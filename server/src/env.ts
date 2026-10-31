@@ -64,6 +64,18 @@ export interface Env {
    * request, they have nothing to do.
    */
   DELETION_OPEN?: string;
+  /**
+   * Var: the version of the terms of service and the privacy policy in force (docs/legal/*.md; the
+   * legal draft's P1, P2, P12, P33; termsVersion). Empty or unset (wrangler.jsonc: "" until the owner
+   * publishes): nothing of the terms exists for a player: /terminos, /privacidad, /terms and /privacy
+   * answer 404, GET /api/config says legal.terms null, the game shows no notice, link or acceptance,
+   * and a sign-up records no terms. Set: those pages are served (legalPages.ts), the game shows the
+   * notice above JUGAR COMO INVITADO and CREAR CUENTA and asks for the acceptance before playing
+   * online, and an account's acceptance is a consents row (kind 'terms', this version). A new value
+   * is a new version: every account and guest is asked again. Lower-case letters, digits, '.', '_'
+   * and '-', at most 32 (e.g. "2026-12-01"); anything else counts as unset.
+   */
+  TERMS_VERSION?: string;
   /** `.dev.vars` only: '1' opens the dev-only routes (the dev sign-in, the stub's outbox) on a loopback host, never elsewhere. */
   DEV_AUTH?: string;
   FLAGS: KVNamespace;
@@ -182,6 +194,24 @@ export function deleteGraceMs(env: Pick<Env, 'DELETE_GRACE'>): number {
 /** DELETION_OPEN is '1': POST /api/me/delete takes requests (else 404 not_found). */
 export function deletionOpen(env: Pick<Env, 'DELETION_OPEN'>): boolean {
   return String(env.DELETION_OPEN ?? '').trim() === '1';
+}
+
+/** A terms version (TERMS_VERSION, a consents.version of kind 'terms'): lower case, digits, '.', '_', '-'; 1 to 32. */
+export const TERMS_VERSION_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+
+/** TERMS_VERSION in force (trimmed, lower-cased), or null while it is unset, empty or malformed: nothing of the terms shows then. */
+export function termsVersion(env: Pick<Env, 'TERMS_VERSION'>): string | null {
+  const v = String(env.TERMS_VERSION ?? '').trim().toLowerCase();
+  return TERMS_VERSION_RE.test(v) ? v : null;
+}
+
+/**
+ * GET /api/config's `legal` (the client's AuthConfig terms, deletion and graceDays): the terms
+ * version in force (null: none yet), DELETION_OPEN, and DELETE_GRACE in days (PERFIL's BORRAR CUENTA
+ * says how long there is to cancel).
+ */
+export function legalConfig(env: Pick<Env, 'TERMS_VERSION' | 'DELETION_OPEN' | 'DELETE_GRACE'>): { terms: string | null; deletion: boolean; graceDays: number } {
+  return { terms: termsVersion(env), deletion: deletionOpen(env), graceDays: Math.round(deleteGraceMs(env) / (24 * 60 * 60_000)) };
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
