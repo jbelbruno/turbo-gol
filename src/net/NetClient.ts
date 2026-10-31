@@ -101,6 +101,7 @@ import {
 } from './protocol';
 import { nodeCarsOf, type CosmeticQueueResult } from './cosmetics';
 import { guestNameOf } from './guestName';
+import { TERMS_VERSION_RE } from './terms';
 import type { CarId } from '../game/cosmetics';
 
 export const GUEST_STORAGE_KEY = STORAGE_PREFIX + 'guest';
@@ -301,6 +302,8 @@ export interface ServerConfig {
   oauth?: string[];
   /** The server queue's bot fill, ms (MatchmakerDO BOT_FILL_MS: the menus' "bots join in"); null from an older Worker. */
   botFillMs?: number | null;
+  /** legal.terms: the terms version in force (src/net/terms.ts), absent until the owner publishes them (Inicio's links then: the legal draft's P12). */
+  terms?: string;
 }
 
 /** POST /api/guest body: no name, the server names every guest (a name sent anyway is ignored). */
@@ -312,6 +315,8 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
   if (typeof v !== 'object' || v === null) return null;
   const o = v as Record<string, unknown>;
   const key = o.turnstileSiteKey;
+  // The terms version only once the owner published one (unpublished, the config is read as before).
+  const terms = typeof o.legal === 'object' && o.legal !== null ? (o.legal as Record<string, unknown>).terms : undefined;
   return {
     turnstileSiteKey: typeof key === 'string' && key.length > 0 ? key : null,
     protocol: typeof o.protocol === 'number' ? o.protocol : 0,
@@ -320,6 +325,7 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
     autoRegion: typeof o.autoRegion === 'string' ? o.autoRegion : '',
     oauth: Array.isArray(o.oauth) ? o.oauth.filter((x): x is string => typeof x === 'string') : [],
     botFillMs: typeof o.botFillMs === 'number' && Number.isFinite(o.botFillMs) && o.botFillMs > 0 ? o.botFillMs : null,
+    ...(typeof terms === 'string' && TERMS_VERSION_RE.test(terms) ? { terms } : {}),
   };
 }
 

@@ -435,6 +435,57 @@ test('P12: the links to the pages, only once published: the About sheet (every s
   assert.match(PROFILE, /void legalState\(acc\)\.then\(\(c\) => \{\s*if \(c\.terms === null\) return;/);
 });
 
+test('P12 on the home page: Inicio\'s footer links the terms and the privacy policy once published (the config the menus already read, no other request), on its own line on an upright phone; nothing while dark', async () => {
+  // NetClient's config (GET /api/config, once per page): legal.terms only once a valid version is in
+  // force; unpublished, the parsed config is exactly as before (no `terms` key at all).
+  const { parseServerConfig } = await import('../src/net/NetClient.ts');
+  assert.equal(parseServerConfig({ legal: { terms: '2026-12-01', deletion: false } }).terms, '2026-12-01');
+  for (const legal of [undefined, null, {}, { terms: null }, { terms: '' }, { terms: 'Not A Version' }, { terms: 7 }, 'x']) {
+    assert.equal('terms' in parseServerConfig(legal === undefined ? {} : { legal }), false, JSON.stringify(legal));
+  }
+  // The Game hands it to the Menu, whose config load gives it to the hint bar (every page, the TV's too).
+  assert.match(GAME, /botFillMs: c\.botFillMs \?\? null, terms: c\.terms \?\? null \}/);
+  const load = MENU.slice(MENU.indexOf('private loadConfig(): void {'), MENU.indexOf('private onRegionPill(): void {'));
+  assert.match(load, /\.then\(\(c\) => \{\s*this\.cfg = c;[^}]*this\.hintBar\.legal\(c\.terms \?\? null\);/);
+  assert.doesNotMatch(load, /legalState|authConfig/, 'no second GET /api/config at load');
+  // The bar itself: nothing until a version, then Terms · Privacy after About, once.
+  const { HintBar } = await import('../src/ui/shell/hintbar.ts');
+  await withDom(async () => {
+    const bar = new HintBar(() => undefined);
+    const keys = () => bar.el.all().map((e) => e.getAttribute('data-key')).filter(Boolean);
+    assert.deepEqual(keys(), ['source', 'about']);
+    assert.equal(bar.legal(null), false);
+    assert.deepEqual(keys(), ['source', 'about'], 'unpublished: the bar as before');
+    assert.equal(bar.el.classList.contains('mn-hint-legal'), false);
+    assert.equal(bar.legal('v2'), true);
+    assert.deepEqual(keys(), ['source', 'about', 'legal-terms', 'legal-privacy']);
+    const group = bar.el.all().find((e) => e.className === 'mn-links-legal');
+    assert.ok(group, 'one group (shell.css: Inicio only, its own line upright)');
+    assert.deepEqual(links(group), [['/terms', 'Terms'], ['/privacy', 'Privacy']]);
+    const as = group.all().filter((e) => e.tagName === 'A');
+    assert.deepEqual(as.map((a) => [a.title, a.target, a.rel, a.getAttribute('data-nav')]), [['Terms of use', '_blank', 'noopener', ''], ['Privacy policy', '_blank', 'noopener', '']]);
+    assert.equal(group.children.filter((e) => e.className === 'mn-link-sep').length, 2, 'a separator before each');
+    assert.equal(bar.el.classList.contains('mn-hint-legal'), true);
+    assert.equal(bar.legal('v2'), false, 'once');
+    assert.equal(bar.el.all().filter((e) => e.className === 'mn-links-legal').length, 1);
+    // A TV opens them in this tab (Back returns to the game).
+    document.documentElement.classList.add('tg-tv');
+    const tv = new HintBar(() => undefined);
+    tv.legal('v2');
+    assert.deepEqual(tv.el.all().filter((e) => e.tagName === 'A' && e.getAttribute('data-key')?.startsWith('legal-')).map((a) => a.target), [undefined, undefined]);
+  });
+  // Inicio only (About lists them everywhere); upright, a second line of their own: one line has no
+  // room for four links in Spanish at 360 px.
+  const shell = src('../src/ui/styles/shell.css');
+  assert.match(shell, /\.mn-links-legal \{\s*display: contents;\s*\}/);
+  assert.match(shell, /\.mn:not\(\[data-screen='home'\]\) \.mn-links-legal \{\s*display: none;\s*\}/);
+  assert.match(shell, /html\[data-layout='portrait'\] \.mn\[data-screen='home'\] \.mn-hint-legal \{\s*height: 4rem;\s*\}/);
+  assert.match(shell, /html\[data-layout='portrait'\] \.mn\[data-screen='home'\] \.mn-links-legal \{\s*display: flex;\s*flex-basis: 100%;/);
+  assert.equal(es['legal.termsLink'], 'Términos');
+  assert.equal(es['legal.privacyShort'], 'Privacidad');
+  assert.equal(en['legal.privacyShort'], 'Privacy');
+});
+
 test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer drew it)', () => {
   const keys = Object.keys(en).filter((k) => k.startsWith('legal.'));
   assert.ok(keys.length >= 14);

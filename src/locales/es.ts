@@ -1447,6 +1447,7 @@ export default {
   'legal.privacyLink': 'Política de privacidad',
   'legal.terms': 'Términos de uso',
   'legal.privacy': 'Política de privacidad',
+  'legal.privacyShort': 'Privacidad',
   'legal.playAsGuest': 'JUGAR COMO INVITADO',
   'legal.beforeTitle': 'Antes de jugar',
   'legal.guestNote': 'Para jugar como invitado no te pedimos ningún dato.',

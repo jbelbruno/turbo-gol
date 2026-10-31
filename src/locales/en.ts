@@ -2122,6 +2122,8 @@ export default {
   // The two pages' names (the About sheet, PROFILE's ABOUT)
   'legal.terms': 'Terms of use',
   'legal.privacy': 'Privacy policy',
+  // Inicio's footer, after About: legal.termsLink and this short name of the privacy policy (its full name, legal.privacy, as the link's title)
+  'legal.privacyShort': 'Privacy',
   // A guest's sheet before its first online match: the button accepts the terms
   'legal.playAsGuest': 'PLAY AS GUEST',
   'legal.beforeTitle': 'Before you play',

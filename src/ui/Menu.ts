@@ -167,6 +167,8 @@ export interface MenuConfig {
   online: boolean;
   /** The server queue's bot fill, ms (GET /api/config botFillMs: MODOS' "bots join in"), null when the Worker did not say. */
   botFillMs: number | null;
+  /** GET /api/config legal.terms: the terms version in force, null or absent until the owner publishes them (Inicio's footer links them then). */
+  terms?: string | null;
 }
 
 /** What the menus see of the experimental features (Settings > Experimental). */
@@ -1487,6 +1489,8 @@ export class Menu {
         this.cfg = c;
         this.popFailed = false;
         this.popFails = 0;
+        // Inicio's footer links the terms and the privacy policy once the owner published them (the legal draft's P12).
+        this.hintBar.legal(c.terms ?? null);
         this.populationNow();
         this.refreshChrome();
         if (this.visibleNow) {

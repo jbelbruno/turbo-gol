@@ -1437,7 +1437,7 @@ export class Game implements P2PGameHooks {
       config: async (): Promise<MenuConfig> => {
         if (net === null) return { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null };
         const c = await net.config();
-        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, botFillMs: c.botFillMs ?? null };
+        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null };
       },
       // A guest's only: an account (or a page that was one: its hint) registers no guest.
       prewarmAntiBot: () => {
