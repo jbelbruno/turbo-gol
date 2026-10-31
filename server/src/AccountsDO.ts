@@ -124,6 +124,8 @@
  *                                                                     | 503 email_paused (one row for any address, I6)
  *   POST /signup-check    { attempt, code } | { token }              -> { email } | 400 code_wrong | 410 | 409 already_created
  *   POST /signup-finish   proof, { username, pw, news, lang, tz, terms?, refresh, ip } -> UserRef & { email } | 400 | 409 | 410 | 429
+ *                                                                     (`terms`: the version the notice showed, a consents row
+ *                                                                     only when it is TERMS_VERSION's; /pending-create the same)
  *                                                                     (429: the network's new accounts, NEW_ACCOUNTS, one
  *                                                                     budget with /pending-create)
  *   POST /code-resend     { attempt, ip, userId? }                   -> { resendAt, resendsLeft, mail } | 410 | 429 | 503
@@ -160,6 +162,11 @@
  *   POST /me-consent      { userId, kind: 'news', granted }          -> { news, terms } | 400 bad_consent | 404 | 409
  *                                                                     email_required (a grant needs a verified address) /
  *                                                                     deletion_pending { purgeAt } | 429 (NEWS_CHANGES)
+ *                         { userId, kind: 'terms', version }         -> { news, terms } (the legal draft's P1, P33: the
+ *                                                                     re-accept sheet; a row of source 'reaccept' unless the
+ *                                                                     newest is that version) | 400 bad_consent (TERMS_VERSION
+ *                                                                     unset: as before the kind existed) | 409 terms_changed
+ *                                                                     { version } (another one is in force) / deletion_pending
  *   POST /news-unsubscribe { u }                                     -> { ok: true } for any id (that id's account: its
  *                                                                     news withdrawn, a new unsub_id)
  *     While a deletion is pending, 409 deletion_pending { purgeAt } answers /auth-finish and /oauth
@@ -197,7 +204,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, json, limitKey, nodesConfigured, trustedOperatorIds } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
 import { base64urlEncode, checkInternal } from './auth';
 import { AccountStore, DEV_NAME_PROBLEM } from './accountStore';
 import { CODE_TRIES, LEGACY_CLOSED, LEGACY_REMIND_MS, legacyDateOf, markSlot, providerMark } from './accountStore';
@@ -476,6 +483,16 @@ export const DELETION_REQUESTS: WindowCap = { day: 5 };
  * flips it a few times; a press that changes nothing (the same state again) costs no slot.
  */
 export const NEWS_CHANGES: WindowCap = { day: 20 };
+
+/**
+ * The terms version a sign-up's notice showed (signup/finish's and pending/create's `terms`), when it
+ * is the one in force (env.ts termsVersion: none while TERMS_VERSION is unset); null otherwise, and
+ * no row is written: a page of before the change shows the re-accept sheet before it plays online.
+ */
+export function termsAccepted(env: Parameters<typeof termsVersion>[0], sent: unknown): string | null {
+  const current = termsVersion(env);
+  return current !== null && sent === current ? current : null;
+}
 
 /** 409 deletion_pending { purgeAt } (§2.10): only ever after the account was proved (a password, a provider, a mailbox). */
 function deletionPending(purgeAt: number, extra: Record<string, unknown> = {}): Response {
@@ -1133,10 +1150,13 @@ export class AccountsDO extends DurableObject<Env> {
    * POST /me-consent { userId, kind: 'news', granted } -> { news, terms } (§2.11): the refusals of
    * accountStore.ts newsBlock first (a grant without a verified address: 409 email_required; with a
    * deletion pending: 409 deletion_pending), then, for a press that changes the state, one slot of
-   * NEWS_CHANGES (429, nothing written), then the row (setNews). Only the news kind for now: the
-   * terms' kind comes with the terms of service.
+   * NEWS_CHANGES (429, nothing written), then the row (setNews). The terms' kind (the legal draft's
+   * P1, P33: the re-accept sheet) only for the version in force: none (TERMS_VERSION unset) is 400
+   * bad_consent, the answer of before, another is 409 terms_changed { version }; then accountStore.ts
+   * acceptTerms (at most one row per version, so no cap).
    */
   private async meConsent(b: Record<string, unknown>, now: number): Promise<Response> {
+    if (b.kind === 'terms') return this.termsConsent(b, now);
     if (typeof b.userId !== 'string' || b.userId.length > 64 || b.kind !== 'news' || typeof b.granted !== 'boolean') return error(400, 'bad_consent', 'Consentimiento inválido');
     const key = await this.throttleKey('nc', b.userId);
     // ---- one step from here ----
@@ -1151,6 +1171,19 @@ export class AccountsDO extends DurableObject<Env> {
     }
     const r = s.setNews(b.userId, b.granted, now);
     return typeof r === 'string' ? error(409, r) : json(r);
+  }
+
+  /** POST /me-consent { userId, kind: 'terms', version } (meConsent): the version in force accepted again, after a change. */
+  private termsConsent(b: Record<string, unknown>, now: number): Response {
+    if (typeof b.userId !== 'string' || b.userId.length > 64 || typeof b.version !== 'string' || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+    const current = termsVersion(this.env);
+    // Unpublished: the answer of before this kind existed.
+    if (current === null) return error(400, 'bad_consent', 'Consentimiento inválido');
+    if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
+    const r = this.store.acceptTerms(b.userId, current, now);
+    if (r === 'no_user') return error(404, 'no_user');
+    if (r === 'deletion_pending') return deletionPending(this.store.deletionAt(b.userId));
+    return json(r);
   }
 
   /**
@@ -1724,7 +1757,8 @@ export class AccountsDO extends DurableObject<Env> {
     const caps = await this.newAccountCaps(b.ip);
     const marks = await this.markKeys([['e', first.canon]]);
     const lang = langField(b.lang);
-    const terms = typeof b.terms === 'string' && /^[a-z0-9._-]{1,32}$/.test(b.terms) ? b.terms : null;
+    // The terms version the notice above CREAR CUENTA showed: recorded only when it is the one in force (env.ts termsVersion).
+    const terms = termsAccepted(this.env, b.terms);
     // ---- one step from here ----
     const failKeys = failKey === null ? [] : [{ key: failKey, rule: CODE_FAIL_RULE }];
     const wait = this.throttled(failKeys, now);
@@ -2007,7 +2041,7 @@ export class AccountsDO extends DurableObject<Env> {
         const issue = usernameIssue(name);
         if (issue !== null && issue.code === 'usernameReserved') return json({ error: 'name_reserved', message: 'Ese nombre está reservado', suggest: s.suggestName(name, sl) }, 400);
         if (issue !== null) return error(400, 'bad_username', usernameProblem(name) ?? 'Nombre inválido');
-        const r = s.createFromPending(pend, name, { ...refresh, kind: 'web' }, now, { lvl: oauthLevel(b.lvl), lang, tz: tzField(b.tz), news: b.news === true, marks });
+        const r = s.createFromPending(pend, name, { ...refresh, kind: 'web' }, now, { lvl: oauthLevel(b.lvl), lang, tz: tzField(b.tz), news: b.news === true, terms: termsAccepted(this.env, b.terms), marks });
         if (r === 'username_taken') return json({ error: 'username_taken', message: 'Ese nombre ya está en uso', suggest: s.suggestName(name, sl) }, 409);
         if (r === 'lookalike') return json({ error: 'name_lookalike', message: 'Ese nombre se parece mucho a otro', suggest: s.suggestName(name, sl) }, 409);
         if (r === 'email_has_account') return error(409, 'email_has_account', 'Ese correo ya es de una cuenta de Turbogol: entra con ella para vincular');

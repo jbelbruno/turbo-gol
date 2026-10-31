@@ -532,6 +532,8 @@ export interface MeInfo {
   legacy?: boolean;
   /** The newest news consent is a grant (news by email, never by default). */
   news?: boolean;
+  /** The terms version the account accepted last (consents, kind 'terms'); null: none yet. Absent from older servers. */
+  terms?: string | null;
   /** A deletion was asked: the account is purged at this time (ms); 0 = none. */
   deletionAt?: number;
   /** How many ways in it has: Google, Discord, and a password while it can still sign in with one. */

@@ -67,6 +67,7 @@ import { codeField, field } from './common';
 import type { Field } from './common';
 import { errText, openProfileTab } from './profile';
 import { namePrefill } from './accountLinksModel';
+import { termsNotice } from './terms';
 import { language, t } from '../../i18n';
 
 // ---- shared by PERFIL's forms and the sheets -------------------------------------------------------
@@ -214,6 +215,8 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
   const pw = newPasswordFields(email, t('profile.password'));
   let news = false;
   const newsSwitch = toggleSwitch('auth-news', t('auth.signupNews'), () => news, (v) => (news = v));
+  // Right above CREAR CUENTA (both callers put the button after these nodes): the press accepts the version it shows (the legal draft's P1, P2).
+  const notice = termsNotice(menu, t('profile.createAccount'));
   const create = async (): Promise<boolean> => {
     name.error(null);
     pw.pass.error(null);
@@ -232,7 +235,7 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
     const password = pw.check();
     if (password === null) return false;
     try {
-      const s = await acc.signupFinish(proof, { username, password, news, email });
+      const s = await acc.signupFinish(proof, { username, password, news, email, terms: notice.version() });
       hooks.done(s);
       return true;
     } catch (e) {
@@ -249,7 +252,7 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
     }
   };
   // `inputs`: the name, then the password (and its repeat), for Enter's next field and its submit.
-  return { nodes: [name.el, ...pw.nodes, setRow(t('auth.signupNews'), newsSwitch.el)], name, inputs: [name.input, ...pw.inputs], create };
+  return { nodes: [name.el, ...pw.nodes, setRow(t('auth.signupNews'), newsSwitch.el), notice.el], name, inputs: [name.input, ...pw.inputs], create };
 }
 
 /** Welcome, signed in (§3.1 step 6): the toast and the account's profile; PERFIL itself is never opened for it. */
@@ -1017,6 +1020,8 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
   const name = field(t('auth.gameName'), { autocomplete: 'nickname', maxLength: USERNAME_MAX, value: namePrefill(t('auth.nameWord'), guestNumber(menu.host.guestName())), hint: t('auth.gameNameHint'), enterkeyhint: 'done' });
   let news = false;
   const sw = toggleSwitch('auth-news', t('auth.news'), () => news, (v) => (news = v));
+  // Last in the body, right above NO, CREAR MI CUENTA: the press accepts the version it shows (the legal draft's P1, P2).
+  const notice = termsNotice(menu, t('auth.create'));
   const create: SheetAction = {
     label: t('auth.create'),
     primary: true,
@@ -1031,7 +1036,7 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
         return false;
       }
       try {
-        const s = await acc.createAccount(username, { news, lang: language(), tz: timeZone() });
+        const s = await acc.createAccount(username, { news, lang: language(), tz: timeZone(), terms: notice.version() });
         handed = true;
         menu.toast(t('game.welcomeNew', { name: s.name }), 'ok');
         void acc.fetchMe().catch(() => undefined);
@@ -1078,6 +1083,7 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
       name.el,
       setRow(t('auth.news'), sw.el),
       forgot,
+      notice.el,
     ],
     actions: [create, haveOne],
     onClose: () => {

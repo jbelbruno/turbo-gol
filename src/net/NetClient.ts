@@ -567,6 +567,13 @@ export class NetClient {
   sessionProvider: ((minValidMs?: number) => Promise<GuestSession | null>) | null = null;
   /** The server refused the session (401): an account refreshes it (AccountClient.sessionRejected). */
   onSessionRejected: (() => Promise<unknown>) | null = null;
+  /**
+   * Asked before ensureGuest hands out a session (`account`: the signed-in account's, else the
+   * guest's, stored or new): the terms' acceptance (src/ui/screens/terms.ts termsGate). It resolves
+   * at once while there is nothing to accept; a rejection (NetError 'cancelled': the player closed
+   * the sheet) stops the queue, the lobby or the rejoin that asked. Null: nothing asked.
+   */
+  beforeSession: ((account: boolean, signal?: AbortSignal) => Promise<void>) | null = null;
   /** The Bearer of the last queue / rejoin (an account's or the guest's): leave / ice / cancel use it. */
   lastBearer: string | null = null;
   /** Whose `lastBearer` it is: refreshBearer only swaps in a session of the same player. */
@@ -658,11 +665,14 @@ export class NetClient {
     if (this.sessionProvider !== null) {
       const a = await this.sessionProvider();
       if (a !== null) {
+        if (this.beforeSession !== null) await this.beforeSession(true, signal);
         this.lastBearer = a.session;
         this.lastBearerPlayer = a.playerId;
         return a;
       }
     }
+    // The terms' acceptance (the legal draft's P2, P33) before a guest's session is used or made.
+    if (this.beforeSession !== null) await this.beforeSession(false, signal);
     const g = this.storedGuest();
     if (g !== null) return g;
     // A lobby join, a queue and a sign-up can ask together: one registration (and one widget) at a

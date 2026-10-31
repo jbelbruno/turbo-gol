@@ -177,7 +177,7 @@ export const NEWS_CONSENT_VERSION = 'news-v1';
  * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe) and a
  * deletion request (sign-in PR 12).
  */
-export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion';
+export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept';
 /** users.unsub_id: 16 random bytes as base64url, no padding (randomToken). It carries nothing of the account (review point S-L1). */
 export const UNSUB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 /** What POST /api/me/consent answers: the newest row of each kind wins (news granted; the terms version granted, null for none). */
@@ -1638,9 +1638,11 @@ export class AccountStore {
    * identity got an owner meanwhile ('already_linked'), and when the address leads to an account,
    * a race included ('email_has_account': that account signs in and links). `lvl`: the callback's
    * level; the family's method is the provider. `news`: the news switch, a consent row only when it
-   * is on. `marks`: the identities' and their addresses' mark keys (§3.13 step 4).
+   * is on. `terms`: the terms version the notice above CREAR showed (the AccountsDO passes only the
+   * one in force), a 'terms' row when there is one. `marks`: the identities' and their addresses'
+   * mark keys (§3.13 step 4).
    */
-  createFromPending(pend: PendingIdentity, username: string, refreshHash: string | RefreshGrant, now: number, opts: { lvl?: 0 | 1 | 2; lang?: string; tz?: string; news?: boolean; marks?: MarkKeys } = {}): UserRef | 'username_taken' | 'lookalike' | 'email_has_account' | 'already_linked' {
+  createFromPending(pend: PendingIdentity, username: string, refreshHash: string | RefreshGrant, now: number, opts: { lvl?: 0 | 1 | 2; lang?: string; tz?: string; news?: boolean; terms?: string | null; marks?: MarkKeys } = {}): UserRef | 'username_taken' | 'lookalike' | 'email_has_account' | 'already_linked' {
     const idents = pendingIdents(pend);
     const lvl = opts.lvl ?? 0;
     return this.tx(() => {
@@ -1659,6 +1661,7 @@ export class AccountStore {
       const claimed = best !== undefined ? this.fillEmailIn(id, best, best.p, now) : null;
       this.applyMarksIn(id, [...idents.map((i) => markOf(opts.marks, providerMark(i.p), i.id)), markOf(opts.marks, 'e', claimed)], now);
       if (opts.news === true) this.consentIn(id, 'news', NEWS_CONSENT_VERSION, true, 'oauth_signup', now);
+      if (typeof opts.terms === 'string' && opts.terms !== '') this.consentIn(id, 'terms', opts.terms, true, 'oauth_signup', now);
       this.addRefresh(id, refreshHash, now, now, now, null, { lvl, method: pend.p });
       return { userId: id, username, car: DEFAULT_CAR, createdAt: now, authAt: now, authLvl: lvl };
     });
@@ -1910,6 +1913,25 @@ export class AccountStore {
   }
 
   /**
+   * The re-accept sheet's ACEPTAR (POST /api/me/consent { kind: 'terms', version }, the legal
+   * draft's P1 and P33), one transaction: a 'terms' row of `version` (the one in force: the
+   * AccountsDO checks it against TERMS_VERSION), source 'reaccept', unless the account's newest
+   * terms row already is that version (a second press, another tab: nothing written, so the log
+   * grows by one row per version at most). A deletion pending writes nothing (the account is on its
+   * way out and plays nowhere). The account's consents after it.
+   */
+  acceptTerms(userId: string, version: string, now: number): ConsentState | 'no_user' | 'deletion_pending' {
+    return this.tx(() => {
+      const u = this.userById(userId);
+      if (u === null) return 'no_user' as const;
+      if (this.pendingDeletion(u)) return 'deletion_pending' as const;
+      const last = this.newestConsent(userId, 'terms');
+      if (last === null || !last.granted || last.version !== version) this.consentIn(userId, 'terms', version, true, 'reaccept', now);
+      return this.consentState(userId);
+    });
+  }
+
+  /**
    * The mail's unsubscribe (POST /api/news/unsubscribe, §2.11), one transaction: the account whose
    * unsub_id this is gets a news withdrawal (source 'unsubscribe') and a new random id, so the link
    * of an older mail does nothing any more. False for an id no account holds (nothing changes; the
@@ -1963,6 +1985,8 @@ export class AccountStore {
       emailVerified: email !== null,
       legacy: num(u.pw_v) === PW_V_LEGACY,
       news: this.newsGranted(userId),
+      // The terms version the account accepted last (the legal draft's P1, P33): the game asks again when TERMS_VERSION is another.
+      terms: this.consentState(userId).terms,
       deletionAt: num(u.delete_purge_at),
       waysIn,
       // PERFIL's checklist (§3.12 step 5), for the project's maintainer accounts only: booleans and a count.

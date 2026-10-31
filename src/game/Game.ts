@@ -175,7 +175,9 @@ import { t } from '../i18n';
 import type { Outcome } from '../net/outcome';
 import { sessionValid } from '../net/NetClient';
 import type { NetClient, ServerAssignment } from '../net/NetClient';
-import { AccountClient, oauthErrorText, parseAuthHash } from '../net/AccountClient';
+import { AccountClient, AccountError, oauthErrorText, parseAuthHash } from '../net/AccountClient';
+import { GuestTerms } from '../net/terms';
+import { TermsDeclined, termsGate } from '../ui/screens/terms';
 import { TrainingStore } from './trainingStore';
 import { ExperimentalStore, type ExperimentalProblem } from './experimentalStore';
 import { MAX_PRESETS, canonicalValues, type PhysicsValues } from './physicsRules';
@@ -1128,6 +1130,9 @@ export class Game implements P2PGameHooks {
     this.accounts = accounts;
     online.client.sessionProvider = (minValidMs) => accounts.sessionForQueue(minValidMs);
     online.client.onSessionRejected = () => accounts.sessionRejected();
+    // The terms' acceptance before a session goes online (the legal draft's P2, P33): nothing until the owner publishes a version.
+    const guestTerms = new GuestTerms();
+    online.client.beforeSession = (account, signal) => termsGate(this.menu, guestTerms, account, signal);
     this.trainingStore = new TrainingStore({ accountId: () => accounts.account?.playerId ?? null, push: (r) => accounts.pushTraining(r) });
     this.experimental = new ExperimentalStore({
       accountId: () => accounts.account?.playerId ?? null,
@@ -1136,7 +1141,8 @@ export class Game implements P2PGameHooks {
       upsert: (p) => accounts.upsertPreset(p),
       remove: (id) => accounts.deletePreset(id),
     });
-    this.lobby = new LobbyClient({ bearer: async () => (await online.client.ensureGuest()).session });
+    // A lobby says why it did not open when the terms' sheet was closed (LobbyClient words every other session failure).
+    this.lobby = new LobbyClient({ bearer: async () => (await online.client.ensureGuest().catch((e: unknown) => Promise.reject(e instanceof TermsDeclined ? new AccountError(t('legal.declined'), 0, 'terms_declined') : e))).session });
     // The account's cars: its session's car and inventory widen what the pick may hold (the views exist: it may dress the player's car).
     this.garage = new Garage(accounts, this.carPick, () => this.dressLocalCar());
     this.menu = createMenu(this.menuHost(), opts.hudContainer);

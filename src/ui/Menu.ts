@@ -75,8 +75,9 @@ import type { KeypadView } from './components/keypad';
 import type { InputKind } from './device';
 import { rankBadge, tierById } from './badges';
 import { formatPoints, playerName, regionName, tierName } from './names';
-import { t } from '../i18n';
+import { language, t } from '../i18n';
 import type { Key } from '../i18n';
+import { legalPaths, legalState } from '../net/terms';
 import type { AccountClient } from '../net/AccountClient';
 import type { LobbyClient } from '../net/LobbyClient';
 import type { TrainingRecordsView } from '../game/trainingStore';
@@ -1548,13 +1549,18 @@ export class Menu {
   /** About: the build, the source (AGPL-3.0), the third-party licenses, Discord. */
   private openAbout(): void {
     const link = (href: string, text: string): HTMLAnchorElement => h('a.mn-btn.mn-sheet-option', { href, target: '_blank', rel: 'noopener', 'data-nav': true }, text);
+    const list = h('div.mn-sheet-list', null, link(SOURCE_URL, t('menu.sourceTitle', { license: LICENSE_NAME })), link('./third-party-licenses.txt', t('menu.licenses')), link(DISCORD_URL, t('menu.discordTitle')));
     this.modal({
       title: t('nav.aboutTitle', { game: GAME_NAME }),
-      body: [
-        h('p.mn-about-build', null, this.host.info),
-        h('div.mn-sheet-list', null, link(SOURCE_URL, t('menu.sourceTitle', { license: LICENSE_NAME })), link('./third-party-licenses.txt', t('menu.licenses')), link(DISCORD_URL, t('menu.discordTitle'))),
-      ],
+      body: [h('p.mn-about-build', null, this.host.info), list],
       actions: [{ label: t('nav.close'), onClick: () => true }],
+    });
+    // The terms and the privacy policy, from every screen's footer once the owner publishes them (the legal draft's P12).
+    void legalState(this.host.accounts).then((c) => {
+      if (c.terms === null || !list.isConnected) return;
+      const paths = legalPaths(language());
+      list.appendChild(link(paths.terms, t('legal.terms')));
+      list.appendChild(link(paths.privacy, t('legal.privacy')));
     });
   }
 

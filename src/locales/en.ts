@@ -2114,4 +2114,24 @@ export default {
   'replay.pause': 'Pause',
   'replay.list': 'All replays',
   'replay.keys': 'Space: play or pause · ← →: 5 s · 0-{max}: camera',
+  // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
+  // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
+  'legal.notice': 'By pressing "{button}" you accept the {terms}. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.',
+  'legal.termsLink': 'Terms',
+  'legal.privacyLink': 'Privacy policy',
+  // The two pages' names (the About sheet, PROFILE's ABOUT)
+  'legal.terms': 'Terms of use',
+  'legal.privacy': 'Privacy policy',
+  // A guest's sheet before its first online match: the button accepts the terms
+  'legal.playAsGuest': 'PLAY AS GUEST',
+  'legal.beforeTitle': 'Before you play',
+  'legal.guestNote': 'To play as a guest we ask you for no data.',
+  // An account's sheet after the terms changed (or for an account that never accepted them)
+  'legal.acceptAndPlay': 'ACCEPT AND PLAY',
+  'legal.changedTitle': 'The terms have changed',
+  'legal.changedNote': 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept them.',
+  'legal.accountNote': 'To play online with your account, accept the Terms of use.',
+  'legal.orDelete': 'If you do not accept them, you can delete your account in PROFILE.',
+  // A lobby that did not open because the terms' sheet was closed
+  'legal.declined': 'To play online, accept the Terms of use.',
 } satisfies Messages;

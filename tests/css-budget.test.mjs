@@ -252,10 +252,12 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // 163,071 B (main 162,308 B), the cap that plus about 0.6 KB. Sign-in PR 9 adds PERFIL's banner
 // (an email to add or confirm: its fold's edge, its line), the dot on PERFIL in the sections, Edge's
 // own reveal eye hidden beside MOSTRAR, and the email keypad's last row of 11 keys (components.css):
-// 163,571 B (main 163,071 B), the cap that plus about 0.6 KB.
+// 163,571 B (main 163,071 B), the cap that plus about 0.6 KB. The legal pages' PR adds the terms'
+// notice above the buttons that accept (components.css: its type in the scale a TV reads, its two
+// inline links): 163,713 B (main 163,571 B), the cap that plus about 0.6 KB.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 164_170;
+const CSS_BUDGET = 164_310;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

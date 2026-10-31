@@ -327,6 +327,19 @@ html.tg-tv .mn-glyph-start {
   margin: 0 0 0.5rem;
 }
 
+/* The terms' notice above a button that accepts (screens/terms.ts): in the type scale (a TV's 3 m
+   reads it; .mn-note's 13 px does not grow there), its two links running in the sentence. */
+.mn-legal-notice,
+.mn-legal-note {
+  font-size: var(--t-small);
+}
+
+.mn-legal-link {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .mn-sheet-actions {
   display: flex;
   flex-wrap: wrap;

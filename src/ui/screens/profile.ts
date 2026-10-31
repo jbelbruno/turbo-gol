@@ -64,6 +64,7 @@ import type { Key } from '../../i18n';
 import { DISCORD_URL, GAME_NAME, SOURCE_URL } from '../../brand';
 import { version } from '../../../package.json';
 import { openTvSignIn } from './tvSignIn';
+import { legalPaths, legalState } from '../../net/terms';
 
 /** A node's state in words (nodes/shared/controlProtocol.ts NodeStatus). */
 const NODE_STATE: Readonly<Record<MyNode['status'], Key>> = {
@@ -270,7 +271,8 @@ export function profileScreen(menu: Menu): Screen {
   const loadAuthConfig = (): void => {
     if (authCfg !== null) return;
     void acc.authConfig().then((c) => {
-      const changed = c.email !== mailOn() || c.legacy !== legacyPhase() || c.legacyUntil !== null;
+      // The deletion's button and the legal links (the legal draft's P5, P12) come with the config too.
+      const changed = c.email !== mailOn() || c.legacy !== legacyPhase() || c.legacyUntil !== null || c.deletion === true || typeof c.terms === 'string';
       authCfg = c;
       // A guest's half-typed form is never redrawn; an account's view has nothing typed (its banner, its rows).
       if (changed && el.isConnected && sample === null && (acc.signedIn || !typed)) render();
@@ -874,20 +876,25 @@ export function profileScreen(menu: Menu): Screen {
     );
   };
 
-  /** ACERCA DE, under either view. */
-  const about = section(
-    t('profile.about'),
-    h('p.mn-prof-about', null, t('profile.version', { game: GAME_NAME, version, protocol: PROTOCOL_VERSION })),
-    h('p.mn-note.mn-prof-about', null, menu.host.info),
-    h(
-      'div.mn-prof-links',
-      null,
+  /** ACERCA DE, under either view: the terms and the privacy policy join its links once the owner publishes them (the legal draft's P12). */
+  const aboutLinks = h(
+    'div.mn-prof-links',
+    null,
       // Same tab: the viewer is its own page (replay.html), with a way back. Not on a TV: that page has
       // no remote or controller navigation yet.
       tv() ? null : h('a.mn-btn.mn-prof-link', { href: './replay.html', 'data-nav': true, 'data-key': 'profile-replays' }, icon('play'), h('span', null, t('profile.replays'))),
       h('a.mn-btn.mn-prof-link', { href: './third-party-licenses.txt', target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'profile-licenses' }, icon('info'), h('span', null, t('menu.licenses'))),
-    ),
   );
+  void legalState(acc).then((c) => {
+    if (c.terms === null) return;
+    const paths = legalPaths(language());
+    // A new tab, so the game stays (on a TV, this one: Back returns to the game).
+    const legal = (href: string, text: string, key: string): HTMLAnchorElement => h('a.mn-btn.mn-prof-link', { href, target: tv() ? undefined : '_blank', rel: 'noopener', 'data-nav': true, 'data-key': key }, icon('info'), h('span', null, text));
+    aboutLinks.appendChild(legal(paths.terms, t('legal.terms'), 'profile-terms'));
+    aboutLinks.appendChild(legal(paths.privacy, t('legal.privacy'), 'profile-privacy'));
+    menu.refit();
+  });
+  const about = section(t('profile.about'), h('p.mn-prof-about', null, t('profile.version', { game: GAME_NAME, version, protocol: PROTOCOL_VERSION })), h('p.mn-note.mn-prof-about', null, menu.host.info), aboutLinks);
 
   // ---- the email of an account (sign-in PR 9: the design's §3.6, §3.9, §3.10) ------------------------
 

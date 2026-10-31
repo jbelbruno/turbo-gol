@@ -57,7 +57,7 @@
  *     into the pending cookie `__Host-tg_pend` (JWT typ 'pend': { p, id, email, trust, p2? }, HttpOnly,
  *     SameSite=Lax, 30 minutes) and /#auth=confirm asks "do you already have a Turbogol account?":
  *   POST /api/auth/pending    {} (pending cookie)                 -> { provider, email, trust, second, match } | 404 no_pending
- *   POST /api/auth/pending/create { username, news, lang, tz, turnstileToken } (pending cookie) -> AccountSession +
+ *   POST /api/auth/pending/create { username, news, lang, tz, turnstileToken, acceptTerms? } (pending cookie) -> AccountSession +
  *                             refresh cookie | 400 bad_username / name_reserved { suggest } | 409 username_taken /
  *                             name_lookalike { suggest } (the email sign-up's name rules) | email_has_account |
  *                             already_linked | 403 turnstile_failed | 404 no_pending | 429 (new accounts per network:
@@ -1551,7 +1551,7 @@ function timeZoneOf(v: unknown): string {
 async function pendingCreate(c: RouteContext): Promise<Response> {
   const pend = await readPending(c);
   if (pend === null) return noPending();
-  const b = await readJson<{ username?: unknown; news?: unknown; lang?: unknown; tz?: unknown; turnstileToken?: unknown }>(c.request);
+  const b = await readJson<{ username?: unknown; news?: unknown; lang?: unknown; tz?: unknown; turnstileToken?: unknown; acceptTerms?: unknown }>(c.request);
   if (!b) return error(400, 'bad_request');
   const blocked = await c.antiBot(b.turnstileToken);
   if (blocked !== null) return blocked;
@@ -1570,6 +1570,8 @@ async function pendingCreate(c: RouteContext): Promise<Response> {
     lang: b.lang === 'es' || b.lang === 'en' ? b.lang : '',
     tz: timeZoneOf(b.tz),
     news: b.news === true,
+    // The terms version the notice above CREAR showed (the AccountsDO records only the one in force).
+    terms: b.acceptTerms,
   });
   if (!r.ok) return noStore(r.res);
   return withCookies(json(await accountSession(c.env, r.data)), [refreshCookie(refreshTok), clearCookie(PENDING_COOKIE, 'Lax')]);
@@ -2200,6 +2202,10 @@ async function deleteCancel(c: RouteContext): Promise<Response> {
 //   POST /api/me/consent          Bearer (account, not a TV) { kind: 'news', granted } -> { news, terms } | 400
 //                                 bad_consent | 403 tv_session | 409 email_required (a grant needs a verified address)
 //                                 / deletion_pending { purgeAt } | 429. PERFIL's switch, the game's Origin and JSON (R1).
+//                                 Bearer (account, a TV's too) { kind: 'terms', version } -> { news, terms }: the
+//                                 re-accept sheet (the legal draft's P1, P33), the version in force only (400 bad_consent
+//                                 while TERMS_VERSION is unset, as before; 409 terms_changed { version } for another). Accepting the
+//                                 terms changes no credential, so a TV signed in with the phone accepts on its own screen.
 //   POST /api/news/unsubscribe    two forms, one answer, { ok: true } for any id (an unknown or spent one too), so
 //                                 ids cannot be tested; that id's account gets a news withdrawal and a new id:
 //                                 1. the page's (/account#unsub=<id>): JSON { u }, the game's Origin (R1);
@@ -2211,13 +2217,22 @@ async function deleteCancel(c: RouteContext): Promise<Response> {
 //                                 Outside /api/auth/*, so the login-CSRF gate (crossSiteRefusal) does not run
 //                                 before it: its JSON form asks for it itself.
 
-/** POST /api/me/consent { kind: 'news', granted } (§2.11): a full Bearer (not a TV's); the AccountsDO decides every refusal. */
+/**
+ * POST /api/me/consent { kind: 'news', granted } (§2.11): a full Bearer (not a TV's); { kind: 'terms',
+ * version } (the re-accept sheet): any account's Bearer, a TV's too. The AccountsDO decides every refusal.
+ */
 async function meConsent(c: RouteContext): Promise<Response> {
   const refused = crossSiteRefusal(c, '/api/me/consent');
   if (refused !== null) return refused;
+  const b = await readJson<{ kind?: unknown; granted?: unknown; version?: unknown }>(c.request);
+  if (b?.kind === 'terms') {
+    const a = requireAccount(c);
+    if (a instanceof Response) return a;
+    if (typeof b.version !== 'string' || b.version.length === 0 || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+    return noStore(await accountsCall(c.env, '/me-consent', { userId: a.sub, kind: 'terms', version: b.version }));
+  }
   const s = requirePrimary(c);
   if (s instanceof Response) return s;
-  const b = await readJson<{ kind?: unknown; granted?: unknown }>(c.request);
   if (!b || b.kind !== 'news' || typeof b.granted !== 'boolean') return error(400, 'bad_consent', 'Consentimiento inválido');
   return noStore(await accountsCall(c.env, '/me-consent', { userId: s.sub, kind: 'news', granted: b.granted }));
 }

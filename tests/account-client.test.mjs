@@ -67,14 +67,16 @@ const isKey = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
 test('authConfig: one GET /api/config for the page, its auth read leniently (email, devSignIn, the legacy phase and cutoff); offline asks again next time', async () => {
   const { acc, calls } = client({ '/api/config': () => res(200, { oauth: ['discord'], auth: { email: true, devSignIn: false, legacy: { phase: 'grace', until: NOW + 30 * 86_400_000 } } }) });
-  assert.deepEqual(await acc.authConfig(), { email: true, devSignIn: false, legacy: 'grace', legacyUntil: NOW + 30 * 86_400_000 });
+  // GET /api/config's legal (the legal draft's P12, P5): none of it from a server that does not say.
+  const noLegal = { terms: null, deletion: false, graceDays: 14 };
+  assert.deepEqual(await acc.authConfig(), { email: true, devSignIn: false, legacy: 'grace', legacyUntil: NOW + 30 * 86_400_000, ...noLegal });
   assert.equal(await acc.devSignInOffered(), false, 'the dev sign-in reads the same answer');
   await acc.authConfig();
   assert.deepEqual(calls.map((c) => [c.method, c.path]), [['GET', '/api/config']]);
   for (const [auth, want] of [
-    [undefined, { email: false, devSignIn: false, legacy: 'none', legacyUntil: null }],
-    [{ email: 'yes', legacy: { phase: 'later' } }, { email: false, devSignIn: false, legacy: 'none', legacyUntil: null }],
-    [{ email: true, legacy: { phase: 'closed', until: null } }, { email: true, devSignIn: false, legacy: 'closed', legacyUntil: null }],
+    [undefined, { email: false, devSignIn: false, legacy: 'none', legacyUntil: null, ...noLegal }],
+    [{ email: 'yes', legacy: { phase: 'later' } }, { email: false, devSignIn: false, legacy: 'none', legacyUntil: null, ...noLegal }],
+    [{ email: true, legacy: { phase: 'closed', until: null } }, { email: true, devSignIn: false, legacy: 'closed', legacyUntil: null, ...noLegal }],
   ]) {
     const c = client({ '/api/config': () => res(200, { auth }) });
     assert.deepEqual(await c.acc.authConfig(), want, JSON.stringify(auth));
