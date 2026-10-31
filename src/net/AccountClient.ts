@@ -1404,6 +1404,19 @@ export class AccountClient {
     if (this.me !== null && this.me.playerId === owner) this.me.terms = terms;
     return terms;
   }
+
+  /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */
+  startedProvider(): OAuthProvider | null {
+    try {
+      const raw = this.sessionStore.getItem(PROVIDER_TRY_KEY);
+      if (raw === null) return null;
+      const v = JSON.parse(raw) as { p?: unknown; at?: unknown };
+      return (v.p === 'google' || v.p === 'discord') && typeof v.at === 'number' && this.now() - v.at < PROVIDER_TRY_MS ? v.p : null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Settings › Game's Idioma, while signed in (§2.9, §4.2): the choice is kept for this tab
    * (sessionStorage) before the page reloads in the new language, and sendLanguageChoice sends it

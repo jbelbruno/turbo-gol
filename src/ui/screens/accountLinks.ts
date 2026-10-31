@@ -17,8 +17,8 @@
  *   /account#email=, #undo=  sign-in PR 9: the add or change's link, and its undo
  *   /account#unsub=<id>      a news mail's footer link (sign-in PR 13): DARME DE BAJA (POST
  *                            news/unsubscribe { u }), then "Done: we won't send you news anymore."
- *   keep                     sign-in PR 12's cancel link: this page says the link is not valid here
- *                            until the terms of service bring its sheet
+ *   /account#keep=<token>    sign-in PR 12's cancel link (M9): "¿Conservar tu cuenta?" (deletion.ts
+ *                            openKeepSheet) while DELETION_OPEN is '1'; before that, not valid here
  *
  * On load (installAccountLinks, the arbiter's 'account' step) the link is read from the path and
  * the fragment, its token kept in sessionStorage (AccountClient.keepPendingLink, until its POST
@@ -68,6 +68,7 @@ import type { Field } from './common';
 import { errText, openProfileTab } from './profile';
 import { namePrefill } from './accountLinksModel';
 import { termsNotice } from './terms';
+import { openKeepSheet } from './deletion';
 import { language, t } from '../../i18n';
 
 // ---- shared by PERFIL's forms and the sheets -------------------------------------------------------
@@ -865,9 +866,8 @@ export async function openAccountLink(menu: Menu, link: AccountLink): Promise<vo
   if (link.kind === 'email') return openEmailLinkSheet(menu, link.token);
   if (link.kind === 'undo') return openUndoSheet(menu, link.token);
   if (link.kind === 'unsub') return openUnsubSheet(menu, link.token);
-  // keep: its sheet comes with the terms of service (sign-in PR 12's route is closed until then).
-  menu.host.accounts.keepPendingLink(null);
-  menu.toast(t('error.account.link_invalid'), 'error');
+  // keep: M9's cancel link, its sheet while the deletion screens are open (deletion.ts; DELETION_OPEN), else not valid here.
+  return openKeepSheet(menu, link.token);
 }
 
 /**

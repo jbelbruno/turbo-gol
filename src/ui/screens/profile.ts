@@ -42,7 +42,7 @@
 import { h, setChildren, navButton } from '../dom';
 import { AccountError } from '../../net/AccountClient';
 import type { AuthConfig } from '../../net/AccountClient';
-import { REGIONS, USERNAME_MAX, emailTypo, normalizeEmail, passwordIssue, usernameIssue } from '../../net/account';
+import { REGIONS, USERNAME_MAX, emailTypo, normalizeEmail, passwordIssue, usernameIssue, usernameKey } from '../../net/account';
 import type { AccountIssue, DeviceSession, MeInfo, MyNode, OAuthProvider, PlaylistRating } from '../../net/account';
 import { emailNudge, signInRoute } from '../../net/emailAuth';
 import type { StoredAttempt } from '../../net/emailAuth';
@@ -54,6 +54,7 @@ import { ratingCard, rankBadge, tierById } from '../badges';
 import { playerName, regionName } from '../names';
 import type { Menu, Screen } from '../Menu';
 import { codeField, field, primary, screenHead, secondary, section } from './common';
+import type { Field } from './common';
 import { finePointer } from '../device';
 import { icon } from '../components/icons';
 import type { IconName } from '../components/icons';
@@ -64,6 +65,7 @@ import type { Key } from '../../i18n';
 import { DISCORD_URL, GAME_NAME, SOURCE_URL } from '../../brand';
 import { version } from '../../../package.json';
 import { openTvSignIn } from './tvSignIn';
+import { deletionDone, pendingSheet } from './deletion';
 import { legalPaths, legalState } from '../../net/terms';
 
 /** A node's state in words (nodes/shared/controlProtocol.ts NodeStatus). */
@@ -345,17 +347,26 @@ export function profileScreen(menu: Menu): Screen {
         newAccount.hidden = false;
         return;
       }
-      try {
-        if (route.kind === 'email') await acc.signIn(route.email, pass.input.value);
-        else await acc.legacySignIn(route.username, pass.input.value);
+      const password = pass.input.value;
+      const signIn = async (cancelDeletion: boolean): Promise<void> => {
+        if (route.kind === 'email') await acc.signIn(route.email, password, { cancelDeletion });
+        else await acc.legacySignIn(route.username, password, { cancelDeletion });
         acc.dropSignupAttempt();
-        menu.toast(t('profile.hello', { name: acc.account?.name ?? '' }), 'ok');
+        menu.toast(cancelDeletion ? t('delete.keptToast') : t('profile.hello', { name: acc.account?.name ?? '' }), 'ok');
         // A username's sign-in (§3.10 step 3): the sheet that asks for an email, not only the banner.
         void acc.fetchMe().then((me) => {
           if (route.kind === 'legacy' && me !== null && emailNudge(me, acc.account?.tv === true) !== null) openGrace(me);
         }, () => undefined);
         render();
+      };
+      try {
+        await signIn(false);
       } catch (e) {
+        // The right password of an account whose deletion is pending (the legal draft's P5): keep it?
+        if (e instanceof AccountError && e.code === 'deletion_pending' && deletionOn()) {
+          void pendingSheet(menu, e.detail.purgeAt ?? 0, () => signIn(true));
+          return;
+        }
         pass.error(authErrText(menu, e));
         if (e instanceof AccountError && e.code === 'bad_credentials') {
           const providers = providersLine(menu);
@@ -787,6 +798,8 @@ export function profileScreen(menu: Menu): Screen {
         { 'data-key': 'profile-signout' },
       ),
       secondary(t('profile.signOutAll'), () => signOutAllDialog(), { 'data-key': 'profile-signout-all' }),
+      // BORRAR CUENTA (the legal draft's P5): only while the server takes deletions; never the project's account (it is never deleted).
+      deletionOn() && me?.maintainer === undefined && sample === null ? secondary(t('delete.button'), () => deleteDialog(), { 'data-key': 'profile-delete', class: 'mn-btn-cancel' }) : null,
     );
     const toggle = h(
       'button.mn-picker.mn-prof-fold',
@@ -1240,6 +1253,67 @@ export function profileScreen(menu: Menu): Screen {
         }),
       (e: unknown) => menu.toast(errText(e), 'error'),
     );
+  };
+
+  /** The server takes deletions (GET /api/config legal.deletion, DELETION_OPEN): BORRAR CUENTA and its screens show (the legal draft's P5). */
+  const deletionOn = (): boolean => authCfg?.deletion === true;
+
+  /**
+   * POST /api/me/delete with the name typed (`f`: the dialog's field, null after "confirm it's you"):
+   * 403 reauth_required { level } asks for that level (fresh, forced: the server just said so) and
+   * sends the same request once more. Done: every device is signed out, this one too (AccountClient
+   * forgets its session), and deletionDone shows the day and the receipt.
+   */
+  const requestDeletion = async (confirm: string, f: Field | null): Promise<boolean> => {
+    const name = acc.account?.name ?? '';
+    const mailed = acc.me?.emailVerified === true;
+    try {
+      const purgeAt = await acc.deleteAccount(confirm);
+      queueMicrotask(() => deletionDone(menu, name, purgeAt, mailed));
+      render();
+      return true;
+    } catch (e) {
+      if (e instanceof AccountError && e.code === 'reauth_required' && f !== null) {
+        queueMicrotask(() => fresh(() => void requestDeletion(confirm, null), e.level === 2 ? 2 : 1, true));
+        return true;
+      }
+      if (f === null) {
+        menu.toast(errText(e), 'error');
+        return true;
+      }
+      f.error(errText(e));
+      return false;
+    }
+  };
+
+  /**
+   * BORRAR CUENTA (the legal draft's P5): what goes and the days to cancel, the username typed to
+   * confirm (as usernameKey compares names: the server's rule), BORRAR MI CUENTA (danger; CANCELAR
+   * takes the first focus), then the server's "confirm it's you" at the level the account reaches.
+   */
+  const deleteDialog = (): void => {
+    const name = acc.account?.name ?? '';
+    const typedName = field(t('delete.nameLabel'), { maxLength: USERNAME_MAX * 2, autocomplete: 'off', hint: t('delete.typeName', { name }), enterkeyhint: 'done' });
+    menu.modal({
+      title: t('delete.title'),
+      body: [h('p.mn-note', null, t('delete.note', { days: authCfg?.graceDays ?? 14 })), typedName.el],
+      actions: [
+        {
+          label: t('delete.confirm'),
+          danger: true,
+          onClick: async () => {
+            typedName.error(null);
+            const confirm = typedName.input.value;
+            if (name === '' || usernameKey(confirm.trim()) !== usernameKey(name)) {
+              typedName.error(t('delete.badName'));
+              return false;
+            }
+            return requestDeletion(confirm, typedName);
+          },
+        },
+        { label: t('profile.cancel'), autofocus: true, onClick: () => true },
+      ],
+    });
   };
 
   /** Sign out on every device, this one too: the way out of a stolen session for any account (no password needed). */

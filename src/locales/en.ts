@@ -2134,4 +2134,33 @@ export default {
   'legal.orDelete': 'If you do not accept them, you can delete your account in PROFILE.',
   // A lobby that did not open because the terms' sheet was closed
   'legal.declined': 'To play online, accept the Terms of use.',
+
+  // Deleting the account (PROFILE > ACCOUNT AND SECURITY; the legal draft's P5), shown only while the server takes deletions
+  'delete.button': 'DELETE ACCOUNT',
+  'delete.title': 'Delete your account',
+  // {days} is the grace before the deletion (14)
+  'delete.note': 'Your account is deleted in {days} days, with its name, rating, points and items. Until then you can cancel: sign in again, or use the link in the email if you have one. You are signed out on every device, this one too.',
+  'delete.nameLabel': 'Your username',
+  // {name} is the account's username, which the player types to confirm
+  'delete.typeName': 'To confirm, type your username: {name}',
+  'delete.confirm': 'DELETE MY ACCOUNT',
+  'delete.badName': 'Type your username exactly as it is.',
+  // After the request: {name} the account, {date} the deletion day
+  'delete.doneTitle': 'Deletion requested',
+  'delete.done': 'The account {name} is deleted on {date}. Until then, sign in again to cancel it.',
+  'delete.doneMail': 'We sent you an email with a link to cancel it.',
+  // The receipt on screen (the legal draft's P5, for an account without an email too); {when} the request's date and time
+  'delete.receipt': 'Receipt: deletion of the account {name} requested on {when}. It is deleted on {date}.',
+  // A sign-in of an account whose deletion is pending; {date} the deletion day
+  'delete.pendingTitle': 'This account is being deleted',
+  'delete.pendingNote': 'You asked to delete this account. It is deleted on {date}. Do you want to keep it?',
+  // The same, back from Google or Discord (the day is not known there)
+  'delete.pendingNoteNoDate': 'You asked to delete this account. Do you want to keep it?',
+  'delete.keepBtn': 'KEEP MY ACCOUNT',
+  'delete.keptToast': 'Done: your account will not be deleted.',
+  // The cancel link of the deletion email (/account#keep=)
+  'delete.keepTitle': 'Keep your account?',
+  'delete.keepNote': 'This link cancels the deletion of your account. Nothing changes until you confirm.',
+  'delete.keptTitle': 'Your account stays',
+  'delete.kept': 'We cancelled the deletion. Sign in again to keep playing.',
 } satisfies Messages;

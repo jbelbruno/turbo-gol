@@ -178,6 +178,7 @@ import type { NetClient, ServerAssignment } from '../net/NetClient';
 import { AccountClient, AccountError, oauthErrorText, parseAuthHash } from '../net/AccountClient';
 import { GuestTerms } from '../net/terms';
 import { TermsDeclined, termsGate } from '../ui/screens/terms';
+import { pendingFromProvider } from '../ui/screens/deletion';
 import { TrainingStore } from './trainingStore';
 import { ExperimentalStore, type ExperimentalProblem } from './experimentalStore';
 import { MAX_PRESETS, canonicalValues, type PhysicsValues } from './physicsRules';
@@ -1212,6 +1213,8 @@ export class Game implements P2PGameHooks {
     if (auth !== null) history.replaceState(null, '', location.pathname + location.search);
     // Kept only for a provider's round trip: any other page load forgets it.
     const detour = takeDetour();
+    // Its owner's deletion is pending (the legal draft's P5): the provider this tab started, read before its mark goes.
+    const keepWith = auth?.kind === 'error' && auth.code === 'deletion_pending' ? this.accounts.startedProvider() : null;
     // A provider's round trip that signed nobody in: "continue as" learns nothing from it (its mark goes).
     if (auth?.kind === 'error' && auth.code !== 'no_account') this.accounts.providerAbandoned();
     if (auth?.kind === 'confirm' || (auth?.kind === 'error' && auth.code === 'no_account')) {
@@ -1223,8 +1226,10 @@ export class Game implements P2PGameHooks {
       if (auth === null && this.accounts.hintName === null) return;
       const a = await this.accounts.restore();
       if (auth !== null) {
-        if (auth.kind === 'error') this.menu.toast(oauthErrorText(auth.code), 'error');
-        else if (a !== null) {
+        // deletion_pending: CONSERVAR MI CUENTA signs in with that provider again (deletion.ts), while the deletion screens are open.
+        if (auth.kind === 'error') {
+          if (!(auth.code === 'deletion_pending' && (await pendingFromProvider(this.menu, keepWith)))) this.menu.toast(oauthErrorText(auth.code), 'error');
+        } else if (a !== null) {
           const hello = auth.kind === 'new' ? t('game.welcomeNew', { name: a.name }) : auth.kind === 'linked' ? t('game.accountLinked') : auth.kind === 'reauth' ? t('profile.reauthDone') : t('profile.hello', { name: a.name });
           // Signed in, the identity pending in this browser not linked: the reason with the hello.
           const linkError = auth.kind === 'ok' && auth.linkError !== undefined ? ` ${oauthErrorText(auth.linkError)}` : '';
