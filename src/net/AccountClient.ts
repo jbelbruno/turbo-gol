@@ -1405,6 +1405,19 @@ export class AccountClient {
     return terms;
   }
 
+  /**
+   * A maintainer's deletion on request (POST /api/admin/account-delete, the legal draft's P4), from
+   * the browser's console on turbo-gol.com (docs/legal/README.md): `account` its id or username,
+   * `confirm` its username typed again, `receivedAt` when the request came (ms or YYYY-MM-DD).
+   * Resolves the certificate to send back. Refusals: reauth_required { level: 2 } (PERFIL's
+   * CONFIRMAR CON LA CONTRASEÑA first), not_trusted, bad_confirm, no_user, maintainer_account, retry.
+   */
+  async adminDeleteAccount(account: string, confirm: string, receivedAt?: number | string): Promise<unknown> {
+    const r = (await this.ownCall('/api/admin/account-delete', { account, confirm, ...(receivedAt !== undefined ? { receivedAt } : {}) })) as { certificate?: unknown } | null;
+    if (typeof r?.certificate !== 'object' || r.certificate === null) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r.certificate;
+  }
+
   /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */
   startedProvider(): OAuthProvider | null {
     try {

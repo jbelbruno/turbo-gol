@@ -802,6 +802,49 @@ export class AccountStore {
     });
   }
 
+  // ---- deletion on request (the legal draft's P4: Ley 25.326 art. 16.2, 5 business days) -----------
+
+  /** The account an operator names (POST /api/admin/account-delete): its id (16 hex), else its username as usernameKey compares names; null for none. */
+  accountIdOf(account: string): string | null {
+    const a = account.trim();
+    if (/^[0-9a-f]{16}$/.test(a) && this.userById(a) !== null) return a;
+    const name = a.length > 0 && a.length <= USERNAME_MAX * 2 ? this.userByKey(usernameKey(a)) : null;
+    return name === null ? null : str(name.id);
+  }
+
+  /**
+   * The project's deletion on request (POST /api/admin/account-delete), one transaction, before its
+   * purge: refused for no account ('no_user'), the project's own ('maintainer_account', as every
+   * deletion) and a name typed wrong ('bad_confirm', usernameKey's comparison, as POST
+   * /api/me/delete's). A suspended account, one without an address and one whose deletion is
+   * pending already are taken: the 14 days to cancel are the player's choice in PERFIL, a request by
+   * mail is done at once. The purge is due now (delete_purge_at = now; delete_requested_at kept from
+   * the player's own request, else now), and what requestDeletion does at once is done too: every
+   * device signed out, the news withdrawn, every live mailed proof dead (the cancel link included:
+   * nothing calls this one off). The caller purges it (purgeAccount, the alarm's own path) right
+   * after. Resolves when the deletion was first asked.
+   */
+  forceDeletion(userId: string, confirm: unknown, now: number): { requestedAt: number } | 'no_user' | 'maintainer_account' | 'bad_confirm' {
+    return this.tx(() => {
+      const why = this.deletionRefusal(userId);
+      if (why !== null) return why;
+      const u = this.userById(userId) as Row;
+      if (typeof confirm !== 'string' || confirm.length > USERNAME_MAX * 2 || usernameKey(confirm.trim()) !== str(u.ukey)) return 'bad_confirm' as const;
+      const requestedAt = this.pendingDeletion(u) && num(u.delete_requested_at) > 0 ? num(u.delete_requested_at) : now;
+      this.sql.exec('UPDATE users SET delete_requested_at = ?, delete_purge_at = ? WHERE id = ?', requestedAt, now, userId);
+      this.deleteRefreshOf(userId);
+      if (this.newsGranted(userId)) this.consentIn(userId, 'news', NEWS_CONSENT_VERSION, false, DELETION_CONSENT_SOURCE, now);
+      this.killMailTokens({ userId }, ['reset', 'add_email', 'change_email', 'reauth', 'cancel_delete', 'undo_email'], now);
+      return { requestedAt };
+    });
+  }
+
+  /** One account as purgeCandidates lists it (the values its marks are made of), due or not; null for none. */
+  purgeCandidate(userId: string): PurgeCandidate | null {
+    const u = this.userById(userId);
+    return u === null ? null : { userId, values: this.markValues(u) };
+  }
+
   /** The values a purge marks (§3.13 step 1): the account's email canon, its hint's and the ones its undos hold, its Google sub and its Discord id. */
   private markValues(u: Row): Array<[MarkKind, string]> {
     const out: Array<[MarkKind, string]> = [];

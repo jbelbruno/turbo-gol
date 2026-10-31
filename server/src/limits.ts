@@ -114,6 +114,8 @@
  *   POST /api/auth/tv/renew             tvRenew          network       60  RL_60    a TV's next code, once per code's life (no check: its secret)
  *   GET  /nodes/admin/account-stats     accountStats     account       10  RL_10    a maintainer's account counts (nodeRoutes.ts): a few scans
  *                                                                                    of every account in the AccountsDO each
+ *   POST /api/admin/account-delete      accountStats     account       10  RL_10    a maintainer's deletion on request (accountRoutes.ts, the
+ *                                                                                    legal draft's P4): the same rule, one count for the two
  *   POST /api/dev/signin                dev              network      120  RL_120   the dev-only sign-in and the stub's outbox (accountRoutes.ts
  *   GET  /api/dev/mail                                                               devRoute): counted only while their gate is open (DEV_AUTH=1
  *                                                                                    on a loopback host); closed, they are an unknown route
@@ -325,6 +327,8 @@ export function accountGate(method: string, path: string): readonly LimitName[] 
         return ['dev'];
       case '/api/me/replay-name':
         return ['replayName'];
+      case '/api/admin/account-delete':
+        return ['accountStats'];
     }
     return [];
   }

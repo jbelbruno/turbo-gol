@@ -158,6 +158,10 @@
  *                                                                     maintainer_account / deletion_pending { purgeAt } |
  *                                                                     429 / 503 (M9 cannot go: nothing changes)
  *   POST /delete-cancel   { token }                                  -> { ok } | 410 link_invalid (M9's link)
+ *   POST /admin-delete    { account, confirm, by, receivedAt? }      -> { certificate } (the legal draft's P4: a maintainer's
+ *                                                                     deletion on request, now, also of a suspended account or
+ *                                                                     one without an address) | 400 bad_confirm | 404 no_user |
+ *                                                                     409 maintainer_account | 503 retry
  *   The news consent (sign-in PR 13, the design's §2.11 and §3.14; no news is sent yet):
  *   POST /me-consent      { userId, kind: 'news', granted }          -> { news, terms } | 400 bad_consent | 404 | 409
  *                                                                     email_required (a grant needs a verified address) /
@@ -564,6 +568,64 @@ async function sha256Hex(s: string): Promise<string> {
   let h = '';
   for (let i = 0; i < d.length; i++) h += (d[i] < 16 ? '0' : '') + d[i].toString(16);
   return h;
+}
+
+/**
+ * The certificate of a deletion on request (POST /api/admin/account-delete, the legal draft's P4),
+ * for the owner to send back within 72 hours: a reference, the dates and a digest, nothing personal
+ * (no name, no address, no id). `digest` = SHA-256 hex of "turbogol-deletion-v1\n<ref>\n<account
+ * id>\n<deletedAt>" (deletionDigest): the account's id stays in deleted_ids (its tombstone), so the
+ * owner can show which account a certificate is for, and nobody else can.
+ */
+export interface DeletionCertificate {
+  kind: 'turbogol-deletion';
+  v: 1;
+  /** 8 random bytes, hex: how the person and the owner name this deletion. */
+  ref: string;
+  /** When the request came (the owner's date), ms; null when not given. */
+  receivedAt: number | null;
+  /** When the deletion was first asked: PERFIL's request when there was one, else the deletion itself. */
+  requestedAt: number;
+  deletedAt: number;
+  digest: string;
+  /** The certificate in words, in both languages, to paste into the answer. */
+  text: { es: string; en: string };
+}
+
+/** A certificate's digest (DeletionCertificate.digest). */
+export function deletionDigest(ref: string, userId: string, deletedAt: number): Promise<string> {
+  return sha256Hex(`turbogol-deletion-v1\n${ref}\n${userId}\n${deletedAt}`);
+}
+
+/** /admin-delete's receivedAt: ms or a YYYY-MM-DD date (12:00 UTC), within the last 400 days and not ahead; else null. */
+function receivedOf(v: unknown, now: number): number | null {
+  const m = typeof v === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim()) : null;
+  const at = typeof v === 'number' ? v : m !== null ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12) : NaN;
+  return Number.isFinite(at) && at <= now + 24 * 60 * 60_000 && at >= now - 400 * 24 * 60 * 60_000 ? Math.floor(at) : null;
+}
+
+async function deletionCertificate(userId: string, receivedAt: number | null, requestedAt: number, deletedAt: number): Promise<DeletionCertificate> {
+  const ref = randomHex(8);
+  const digest = await deletionDigest(ref, userId, deletedAt);
+  const iso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d{3}Z$/, ' UTC').replace('T', ' ');
+  const es = [
+    `Constancia de borrado de Turbogol (referencia ${ref}).`,
+    receivedAt !== null ? `Pedido recibido: ${iso(receivedAt)}.` : null,
+    requestedAt !== deletedAt ? `Borrado pedido en el juego: ${iso(requestedAt)}.` : null,
+    `Cuenta borrada: ${iso(deletedAt)}.`,
+    `Huella: ${digest}.`,
+    'La huella identifica la cuenta sin ningún dato personal.',
+  ];
+  const en = [
+    `Turbogol deletion certificate (reference ${ref}).`,
+    receivedAt !== null ? `Request received: ${iso(receivedAt)}.` : null,
+    requestedAt !== deletedAt ? `Deletion asked in the game: ${iso(requestedAt)}.` : null,
+    `Account deleted: ${iso(deletedAt)}.`,
+    `Digest: ${digest}.`,
+    'The digest identifies the account without any personal data.',
+  ];
+  const join = (lines: Array<string | null>): string => lines.filter((x): x is string => x !== null).join('\n');
+  return { kind: 'turbogol-deletion', v: 1, ref, receivedAt, requestedAt, deletedAt, digest, text: { es: join(es), en: join(en) } };
 }
 
 /** A row's code hash (section 1.6): bound to the attempt, so a copy of the database cannot test a code without the browser's id. */
@@ -1135,6 +1197,9 @@ export class AccountsDO extends DurableObject<Env> {
         return this.meDelete(b, now);
       case '/delete-cancel':
         return this.deleteCancel(b, now);
+      // Deletion on request (the legal draft's P4).
+      case '/admin-delete':
+        return this.adminDelete(b, now);
       // The news consent and unsubscribing (sign-in PR 13).
       case '/me-consent':
         return this.meConsent(b, now);
@@ -1237,6 +1302,53 @@ export class AccountsDO extends DurableObject<Env> {
     // `must` with no key: the lane had room above and the account's notice cap was taken with the others.
     const mail = p.email !== null ? this.notice(p, null, { kind: 'deletion_scheduled', name: p.name, at: r.purgeAt, token: cancel.token }, b.lang, now, true) : null;
     return json({ purgeAt: r.purgeAt, mail });
+  }
+
+  /**
+   * POST /admin-delete { account, confirm, by, receivedAt? } -> { certificate } (the legal draft's P4:
+   * a deletion asked by mail, done within Ley 25.326 art. 16.2's 5 business days, its certificate
+   * sent back within 72 hours). `account` is an id or a username, `confirm` that account's username
+   * as the maintainer typed it, `by` the maintainer's id (the Worker's gate checked it), `receivedAt`
+   * when the request came (ms, or a YYYY-MM-DD date; optional). accountStore.ts forceDeletion first
+   * (404 no_user, 409 maintainer_account, 400 bad_confirm; a suspended account, one without an
+   * address and one pending already are taken), then the purge the alarm runs (purgeAccount: the
+   * sanction marks of a sanction in force, every row, the tombstone), tried again when a value it
+   * marks changed between its keys and its transaction; then the NodeRegistryDO is told. Still not
+   * purged after 3 tries: 503 retry, and the alarm comes back for it in PURGE_AGAIN_MS (it is due).
+   * An ALERT line names the maintainer and the account (6 characters of each id), never a name.
+   */
+  private async adminDelete(b: Record<string, unknown>, now: number): Promise<Response> {
+    if (typeof b.account !== 'string' || b.account.length === 0 || b.account.length > 64 || typeof b.by !== 'string' || b.by.length > 64) return error(400, 'bad_request');
+    const maintainer = b.by.slice(0, 6);
+    const s = this.store;
+    const userId = s.accountIdOf(b.account);
+    if (userId === null) return error(404, 'no_user', 'No hay ninguna cuenta con ese nombre');
+    const f = s.forceDeletion(userId, b.confirm, now);
+    if (f === 'no_user') return error(404, 'no_user', 'No hay ninguna cuenta con ese nombre');
+    if (f === 'maintainer_account') return error(409, 'maintainer_account', 'La cuenta del proyecto no se puede borrar');
+    if (f === 'bad_confirm') return error(400, 'bad_confirm', 'Escribe el nombre de usuario de la cuenta tal como es');
+    let purged = false;
+    let marks = 0;
+    for (let tries = 0; tries < 3 && !purged; tries++) {
+      const c = s.purgeCandidate(userId);
+      if (c === null) break;
+      const r = s.purgeAccount(userId, await this.markKeys(c.values), now);
+      purged = r.result === 'purged';
+      marks = r.marks;
+      if (r.result !== 'retry' && !purged) break;
+    }
+    if (!purged) {
+      await this.ctx.storage.setAlarm(Date.now() + PURGE_AGAIN_MS);
+      return error(503, 'retry', 'La cuenta cambió mientras se borraba: vuelve a intentarlo');
+    }
+    const certificate = await deletionCertificate(userId, receivedOf(b.receivedAt, now), f.requestedAt, now);
+    console.warn(`ALERT maintainer ${maintainer} deleted the account ${userId.slice(0, 6)} on request (certificate ${certificate.ref}${marks > 0 ? `, ${marks} sanction marks kept` : ''})`);
+    try {
+      await this.tellNodes();
+    } catch {
+      /* the alarm tells the NodeRegistryDO next run (deleted_nodes) */
+    }
+    return json({ certificate });
   }
 
   /** POST /delete-cancel { token } -> { ok } | 410 link_invalid (§2.10): M9's link calls the deletion off (accountStore.ts cancelDeletionByToken). */

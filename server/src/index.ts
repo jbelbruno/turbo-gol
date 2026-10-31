@@ -799,7 +799,8 @@ export default {
     try {
       // /api/news/unsubscribe (sign-in PR 13): an account route outside /api/auth/, so the login-CSRF
       // gate leaves its one-click form (RFC 8058: no Origin) through; its JSON form asks for it itself.
-      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe';
+      // /api/admin/account-delete (the legal draft's P4): a maintainer's deletion on request, an account route too.
+      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe' || path === '/api/admin/account-delete';
       // The dev-only routes (accountRoutes.ts devRoute) exist only behind their gate: closed, they are
       // an unknown route (404), never counted by a limit and never near the AccountsDO.
       const dev = path.startsWith('/api/dev/') && isDevAuth(request, env);

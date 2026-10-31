@@ -186,6 +186,12 @@ export const ACCOUNT_SESSION_TTL_SECONDS = 60 * 60;
  * account without one.
  */
 export const REAUTH_WINDOW_S = 10 * 60;
+/**
+ * The maintainer gate's freshness (nodeRoutes.ts MAINTAINER_FRESH_S, the same value: a test checks;
+ * not imported, since nodeRoutes.ts imports this file): POST /api/admin/account-delete takes a
+ * maintainer whose device typed its password this recently.
+ */
+export const ADMIN_FRESH_S = 15 * 60;
 export const SERVER_KDF_ITERATIONS = 100_000;
 export const REFRESH_COOKIE = '__Host-tg_rt';
 const OAUTH_COOKIE = '__Host-tg_oa';
@@ -2197,6 +2203,37 @@ async function deleteCancel(c: RouteContext): Promise<Response> {
   return noStore(await accountsCall(c.env, '/delete-cancel', { token }));
 }
 
+// ---- deletion on request (the legal draft's P4: Ley 25.326 art. 16.2, 5 business days) -------------
+//
+//   POST /api/admin/account-delete  Bearer { account: <its id or username>, confirm: <its username, typed>,
+//                                   receivedAt?: <ms or YYYY-MM-DD> } -> { certificate } (AccountsDO.ts
+//                                   DeletionCertificate: a reference, the dates and a digest, nothing personal,
+//                                   for the owner to send back within 72 hours) | 400 bad_request / bad_confirm |
+//                                   401 | 403 tv_session / not_trusted / reauth_required { level: 2 } | 404 no_user |
+//                                   409 maintainer_account | 415 / 403 bad_origin (the game's Origin and JSON, R1) |
+//                                   429 | 503 retry. The maintainer gate of /nodes/admin/* (nodeRoutes.ts): a
+//                                   NODE_TRUSTED_OPERATORS account's own session, not a TV's, whose device typed
+//                                   its password in the last MAINTAINER_FRESH_S. The account goes now, with no
+//                                   grace: a suspended one and one without an address too (they cannot use
+//                                   PERFIL's button), through the purge the alarm runs. Open whatever
+//                                   DELETION_OPEN says: answering a request by mail is the law's, not a button's.
+//                                   From the browser's console on turbo-gol.com: docs/legal/README.md.
+
+/** POST /api/admin/account-delete (the legal draft's P4): the maintainer gate, then the AccountsDO's deletion and its certificate. */
+async function adminAccountDelete(c: RouteContext): Promise<Response> {
+  const refused = crossSiteRefusal(c, '/api/admin/account-delete');
+  if (refused !== null) return refused;
+  const s = requirePrimary(c);
+  if (s instanceof Response) return s;
+  if (!trustedOperatorIds(c.env).has(s.sub)) return error(403, 'not_trusted', 'only the project deletes accounts on request');
+  const fresh = requireFresh(c, 2, ADMIN_FRESH_S);
+  if (fresh instanceof Response) return fresh;
+  const b = await readJson<{ account?: unknown; confirm?: unknown; receivedAt?: unknown }>(c.request);
+  if (!b || typeof b.account !== 'string' || b.account.trim().length === 0 || b.account.length > 64 || typeof b.confirm !== 'string' || b.confirm.length > 128) return error(400, 'bad_request');
+  const receivedAt = typeof b.receivedAt === 'number' || (typeof b.receivedAt === 'string' && b.receivedAt.length <= 16) ? b.receivedAt : undefined;
+  return noStore(await accountsCall(c.env, '/admin-delete', { account: b.account, confirm: b.confirm, by: s.sub, receivedAt }));
+}
+
 // ---- the news consent and unsubscribing (sign-in PR 13: §2.11, §3.14; no news is sent yet) ----------
 //
 //   POST /api/me/consent          Bearer (account, not a TV) { kind: 'news', granted } -> { news, terms } | 400
@@ -2464,6 +2501,8 @@ export async function accountRoute(c: RouteContext, url: URL): Promise<Response 
     // Account deletion (sign-in PR 12).
     if (p === '/api/me/delete') return meDelete(c);
     if (p === '/api/auth/delete/cancel') return deleteCancel(c);
+    // Deletion on request, a maintainer's (the legal draft's P4).
+    if (p === '/api/admin/account-delete') return adminAccountDelete(c);
     // The news consent and unsubscribing (sign-in PR 13).
     if (p === '/api/me/consent') return meConsent(c);
     if (p === '/api/news/unsubscribe') return newsUnsubscribe(c, url);
