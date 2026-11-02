@@ -7,6 +7,7 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The replay list looks like the game: the TURBOGOL mark, a header with the community-servers tag, filters by kind (all, Competitive, Casual) and format (1v1, 2v2, 3v3), a scoreboard card per match (blue side, the score, red side, the winner lit, one tap anywhere to watch), placeholders while it loads and a layout for phones.
 - Replay cameras: a free orbital camera (drag to turn, wheel or pinch to zoom, right drag to move the
   point, double click to follow the ball again) that stays inside the pitch, a distance control for
   the players' cameras (a slider and the wheel, remembered, plus ball cam or car cam), and buttons
