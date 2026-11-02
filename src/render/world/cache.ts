@@ -15,7 +15,7 @@
  * Bump whenever a generator, a bake material or the codec changes what a bake produces (the theme
  * data itself is hashed into the key, see `cacheKey`).
  */
-export const WORLD_CACHE_VERSION = 8;
+export const WORLD_CACHE_VERSION = 9;
 const DB_NAME = 'turbogol-world';
 /** Version 2 added the `used` store (version 1 evicted the oldest write first). */
 const DB_VERSION = 2;
