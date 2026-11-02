@@ -545,7 +545,7 @@ async function replayOwn(c: NodeRouteContext, env: NodesEnv, what: 'mine' | 'sta
   const s = requireAccount({ session: await c.session() });
   if (s instanceof Response) return s;
   if (c.limited('nrown:' + s.sub, LIMIT_REPLAY_OWN_PER_ACCOUNT)) return error(429, 'rate_limited');
-  const res = await toRegistry(env, new Request(c.request.url, { method: 'GET' }), `${NODE_ROUTES.replays}/${what}?account=${s.sub}`);
+  const res = await toRegistry(env, new Request(c.request.url, { method: 'GET' }), `${NODE_ROUTES.replays}/${what}?account=${s.sub}&name=${encodeURIComponent(s.name)}`);
   if (!res.ok) {
     await res.body?.cancel();
     return error(503, 'nodes_unavailable');
