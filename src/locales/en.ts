@@ -2085,6 +2085,10 @@ export default {
   'replay.unverifiedNotice': 'Not verified: only the community server that hosted this match vouches for it. No other server checked it.',
   // Over a replay opened from a file on the device
   'replay.localNotice': 'A local file: it does not come from this server, and nobody checked it.',
+  'replay.eyebrow': 'COMMUNITY SERVERS',
+  'replay.all': 'All',
+  'replay.anyFormat': 'Any format',
+  'replay.noneFiltered': 'No replays match this filter.',
   'replay.back': 'Back to the game',
   'replay.loading': 'Loading…',
   'replay.empty': 'No replays yet. Play a match on a community server and it shows up here.',
