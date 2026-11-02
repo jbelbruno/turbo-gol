@@ -1410,3 +1410,58 @@ test('the kill switch nodes_off: every route that reaches the object answers 503
   assert.equal((await req(env, 'GET', '/nodes/releases/install.sh')).status, 200, 'the installers go on');
   assert.ok(reads.every((n) => n === 'nodes_off'));
 });
+
+// ---- stars, "my replays" and the most starred ----------------------------------------------------
+
+const authOf = async (sub) => ({ authorization: 'Bearer ' + (await accountToken(sub, 'Cuenta')) });
+const ACCOUNT_C = 'c3c3c3c3c3c3c3c3';
+
+test('replay stars (store): a count per match, one star per account, a cap, only served matches; the top orders by stars then the newest; mine is by seat; a prune takes the stars', () => {
+  const store = memStore();
+  for (const [c, at] of [['1', BASE - 3000], ['2', BASE - 2000], ['3', BASE - 1000]]) store.finished(settled(hex64(c), { doneAt: at }), rated(hex64(c)));
+  assert.equal(store.setReplayStar(ACCOUNT_A, hex64('9'), true, 5), null, 'not a served match');
+  assert.equal(store.setReplayStar(ACCOUNT_A, hex64('1'), true, 5), 1);
+  assert.equal(store.setReplayStar(ACCOUNT_A, hex64('1'), true, 5), 1, 'a second star of the same account is the same star');
+  assert.equal(store.setReplayStar(ACCOUNT_B, hex64('1'), true, 5), 2);
+  assert.equal(store.setReplayStar(ACCOUNT_B, hex64('2'), true, 5), 1);
+  assert.equal(store.setReplayStar(ACCOUNT_B, hex64('3'), true, 1), 'full', 'one star at most for this account');
+  assert.deepEqual(store.replayTop(30).map((r) => [r.item.matchId[0], r.item.stars]), [['1', 2], ['2', 1]], 'the unstarred are not in the top');
+  assert.deepEqual(store.replayList(null, 30).map((r) => [r.item.matchId[0], r.item.stars]), [['3', 0], ['2', 1], ['1', 2]], 'the public list carries the counts');
+  assert.deepEqual(store.replayStarredBy(ACCOUNT_B, 10).sort(), [hex64('1'), hex64('2')]);
+  assert.deepEqual(store.replayMine(ACCOUNT_A, 10).map((r) => r.item.matchId[0]), ['3', '2', '1'], 'the matches it sat in, newest first');
+  assert.deepEqual(store.replayMine(ACCOUNT_C, 10), []);
+  assert.equal(store.setReplayStar(ACCOUNT_B, hex64('1'), false, 5), 1);
+  store.pruneReplays(BASE + 40 * 24 * 60 * 60_000);
+  assert.deepEqual(store.replayStarredBy(ACCOUNT_B, 10), [], 'pruned with their matches');
+});
+
+test('replay stars (routes): only a registered account stars, counts are public and carry no one, mine shows the account’s own matches, top the most starred', async () => {
+  const { env } = await replayWorld([
+    { id: hex64('1'), doneAt: BASE - 3000, bytes: null, sha: 'e'.repeat(64) },
+    { id: hex64('2'), doneAt: BASE - 2000, bytes: null, sha: 'e'.repeat(64) },
+  ]);
+  const a = await authOf(ACCOUNT_A);
+  const b = await authOf(ACCOUNT_B);
+  const c = await authOf(ACCOUNT_C);
+  const star = (headers, id, on = true) => req(env, 'POST', `/nodes/replays/${id}/star`, { headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ on }) });
+  assert.equal((await star({}, hex64('1'))).status, 401, 'no session');
+  assert.equal((await req(env, 'GET', '/nodes/replays/mine')).status, 401);
+  assert.equal((await req(env, 'GET', '/nodes/replays/stars')).status, 401);
+  const guest = { authorization: 'Bearer ' + (await signJwt(SECRET, { sub: PLAYER, name: 'Invitado 4821', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 })) };
+  assert.equal((await star(guest, hex64('1'))).status, 403, 'a guest never stars');
+  assert.equal((await star(a, hex64('9'))).status, 404, 'a match that is not served');
+  assert.equal((await star(a, hex64('1'), 'yes')).status, 400);
+  assert.deepEqual(await jsonOf(await star(a, hex64('1'))), { stars: 1, starred: true });
+  assert.deepEqual(await jsonOf(await star(b, hex64('1'))), { stars: 2, starred: true });
+  assert.deepEqual(await jsonOf(await star(b, hex64('2'))), { stars: 1, starred: true });
+  const top = await jsonOf(await req(env, 'GET', '/nodes/replays/top'));
+  assert.deepEqual(top.matches.map((m) => [m.matchId[0], m.stars]), [['1', 2], ['2', 1]]);
+  const text = JSON.stringify(top);
+  assert.ok(!text.includes(ACCOUNT_A) && !text.includes(ACCOUNT_B), 'a count only: who starred never leaves the server');
+  assert.deepEqual((await jsonOf(await req(env, 'GET', '/nodes/replays/stars', { headers: a }))).ids, [hex64('1')]);
+  const mine = await req(env, 'GET', '/nodes/replays/mine', { headers: a });
+  assert.match(mine.headers.get('cache-control'), /no-store/);
+  assert.deepEqual((await jsonOf(mine)).matches.map((m) => m.matchId[0]).sort(), ['1', '2']);
+  assert.deepEqual((await jsonOf(await req(env, 'GET', '/nodes/replays/mine', { headers: c }))).matches, [], 'an account that played none');
+  assert.deepEqual(await jsonOf(await star(a, hex64('1'), false)), { stars: 1, starred: false });
+});
