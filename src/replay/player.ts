@@ -16,11 +16,12 @@
 import * as THREE from 'three/webgpu';
 import { RoomHost } from '../../server/src/roomHost';
 import type { Replay } from '../../nodes/shared/replay';
+import { STORAGE_PREFIX } from '../brand';
 import { t } from '../i18n';
 import type { MatchEvent } from '../net/protocol';
 import { ArenaView } from '../render/Arena';
 import { BallView } from '../render/Ball';
-import { ChaseCamera } from '../render/Camera';
+import { ChaseCamera, clampToArena } from '../render/Camera';
 import type { CameraCarState } from '../render/Camera';
 import { CarView } from '../render/Car';
 import { Effects } from '../render/Effects';
@@ -53,6 +54,50 @@ import { clockText, el } from './list';
 const MAX_FRAME_DT = 0.1;
 /** Wall-clock budget per frame for a fast-forward or the scan (ms). */
 const BUSY_BUDGET_MS = 25;
+/** The chase cameras' distance range (uu; settings.ts allows 100-400 in the game, a replay lets it go further). */
+const CHASE_MIN = 100;
+const CHASE_MAX = 500;
+/** The orbital camera's distance and pitch limits (it is also kept inside the arena: Camera.ts clampToArena). */
+const ORBIT_MIN = 150;
+const ORBIT_MAX = 4200;
+const PITCH_MIN = 0.05;
+const PITCH_MAX = 1.45;
+/** The lead a jump to a goal keeps before it (s), so the play that made it shows. */
+const GOAL_LEAD_SECONDS = 4;
+const CAM_KEY = STORAGE_PREFIX + 'replay.cam';
+
+interface CamPrefs {
+  chaseDist: number;
+  orbitDist: number;
+  ballCam: boolean;
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+/** What the viewer remembers about the cameras (best effort: storage can be off). */
+function loadCamPrefs(): CamPrefs {
+  const d: CamPrefs = { chaseDist: 270, orbitDist: 1400, ballCam: true };
+  try {
+    const p = JSON.parse(window.localStorage.getItem(CAM_KEY) ?? 'null') as Partial<CamPrefs> | null;
+    if (p && typeof p === 'object') {
+      if (typeof p.chaseDist === 'number' && Number.isFinite(p.chaseDist)) d.chaseDist = clamp(p.chaseDist, CHASE_MIN, CHASE_MAX);
+      if (typeof p.orbitDist === 'number' && Number.isFinite(p.orbitDist)) d.orbitDist = clamp(p.orbitDist, ORBIT_MIN, ORBIT_MAX);
+      if (typeof p.ballCam === 'boolean') d.ballCam = p.ballCam;
+    }
+  } catch {
+    /* private mode */
+  }
+  return d;
+}
+
+function saveCamPrefs(p: CamPrefs): void {
+  try {
+    window.localStorage.setItem(CAM_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode */
+  }
+}
+
 /** How long the GO caption stays (Game.ts GO_CAPTION_SECONDS). */
 const GO_CAPTION_TICKS = Math.round(0.8 * TICK_RATE);
 /** Name tags float this far above a car's origin (uu). */
@@ -255,7 +300,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   speedSel.value = '1';
   const camSel = el('select.rp-btn', { 'aria-label': t('replay.camera') }) as HTMLSelectElement;
   camSel.append(el('option', { value: '0' }, `0 · ${t('replay.broadcast')}`));
-  roster.forEach((_e, i) => camSel.append(el('option', { value: String(i + 1) }, `${i + 1} · ${shownName[i]}`)));
+  camSel.append(el('option', { value: '1' }, `1 · ${t('replay.orbital')}`));
+  roster.forEach((_e, i) => camSel.append(el('option', { value: String(i + 2) }, `${i + 2} · ${shownName[i]}`)));
   const seek = el('input', { type: 'range', min: '0', max: String(endTick), step: '1', value: '0', 'aria-label': t('replay.title') }) as HTMLInputElement;
   const marks = el('div.rp-marks');
   for (const g of o.scan.goals) {
@@ -265,9 +311,17 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   }
   const time = el('span.rp-time', null, '');
   const list = el('a.rp-btn', { href: './replay.html' }, t('replay.list'));
+  const goals = [...o.scan.goals].sort((a, b) => a.tick - b.tick);
+  const prevGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.prevGoal')) as HTMLButtonElement;
+  const nextGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.nextGoal')) as HTMLButtonElement;
+  // The chase cameras' own controls: ball cam or car cam, and how far behind (shown with a car's camera).
+  const ballCamBtn = el('button.rp-btn', { type: 'button' }, '') as HTMLButtonElement;
+  const distSlider = el('input', { type: 'range', min: String(CHASE_MIN), max: String(CHASE_MAX), step: '10', 'aria-label': t('replay.distance') }) as HTMLInputElement;
+  const chaseCtl = el('span.rp-ctl.rp-hidden', null, ballCamBtn, el('span.rp-ctl-label', null, t('replay.distance')), distSlider);
+  const hint = el('span.rp-keys.rp-grow', null, '');
   o.bar.replaceChildren(
     el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time),
-    el('div.rp-line', null, speedSel, camSel, el('span.rp-keys.rp-grow', null, t('replay.keys', { max: roster.length })), list),
+    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, list),
   );
   o.bar.classList.remove('rp-hidden');
 
@@ -283,9 +337,17 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   /** The tick the GO caption goes at (-1: none showing). */
   let goHideTick = -1;
   let lastDrawn = -1;
+  /** 0 broadcast, 1 orbital (free, with the mouse), 2 + i a car's chase camera. */
   let camIndex = 0;
+  const CAM_ORBIT = 1;
+  const CAM_CAR0 = 2;
   let snapChase = true;
   const chase = new ChaseCamera();
+  const prefs = loadCamPrefs();
+  chase.settings.distance = prefs.chaseDist;
+  chase.ballCam = prefs.ballCam;
+  /** The orbital camera: spherical round `target` (which follows the ball until it is moved by hand). */
+  const orbit = { yaw: -0.7, pitch: 0.5, dist: prefs.orbitDist, follow: true, target: new THREE.Vector3() };
   const camState: CameraCarState = { grounded: true, speed: 0, supersonic: false };
   const lookAt = new THREE.Vector3();
   const v = new THREE.Vector3();
@@ -294,11 +356,31 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     playing = p;
     playBtn.textContent = p ? t('replay.pause') : t('replay.play');
   };
+  /** The bar's camera controls and the hint line follow the camera. */
+  const updateCamUi = (): void => {
+    const car = camIndex >= CAM_CAR0;
+    chaseCtl.classList.toggle('rp-hidden', !car);
+    distSlider.value = String(Math.round(chase.settings.distance));
+    ballCamBtn.textContent = chase.ballCam ? t('replay.ballCam') : t('replay.carCam');
+    hint.textContent = camIndex === CAM_ORBIT ? t('replay.orbitHint') : car ? t('replay.chaseHint') : t('replay.keys', { max: roster.length + 1 });
+    renderer.gpu.domElement.style.cursor = camIndex === CAM_ORBIT ? 'grab' : '';
+  };
   const setCam = (n: number): void => {
-    if (n < 0 || n > cars.length) return;
+    if (n < 0 || n > cars.length + 1) return;
     camIndex = n;
     camSel.value = String(n);
     snapChase = true;
+    updateCamUi();
+  };
+  /** Zoom the current camera by `f` (< 1 closer): the orbital's distance or a chase camera's. */
+  const zoomBy = (f: number): void => {
+    if (camIndex === CAM_ORBIT) orbit.dist = clamp(orbit.dist * f, ORBIT_MIN, ORBIT_MAX);
+    else if (camIndex >= CAM_CAR0) chase.settings.distance = clamp(chase.settings.distance * f, CHASE_MIN, CHASE_MAX);
+    else return;
+    prefs.orbitDist = orbit.dist;
+    prefs.chaseDist = chase.settings.distance;
+    saveCamPrefs(prefs);
+    distSlider.value = String(Math.round(chase.settings.distance));
   };
   /** Where the viewer is, or is going: a seek in progress counts as done. */
   const pos = (): number => (seekTarget >= 0 ? seekTarget : run.host.currentTick);
@@ -323,6 +405,19 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       );
     }
   };
+  /** Jump to the goal before / after the current moment (a lead before it); the start when there is none before. */
+  const goalJump = (dir: -1 | 1): void => {
+    const lead = (g: { tick: number }): number => Math.max(0, g.tick - GOAL_LEAD_SECONDS * TICK_RATE);
+    const here = pos();
+    if (dir > 0) {
+      const g = goals.find((x) => lead(x) > here + TICK_RATE / 4);
+      if (g) seekTo(lead(g));
+    } else {
+      let to = 0;
+      for (const g of goals) if (lead(g) < here - TICK_RATE / 2) to = lead(g);
+      seekTo(to);
+    }
+  };
   const togglePlay = (): void => {
     if (!playing && pos() >= endTick) seekTo(0);
     setPlaying(!playing);
@@ -333,6 +428,86 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     speed = Number(speedSel.value) || 1;
   });
   camSel.addEventListener('change', () => setCam(Number(camSel.value) || 0));
+  prevGoalBtn.addEventListener('click', () => goalJump(-1));
+  nextGoalBtn.addEventListener('click', () => goalJump(1));
+  ballCamBtn.addEventListener('click', () => {
+    chase.toggle();
+    prefs.ballCam = chase.ballCam;
+    saveCamPrefs(prefs);
+    updateCamUi();
+  });
+  distSlider.addEventListener('input', () => {
+    chase.settings.distance = Number(distSlider.value) || prefs.chaseDist;
+    prefs.chaseDist = chase.settings.distance;
+    saveCamPrefs(prefs);
+  });
+  // The mouse (and a finger) on the picture: the orbital camera turns with a drag, moves its point
+  // with the right button or Shift, zooms with the wheel or a pinch; a double click follows the ball again.
+  const dom = renderer.gpu.domElement;
+  dom.style.touchAction = 'none';
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinch = 0;
+  const pinchSpan = (): number => {
+    const [a, b] = [...pointers.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  };
+  dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  dom.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      dom.setPointerCapture(e.pointerId);
+    } catch {
+      /* gone */
+    }
+    if (pointers.size === 2) pinch = pinchSpan();
+    if (camIndex === CAM_ORBIT) dom.style.cursor = 'grabbing';
+  });
+  dom.addEventListener('pointermove', (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p || camIndex === 0) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (pointers.size === 2) {
+      const span = pinchSpan();
+      if (pinch > 0 && span > 0) zoomBy(pinch / span);
+      pinch = span;
+      return;
+    }
+    if (camIndex !== CAM_ORBIT) return;
+    if ((e.buttons & 2) !== 0 || e.shiftKey) {
+      // Move the point the camera looks at over the ground (the ground follows the pointer); clamped to the arena where it is used.
+      const k = orbit.dist * 0.0016;
+      const fx = -Math.cos(orbit.yaw);
+      const fz = -Math.sin(orbit.yaw);
+      orbit.target.x += fx * dy * k + fz * dx * k;
+      orbit.target.z += fz * dy * k - fx * dx * k;
+      orbit.follow = false;
+    } else {
+      orbit.yaw -= dx * 0.005;
+      orbit.pitch = clamp(orbit.pitch + dy * 0.005, PITCH_MIN, PITCH_MAX);
+    }
+  });
+  const letGo = (e: PointerEvent): void => {
+    pointers.delete(e.pointerId);
+    pinch = 0;
+    if (camIndex === CAM_ORBIT && pointers.size === 0) dom.style.cursor = 'grab';
+  };
+  dom.addEventListener('pointerup', letGo);
+  dom.addEventListener('pointercancel', letGo);
+  dom.addEventListener('dblclick', () => {
+    if (camIndex === CAM_ORBIT) orbit.follow = true;
+  });
+  dom.addEventListener(
+    'wheel',
+    (e) => {
+      if (camIndex === 0) return;
+      e.preventDefault();
+      zoomBy(Math.exp(clamp(e.deltaY, -240, 240) * 0.0012));
+    },
+    { passive: false },
+  );
   seek.addEventListener('pointerdown', () => {
     dragging = true;
   });
@@ -355,7 +530,11 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
       e.preventDefault();
       seekTo(pos() + (e.code === 'ArrowLeft' ? -5 : 5) * TICK_RATE);
-    } else if (/^Digit[0-8]$/.test(e.code)) {
+    } else if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+      goalJump(e.code === 'BracketLeft' ? -1 : 1);
+    } else if (e.code === 'KeyB' && camIndex >= CAM_CAR0) {
+      ballCamBtn.click();
+    } else if (/^Digit[0-9]$/.test(e.code)) {
       setCam(Number(e.code.slice(5)));
     }
   });
@@ -406,7 +585,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const hgt = o.tagsRoot.clientHeight;
     for (let i = 0; i < cars.length; i++) {
       const tag = tags[i];
-      if (camIndex === i + 1) {
+      if (camIndex === i + CAM_CAR0) {
         tag.style.transform = 'translate(-9999px, 0)';
         continue;
       }
@@ -446,8 +625,28 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
         camera.updateProjectionMatrix();
       }
       snapChase = true;
+    } else if (camIndex === CAM_ORBIT) {
+      // Orbital: round a point that follows the ball (or the spot the player moved it to). The point and
+      // the camera are both kept inside the arena (Camera.ts clampToArena), so it never leaves the stadium.
+      if (snapChase) {
+        snapChase = false;
+        orbit.target.copy(bp);
+      } else if (orbit.follow) {
+        orbit.target.lerp(bp, 1 - Math.exp(-6 * Math.min(dt, 0.1)));
+      }
+      clampToArena(orbit.target);
+      const cp = Math.cos(orbit.pitch);
+      camera.position.set(orbit.target.x + orbit.dist * cp * Math.cos(orbit.yaw), orbit.target.y + orbit.dist * Math.sin(orbit.pitch), orbit.target.z + orbit.dist * cp * Math.sin(orbit.yaw));
+      clampToArena(camera.position);
+      if (camera.position.y < 60) camera.position.y = 60;
+      camera.up.set(0, 1, 0);
+      camera.lookAt(orbit.target);
+      if (camera.fov !== 75) {
+        camera.fov = 75;
+        camera.updateProjectionMatrix();
+      }
     } else {
-      const i = camIndex - 1;
+      const i = camIndex - CAM_CAR0;
       const po = offsets[i];
       const vx = cur[po + C_VEL];
       const vy = cur[po + C_VEL + 1];
@@ -467,6 +666,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     placeTags();
   };
 
+  updateCamUi();
   let stopped = false;
   const frame = (now: number): void => {
     if (stopped) return;

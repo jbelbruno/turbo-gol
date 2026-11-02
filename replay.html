@@ -58,6 +58,10 @@
       .rp-mark { position: absolute; top: 0; width: 4px; height: 8px; margin-left: -2px; border-radius: 2px; }
       .rp-mark.rp-blue { background: var(--blue); } .rp-mark.rp-red { background: var(--red); }
       .rp-keys { color: var(--text-3); font-size: var(--t-caption); }
+      .rp-ctl { display: inline-flex; align-items: center; gap: var(--sp-2); }
+      .rp-ctl-label { color: var(--text-2); font-size: var(--t-small); }
+      .rp-ctl input { width: 120px; accent-color: var(--brand); }
+      #game-canvas { user-select: none; -webkit-user-select: none; }
       #notice { position: absolute; left: 50%; top: calc(var(--safe-top) + 96px); transform: translateX(-50%); max-width: min(640px, calc(100% - 32px)); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-panel); background: var(--surface-0-94); border: 1px solid var(--warn); color: var(--text); font-size: var(--t-small); text-align: center; pointer-events: auto; }
       #notice.rp-ok { border-color: var(--ok-glow, var(--ok)); color: var(--text-2); }
       #error { position: absolute; inset: 0; display: grid; place-content: center; gap: var(--sp-4); text-align: center; padding: 16px; pointer-events: auto; }

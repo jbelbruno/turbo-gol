@@ -7,6 +7,10 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Replay cameras: a free orbital camera (drag to turn, wheel or pinch to zoom, right drag to move the
+  point, double click to follow the ball again) that stays inside the pitch, a distance control for
+  the players' cameras (a slider and the wheel, remembered, plus ball cam or car cam), and buttons
+  and [ ] keys to jump to the previous or next goal.
 - Replays: PROFILE > ABOUT > REPLAYS (not on TVs yet) lists the matches the community servers played in the last
   30 days, for everyone, guests included, and plays any of them in the browser: the game's own
   stadium and scorebug, a timeline with the goals, speed from 0.25x to 8x, a broadcast camera and
