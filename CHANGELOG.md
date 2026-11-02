@@ -7,6 +7,11 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Replays: stars and your own. A registered account can star a replay (guests see the counts), sort
+  the list by the most starred and filter it to "My replays" (the matches its account played, after the
+  usual delay). The server keeps who starred, never shows it: only the count. In the player, Esc (or
+  the phone's Back) pauses and opens a menu (Resume, All replays, Back to the game; a second Back
+  leaves), and an Exit button is always on screen.
 - The replay list looks like the game: the TURBOGOL mark, a header with the community-servers tag, filters by kind (all, Competitive, Casual) and format (1v1, 2v2, 3v3), a scoreboard card per match (blue side, the score, red side, the winner lit, one tap anywhere to watch), placeholders while it loads and a layout for phones.
 - Replay cameras: a free orbital camera (drag to turn, wheel or pinch to zoom, right drag to move the
   point, double click to follow the ball again) that stays inside the pitch, a distance control for

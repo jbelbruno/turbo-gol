@@ -124,6 +124,9 @@ export class NodeStore implements RegistryStore, MatchStore {
     // the matches of one hour by their exact times.
     s.exec(`CREATE INDEX IF NOT EXISTS replay_index_hour ON replay_index (${REPLAY_HOUR_SQL}, match_id)`);
     s.exec('CREATE TABLE IF NOT EXISTS replay_players (match_id TEXT NOT NULL, slot INTEGER NOT NULL, player_id TEXT NOT NULL, PRIMARY KEY (match_id, slot))');
+    s.exec('CREATE INDEX IF NOT EXISTS replay_players_player ON replay_players (player_id)');
+    s.exec('CREATE TABLE IF NOT EXISTS replay_stars (match_id TEXT NOT NULL, account_id TEXT NOT NULL, PRIMARY KEY (match_id, account_id))');
+    s.exec('CREATE INDEX IF NOT EXISTS replay_stars_account ON replay_stars (account_id)');
     const v = s.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'state_version'").toArray()[0]?.v;
     if (v === undefined) {
       s.exec("INSERT INTO meta (k, v) VALUES ('state_version', ?)", String(STATE_VERSION));
@@ -264,6 +267,7 @@ export class NodeStore implements RegistryStore, MatchStore {
     this.tx(() => {
       for (const id of ids) {
         this.sql.exec('DELETE FROM replay_players WHERE match_id = ?', id);
+        this.sql.exec('DELETE FROM replay_stars WHERE match_id = ?', id);
         this.sql.exec('DELETE FROM replay_index WHERE match_id = ?', id);
       }
     });
@@ -287,9 +291,79 @@ export class NodeStore implements RegistryStore, MatchStore {
           .exec<{ data: string }>(`SELECT data FROM replay_index WHERE +at < ? AND +at >= ? AND ${REPLAY_HOUR_SQL} <= ? AND NOT (${REPLAY_HOUR_SQL} = ? AND match_id >= ?) ${order}`, ...span, cursor.hour, cursor.hour, cursor.matchId, limit)
           .toArray()
       : this.sql.exec<{ data: string }>(`SELECT data FROM replay_index WHERE +at < ? AND +at >= ? ${order}`, ...span, limit).toArray();
-    const items = rows.map((r) => JSON.parse(r.data) as ReplayListItem);
-    const seats = this.seatsOf(items.map((i) => i.matchId));
-    return items.map((item) => ({ item, seats: seats.get(item.matchId) ?? null }));
+    return this.withSeatsAndStars(rows.map((r) => JSON.parse(r.data) as ReplayListItem));
+  }
+
+  /** Rows with their seats and star counts. */
+  private withSeatsAndStars(items: ReplayListItem[]): ReplayRow[] {
+    const ids = items.map((i) => i.matchId);
+    const seats = this.seatsOf(ids);
+    const stars = this.starCounts(ids);
+    return items.map((item) => ({ item: { ...item, stars: stars.get(item.matchId) ?? 0 }, seats: seats.get(item.matchId) ?? null }));
+  }
+
+  /** How many accounts starred each of `matchIds` (0 is absent). */
+  private starCounts(matchIds: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    if (matchIds.length === 0) return out;
+    const marks = matchIds.map(() => '?').join(', ');
+    for (const r of this.sql.exec<{ match_id: string; n: number }>(`SELECT match_id, COUNT(*) AS n FROM replay_stars WHERE match_id IN (${marks}) GROUP BY match_id`, ...matchIds).toArray()) out.set(r.match_id, Number(r.n));
+    return out;
+  }
+
+  /** The served matches with the most stars (at least one), the newest among equals: at most `limit`. */
+  replayTop(limit: number): ReplayRow[] {
+    const { newest, oldest } = replayServedSpan(this.now());
+    const rows = this.sql
+      .exec<{ data: string }>(
+        'SELECT i.data AS data FROM replay_index i JOIN (SELECT match_id, COUNT(*) AS n FROM replay_stars GROUP BY match_id) s ON s.match_id = i.match_id WHERE +i.at < ? AND +i.at >= ? ORDER BY s.n DESC, i.at DESC, i.match_id DESC LIMIT ?',
+        newest,
+        oldest,
+        limit,
+      )
+      .toArray();
+    return this.withSeatsAndStars(rows.map((r) => JSON.parse(r.data) as ReplayListItem));
+  }
+
+  /** The served matches `accountId` played in (by its seat), newest first, at most `limit`. */
+  replayMine(accountId: string, limit: number): ReplayRow[] {
+    const { newest, oldest } = replayServedSpan(this.now());
+    const rows = this.sql
+      .exec<{ data: string }>(
+        'SELECT i.data AS data FROM replay_players p JOIN replay_index i ON i.match_id = p.match_id WHERE p.player_id = ? AND +i.at < ? AND +i.at >= ? ORDER BY i.at DESC, i.match_id DESC LIMIT ?',
+        accountId,
+        newest,
+        oldest,
+        limit,
+      )
+      .toArray();
+    return this.withSeatsAndStars(rows.map((r) => JSON.parse(r.data) as ReplayListItem));
+  }
+
+  /** The served matches `accountId` starred (at most `limit`). */
+  replayStarredBy(accountId: string, limit: number): string[] {
+    const { newest, oldest } = replayServedSpan(this.now());
+    return this.sql
+      .exec<{ match_id: string }>('SELECT s.match_id AS match_id FROM replay_stars s JOIN replay_index i ON i.match_id = s.match_id WHERE s.account_id = ? AND +i.at < ? AND +i.at >= ? LIMIT ?', accountId, newest, oldest, limit)
+      .toArray()
+      .map((r) => r.match_id);
+  }
+
+  /**
+   * Star or unstar a served match for `accountId`. Null when the match is not served; 'full' when the
+   * account holds `max` stars already; else the match's new count.
+   */
+  setReplayStar(accountId: string, matchId: string, on: boolean, max: number): number | 'full' | null {
+    if (!this.replayEntry(matchId)) return null;
+    if (on) {
+      const held = Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM replay_stars WHERE account_id = ?', accountId).toArray()[0]?.n ?? 0);
+      const has = this.sql.exec('SELECT 1 AS x FROM replay_stars WHERE match_id = ? AND account_id = ?', matchId, accountId).toArray().length > 0;
+      if (!has && held >= max) return 'full';
+      this.sql.exec('INSERT INTO replay_stars (match_id, account_id) VALUES (?, ?) ON CONFLICT(match_id, account_id) DO NOTHING', matchId, accountId);
+    } else {
+      this.sql.exec('DELETE FROM replay_stars WHERE match_id = ? AND account_id = ?', matchId, accountId);
+    }
+    return this.starCounts([matchId]).get(matchId) ?? 0;
   }
 
   /** The seats of each of `matchIds` that has any. */
@@ -311,7 +385,7 @@ export class NodeStore implements RegistryStore, MatchStore {
     const r = this.sql
       .exec<{ sha: string; data: string }>('SELECT sha, data FROM replay_index WHERE match_id = ? AND at < ? AND at >= ?', matchId, newest, oldest)
       .toArray()[0];
-    return r ? { item: JSON.parse(r.data) as ReplayListItem, sha: r.sha, seats: this.seatsOf([matchId]).get(matchId) ?? null } : null;
+    return r ? { item: { ...(JSON.parse(r.data) as ReplayListItem), stars: this.starCounts([matchId]).get(matchId) ?? 0 }, sha: r.sha, seats: this.seatsOf([matchId]).get(matchId) ?? null } : null;
   }
 
   /** A maintainer's delist (NodeRegistryDO adminDelist): the row and its seats go, whatever its age. True when there was a row. */
@@ -319,6 +393,7 @@ export class NodeStore implements RegistryStore, MatchStore {
     const had = this.sql.exec('SELECT 1 AS x FROM replay_index WHERE match_id = ?', matchId).toArray().length > 0;
     this.tx(() => {
       this.sql.exec('DELETE FROM replay_players WHERE match_id = ?', matchId);
+      this.sql.exec('DELETE FROM replay_stars WHERE match_id = ?', matchId);
       this.sql.exec('DELETE FROM replay_index WHERE match_id = ?', matchId);
     });
     return had;

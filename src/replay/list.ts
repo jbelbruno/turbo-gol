@@ -2,14 +2,19 @@
  * The replay list (replay.html without ?id): the matches the community servers played in the
  * last 30 days (src/net/replays.ts), newest hour first, a page at a time; each shows the hour it
  * ended in (the server rounds it), never the minute. A scoreboard card per match (blue side, the
- * score, red side; the winner lit), filters by kind and format over what is loaded. Every text
- * goes in as textContent: names come from players (a hidden one, 'Jugador N', in this page's
+ * score, red side; the winner lit) with its star count, filters by kind and format over what is
+ * loaded, and three views of the matches: the latest (paged), the most starred and, for a
+ * registered account, its own ("My replays", which can be starred-sorted too). Only a registered
+ * account stars (a guest sees the counts); the server keeps who starred, never shows it. Every
+ * text goes in as textContent: names come from players (a hidden one, 'Jugador N', in this page's
  * language: names.ts).
  */
 import { t } from '../i18n';
 import type { Key } from '../i18n';
+import { AccountClient } from '../net/AccountClient';
+import type { AccountSession } from '../net/account';
 import { PROTOCOL_VERSION } from '../net/protocol';
-import { fetchReplayList } from '../net/replays';
+import { fetchMyReplays, fetchMyStars, fetchReplayList, fetchTopReplays, setReplayStar } from '../net/replays';
 import type { ReplayBuild, ReplayListItem } from '../net/replays';
 import { ROCKETSIM_WASM_SHA256 } from '../sim/wasm/rocketsim.sha256';
 import { TICK_RATE } from '../sim/types';
@@ -44,8 +49,13 @@ function regionName(r: string): string {
   return text === key ? r : text;
 }
 
-/** One match as a scoreboard card (the whole card is the link to watch it). */
-function card(m: ReplayListItem): HTMLElement {
+/** What a card needs from the page: the star toggle. */
+interface CardCtx {
+  onStar: (m: ReplayListItem, card: HTMLElement) => void;
+}
+
+/** One match as a scoreboard card: a cover link to watch it, and its star (a button above the link). */
+function card(m: ReplayListItem, ctx: CardCtx): HTMLElement {
   const side = (n: 0 | 1): HTMLElement => {
     // A guest's server name ('Invitado 4821') and a hidden one ('Jugador 3') in this page's language.
     const names = m.players.filter((p) => p.team === n).map((p) => (p.bot ? `${p.name} (${t('replay.bot')})` : replayName(p.name)));
@@ -62,18 +72,29 @@ function card(m: ReplayListItem): HTMLElement {
   ];
   if (!sameBuild(m.build)) chips.push(el('span.rp-chip.rp-warn', null, t('replay.otherVersion')));
   const score = el('div.rp-score', null, el(`span.rp-b.${m.blue > m.red ? 'rp-win' : ''}`, null, String(m.blue)), el('span.rp-sep', null, '–'), el(`span.rp-r.${m.red > m.blue ? 'rp-win' : ''}`, null, String(m.red)));
-  return el(
-    'a.rp-card',
-    { href: `?id=${m.matchId}`, 'data-kind': m.ranked ? 'ranked' : 'casual', 'data-mode': m.mode },
+  const star = el('button.rp-star', { type: 'button', 'aria-pressed': 'false' }, el('span.rp-staricon'), el('span.rp-starn', null, String(m.stars ?? 0)));
+  const c = el(
+    'div.rp-card',
+    { 'data-kind': m.ranked ? 'ranked' : 'casual', 'data-mode': m.mode, 'data-id': m.matchId },
+    el('a.rp-cover', { href: `?id=${m.matchId}`, 'aria-label': t('replay.watch') }),
     el('div.rp-bar'),
     el('div.rp-board', null, side(0), score, side(1)),
-    el('div.rp-foot', null, el('div.rp-meta', null, el('span', null, when), m.ticks > 0 ? el('span', null, clockText(m.ticks)) : null, ...chips), el('span.rp-go', null, el('span.rp-tri'), t('replay.watch'))),
+    el(
+      'div.rp-foot',
+      null,
+      el('div.rp-meta', null, el('span', null, when), m.ticks > 0 ? el('span', null, clockText(m.ticks)) : null, ...chips),
+      el('div.rp-actions', null, star, el('span.rp-go', null, el('span.rp-tri'), t('replay.watch'))),
+    ),
   );
+  star.addEventListener('click', () => ctx.onStar(m, c));
+  return c;
 }
 
 const skeletons = (rows: HTMLElement): void => {
   for (let i = 0; i < 3; i++) rows.append(el('div.rp-skel', { 'aria-hidden': 'true' }));
 };
+
+type Source = 'recent' | 'top' | 'mine';
 
 /** Fill `root` with the list; `openFile` plays a local file (a maintainer's download). */
 export function showList(root: HTMLElement, openFile: (f: File) => void): void {
@@ -92,10 +113,17 @@ export function showList(root: HTMLElement, openFile: (f: File) => void): void {
   const fileBtn = el('button.rp-btn.rp-ghost', { type: 'button' }, t('replay.openFile'));
   fileBtn.addEventListener('click', () => file.click());
 
-  // Filters (over what is loaded): kind and format, one pick each.
-  const filter = { kind: 'all', mode: 'all' };
-  const chipOf = (group: 'kind' | 'mode', value: string, text: string): HTMLButtonElement =>
-    el('button.rp-fchip', { type: 'button', 'aria-pressed': value === 'all' ? 'true' : 'false', 'data-group': group, 'data-value': value }, text) as HTMLButtonElement;
+  // The account (a registered one stars and has "My replays"); the ids it starred.
+  let session: AccountSession | null = null;
+  let starred = new Set<string>();
+  const items = new Map<string, ReplayListItem>();
+
+  // Filters: kind and format (over what is loaded), the account's own, and the order.
+  const filter = { kind: 'all', mode: 'all', mine: false, sort: 'new' };
+  const chipOf = (group: string, value: string, text: string, pressed = value === 'all' || value === 'new'): HTMLButtonElement =>
+    el('button.rp-fchip', { type: 'button', 'aria-pressed': pressed ? 'true' : 'false', 'data-group': group, 'data-value': value }, text) as HTMLButtonElement;
+  const mineChip = chipOf('mine', 'on', t('replay.mine'), false);
+  mineChip.classList.add('rp-hidden');
   const chips: HTMLButtonElement[] = [
     chipOf('kind', 'all', t('replay.all')),
     chipOf('kind', 'ranked', t('replay.ranked')),
@@ -104,8 +132,16 @@ export function showList(root: HTMLElement, openFile: (f: File) => void): void {
     chipOf('mode', '1v1', '1v1'),
     chipOf('mode', '2v2', '2v2'),
     chipOf('mode', '3v3', '3v3'),
+    chipOf('sort', 'new', t('replay.sortNew')),
+    chipOf('sort', 'stars', t('replay.sortStars')),
   ];
-  const filtersEl = el('div.rp-filters', null, el('div.rp-fgroup', null, ...chips.slice(0, 3)), el('div.rp-fgroup', null, ...chips.slice(3)));
+  const filtersEl = el(
+    'div.rp-filters',
+    null,
+    el('div.rp-fgroup', null, ...chips.slice(0, 3), mineChip),
+    el('div.rp-fgroup', null, ...chips.slice(3, 7)),
+    el('div.rp-fgroup', null, ...chips.slice(7)),
+  );
   const none = el('p.rp-note.rp-hidden', null, t('replay.noneFiltered'));
   const apply = (): void => {
     let shown = 0;
@@ -118,14 +154,46 @@ export function showList(root: HTMLElement, openFile: (f: File) => void): void {
     }
     none.classList.toggle('rp-hidden', total === 0 || shown > 0);
   };
-  filtersEl.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.rp-fchip');
-    if (!b) return;
-    const group = b.dataset.group === 'mode' ? 'mode' : 'kind';
-    filter[group] = b.dataset.value ?? 'all';
-    for (const c of chips) if (c.dataset.group === group) c.setAttribute('aria-pressed', c === b ? 'true' : 'false');
-    apply();
-  });
+
+  // The stars: each card shows its count; the account's own are lit; a guest's is locked.
+  const paintStars = (): void => {
+    for (const c of rows.querySelectorAll<HTMLElement>('.rp-card')) {
+      const id = c.dataset.id ?? '';
+      const m = items.get(id);
+      const b = c.querySelector<HTMLButtonElement>('.rp-star');
+      if (!b || !m) continue;
+      const on = starred.has(id);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.classList.toggle('rp-on', on);
+      b.classList.toggle('rp-locked', session === null);
+      b.title = session === null ? t('replay.starSignIn') : on ? t('replay.unstar') : t('replay.star');
+      const n = b.querySelector('.rp-starn');
+      if (n) n.textContent = String(m.stars ?? 0);
+    }
+  };
+  const ctx: CardCtx = {
+    onStar: (m) => {
+      if (session === null) return;
+      const on = !starred.has(m.matchId);
+      // At once, then what the server says; a refusal puts it back.
+      if (on) starred.add(m.matchId);
+      else starred.delete(m.matchId);
+      m.stars = Math.max(0, (m.stars ?? 0) + (on ? 1 : -1));
+      paintStars();
+      setReplayStar(session.session, m.matchId, on).then(
+        (r) => {
+          m.stars = r.stars;
+          paintStars();
+        },
+        () => {
+          if (on) starred.delete(m.matchId);
+          else starred.add(m.matchId);
+          m.stars = Math.max(0, (m.stars ?? 0) + (on ? -1 : 1));
+          paintStars();
+        },
+      );
+    },
+  };
 
   root.replaceChildren(
     el(
@@ -149,22 +217,46 @@ export function showList(root: HTMLElement, openFile: (f: File) => void): void {
 
   let next: string | null = null;
   let busy = false;
+  /** Bumped by every change of view: an answer of a view left behind is dropped. */
+  let gen = 0;
+  const source = (): Source => (filter.mine ? 'mine' : filter.sort === 'stars' ? 'top' : 'recent');
+  const emptyText = (): string => (source() === 'mine' ? t('replay.mineEmpty') : source() === 'top' ? t('replay.topEmpty') : t('replay.empty'));
   const clearSkeletons = (): void => {
     for (const s of rows.querySelectorAll('.rp-skel')) s.remove();
+  };
+  const add = (list: ReplayListItem[]): void => {
+    for (const m of list) {
+      items.set(m.matchId, m);
+      rows.append(card(m, ctx));
+    }
+    paintStars();
   };
   const load = async (before: string | null): Promise<void> => {
     if (busy) return;
     busy = true;
+    const mine = gen;
+    const src = source();
     more.setAttribute('disabled', '');
     try {
-      const page = await fetchReplayList(before);
-      clearSkeletons();
-      for (const m of page.matches) rows.append(card(m));
-      next = page.next;
+      if (src === 'recent') {
+        const page = await fetchReplayList(before);
+        if (mine !== gen) return;
+        clearSkeletons();
+        add(page.matches);
+        next = page.next;
+      } else {
+        const list = src === 'top' ? await fetchTopReplays() : await fetchMyReplays(session?.session ?? '');
+        if (mine !== gen) return;
+        clearSkeletons();
+        // "My replays" by stars: the account's own matches, the most starred first (the sort is stable).
+        add(src === 'mine' && filter.sort === 'stars' ? [...list].sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0)) : list);
+        next = null;
+      }
       apply();
       note.classList.toggle('rp-hidden', rows.childElementCount > 0);
-      note.textContent = t('replay.empty');
+      note.textContent = emptyText();
     } catch (e) {
+      if (mine !== gen) return;
       clearSkeletons();
       const unavailable = e instanceof Error && e.message === 'HTTP 404';
       note.classList.remove('rp-hidden');
@@ -179,13 +271,64 @@ export function showList(root: HTMLElement, openFile: (f: File) => void): void {
         note.append(' ', retry);
       }
     } finally {
-      busy = false;
-      more.removeAttribute('disabled');
-      moreLine.classList.toggle('rp-hidden', next === null);
+      if (mine === gen) {
+        busy = false;
+        more.removeAttribute('disabled');
+        moreLine.classList.toggle('rp-hidden', next === null);
+      }
     }
   };
+  /** A change of view (my replays on or off, the order): start over from the first page. */
+  const reload = (): void => {
+    gen++;
+    busy = false;
+    next = null;
+    rows.replaceChildren();
+    skeletons(rows);
+    note.classList.add('rp-hidden');
+    none.classList.add('rp-hidden');
+    moreLine.classList.add('rp-hidden');
+    void load(null);
+  };
+
+  filtersEl.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.rp-fchip');
+    if (!b) return;
+    const group = b.dataset.group ?? 'kind';
+    const value = b.dataset.value ?? 'all';
+    if (group === 'mine') {
+      filter.mine = !filter.mine;
+      b.setAttribute('aria-pressed', filter.mine ? 'true' : 'false');
+      reload();
+      return;
+    }
+    if (group === 'sort') {
+      if (filter.sort === value) return;
+      filter.sort = value;
+    } else if (group === 'mode') filter.mode = value;
+    else filter.kind = value;
+    for (const c of chips) if (c.dataset.group === group) c.setAttribute('aria-pressed', c === b ? 'true' : 'false');
+    if (group === 'sort') reload();
+    else apply();
+  });
   more.addEventListener('click', () => {
     if (next !== null) void load(next);
   });
   void load(null);
+
+  // The account, when there is one: "My replays" appears and the stars it holds are lit.
+  void new AccountClient()
+    .restore()
+    .then(async (s) => {
+      if (s === null) return;
+      session = s;
+      mineChip.classList.remove('rp-hidden');
+      try {
+        starred = new Set(await fetchMyStars(s.session));
+      } catch {
+        /* the stars of this visit only */
+      }
+    })
+    .catch(() => undefined)
+    .finally(paintStars);
 }

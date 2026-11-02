@@ -523,6 +523,13 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   window.addEventListener('keydown', (e) => {
     // Alt + ← is the browser's Back, Ctrl / Cmd + a digit its tabs.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // Esc pauses and opens the menu (and closes it again); with the menu open nothing else answers.
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      setMenu(!menuOpen);
+      return;
+    }
+    if (menuOpen) return;
     if (e.target instanceof HTMLSelectElement || (e.target instanceof HTMLInputElement && e.target.type !== 'range')) return;
     if (e.code === 'Space') {
       e.preventDefault();
@@ -666,6 +673,44 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     placeTags();
   };
 
+  // ---- leaving: a visible Exit; Esc, or the phone's Back, pauses and opens the menu -------------
+  const app = o.bar.parentElement ?? document.body;
+  const exitBtn = el('button.rp-btn.rp-exit', { type: 'button', 'aria-label': t('replay.exit') }, el('span.rp-x'), t('replay.exit'));
+  const resumeBtn = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.resume')) as HTMLButtonElement;
+  const menu = el(
+    'div.rp-menu.rp-hidden',
+    { role: 'dialog', 'aria-modal': 'true', 'aria-label': t('replay.paused') },
+    el('div.rp-menu-panel', null, el('span.rp-eyebrow', null, t('replay.paused')), resumeBtn, el('a.rp-btn', { href: './replay.html' }, t('replay.list')), el('a.rp-btn', { href: './' }, t('replay.back'))),
+  );
+  app.append(exitBtn, menu);
+  let menuOpen = false;
+  let resumeOnClose = false;
+  const setMenu = (open: boolean): void => {
+    if (open === menuOpen) return;
+    menuOpen = open;
+    menu.classList.toggle('rp-hidden', !open);
+    exitBtn.classList.toggle('rp-hidden', open);
+    if (open) {
+      resumeOnClose = playing;
+      setPlaying(false);
+      resumeBtn.focus();
+    } else if (resumeOnClose) setPlaying(true);
+  };
+  exitBtn.addEventListener('click', () => setMenu(true));
+  resumeBtn.addEventListener('click', () => setMenu(false));
+  menu.addEventListener('click', (e) => {
+    if (e.target === menu) setMenu(false);
+  });
+  // The phone's Back (a gesture, the button) and the browser's: the first press pauses and opens the menu,
+  // the next one leaves (to the page it came from).
+  history.pushState({ tgReplay: 1 }, '');
+  window.addEventListener('popstate', () => {
+    if (stopped) return;
+    if (!menuOpen) {
+      setMenu(true);
+      history.pushState({ tgReplay: 1 }, '');
+    } else history.back();
+  });
   updateCamUi();
   let stopped = false;
   const frame = (now: number): void => {
