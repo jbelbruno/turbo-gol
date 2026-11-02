@@ -57,7 +57,7 @@ import { cacheKey, copyRows, openCache, readBake, writeBake, type BakeShape, typ
 import { buildAlpineFarSliced, buildAlpineLive, type LiveDetail } from './alpine';
 import { buildCanyon } from './canyon';
 import { PROXY_TOP, buildBeam, buildDome, type Beam, type Dome } from './dome';
-import { createEnvProbe, pmremAtlasSize, type EnvProbe } from './env';
+import { createEnvProbe, pmremFaceSize, type EnvProbe } from './env';
 import type { Lamp } from './geo';
 import { LIGHTHOUSE_LANTERN, QUAY, SEA_LEVEL, buildHarbourFar, buildHarbourLive } from './harbour';
 import { buildLightMap, lightMapFromData, type LightMap } from './lightmap';
@@ -180,8 +180,8 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
     return cacheKey(w.theme, w.spec.skyCubeSize, w.spec.envSize, SSAA, proxySsaaOf(w.spec), backendName, data);
   };
   const shapeOf = (w: Want): BakeShape => {
-    const [envW, envH] = pmremAtlasSize(w.spec.envSize);
-    return { face: w.spec.skyCubeSize, lutBytes: LUT_BYTES, envW, envH };
+    // three r187: the environment is a PMREM cube, re-rendered from the cached sky on a cached load (no atlas stored).
+    return { face: w.spec.skyCubeSize, lutBytes: LUT_BYTES, envW: 0, envH: 0 };
   };
   // The cache read goes first. Building the live layer (CPU) waits for the database to be open,
   // so that the read's I/O runs while the geometry is built (see realise).
@@ -405,8 +405,7 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
    * is dropped and the queue goes on with the newer wish.
    */
   function fits(want: Want): boolean {
-    const [envW, envH] = pmremAtlasSize(want.spec.envSize);
-    return cube.width === want.spec.skyCubeSize && env.target.width === envW && env.target.height === envH;
+    return cube.width === want.spec.skyCubeSize && env.target.width === pmremFaceSize(want.spec.envSize);
   }
 
   /**
@@ -493,9 +492,9 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
     const lutRead = gpu.readRenderTargetPixelsAsync(lutRT, 0, 0, PROXY_WIDTH, 1);
     // 4. image-based lighting
     updateEnv();
-    const envW = env.target.width;
-    const envH = env.target.height;
-    const envRead = baker.encode2D(env.target.texture, envW, envH);
+    const envW = 0;
+    const envH = 0;
+    const envRead: Promise<THREE.TypedArray> = Promise.resolve(new Uint8Array(0));
     // bake-only memory: the SSAA scratch target, the mirror cube (re-allocated next bake) and the
     // far skyline (usually a later visit is a cache hit)
     baker.releaseScratch();
@@ -567,7 +566,7 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
     const faces: Uint8Array[] = [];
     for (let i = 0; i < 6; i++) faces.push(new Uint8Array(rec.faces, i * bytes, bytes));
     baker.decodeFaces(cube, faces);
-    baker.decode2D(env.target, new Uint8Array(rec.env));
+    env.update({ cube: cube.texture, turf: preset.envTurf, lamps: tw.floodlights, lampRadiance: preset.envLamp });
     const next = proxyLUTFromData(new Uint16Array(rec.lut));
     dome.lut.value = next;
     if (lutData !== null) lutData.dispose();

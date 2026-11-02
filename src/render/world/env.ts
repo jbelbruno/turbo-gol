@@ -12,9 +12,9 @@
  *
  * The PMREM target is allocated up front (the same layout PMREMGenerator uses) and every later
  * bake re-renders it in place, so scene.environment keeps ONE texture object per size: no
- * material ever sees a new environment node (which would rebuild every lit material). A cached
- * load decodes the stored atlas straight into it (World.ts), so the probe's scene, its materials
- * and the PMREM generator are only built by a real bake.
+ * material ever sees a new environment node (which would rebuild every lit material). Since three r187
+ * the PMREM is a cube (no cube-UV atlas), which the bake cache does not store: a cached load
+ * re-renders it from the restored sky (World.ts showCached).
  */
 import * as THREE from 'three/webgpu';
 import type { UniformNode } from 'three/webgpu';
@@ -36,32 +36,34 @@ export interface EnvParams {
 
 export interface EnvProbe {
   /** The PMREM target (scene.environment = its texture); fixed for the probe's lifetime. */
-  readonly target: THREE.RenderTarget;
+  readonly target: THREE.CubeRenderTarget;
   /** Re-render the PMREM from the world (a bake or a theme switch). */
   update(params: EnvParams): void;
   dispose(): void;
 }
 
-/** Width and height of PMREMGenerator's cube-UV atlas for faces of `size`. */
-export function pmremAtlasSize(size: number): [number, number] {
-  const cubeSize = 2 ** Math.floor(Math.log2(size));
-  return [3 * Math.max(cubeSize, 16 * 7), 4 * cubeSize];
+/** The PMREM target's face size for a requested `size`: a power of two (three r187 captures into a source cube of at least 256 and filters down into it). */
+export function pmremFaceSize(size: number): number {
+  return Math.max(16, 2 ** Math.floor(Math.log2(size)));
 }
 
-/** A render target laid out like PMREMGenerator's own (cube-UV atlas of `size` faces + mips). */
-function createPmremTarget(size: number): THREE.RenderTarget {
-  const [w, h] = pmremAtlasSize(size);
-  const rt = new THREE.RenderTarget(w, h, {
-    magFilter: THREE.LinearFilter,
-    minFilter: THREE.LinearFilter,
+/**
+ * A target laid out like PMREMGenerator's own since three r187 (_allocateTarget: a cube, its
+ * prefiltered mip levels down to 8 px allocated, no automatic mipmaps). r187 dropped the cube-UV atlas.
+ */
+function createPmremTarget(size: number): THREE.CubeRenderTarget {
+  const face = pmremFaceSize(size);
+  const rt = new THREE.CubeRenderTarget(face, {
+    minFilter: THREE.LinearMipmapLinearFilter,
     generateMipmaps: false,
     type: THREE.HalfFloatType,
-    format: THREE.RGBAFormat,
     colorSpace: THREE.LinearSRGBColorSpace,
-    depthBuffer: true,
+    depthBuffer: false,
   });
-  rt.texture.mapping = THREE.CubeUVReflectionMapping;
-  rt.texture.name = 'PMREM.cubeUv';
+  const maxLod = Math.log2(face) - 3;
+  const mips = rt.texture.mipmaps as unknown as { width: number; height: number }[];
+  for (let lod = 0; lod <= maxLod; lod++) mips.push({ width: face >> lod, height: face >> lod });
+  rt.texture.name = 'PMREM';
   (rt.texture as THREE.Texture & { isPMREMTexture?: boolean }).isPMREMTexture = true;
   return rt;
 }

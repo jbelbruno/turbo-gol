@@ -465,6 +465,13 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
+  (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
+  WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%
+  smaller to download. Same frame cost in a match. 0.187 dropped the cube-UV environment atlas:
+  the stadium's reflections (src/render/world/env.ts) are now a cube with its mip levels, re-rendered
+  from the cached sky on a cached load instead of stored; the world cache version goes to 9, so a
+  returning player's first load after this bakes the stadium once again.
 - Error messages no longer show technical codes ("Server error (503)", "Connection lost (1006)"):
   they say what happened, and the code goes to the developer console and the network panel (F4).
 - The match HUD keeps its scorebug (BLU 1 │ 2:49 │ 0 RED) with a lime notch under your team, and
