@@ -454,91 +454,38 @@ test('the crowd: crowdDensity sets people per quad, the same crowd on every tier
 // ---- What the boards show (content.ts, textures.ts) ---------------------------------------------
 
 const { THEME_IDS } = await import('../src/render/theme.ts');
-const { CONTENT, GENERIC, INLAND, THEME_PLACE, themeContent } = await import('../src/render/stadium/content.ts');
+const { BRAND, CONTENT, THEME_PLACE, themeContent } = await import('../src/render/stadium/content.ts');
 const { EMBLEMS } = await import('../src/render/stadium/emblems.ts');
 const { BOARD_CARDS, BOARD_COLS, BOARD_ROWS, BIG_CELL0, boardAtlasSize, drawBoards } = await import('../src/render/stadium/textures.ts');
 const textures = await import('../src/render/stadium/textures.ts');
 
-/** The harbour's own names: on the harbour's boards, never on another place's. */
-const HARBOUR_NAMES = ['PLEAMAR', 'ROMPEOLAS', 'PUERTO SUR', 'LIGA PORTUARIA', 'MARELUX', 'FARO ALTO', 'ESTIBA', 'BOYA AZUL', 'NUDO SIETE', 'CORALINA', 'ONDAMAR', 'GRÚA NORTE', 'SALINA', 'TIMONEL', 'VELA ROJA', 'PIXELMAR', 'MUELLE 9', 'AEROFARO'];
-/** The harbour's emblems (the anchor, the lighthouse, the sea's waves). */
-const HARBOUR_EMBLEMS = ['anchor', 'lighthouse', 'wave'];
 const HEX = /^#[0-9a-f]{6}$/i;
-/** Every text a set prints: card names and taglines, the big board's two sponsors. */
+/** Every text a set prints: card names and taglines, the big board's two cards. */
 const textsOf = (set) => [...set.cards, set.main, set.secondary].flatMap((c) => [c.name, c.tag]);
 
-test('every theme has a full board set; the two harbour themes share one; no banners are left', () => {
+test('every stadium shows Turbogol only: a full set, the same in every theme, neighbours differ', () => {
   for (const id of THEME_IDS) {
     const set = themeContent(id);
     assert.ok(set, id);
     assert.equal(set.cards.length, BOARD_CARDS, `${id} cards`);
     assert.equal(set.banners, undefined, `${id}: no banner designs`);
-    // the big board's main and secondary sponsors: their own names, not among the cards
-    assert.ok(set.main && set.secondary && set.main.name !== set.secondary.name, `${id}: two big sponsors`);
-    for (const c of [set.main, set.secondary]) assert.ok(!set.cards.some((k) => k.name === c.name) && !GENERIC.includes(c.name), `${id}: ${c.name} is not a card`);
+    assert.deepEqual(set, CONTENT.harbour, `${id}: the same set everywhere`);
     for (const c of [...set.cards, set.main, set.secondary]) {
-      assert.ok(c.name.length > 0 && c.tag.length > 0, `${id}: empty card text`);
-      assert.ok(c.logo in EMBLEMS, `${id} ${c.name}: emblem ${c.logo}`);
-      for (const col of [...c.bg, c.fg, c.ac]) assert.match(col, HEX, `${id} ${c.name}`);
+      assert.equal(c.name, BRAND, `${id}: only ${BRAND}`);
+      assert.ok(c.tag.length > 0, `${id}: empty tagline`);
+      assert.ok(c.logo in EMBLEMS, `${id}: emblem ${c.logo}`);
+      for (const col of [...c.bg, c.fg, c.ac]) assert.match(col, HEX, id);
     }
+    // a wave needs a visible change: neighbouring cards never look the same
+    set.cards.forEach((c, i) => {
+      const n = set.cards[(i + 1) % set.cards.length];
+      assert.ok(c.tag !== n.tag || c.bg[0] !== n.bg[0], `${id}: cards ${i} and ${i + 1} look the same`);
+    });
+    assert.ok(set.main.tag !== set.secondary.tag || set.main.bg[0] !== set.secondary.bg[0], `${id}: the big board alternates`);
   }
   assert.equal(THEME_PLACE['harbour-night'], 'harbour');
-  const others = THEME_IDS.filter((id) => !id.startsWith('harbour')).map((id) => THEME_PLACE[id]);
-  assert.equal(new Set([...others, 'harbour']).size, others.length + 1, 'every other theme has a place of its own');
-  assert.deepEqual(Object.keys(CONTENT).sort(), ['harbour', ...others].sort());
   assert.equal(L.bannerPlaces, undefined, 'no banner placements');
   assert.equal(textures.bannerAtlas, undefined, 'no banner atlas');
-});
-
-test('the harbour names and emblems appear only on the harbour; a place keeps its own names', () => {
-  const harbour = textsOf(CONTENT.harbour);
-  for (const n of HARBOUR_NAMES) assert.ok(harbour.includes(n), `${n} is on the harbour`);
-  for (const [place, set] of Object.entries(CONTENT)) {
-    if (place === 'harbour') continue;
-    for (const t of textsOf(set)) {
-      assert.ok(!HARBOUR_NAMES.some((n) => t.includes(n)), `${place}: '${t}' is the harbour's`);
-      assert.doesNotMatch(t, /PUERTO|PORTUARI|FARO|MUELLE|BARCO|NAVAL|CORAL|MAR|MAR/, `${place}: '${t}' names the harbour or the sea`);
-    }
-    for (const e of [...set.cards, set.main, set.secondary].map((c) => c.logo)) {
-      assert.ok(!HARBOUR_EMBLEMS.includes(e), `${place}: the harbour's ${e} emblem`);
-    }
-  }
-  // The generic sponsors are on every set at the same slots, the inland pair on every set but the
-  // harbour's at the harbour's CORALINA and PIXELMAR slots; every other name is one place's only.
-  const slotsOf = (set, names) => set.cards.map((c, i) => (names.includes(c.name) ? i : -1)).filter((i) => i >= 0);
-  const seaSlots = slotsOf(CONTENT.harbour, ['CORALINA', 'PIXELMAR']);
-  assert.equal(seaSlots.length, INLAND.length);
-  const where = new Map();
-  for (const [place, set] of Object.entries(CONTENT)) {
-    assert.deepEqual(slotsOf(set, GENERIC), slotsOf(CONTENT.harbour, GENERIC), `${place}: generic slots`);
-    for (const g of GENERIC) assert.ok(set.cards.some((c) => c.name === g), `${place} lacks ${g}`);
-    assert.deepEqual(slotsOf(set, INLAND), place === 'harbour' ? [] : seaSlots, `${place}: inland slots`);
-    for (const n of new Set([...set.cards, set.main, set.secondary].map((c) => c.name))) {
-      if (GENERIC.includes(n) || INLAND.includes(n)) continue;
-      assert.ok(!where.has(n), `${n} is on ${where.get(n)} and ${place}`);
-      where.set(n, place);
-    }
-  }
-});
-
-test('no two cards of a set share a name; the generic and inland cards are the same in every set', () => {
-  for (const [place, set] of Object.entries(CONTENT)) {
-    const names = set.cards.map((c) => c.name);
-    assert.equal(new Set(names).size, names.length, `${place}: ${names.join(', ')}`);
-    set.cards.forEach((c, i) => {
-      if (!GENERIC.includes(c.name)) return;
-      const h = CONTENT.harbour.cards[i];
-      assert.deepEqual({ ...c, tag: c.name === 'MÁS GOL.' ? '' : c.tag }, { ...h, tag: c.name === 'MÁS GOL.' ? '' : h.tag }, `${place} ${c.name}`);
-    });
-    if (place !== 'harbour') {
-      set.cards.forEach((c, i) => {
-        if (INLAND.includes(c.name)) assert.deepEqual(c, CONTENT.canyon.cards[i], `${place} ${c.name}`);
-      });
-    }
-  }
-  // The slogan names the place.
-  const slogans = Object.values(CONTENT).map((s) => s.cards.find((c) => c.name === 'MÁS GOL.').tag);
-  assert.equal(new Set(slogans).size, slogans.length, slogans.join(' / '));
 });
 
 /** A recording 2D context: every method is a no-op except fillText (recorded) and measureText. */
