@@ -325,10 +325,15 @@ export class NodeStore implements RegistryStore, MatchStore {
     return this.withSeatsAndStars(rows.map((r) => JSON.parse(r.data) as ReplayListItem));
   }
 
-  /** The served matches `accountId` played in (by its seat), newest first, at most `limit`. */
-  replayMine(accountId: string, limit: number): ReplayRow[] {
+  /**
+   * The served matches `accountId` played in, newest first, at most `limit`: by its seat, and, for a
+   * row listed before the seats were kept (a legacy row: no seat at all, the first days of the
+   * replays, gone within 30 days), by the account's name (`name`: its username, which no guest or
+   * hidden name can be: those have a space). Both kinds in one list, once each.
+   */
+  replayMine(accountId: string, name: string, limit: number): ReplayRow[] {
     const { newest, oldest } = replayServedSpan(this.now());
-    const rows = this.sql
+    const bySeat = this.sql
       .exec<{ data: string }>(
         'SELECT i.data AS data FROM replay_players p JOIN replay_index i ON i.match_id = p.match_id WHERE p.player_id = ? AND +i.at < ? AND +i.at >= ? ORDER BY i.at DESC, i.match_id DESC LIMIT ?',
         accountId,
@@ -336,8 +341,29 @@ export class NodeStore implements RegistryStore, MatchStore {
         oldest,
         limit,
       )
-      .toArray();
-    return this.withSeatsAndStars(rows.map((r) => JSON.parse(r.data) as ReplayListItem));
+      .toArray()
+      .map((r) => JSON.parse(r.data) as ReplayListItem);
+    let legacy: ReplayListItem[] = [];
+    if (name !== '' && !/\s/.test(name)) {
+      // `instr` over the stored JSON, not LIKE: a username can hold '_'. The parse below is the check.
+      legacy = this.sql
+        .exec<{ data: string }>(
+          'SELECT i.data AS data FROM replay_index i WHERE +i.at < ? AND +i.at >= ? AND NOT EXISTS (SELECT 1 FROM replay_players p WHERE p.match_id = i.match_id) AND instr(i.data, ?) > 0 ORDER BY i.at DESC, i.match_id DESC LIMIT ?',
+          newest,
+          oldest,
+          JSON.stringify({ name }).slice(1, -1),
+          limit,
+        )
+        .toArray()
+        .map((r) => JSON.parse(r.data) as ReplayListItem)
+        .filter((m) => m.players.some((p) => !p.bot && p.name === name));
+    }
+    const seen = new Set<string>();
+    const items = [...bySeat, ...legacy]
+      .filter((m) => (seen.has(m.matchId) ? false : (seen.add(m.matchId), true)))
+      .sort((a, b) => b.at - a.at || (a.matchId < b.matchId ? 1 : -1))
+      .slice(0, limit);
+    return this.withSeatsAndStars(items);
   }
 
   /** The served matches `accountId` starred (at most `limit`). */

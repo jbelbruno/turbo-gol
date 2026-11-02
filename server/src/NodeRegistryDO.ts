@@ -990,7 +990,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
       const account = url.searchParams.get('account') ?? '';
       if (id !== 'top' && !ACCOUNT_ID_RE.test(account)) return error(400, 'bad_request');
       if (id === 'stars') return json({ ids: store.replayStarredBy(account, REPLAY_STARS_MAX) });
-      const rows = id === 'top' ? store.replayTop(REPLAY_PAGE) : store.replayMine(account, REPLAY_MINE_MAX);
+      // The account's username (its session's name): "mine" also finds a row listed before the seats were kept.
+      const name = (url.searchParams.get('name') ?? '').slice(0, 64);
+      const rows = id === 'top' ? store.replayTop(REPLAY_PAGE) : store.replayMine(account, name, REPLAY_MINE_MAX);
       const hidden = await this.hiddenSlots(rows);
       if (!hidden) return error(503, 'nodes_unavailable', UNAVAILABLE);
       return json({ matches: rows.map((r, i) => publicItem(r.item, hidden[i])) });

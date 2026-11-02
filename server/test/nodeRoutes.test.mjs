@@ -1428,8 +1428,14 @@ test('replay stars (store): a count per match, one star per account, a cap, only
   assert.deepEqual(store.replayTop(30).map((r) => [r.item.matchId[0], r.item.stars]), [['1', 2], ['2', 1]], 'the unstarred are not in the top');
   assert.deepEqual(store.replayList(null, 30).map((r) => [r.item.matchId[0], r.item.stars]), [['3', 0], ['2', 1], ['1', 2]], 'the public list carries the counts');
   assert.deepEqual(store.replayStarredBy(ACCOUNT_B, 10).sort(), [hex64('1'), hex64('2')]);
-  assert.deepEqual(store.replayMine(ACCOUNT_A, 10).map((r) => r.item.matchId[0]), ['3', '2', '1'], 'the matches it sat in, newest first');
-  assert.deepEqual(store.replayMine(ACCOUNT_C, 10), []);
+  assert.deepEqual(store.replayMine(ACCOUNT_A, 'Javier', 10).map((r) => r.item.matchId[0]), ['3', '2', '1'], 'the matches it sat in, newest first, once each');
+  assert.deepEqual(store.replayMine(ACCOUNT_C, 'Nadie', 10), []);
+  // A row listed before the seats were kept (no seat at all) is found by the account's name, and only by it.
+  store.sql.exec("DELETE FROM replay_players WHERE match_id = ?", hex64('2'));
+  assert.deepEqual(store.replayMine(ACCOUNT_A, 'Javier', 10).map((r) => r.item.matchId[0]), ['3', '2', '1'], 'legacy row 2 found by the name, the others by their seat');
+  assert.deepEqual(store.replayMine(ACCOUNT_C, 'Rival', 10).map((r) => r.item.matchId[0]), ['2'], 'a name that played in the legacy row');
+  assert.deepEqual(store.replayMine(ACCOUNT_C, 'Rival', 10).length, 1, 'the seated rows are not found by name');
+  assert.deepEqual(store.replayMine(ACCOUNT_C, 'Jugador 1', 10), [], 'a name with a space (a guest or a hidden one) never matches by name');
   assert.equal(store.setReplayStar(ACCOUNT_B, hex64('1'), false, 5), 1);
   store.pruneReplays(BASE + 40 * 24 * 60 * 60_000);
   assert.deepEqual(store.replayStarredBy(ACCOUNT_B, 10), [], 'pruned with their matches');
@@ -1464,4 +1470,17 @@ test('replay stars (routes): only a registered account stars, counts are public 
   assert.deepEqual((await jsonOf(mine)).matches.map((m) => m.matchId[0]).sort(), ['1', '2']);
   assert.deepEqual((await jsonOf(await req(env, 'GET', '/nodes/replays/mine', { headers: c }))).matches, [], 'an account that played none');
   assert.deepEqual(await jsonOf(await star(a, hex64('1'), false)), { stars: 1, starred: false });
+});
+
+test('"my replays" through the Worker: a row listed before the seats were kept is found by the session name, a seated one by its seat', async () => {
+  const { env, reg } = await replayWorld([
+    { id: hex64('1'), doneAt: BASE - 3000, bytes: null, sha: 'e'.repeat(64) },
+    { id: hex64('2'), doneAt: BASE - 2000, bytes: null, sha: 'e'.repeat(64) },
+  ]);
+  reg.obj.store.sql.exec('DELETE FROM replay_players WHERE match_id = ?', hex64('1'));
+  const as = async (sub, name) => ({ authorization: 'Bearer ' + (await accountToken(sub, name)) });
+  const ids = async (h) => (await jsonOf(await req(env, 'GET', '/nodes/replays/mine', { headers: h }))).matches.map((m) => m.matchId[0]).sort();
+  assert.deepEqual(await ids(await as(ACCOUNT_A, 'Javier')), ['1', '2'], 'by name for the legacy row, by seat for the other');
+  assert.deepEqual(await ids(await as(ACCOUNT_C, 'Rival')), ['1'], 'another account with a name that played in the legacy row');
+  assert.deepEqual(await ids(await as(ACCOUNT_C, 'Otro')), [], 'a name that did not play');
 });
