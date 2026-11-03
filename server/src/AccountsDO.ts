@@ -322,8 +322,8 @@ function isPw(v: unknown): v is PasswordRecord {
 
 /**
  * The level an OAuth sign-in, link or re-authentication carries (R6): what the Worker's start asked
- * the provider for, at most 1 in this build (a press on the provider's page; Google's forced
- * password, level 2, comes with its own change). Anything else is 0.
+ * the provider for, at most 1 (a press on the provider's page; Google cannot show more: it has no
+ * forced password login, docs/online/ACCOUNTS.md). Anything else is 0.
  */
 function oauthLevel(v: unknown): 0 | 1 {
   return v === 1 ? 1 : 0;

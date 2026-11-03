@@ -1467,8 +1467,8 @@ export class AccountStore {
   /**
    * The highest level the account can reach (R6's ceiling) with the proofs this build takes: 2 with
    * a password (a v1 or v2 key: "confirm it's you" takes either) or a verified address (a code from
-   * its mailbox, sign-in PR 7), else 1, a press on a provider's page. Google's forced login joins it
-   * with the Google PR.
+   * its mailbox, sign-in PR 7), else 1, a press on a provider's page. Google never raises it: its
+   * account chooser is a press, and it cannot be asked for its password again.
    */
   private ceilingOf(u: Row): 1 | 2 {
     return (u.pw_hash !== null && u.pw_hash !== undefined) || (u.email_canon !== null && u.email_canon !== undefined) ? 2 : 1;

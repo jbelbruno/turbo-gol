@@ -734,8 +734,9 @@ export function profileScreen(menu: Menu): Screen {
   const accountView = (v: AccountData): HTMLElement => {
     const me = v.me;
     const banLeft = me ? me.rankedBanUntil - Date.now() : 0;
-    const providers = (menu.cfg?.oauth ?? []) as OAuthProvider[];
-    const linkable = providers.filter((p) => me && !me.providers.includes(p));
+    // The configured providers, Google left out inside another app's browser (§3.0), which says why where VINCULAR GOOGLE would be.
+    const linkable = emailProviders(menu).filter((p) => me && !me.providers.includes(p));
+    const googleNote = me && !me.providers.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
     const linked = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password');
     // An unlink never takes the last way in (the server refuses it too: last_method).
     const ways = me?.providers.length ?? 0;
@@ -791,6 +792,7 @@ export function profileScreen(menu: Menu): Screen {
       ...linked.map(linkedRow),
       // A link needs a credential proved on this browser in the last minutes: confirm it is you first.
       ...linkable.map((p) => secondary(t('profile.link', { provider: PROVIDER_NAMES[p].toUpperCase() }), () => fresh(() => (window.location.href = acc.oauthUrl(p, true)), linkLevel(me)), { 'data-key': 'profile-link-' + p })),
+      googleNote,
       secondary(t('profile.devices'), () => devicesDialog(), { 'data-key': 'profile-devices' }),
       secondary(
         t('profile.signOut'),
@@ -1137,8 +1139,10 @@ export function profileScreen(menu: Menu): Screen {
    * "confirm it is you" with what reaches that level. Level 1: a provider already on the account (a
    * round trip that comes back to PERFIL, then the player taps again) or the password here. Level 2
    * (the server's reauth_required { level: 2 }): the password, or a code to the account's verified
-   * address (POST /api/auth/reauth/code); a press on a provider's page is level 1, and the sheet says
-   * so. A password of before (me.legacy) is only re-keyed by itself: no code then.
+   * address (POST /api/auth/reauth/code); a press on a provider's page is level 1, Google's too (it
+   * cannot be asked for its password again), and the sheet says so. Google is not offered at level 1
+   * inside another app's browser, which refuses it (the sheet says why). A password of before
+   * (me.legacy) is only re-keyed by itself: no code then.
    */
   const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => {
     if (!force && acc.fresh(level)) {
@@ -1146,18 +1150,21 @@ export function profileScreen(menu: Menu): Screen {
       return;
     }
     const me = acc.me;
-    const own = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
+    const configured = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
+    // Level 1 offers the account's providers this browser can sign in with (Google is hidden inside another app's browser, §3.0); level 2 offers none and the note names them all.
+    const own = configured.filter((p) => emailProviders(menu).includes(p));
     const offered = level === 1 ? own : [];
     const pass = field(t('profile.yourPassword'), { type: 'password', autocomplete: 'current-password', maxLength: 128 });
     const withPassword = me?.hasPassword === true;
     // No code for the project's account: it confirms with its password (the server refuses it the code: 403 password_required).
     const mailbox = me?.emailVerified === true && typeof me.email === 'string' && me.email.length > 0 && me.legacy !== true && me.maintainer === undefined ? me.email : null;
-    const ownNames = own.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
-    const notEnough = level === 2 && own.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
+    const ownNames = configured.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
+    const notEnough = level === 2 && configured.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
     const byCode: HTMLButtonElement | null = mailbox !== null ? secondary(t('auth.reauthCode', { email: mailbox }), () => byCode !== null && void busyWhile(byCode, () => openReauthCodeSheet(menu, go)), { 'data-key': 'profile-reauth-code' }) : null;
+    const inAppNote = level === 1 && configured.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
     menu.modal({
       title: t('profile.reauthTitle'),
-      body: [h('p.mn-note', null, t('profile.reauthNote')), notEnough, ...offered.map((p) => secondary(t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })), byCode, withPassword ? pass.el : null],
+      body: [h('p.mn-note', null, t('profile.reauthNote')), notEnough, ...offered.map((p) => secondary(t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })), inAppNote, byCode, withPassword ? pass.el : null],
       actions: [
         ...(withPassword
           ? [

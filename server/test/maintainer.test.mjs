@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -43,8 +44,9 @@ globalThis.fetch = async (url, init) => {
     posts.push(JSON.parse(String(init?.body ?? '{}')));
     return new Response(null, { status: 204 });
   }
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  // Google is read from the id_token of its token answer (no userinfo call: that URL is BLOCKED below).
+  if (u === 'https://oauth2.googleapis.com/token') return ok(googleTokenAnswer(identity.google));
+  if (u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -56,7 +58,7 @@ globalThis.fetch = async (url, init) => {
 const { AccountsDO } = await import('../src/AccountsDO.ts');
 const A = await import('../src/accountRoutes.ts');
 const ACC = await import('../../src/net/account.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'maintainer-test-secret';
 const ORIGIN = 'https://turbo-gol.com';

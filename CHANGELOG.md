@@ -7,6 +7,12 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
+  without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
+  link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
+  press on its account chooser); level 2 stays the password or a code by mail. Discord, Instagram,
+  Facebook, TikTok and Line browsers now get the "open it in your browser" note in LINK and
+  "confirm it's you" too, not only on the sign-in tab (`docs/online/ACCOUNTS.md`).
 - Replays: stars and your own. A registered account can star a replay (guests see the counts), sort
   the list by the most starred and filter it to "My replays" (the matches its account played, after the
   usual delay). The server keeps who starred, never shows it: only the count. In the player, Esc (or

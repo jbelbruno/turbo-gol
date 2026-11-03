@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -40,8 +41,9 @@ const identity = { google: { sub: 'g-default' }, discord: { id: 'd-default' } };
 globalThis.fetch = async (url, init) => {
   const u = String(url instanceof Request ? url.url : url);
   const ok = (b) => new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } });
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  // Google is read from the id_token of its token answer (no userinfo call: that URL is BLOCKED below).
+  if (u === 'https://oauth2.googleapis.com/token') return ok(googleTokenAnswer(identity.google));
+  if (u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -55,7 +57,7 @@ const A = await import('../src/accountRoutes.ts');
 const TV = await import('../src/tvCodes.ts');
 const AUTH = await import('../src/auth.ts');
 const ACC = await import('../../src/net/account.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'oauth-email-test-secret';
 const ORIGIN = 'https://turbo-gol.com';
@@ -245,11 +247,11 @@ test('I9: the trust of an address is the server\'s: an unverified address is non
   const [h, , s] = r2.pend.split('.');
   const forged = h + '.' + Buffer.from(JSON.stringify({ ...claims(r2.pend), email: 'victim@gmail.com', trust: 'auth' })).toString('base64url') + '.' + s;
   assert.equal((await create(env, forged, 'Forjado', ip(2))).status, 404);
-  // Google is never authoritative in this build: a Gmail address is a hint, not a claim (the Google PR claims it).
+  // Google is authoritative for a Gmail address outside Workspace (sign-in PR 11): the server reads its id_token, and the address is claimed.
   const g = await oauth(env, 'google', google('g-gmail', { email: 'Ana.Perez@gmail.com', email_verified: true }), { ip: ip(3) });
-  assert.equal(claims(g.pend).trust, 'asserted');
+  assert.equal(claims(g.pend).trust, 'auth');
   const gm = await create(env, g.pend, 'AnaG', ip(3));
-  assert.deepEqual([row(obj, gm.json.playerId).email_canon, row(obj, gm.json.playerId).email_hint_canon], [null, 'anaperez@gmail.com']);
+  assert.deepEqual([row(obj, gm.json.playerId).email_canon, row(obj, gm.json.playerId).email_proof, row(obj, gm.json.playerId).email_hint_canon], ['anaperez@gmail.com', 'google', null]);
 });
 
 // ---- pending: the match ----------------------------------------------------------------------------
@@ -340,12 +342,12 @@ test('pend=1: an unowned identity of the other provider joins as p2 and CREAR ma
   assert.equal(g.done.location, '/#auth=confirm');
   assert.equal(g.rt, null);
   assert.equal(users(obj).length, 0);
-  assert.deepEqual(claims(g.pend).p2, { p: 'google', id: 'g-uno', email: 'uno@gmail.com', trust: 'asserted' });
+  assert.deepEqual(claims(g.pend).p2, { p: 'google', id: 'g-uno', email: 'uno@gmail.com', trust: 'auth' });
   assert.equal((await pendingOf(env, g.pend, ip(0))).json.second, 'google');
   const made = await create(env, g.pend, 'Uno', ip(0));
   assert.equal(made.status, 200, JSON.stringify(made.json));
   const u = row(obj, made.json.playerId);
-  assert.deepEqual([u.discord_id, u.google_sub, u.email_hint], ['d-uno', 'g-uno', 'uno@gmail.com']);
+  assert.deepEqual([u.discord_id, u.google_sub, u.email, u.email_proof, u.email_hint], ['d-uno', 'g-uno', 'uno@gmail.com', 'google', null], "Google's Gmail address is claimed, not a hint");
   // The same provider again: "that one has no account either", and the pending identity stays.
   const d2 = await oauth(env, 'discord', discord('d-dos'), { ip: ip(1) });
   const again = await oauth(env, 'discord', discord('d-tres'), { query: '?pend=1', pend: d2.pend, ip: ip(1) });
