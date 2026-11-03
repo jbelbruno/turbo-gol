@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -46,8 +47,8 @@ globalThis.fetch = async (url, init) => {
     posts.push(JSON.parse(String(init?.body ?? '{}')));
     return new Response(null, { status: 204 });
   }
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return tokenStatus.code === 200 ? ok({ access_token: 'fake-access' }) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  if (u === 'https://oauth2.googleapis.com/token') return tokenStatus.code === 200 ? ok(googleTokenAnswer(identity.google)) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
+  if (u === 'https://discord.com/api/v10/oauth2/token') return tokenStatus.code === 200 ? ok({ access_token: 'fake-access' }) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -61,7 +62,7 @@ const A = await import('../src/accountRoutes.ts');
 const S = await import('../src/accountStore.ts');
 const AUTH = await import('../src/auth.ts');
 const ACC = await import('../../src/net/account.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'privacy-fixes-test-secret';
 const ORIGIN = 'https://turbo-gol.com';

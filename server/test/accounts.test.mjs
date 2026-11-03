@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 registerHooks({
@@ -324,39 +325,44 @@ test('login throttle: free failures, then a doubling lock capped at 15 min; a ne
   assert.equal(ADO.nextFail(e, NOW + 16 * 60_000).count, 1);
 });
 
-test('oauthIdentity: code exchange with PKCE + client secret, then the user endpoint (Google sub, Discord id): the id and the address, never a name', async () => {
+test('oauthIdentity: code exchange with PKCE + client secret; Google is read from the id_token of its token answer (no userinfo call), Discord from /users/@me: the id and the address, never a name', async () => {
   const calls = [];
   // Discord API v10 user object (pomelo usernames: discriminator "0", global_name nullable).
   let discordUser = { id: '80351110224678912', username: 'ana_d', discriminator: '0', global_name: null, avatar: null };
-  let googleUser = { sub: 'g1', name: 'Ana Gómez', given_name: 'Ana' };
+  let googleClaims = { sub: 'g1', name: 'Ana Gómez', given_name: 'Ana' };
   const fake = async (url, init) => {
     calls.push({ url, init });
-    if (url.includes('token')) return new Response(JSON.stringify({ access_token: 'AT' }), { status: 200 });
-    if (url.includes('googleapis')) return new Response(JSON.stringify(googleUser), { status: 200 });
-    return new Response(JSON.stringify(discordUser), { status: 200 });
+    if (url === 'https://oauth2.googleapis.com/token') return new Response(JSON.stringify(googleTokenAnswer(googleClaims, { nonce: 'N1' })), { status: 200 });
+    if (url === 'https://discord.com/api/v10/oauth2/token') return new Response(JSON.stringify({ access_token: 'AT' }), { status: 200 });
+    if (url === 'https://discord.com/api/v10/users/@me') return new Response(JSON.stringify(discordUser), { status: 200 });
+    throw new Error('BLOCKED network call in a test: ' + url);
   };
   const env = { GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gs', DISCORD_CLIENT_ID: 'did', DISCORD_CLIENT_SECRET: 'ds' };
   assert.deepEqual(A.enabledProviders(env), ['google', 'discord']);
   assert.deepEqual(A.enabledProviders({ GOOGLE_CLIENT_ID: 'x' }), [], 'a half-configured provider stays off');
+  assert.deepEqual(A.enabledProviders({ GOOGLE_CLIENT_SECRET: 'x' }), [], 'the secret alone neither');
   assert.equal(A.providerConfig(env, 'google').scope, 'openid email');
+  assert.equal(A.providerConfig(env, 'google').user, null, 'no userinfo endpoint for Google');
   assert.equal(A.providerConfig(env, 'discord').scope, 'identify email');
-  const g = await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'CODE', 'VERIFIER', 'https://x/cb', fake);
+  const g = await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'CODE', 'VERIFIER', 'https://x/cb', fake, { nonce: 'N1' });
   assert.deepEqual(g, { id: 'g1', email: null, trust: 'none' });
   const form = new URLSearchParams(calls[0].init.body);
   assert.equal(form.get('code_verifier'), 'VERIFIER');
   assert.equal(form.get('client_secret'), 'gs');
   assert.equal(form.get('redirect_uri'), 'https://x/cb');
-  assert.equal(calls[1].init.headers.authorization, 'Bearer AT');
+  assert.equal(calls.length, 1, "Google's id_token is the whole answer: no second request");
   const d = await A.oauthIdentity(A.providerConfig(env, 'discord'), 'discord', 'C', 'V', 'https://x/cb', fake);
   assert.deepEqual(d, { id: '80351110224678912', email: null, trust: 'none' });
-  assert.equal(calls[2].url, 'https://discord.com/api/v10/oauth2/token', 'versioned API, not the unversioned (v6) default');
-  assert.equal(calls[3].url, 'https://discord.com/api/v10/users/@me');
+  assert.equal(calls[1].url, 'https://discord.com/api/v10/oauth2/token', 'versioned API, not the unversioned (v6) default');
+  assert.equal(calls[2].url, 'https://discord.com/api/v10/users/@me');
+  assert.equal(calls[2].init.headers.authorization, 'Bearer AT');
   discordUser = { ...discordUser, global_name: 'Ana D.', email: 'Ana.D@Example.org', verified: true };
   assert.deepEqual(await A.oauthIdentity(A.providerConfig(env, 'discord'), 'discord', 'C', 'V', 'https://x/cb', fake), { id: '80351110224678912', email: 'ana.d@example.org', trust: 'asserted' });
-  googleUser = { ...googleUser, email: 'ana@gmail.com', email_verified: true };
-  assert.deepEqual(await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'C', 'V', 'u', fake), { id: 'g1', email: 'ana@gmail.com', trust: 'asserted' });
-  const bad = await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'C', 'V', 'u', async () => new Response('no', { status: 400 }));
+  googleClaims = { ...googleClaims, email: 'ana@gmail.com', email_verified: true };
+  assert.deepEqual(await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'C', 'V', 'u', fake, { nonce: 'N1' }), { id: 'g1', email: 'ana@gmail.com', trust: 'auth' }, 'a Gmail address without hd: Google is authoritative for it');
+  const bad = await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'C', 'V', 'u', async () => new Response('no', { status: 400 }), { nonce: 'N1' });
   assert.equal(bad, null);
+  assert.equal(await A.oauthIdentity(A.providerConfig(env, 'google'), 'google', 'C', 'V', 'u', async () => new Response('<html>', { status: 200 }), { nonce: 'N1' }), null, 'a token answer that is not JSON');
 });
 
 // ---- ranked matchmaking ---------------------------------------------------------------------------

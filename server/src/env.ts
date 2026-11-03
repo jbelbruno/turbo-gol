@@ -22,9 +22,12 @@ export interface Env {
   LOBBY: DurableObjectNamespace;
   LOBBY_DIR: DurableObjectNamespace;
   /**
-   * Secrets, optional, OAuth sign-in (both of a pair or none). Google: Cloud console -> APIs & Services
-   * -> Credentials -> OAuth client ID (Web application); Discord: Developer Portal -> Applications ->
-   * OAuth2. Authorized redirect URI: <origin>/api/auth/oauth/google|discord/callback.
+   * Secrets, optional, OAuth sign-in (both of a pair or none: with one missing the provider is off,
+   * its button is not shown and its start answers 404). Google: Cloud console -> APIs & Services ->
+   * Credentials -> OAuth client ID (Web application), scopes `openid email` only (never `profile`);
+   * the callback reads Google's id_token (iss, aud, exp, nonce; sub, email, email_verified, hd),
+   * not a userinfo endpoint. Discord: Developer Portal -> Applications -> OAuth2.
+   * Authorized redirect URI: <origin>/api/auth/oauth/google|discord/callback. Guide: docs/online/ACCOUNTS.md.
    */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
