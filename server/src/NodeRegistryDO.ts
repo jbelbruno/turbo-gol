@@ -100,7 +100,7 @@ import type { ReplayCursor, ReplayRow } from './nodeStore';
 import { publicItem } from './replayIndex';
 import type { ReplaySeat } from './replayIndex';
 import { GUEST_NAME_RE } from '../../src/net/guestName';
-import { HIDDEN_NAME_RE, REPLAY_PAGE } from '../../src/net/replays';
+import { HIDDEN_NAME_RE, REPLAY_MINE_MAX, REPLAY_PAGE, REPLAY_STARS_MAX } from '../../src/net/replays';
 import type { ReplayList } from '../../src/net/replays';
 import { HEALTHZ_MAX_BYTES, HEALTHZ_TIMEOUT_MS, NodeWatch, channelOf, healthzTargets, label, probeHealthz, probeTargetOk, readJsonCapped } from './nodeWatch';
 import type { WatchNote } from './nodeWatch';
@@ -139,6 +139,8 @@ const LIMIT_PURGE_EVERY = 256;
  */
 const UNAVAILABLE = 'the node control plane is not available right now: try again later';
 const REPLAY_ROUTE = /^\/nodes\/replays\/([0-9a-f]{64})$/;
+/** An account id (16 hex), as the Worker's verified session carries it. */
+const ACCOUNT_ID_RE = /^[0-9a-f]{16}$/;
 /** The public list's internal cursor (the Worker checked its signature): a settle hour and a match id. */
 const REPLAY_CURSOR = /^(\d{1,10})\.([0-9a-f]{64})$/;
 /**
@@ -772,6 +774,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (method === 'POST' && path === NODE_ROUTES.leave) return await this.leave(request, cp);
       if (method === 'GET' && path === NODE_ROUTES.status) return this.matchStatus(url, cp);
       if (method === 'POST' && path === NODE_ROUTES.health) return await this.health(cp);
+      if (method === 'POST' && path === NODE_ROUTES.replays + '/star') return await this.replayStar(request);
       if (method === 'GET' && (path === NODE_ROUTES.replays || path.startsWith(NODE_ROUTES.replays + '/'))) return await this.replays(url);
     } catch (e) {
       this.log(`${method} ${path} failed: ${String(e)}`);
@@ -982,6 +985,18 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const store = this.store;
     if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
     const id = url.pathname.slice(NODE_ROUTES.replays.length + 1);
+    // The stars' views (GET /internal/replays/top | mine?account= | stars?account=): rows as the public sees them, or match ids.
+    if (id === 'top' || id === 'mine' || id === 'stars') {
+      const account = url.searchParams.get('account') ?? '';
+      if (id !== 'top' && !ACCOUNT_ID_RE.test(account)) return error(400, 'bad_request');
+      if (id === 'stars') return json({ ids: store.replayStarredBy(account, REPLAY_STARS_MAX) });
+      // The account's username (its session's name): "mine" also finds a row listed before the seats were kept.
+      const name = (url.searchParams.get('name') ?? '').slice(0, 64);
+      const rows = id === 'top' ? store.replayTop(REPLAY_PAGE) : store.replayMine(account, name, REPLAY_MINE_MAX);
+      const hidden = await this.hiddenSlots(rows);
+      if (!hidden) return error(503, 'nodes_unavailable', UNAVAILABLE);
+      return json({ matches: rows.map((r, i) => publicItem(r.item, hidden[i])) });
+    }
     if (id) {
       if (!/^[0-9a-f]{64}$/.test(id)) return error(404, 'not_found');
       const e = store.replayEntry(id);
@@ -1000,6 +1015,18 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const last = page[page.length - 1];
     const next = rows.length > REPLAY_PAGE ? `${Math.floor(last.item.at / HOUR_MS)}.${last.item.matchId}` : null;
     return json({ matches: page.map((r, i) => publicItem(r.item, hidden[i])), next } satisfies ReplayList);
+  }
+
+  /** POST /internal/replays/star { account, matchId, on }: an account's star on a served match; the match's new count. */
+  private async replayStar(request: Request): Promise<Response> {
+    const store = this.store;
+    if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    const b = await readJson<{ account?: unknown; matchId?: unknown; on?: unknown }>(request);
+    if (!b || typeof b.account !== 'string' || !ACCOUNT_ID_RE.test(b.account) || typeof b.matchId !== 'string' || !/^[0-9a-f]{64}$/.test(b.matchId) || typeof b.on !== 'boolean') return error(400, 'bad_request');
+    const r = store.setReplayStar(b.account, b.matchId, b.on, REPLAY_STARS_MAX);
+    if (r === null) return error(404, 'no_replay');
+    if (r === 'full') return error(409, 'stars_full', `an account holds at most ${REPLAY_STARS_MAX} stars`);
+    return json({ stars: r, starred: b.on });
   }
 
   /**

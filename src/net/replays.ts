@@ -67,6 +67,8 @@ export interface ReplayListItem {
   players: ReplayPlayer[];
   /** The build the match was played on: the viewer warns when it is not its own. */
   build: ReplayBuild;
+  /** How many registered accounts starred it (a count only: who never leaves the server). */
+  stars?: number;
 }
 
 export interface ReplayList {
@@ -86,6 +88,42 @@ export async function fetchReplayList(before: string | null = null): Promise<Rep
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as ReplayList;
 }
+
+/** An account's Bearer, for the routes that need one. */
+const bearer = (session: string): Record<string, string> => ({ authorization: 'Bearer ' + session });
+
+/** The most starred matches (public): at most REPLAY_PAGE, the most starred first, the newest among equals. */
+export async function fetchTopReplays(): Promise<ReplayListItem[]> {
+  const res = await fetch('/nodes/replays/top');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { matches: ReplayListItem[] }).matches;
+}
+
+/** The account's own matches (served ones, newest first, at most REPLAY_MINE_MAX). */
+export async function fetchMyReplays(session: string): Promise<ReplayListItem[]> {
+  const res = await fetch('/nodes/replays/mine', { headers: bearer(session) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { matches: ReplayListItem[] }).matches;
+}
+
+/** The match ids the account starred. */
+export async function fetchMyStars(session: string): Promise<string[]> {
+  const res = await fetch('/nodes/replays/stars', { headers: bearer(session) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { ids: string[] }).ids;
+}
+
+/** Star or unstar a match (accounts only): its new count. Throws on a refusal. */
+export async function setReplayStar(session: string, matchId: string, on: boolean): Promise<{ stars: number; starred: boolean }> {
+  const res = await fetch(`/nodes/replays/${matchId}/star`, { method: 'POST', headers: { ...bearer(session), 'content-type': 'application/json' }, body: JSON.stringify({ on }) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as { stars: number; starred: boolean };
+}
+
+/** The account's own list, at most this many matches. */
+export const REPLAY_MINE_MAX = 60;
+/** The most stars one account can hold at once. */
+export const REPLAY_STARS_MAX = 500;
 
 /** URL of a match's public replay. */
 export function replayUrl(matchId: string): string {

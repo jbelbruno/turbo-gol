@@ -7,6 +7,22 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
+  without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
+  link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
+  press on its account chooser); level 2 stays the password or a code by mail. Discord, Instagram,
+  Facebook, TikTok and Line browsers now get the "open it in your browser" note in LINK and
+  "confirm it's you" too, not only on the sign-in tab (`docs/online/ACCOUNTS.md`).
+- Replays: stars and your own. A registered account can star a replay (guests see the counts), sort
+  the list by the most starred and filter it to "My replays" (the matches its account played, after the
+  usual delay). The server keeps who starred, never shows it: only the count. In the player, Esc (or
+  the phone's Back) pauses and opens a menu (Resume, All replays, Back to the game; a second Back
+  leaves), and an Exit button is always on screen.
+- The replay list looks like the game: the TURBOGOL mark, a header with the community-servers tag, filters by kind (all, Competitive, Casual) and format (1v1, 2v2, 3v3), a scoreboard card per match (blue side, the score, red side, the winner lit, one tap anywhere to watch), placeholders while it loads and a layout for phones.
+- Replay cameras: a free orbital camera (drag to turn, wheel or pinch to zoom, right drag to move the
+  point, double click to follow the ball again) that stays inside the pitch, a distance control for
+  the players' cameras (a slider and the wheel, remembered, plus ball cam or car cam), and buttons
+  and [ ] keys to jump to the previous or next goal.
 - Replays: PROFILE > ABOUT > REPLAYS (not on TVs yet) lists the matches the community servers played in the last
   30 days, for everyone, guests included, and plays any of them in the browser: the game's own
   stadium and scorebug, a timeline with the goals, speed from 0.25x to 8x, a broadcast camera and
@@ -324,6 +340,7 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- Replays: "My replays" also finds the matches listed before the seats were kept (the first days: they have no seat, so they are found by the account's username).
 - You can choose the stadium again. In MODES › VS AI, Stadium opened an empty GARAGE; now it opens
   the list of stadiums (Night harbour, Red canyon, Alpine valley) with yours marked. Pick one with
   a click, a tap, Enter, A or OK: it is saved and used in all your matches and behind the menus.
@@ -465,6 +482,13 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
+  (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
+  WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%
+  smaller to download. Same frame cost in a match. 0.187 dropped the cube-UV environment atlas:
+  the stadium's reflections (src/render/world/env.ts) are now a cube with its mip levels, re-rendered
+  from the cached sky on a cached load instead of stored; the world cache version goes to 9, so a
+  returning player's first load after this bakes the stadium once again.
 - Error messages no longer show technical codes ("Server error (503)", "Connection lost (1006)"):
   they say what happened, and the code goes to the developer console and the network panel (F4).
 - The match HUD keeps its scorebug (BLU 1 │ 2:49 │ 0 RED) with a lime notch under your team, and

@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -37,8 +38,9 @@ const identity = { google: { sub: 'g-default' }, discord: { id: 'd-default' } };
 globalThis.fetch = async (url, init) => {
   const u = String(url instanceof Request ? url.url : url);
   const ok = (b) => new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } });
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  // Google is read from the id_token of its token answer (no userinfo call: that URL is BLOCKED below).
+  if (u === 'https://oauth2.googleapis.com/token') return ok(googleTokenAnswer(identity.google));
+  if (u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -54,7 +56,7 @@ const ACC = await import('../../src/net/account.ts');
 const AUTH = await import('../src/auth.ts');
 const L = await import('../src/limits.ts');
 const S = await import('../src/accountStore.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'news-consent-test-secret';
 const ORIGIN = 'https://turbo-gol.com';

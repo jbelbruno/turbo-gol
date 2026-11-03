@@ -39,9 +39,11 @@ export const CARD_SECONDS = 30;
 const CARD_WAVE = 0.00028;
 export const BIG_SECONDS = 30;
 const BIG_PHASE = 15;
-/** The change: the panel dims to DIP_LEVEL over CHANGE_FADE s and comes back with the next card. */
+/** The big board's change: it dims to DIP_LEVEL over CHANGE_FADE s and comes back with the next card. */
 const CHANGE_FADE = 0.55;
 const DIP_LEVEL = 0.08;
+/** A regular card's change (the first boards' "Mexican wave"): the new card slides down over the old in SLIDE_SECONDS. */
+const SLIDE_SECONDS = 0.36;
 
 export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: THREE.Texture): THREE.MeshStandardNodeMaterial | THREE.MeshBasicNodeMaterial {
   const m = spec.bakedLight ? new THREE.MeshBasicNodeMaterial() : new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0 });
@@ -63,20 +65,25 @@ export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: TH
   // outline later on the other (d = the panel within it, 0 .. BIG_PANELS - 1).
   const d = mod(panel.add(PANEL_COUNT - BIG_FIRST), PANEL_COUNT / 2);
   const big = step(d, BIG_PANELS - 0.5);
-  // Regular cards change every CARD_SECONDS, panel by panel round the stadium (a whole panel at
-  // once); the big board every BIG_SECONDS, all of it at once, half a period after the others.
-  const tt = time.add(panel.mul(PANEL_LEN * CARD_WAVE)).div(CARD_SECONDS);
-  const tb = time.add(BIG_PHASE).div(BIG_SECONDS);
+  // Regular cards change every CARD_SECONDS as a wave round the stadium (the first boards' "Mexican
+  // wave"): the change travels along the outline (CARD_WAVE s per uu, through the panels, not panel
+  // by panel) and at each point the new card slides down over the old one. The big board changes
+  // every BIG_SECONDS, all of it at once with a short dip, half a period after the others.
+  const tt = time.add(s.mul(CARD_WAVE)).div(CARD_SECONDS);
+  const slot = floor(tt);
+  const slide = smoothstep(0, SLIDE_SECONDS, fract(tt).mul(CARD_SECONDS));
   const group = mod(panel, 4);
-  const card = floor(hash(floor(tt).mul(3.17).add(group.mul(11.3)).add(1.7)).mul(BOARD_CARDS - 0.001));
+  const cardOf = (sl: typeof slot): typeof slot => floor(hash(sl.mul(3.17).add(group.mul(11.3)).add(1.7)).mul(BOARD_CARDS - 0.001));
+  const useNew = step(oneMinus(slide), ly);
+  const card = mix(cardOf(slot.sub(1)), cardOf(slot), useNew);
+  const cardY = mix(ly.add(slide), ly.sub(oneMinus(slide)), useNew).saturate();
+  const tb = time.add(BIG_PHASE).div(BIG_SECONDS);
   const bigCell = mod(floor(tb), 2).mul(BIG_PANELS).add(d).add(BIG_CELL0);
   const cell = mix(card, bigCell, big);
-  // The change: a short dip to DIP_LEVEL and back (the old card fades out, the new one in).
-  const f = mix(fract(tt).mul(CARD_SECONDS), fract(tb).mul(BIG_SECONDS), big);
-  const period = mix(float(CARD_SECONDS), float(BIG_SECONDS), big);
-  const dip = smoothstep(0, CHANGE_FADE, f).mul(oneMinus(smoothstep(period.sub(CHANGE_FADE), period, f)));
-  const level = mix(float(DIP_LEVEL), float(1), dip);
-  const cy = ly;
+  const fb = fract(tb).mul(BIG_SECONDS);
+  const dip = smoothstep(0, CHANGE_FADE, fb).mul(oneMinus(smoothstep(float(BIG_SECONDS - CHANGE_FADE), float(BIG_SECONDS), fb)));
+  const level = mix(float(1), mix(float(DIP_LEVEL), float(1), dip), big);
+  const cy = mix(cardY, ly, big);
   const col = mod(cell, BOARD_COLS);
   const row = floor(cell.div(BOARD_COLS));
   // A card keeps a 1 px border in its cell; a third of a big card fills its cell, read up to half

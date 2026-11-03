@@ -29,6 +29,11 @@
  *                                     is the first page); the first page cached 30 s per isolate, a later one 5
  *                                     minutes in the location's edge cache; replayList / replaySite count only
  *                                     the pages that reach the object
+ *   GET      /nodes/replays/top       the most starred served matches (public, 30 s per isolate)
+ *   GET      /nodes/replays/mine      Bearer account: the matches that account played (private, never cached)
+ *   GET      /nodes/replays/stars     Bearer account: the match ids it starred
+ *   POST     /nodes/replays/<id>/star { on }, Bearer account (never a guest): star or unstar a served match;
+ *                                     the count is public, who starred never is; 30 a minute per account
  *   GET      /nodes/replays/<id>/view a served match's replay made public (replayIndex.ts: the header rebuilt
  *                                     from the control plane's record, no account or node id, no start time,
  *                                     hidden names as 'Jugador N'), its SHA-256 checked against the index;
@@ -159,6 +164,11 @@ const VERSIONED = /^\d+\.\d+\.\d+\//;
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const REPLAY_PATH = /^\/nodes\/replays\/([0-9a-f]{64})$/;
 const REPLAY_VIEW_PATH = /^\/nodes\/replays\/([0-9a-f]{64})\/view$/;
+const REPLAY_STAR_PATH = /^\/nodes\/replays\/([0-9a-f]{64})\/star$/;
+const REPLAY_OWN_PATH = /^\/nodes\/replays\/(top|mine|stars)$/;
+/** An account's star and own-list calls per minute (per isolate). */
+const LIMIT_REPLAY_OWN_PER_ACCOUNT = 30;
+const REPLAY_TOP_TTL_MS = 30_000;
 const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
 /** Request headers the object may see from a caller (the WebSocket upgrade's, a node's signed upload). */
 const FORWARDED = new Set([
@@ -207,7 +217,7 @@ export async function nodeRoute(c: NodeRouteContext): Promise<Response> {
     res = error(500, 'internal');
   }
   // The public replays are no search engine's to keep: every answer of theirs says so (replay.html has its meta tag).
-  const robots = path === '/nodes/replays' || REPLAY_VIEW_PATH.test(path);
+  const robots = path === '/nodes/replays' || REPLAY_VIEW_PATH.test(path) || REPLAY_OWN_PATH.test(path) || REPLAY_STAR_PATH.test(path);
   if (!cors && !robots) return res; // a 101 among them: passed through untouched
   const out = new Response(res.body, res);
   if (cors) for (const k in c.cors) out.headers.set(k, c.cors[k]);
@@ -270,6 +280,10 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
   }
   if (method === 'GET' && path === '/nodes/status') return status(c, env, who);
   if (method === 'GET' && path === '/nodes/replays') return replayList(c, env);
+  const own = REPLAY_OWN_PATH.exec(path);
+  if (own && method === 'GET') return own[1] === 'top' ? replayTop(c, env) : replayOwn(c, env, own[1] as 'mine' | 'stars');
+  const star = REPLAY_STAR_PATH.exec(path);
+  if (star && method === 'POST') return replayStar(c, env, star[1]);
   const view = REPLAY_VIEW_PATH.exec(path);
   if (view && method === 'GET') return replayView(c, env, view[1]);
   const admin = path.startsWith('/nodes/admin/') ? path.slice('/nodes/admin/'.length) : '';
@@ -503,6 +517,67 @@ async function replayList(c: NodeRouteContext, env: NodesEnv): Promise<Response>
     }
   }
   return new Response(body, { headers });
+}
+
+const replayTopCache = new WeakMap<object, { at: number; body: string }>();
+
+/** GET /nodes/replays/top: the most starred served matches (public), kept REPLAY_TOP_TTL_MS by each isolate. */
+async function replayTop(c: NodeRouteContext, env: NodesEnv): Promise<Response> {
+  if (await replaysOff(env)) return error(404, 'not_found', 'the public replays are off');
+  const now = Date.now();
+  const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-control': `public, max-age=${REPLAY_TOP_TTL_MS / 1000}` };
+  const hit = replayTopCache.get(env.NODES);
+  if (hit && now - hit.at <= REPLAY_TOP_TTL_MS) return new Response(hit.body, { headers });
+  if (await overReplayLimit(c, 'replayList')) return error(429, 'rate_limited');
+  const res = await toRegistry(env, new Request(c.request.url, { method: 'GET' }), `${NODE_ROUTES.replays}/top`);
+  if (!res.ok) {
+    await res.body?.cancel();
+    return error(503, 'nodes_unavailable');
+  }
+  const body = await res.text();
+  replayTopCache.set(env.NODES, { at: now, body });
+  return new Response(body, { headers });
+}
+
+/** GET /nodes/replays/mine | stars: the signed-in account's own matches, or the ids it starred (private, never cached). */
+async function replayOwn(c: NodeRouteContext, env: NodesEnv, what: 'mine' | 'stars'): Promise<Response> {
+  if (await replaysOff(env)) return error(404, 'not_found', 'the public replays are off');
+  const s = requireAccount({ session: await c.session() });
+  if (s instanceof Response) return s;
+  if (c.limited('nrown:' + s.sub, LIMIT_REPLAY_OWN_PER_ACCOUNT)) return error(429, 'rate_limited');
+  const res = await toRegistry(env, new Request(c.request.url, { method: 'GET' }), `${NODE_ROUTES.replays}/${what}?account=${s.sub}&name=${encodeURIComponent(s.name)}`);
+  if (!res.ok) {
+    await res.body?.cancel();
+    return error(503, 'nodes_unavailable');
+  }
+  return new Response(await res.text(), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' } });
+}
+
+/** POST /nodes/replays/<matchId>/star { on }: a registered account stars or unstars a served match (never a guest). */
+async function replayStar(c: NodeRouteContext, env: NodesEnv, matchId: string): Promise<Response> {
+  if (await replaysOff(env)) return error(404, 'not_found', 'the public replays are off');
+  const s = requireAccount({ session: await c.session() });
+  if (s instanceof Response) return s;
+  if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+  if (c.limited('nrown:' + s.sub, LIMIT_REPLAY_OWN_PER_ACCOUNT)) return error(429, 'rate_limited');
+  let on: unknown;
+  try {
+    on = ((await c.request.json()) as { on?: unknown }).on;
+  } catch {
+    return error(400, 'bad_request');
+  }
+  if (typeof on !== 'boolean') return error(400, 'bad_request');
+  const res = await toRegistry(env, new Request(c.request.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ account: s.sub, matchId, on }) }), `${NODE_ROUTES.replays}/star`);
+  if (res.status === 404 || res.status === 409) {
+    await res.body?.cancel();
+    return error(res.status, res.status === 404 ? 'no_replay' : 'stars_full');
+  }
+  if (!res.ok) {
+    await res.body?.cancel();
+    return error(503, 'nodes_unavailable');
+  }
+  replayTopCache.delete(env.NODES);
+  return new Response(await res.text(), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
 /**

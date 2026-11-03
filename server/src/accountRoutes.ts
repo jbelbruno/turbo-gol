@@ -47,12 +47,21 @@
  *   GET  /api/leaderboard?playlist=1v1  [Bearer]                -> LeaderboardAnswer (cached 30 s per playlist; an
  *                             account's own row 15 s per account)
  *   GET  /api/ranked/result?matchId=    Bearer (account)        -> RankedResultAnswer
- *   GET  /api/auth/oauth/:provider/start[?link=1 | ?reauth=1[&then=link:<p>] | ?pend=1 | ?cancelDel=1] -> 302 to Google /
- *                             Discord (state + PKCE; scopes: the id and the address, never a name; cancelDel: an
- *                             account whose deletion is pending signs in and calls it off, else its callback is
- *                             /#auth=error:deletion_pending, sign-in PR 12)
+ *   GET  /api/auth/oauth/:provider/start[?link=1 | ?reauth=1[&then=link:<p>] | ?pend=1 | ?cancelDel=1] -> 302 to
+ *                             Google / Discord (state + PKCE; scopes: the id and the address, never a name: Google
+ *                             `openid email`, with an OpenID Connect nonce kept in the state cookie, Discord
+ *                             `identify email`; cancelDel: an account whose deletion is pending signs in and calls it
+ *                             off, else its callback is /#auth=error:deletion_pending, sign-in PR 12; no other query
+ *                             parameter is read: a `lvl` is ignored, and every Google flow asks for
+ *                             prompt=select_account, a press on its account chooser, level 1 at most)
  *   GET  /api/auth/oauth/:provider/callback?code&state          -> 302 to /#auth=ok | linked | reauth | confirm |
  *                             ok:<linkError> | error:<code>
+ *     Google is read from the id_token of its token answer (it came from Google's token endpoint over TLS,
+ *     so the TLS check stands in for the signature, OIDC Core 3.1.3.7): iss, aud (our client id), exp and
+ *     nonce are checked, and sub, email, email_verified and hd read (providerTrust: a Gmail address
+ *     without hd is 'auth', any other verified one 'asserted'). A callback that is refused for any
+ *     of those is /#auth=error:provider_error, and nothing of Google's answer is logged. Discord is read from
+ *     its users/@me.
  *     The callback never creates an account (the sign-in design's I3): an identity nobody owns goes
  *     into the pending cookie `__Host-tg_pend` (JWT typ 'pend': { p, id, email, trust, p2? }, HttpOnly,
  *     SameSite=Lax, 30 minutes) and /#auth=confirm asks "do you already have a Turbogol account?":
@@ -86,12 +95,14 @@
  * level, stored with it (accountStore.ts refresh.auth_lvl, method) and signed into the session as
  * `aal` beside `aat`: 2 a typed password (signin, login, recover, reauth) or a mailbox proof that
  * sets one (signup/finish, reset) or a code from the account's mailbox (reauth/code/verify), 1 a
- * press on the provider's page (Google's account chooser, Discord's prompt=consent), 0 nothing (a
- * TV, a family from before levels). A refresh keeps it and never raises it. requireFresh(c, level)
- * asks for it: a link needs 1 (2 for a maintainer: linkLevel); an email's add 1 (2 for a maintainer
- * with a password: emailLevel), its change 2; an unlink 1, or 2 when one way in would be left; the
- * maintainer routes (nodeRoutes.ts) always 2, which a maintainer reaches with its password only
- * (reauth/code refuses NODE_TRUSTED_OPERATORS). Every primary sign-in of such an
+ * press on the provider's page (Google's account chooser, Discord's prompt=consent), 0 nothing (a TV, a
+ * family from before levels). Google never proves 2: its prompt takes only none, consent and
+ * select_account, and it documents neither max_age nor an auth_time in the id_token (so no forced
+ * password login can be asked for or checked). A refresh keeps the level and never raises it.
+ * requireFresh(c, level) asks for it: a link needs 1 (2 for a maintainer: linkLevel); an email's add 1
+ * (2 for a maintainer with a password: emailLevel), its change 2; an unlink 1, or 2 when one way in
+ * would be left; the maintainer routes (nodeRoutes.ts) always 2, which a maintainer reaches with its
+ * password only (reauth/code refuses NODE_TRUSTED_OPERATORS). Every primary sign-in of such an
  * account (login, signin, recover, reset, the email undo, a provider's callback) and every level-2
  * re-authentication of it posts an ALERT line to the staff channel, with the method and the
  * country only (maintainerAlert, §3.12).
@@ -167,7 +178,7 @@ import type { Env } from './env';
 import { EXPERIMENTAL_REFUSED, JSON_MAX_BYTES, carriesPhysics, deletionOpen, error, json, readCapped, readJson, trustedOperatorIds } from './env';
 import { base64urlDecode, base64urlEncode, internalSecret, INTERNAL_HEADER, nowSeconds, signJwt, verifyJwt } from './auth';
 import type { SessionClaims } from './auth';
-import { isClientKey, isPlaylist, normalizeEmail, OAUTH_PROVIDERS, usernameIssue, usernameProblem } from '../../src/net/account';
+import { emailCanon, isClientKey, isPlaylist, normalizeEmail, OAUTH_PROVIDERS, usernameIssue, usernameProblem } from '../../src/net/account';
 import type { AccountSession, CodeResendAnswer, CodeStartAnswer, EmailConfirmAnswer, LeaderboardAnswer, OAuthProvider, PasswordLinkAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer } from '../../src/net/account';
 import type { Credentials, LegacyState, PasswordRecord, PendingIdent, PendingIdentity, ProviderEmail, ProviderTrust, RefreshGrant, UserRef } from './accountStore';
 import { DEV_NAME_PROBLEM, LEGACY_CLOSED, UNSUB_ID_RE, devSubOf, legacyDateOf } from './accountStore';
@@ -1227,19 +1238,21 @@ interface ProviderConfig {
   clientSecret: string;
   authorize: string;
   token: string;
-  user: string;
+  /** The user endpoint Discord is read from; null for Google, which is read from the id_token of its token answer (§2.7). */
+  user: string | null;
   scope: string;
 }
 
 export function providerConfig(env: Env, p: OAuthProvider): ProviderConfig | null {
   if (p === 'google') {
+    // Both secrets or none: without them Google is off (the button is not shown, the start answers 404).
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return null;
     return {
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
       authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
       token: 'https://oauth2.googleapis.com/token',
-      user: 'https://openidconnect.googleapis.com/v1/userinfo',
+      user: null,
       // The address, never the name (§5.1): no `profile`.
       scope: 'openid email',
     };
@@ -1275,6 +1288,8 @@ interface OAuthState {
   p: OAuthProvider;
   v: string;
   n: string;
+  /** Google only: the OpenID Connect nonce this start sent. The id_token must carry it back (OIDC Core 3.1.3.7). Not the `state` (n). */
+  nc?: string;
   /** The account to link the identity to (link=1), or null. */
   link: string | null;
   /** The account to re-authenticate (reauth=1): the identity must already be its. */
@@ -1284,6 +1299,8 @@ interface OAuthState {
   /**
    * The level the identity proves (R6), from the prompt this start asked for: 1 for Google's
    * account chooser and Discord's Authorize (prompt=consent). Absent (a state from before levels): 0.
+   * Never 2: Google cannot be asked for its password again (prompt takes only none, consent and
+   * select_account).
    */
   lvl?: 1;
   /** pend=1, the confirm sheet's "I already have one": an owned identity signs in and links the pending one; an unowned one joins it (p2). */
@@ -1313,33 +1330,38 @@ type OAuthEnv = Env & { DISCORD_SILENT?: string };
 /** The provider's answers to a silent start that needed a person after all: the callback asks once more, with the press. */
 const SILENT_RETRY = new Set(['consent_required', 'interaction_required', 'login_required']);
 
-/** What a start asks for, apart from the PKCE pair and the nonce authorizeRedirect makes. */
-type StateFlags = Omit<OAuthState, 'typ' | 'p' | 'v' | 'n' | 'exp' | 'lvl'>;
+/** What a start asks for, apart from the PKCE pair and the nonces authorizeRedirect makes. */
+type StateFlags = Omit<OAuthState, 'typ' | 'p' | 'v' | 'n' | 'nc' | 'exp' | 'lvl'>;
 
 /**
- * The redirect to the provider's authorize page, with a new state cookie (PKCE verifier, nonce,
- * `flags`, the level its prompt proves). `silent`: Discord's prompt=none, level 0. `cookies`: set
- * with it (a callback that chains a link sets the refresh cookie of its re-authentication too).
+ * The redirect to the provider's authorize page, with a new state cookie (PKCE verifier, the state
+ * and, for Google, the OpenID Connect nonce; `flags`; the level its prompt proves). `silent`:
+ * Discord's prompt=none, level 0. `cookies`: set with it (a callback that chains a link sets the
+ * refresh cookie of its re-authentication too).
  */
 async function authorizeRedirect(c: RouteContext, provider: OAuthProvider, cfg: ProviderConfig, flags: StateFlags, silent = false, cookies: readonly string[] = []): Promise<Response> {
   const verifier = base64urlEncode(randomBytes(32));
   const challenge = base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(verifier))));
-  const nonce = base64urlEncode(randomBytes(16));
+  const stateParam = base64urlEncode(randomBytes(16));
+  // Google is read from its id_token, which must carry back the nonce this start sent (OIDC Core 3.1.3.7); it is kept in the state cookie, apart from the `state` parameter.
+  const nonce = provider === 'google' ? base64urlEncode(randomBytes(16)) : undefined;
   const asked = OAUTH_PROMPT[provider];
-  const state: OAuthState = { typ: 'oa', p: provider, v: verifier, n: nonce, ...flags, ...(silent ? { sil: 1 as const } : { lvl: asked.lvl }), exp: nowSeconds() + OAUTH_TTL_S };
+  const state: OAuthState = { typ: 'oa', p: provider, v: verifier, n: stateParam, ...(nonce !== undefined ? { nc: nonce } : {}), ...flags, ...(silent ? { sil: 1 as const } : { lvl: asked.lvl }), exp: nowSeconds() + OAUTH_TTL_S };
   const cookie = `${OAUTH_COOKIE}=${await signJwt(c.env.JWT_SECRET, state)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${OAUTH_TTL_S}`;
   const q = new URLSearchParams({
     client_id: cfg.clientId,
     redirect_uri: `${publicOrigin(c.env, c.request)}/api/auth/oauth/${provider}/callback`,
     response_type: 'code',
     scope: cfg.scope,
-    state: nonce,
+    state: stateParam,
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
+  if (nonce !== undefined) q.set('nonce', nonce);
   // Every start (a sign-in, a link, "confirm it's you") asks for a press on the provider's page:
   // Discord's prompt=consent never lets an earlier authorization answer silently (level 1, not 0),
   // unless DISCORD_SILENT asks for a silent sign-in (level 0, which every sensitive route refuses).
+  // Google's prompt takes only none, consent and select_account (and it documents no max_age): its account chooser is the most a start can ask, in every flow.
   q.set('prompt', silent ? 'none' : asked.prompt);
   return redirect(`${cfg.authorize}?${q.toString()}`, [...cookies, cookie]);
 }
@@ -1385,20 +1407,79 @@ export interface ProviderIdentity extends ProviderEmail {
  * The trust of a provider's address (§3.8), computed here from the provider's own answer and never
  * taken from a client (I9). Discord's `verified` only says the address was confirmed once (it may
  * have changed hands since): 'asserted' at most, a hint. Google is authoritative only for a Gmail
- * address outside Workspace (`hd` absent): 'auth', which claims the canon; any other verified Google
- * address is 'asserted'. In this build Google is read through its userinfo endpoint, and the claim
- * comes with the Google change that reads its id_token (the design's PR 11): until then a Google
- * address is 'asserted' too. An address that does not normalize is none.
+ * address (gmail.com or googlemail.com: emailCanon reads both as gmail.com) outside Workspace (`hd`
+ * absent): 'auth', which claims the canon (accountStore.ts fillEmailIn); any other verified Google
+ * address (a Workspace `hd`, an outside domain) is 'asserted'. An address that is not verified or
+ * does not normalize is none.
  */
 export function providerTrust(provider: OAuthProvider, u: { email?: unknown; verified?: unknown; email_verified?: unknown; hd?: unknown }): ProviderEmail {
   const email = normalizeEmail(u.email);
   const verified = provider === 'google' ? u.email_verified === true || u.email_verified === 'true' : u.verified === true;
   if (email === null || !verified) return { email: null, trust: 'none' };
+  if (provider === 'google' && u.hd === undefined && emailCanon(email)?.endsWith('@gmail.com') === true) return { email, trust: 'auth' };
   return { email, trust: 'asserted' };
 }
 
-/** Code -> provider identity { id, email, trust } (token exchange + user endpoint). `fetchFn` for tests. */
-export async function oauthIdentity(cfg: ProviderConfig, provider: OAuthProvider, code: string, verifier: string, redirectUri: string, fetchFn: typeof fetch = fetch): Promise<ProviderIdentity | null> {
+/** What Google's id_token must carry back: the nonce this start sent (kept in the state cookie), and the clock (seconds, for tests). */
+export interface IdTokenCheck {
+  nonce?: string;
+  now?: number;
+}
+
+/** Google's issuer, with or without the scheme (OIDC Core 3.1.3.7 step 2; Google documents both). */
+const GOOGLE_ISSUERS: readonly string[] = ['https://accounts.google.com', 'accounts.google.com'];
+const ID_TOKEN_MAX = 16 * 1024;
+
+/**
+ * The claims of Google's id_token, or the reason it was refused (a closed set of words: nothing of
+ * the token reaches a log line). It came straight from Google's token endpoint over TLS, in answer
+ * to our own client secret and PKCE verifier, so the TLS check stands in for the signature (OIDC
+ * Core 3.1.3.7 step 6) and none is verified here. What is checked is who it is for and that it is
+ * ours and live: `iss` is Google's, `aud` is our client id (and `azp`, when present or when there are
+ * several audiences, is too), `exp` is ahead and `nonce` is the one this start sent.
+ */
+function readIdToken(raw: unknown, clientId: string, nonce: string | undefined, now: number): { claims: Record<string, unknown> } | { refused: 'missing' | 'malformed' | 'iss' | 'aud' | 'exp' | 'nonce' } {
+  if (typeof raw !== 'string' || raw.length === 0) return { refused: 'missing' };
+  const parts = raw.split('.');
+  if (raw.length > ID_TOKEN_MAX || parts.length !== 3 || parts[1].length === 0) return { refused: 'malformed' };
+  const bytes = base64urlDecode(parts[1]);
+  let claims: unknown;
+  try {
+    claims = bytes === null ? null : JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return { refused: 'malformed' };
+  }
+  if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) return { refused: 'malformed' };
+  const t = claims as Record<string, unknown>;
+  if (typeof t.iss !== 'string' || !GOOGLE_ISSUERS.includes(t.iss)) return { refused: 'iss' };
+  const aud = t.aud;
+  if (!(aud === clientId || (Array.isArray(aud) && aud.includes(clientId) && (aud.length === 1 || t.azp === clientId)))) return { refused: 'aud' };
+  if (t.azp !== undefined && t.azp !== clientId) return { refused: 'aud' };
+  if (typeof t.exp !== 'number' || !Number.isFinite(t.exp) || t.exp <= now) return { refused: 'exp' };
+  if (nonce === undefined || nonce.length === 0 || t.nonce !== nonce) return { refused: 'nonce' };
+  return { claims: t };
+}
+
+/** Google's answer to the code as an identity: its id_token read (readIdToken), the id and the address only, no name. */
+function googleIdentity(tok: unknown, cfg: ProviderConfig, check: IdTokenCheck): ProviderIdentity | null {
+  const r = readIdToken(tok !== null && typeof tok === 'object' ? (tok as { id_token?: unknown }).id_token : undefined, cfg.clientId, check.nonce, check.now ?? nowSeconds());
+  if ('refused' in r) {
+    console.warn(`oauth google: id_token ${r.refused}`);
+    return null;
+  }
+  const u = r.claims;
+  const id = u.sub;
+  if (typeof id !== 'string' || id.length === 0 || id.length > 128) return null;
+  // sub, email, email_verified and hd only: no other claim of the id_token is read (not its name, picture or auth_time).
+  return { id, ...providerTrust('google', u) };
+}
+
+/**
+ * Code -> provider identity { id, email, trust } (token exchange, then Google's id_token or Discord's
+ * user endpoint). `fetchFn` for tests. `check.nonce`: Google's, from the state cookie; without it a
+ * Google answer is refused.
+ */
+export async function oauthIdentity(cfg: ProviderConfig, provider: OAuthProvider, code: string, verifier: string, redirectUri: string, fetchFn: typeof fetch = fetch, check: IdTokenCheck = {}): Promise<ProviderIdentity | null> {
   const form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: verifier, client_id: cfg.clientId, client_secret: cfg.clientSecret });
   const tr = await fetchFn(cfg.token, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: form });
   if (!tr.ok) {
@@ -1406,13 +1487,14 @@ export async function oauthIdentity(cfg: ProviderConfig, provider: OAuthProvider
     console.warn(`oauth ${provider}: token ${tr.status}`);
     return null;
   }
+  if (provider === 'google') return googleIdentity(await tr.json().catch(() => null), cfg, check);
   const tok = (await tr.json()) as { access_token?: unknown };
-  if (typeof tok.access_token !== 'string') return null;
+  if (typeof tok.access_token !== 'string' || cfg.user === null) return null;
   const ur = await fetchFn(cfg.user, { headers: { authorization: 'Bearer ' + tok.access_token, accept: 'application/json' } });
   if (!ur.ok) return null;
   const u = (await ur.json()) as Record<string, unknown>;
-  // The id and the address only: no field of a name is read (given_name, name, global_name, username).
-  const id = provider === 'google' ? u.sub : u.id;
+  // The id and the address only: no field of a name is read (global_name, username).
+  const id = u.id;
   if (typeof id !== 'string' || id.length === 0 || id.length > 128) return null;
   return { id, ...providerTrust(provider, u) };
 }
@@ -1428,7 +1510,8 @@ function oauthStateUnused(c: RouteContext, st: OAuthState): Promise<boolean> {
 
 /**
  * The provider's redirect back (§3.8). A re-authentication moves this browser's proof to now (and
- * with then=link:<p> goes straight on to linking <p>); a link adds the identity to the account; an
+ * with then=link:<p> goes straight on to linking <p>), at level 1 at most (a press on the provider's
+ * page: Google cannot show more); a link adds the identity to the account; an
  * identity an account owns signs in (and with pend=1 links the identity pending in this browser);
  * an identity nobody owns creates NOTHING (I3): the pending cookie holds it, and /#auth=confirm
  * asks "do you already have a Turbogol account?" (POST /api/auth/pending, /pending/create). With
@@ -1451,8 +1534,10 @@ async function oauthCallback(c: RouteContext, provider: OAuthProvider, url: URL)
   }
   const code = url.searchParams.get('code');
   if (!ours || !code || code.length > 2048) return fail('bad_state');
+  // A Google start made before this build (a deploy in the middle of a sign-in) has no nonce to check: refused before the code goes to Google.
+  if (provider === 'google' && !st.nc) return fail('bad_state');
   if (!(await oauthStateUnused(c, st))) return fail('bad_state');
-  const ident = await oauthIdentity(cfg, provider, code, st.v, `${publicOrigin(c.env, c.request)}/api/auth/oauth/${provider}/callback`);
+  const ident = await oauthIdentity(cfg, provider, code, st.v, `${publicOrigin(c.env, c.request)}/api/auth/oauth/${provider}/callback`, undefined, { nonce: st.nc });
   if (!ident) return fail('provider_error');
   const found: ProviderEmail = { email: ident.email, trust: ident.trust };
   const refreshTok = newRefreshToken();
