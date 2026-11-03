@@ -206,7 +206,7 @@ its first deploy (local dev works with any of them):
 | `wrangler.jsonc` -> `kv_namespaces[0].id` | the id printed by `npx wrangler kv namespace create FLAGS` |
 | `wrangler.jsonc` -> `vars.TURNSTILE_SITEKEY` | the Turnstile **sitekey** (dashboard -> Turnstile -> add a widget for the deployed hostname); public |
 | `wrangler.jsonc` -> `vars.VITE_ORIGINS` | `https://<your-host>` (comma-separated if several): the origins allowed for CORS / WebSocket `Origin`; empty = any |
-| secrets `GOOGLE_CLIENT_ID` / `_SECRET`, `DISCORD_CLIENT_ID` / `_SECRET` | optional OAuth sign-in (docs/online/ACCOUNTS.md) |
+| secrets `GOOGLE_CLIENT_ID` / `_SECRET`, `DISCORD_CLIENT_ID` / `_SECRET` | optional OAuth sign-in, a provider is on only with both of its pair; Google asks only for `openid email` and is read from its `id_token` (docs/online/ACCOUNTS.md, "Activar Google") |
 | secret `JWT_SECRET` | a long random string (`openssl rand -hex 32`) |
 | secret `TURNSTILE_SECRET` | the Turnstile **secret** of the same widget; required: without it `POST /api/guest` and every route that asks for a token (the sign-ins, the email sign-up, forgot, the TV start) answer 503 outside local dev |
 | secrets `TURN_KEY_ID`, `TURN_KEY_TOKEN` | optional (phase 2): a Realtime TURN key (dashboard -> Realtime -> TURN); without them P2P pairs that need a relay cannot connect (STUN only) |
