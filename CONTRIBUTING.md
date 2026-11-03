@@ -122,6 +122,10 @@ constraints every change must keep and the phases you can pick up, is
 - Bots must stay deterministic (seeded `Rng` only, all persistent state in `saveState` /
   `loadState`), allocation-free in `think()` and within the CPU budget, because P2P peers, the
   server and community nodes all run them and must agree tick by tick.
+- Trigonometry in the tick path comes from `src/ai/detmath.ts`, never from `Math.atan2` /
+  `Math.acos` / `Math.hypot` / `Math.pow`: the spec leaves those approximated, so Chrome, Firefox
+  and Safari may return different bits for the same arguments and one different input byte desyncs
+  a P2P match. `tests/detmath.test.mjs` fails when a bot file calls one.
 - A change in bot behaviour bumps the protocol versions (the plan lists them).
 - Measure against `main` and paste the results in the pull request:
 

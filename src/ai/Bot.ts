@@ -72,6 +72,7 @@ import {
   type BotPhysics,
   type Vec3,
 } from './math';
+import { atan2Det } from './detmath';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -456,8 +457,10 @@ export function firstReachable(
     const dist = Math.sqrt(dx * dx + dy * dy);
     let penalty = 0;
     if (dist > 1e-3) {
-      const cosA = clamp((dx * nfx + dy * nfy) / dist, -1, 1);
-      const ang = Math.acos(cosA);
+      // Bearing from the car's forward axis to the entry, from the (dot, cross) pair instead of
+      // acos(dot / dist): acos loses half the digits next to +-1 — where a straight run at the ball
+      // sits — and the pair is built only from operations the spec rounds exactly.
+      const ang = Math.abs(atan2Det(dx * nfy - dy * nfx, dx * nfx + dy * nfy));
       if (ang > 0.2) penalty = Math.min(ang * rTurn, 2500);
     }
     const need = Math.max(0, dist - CONTACT_DIST) + penalty;
@@ -502,9 +505,9 @@ export function aimInAir(fwd: Vec3, right: Vec3, up: Vec3, angVel: Vec3, dir: Ve
   const f = v3dot(dir, fwd);
   const r = v3dot(dir, right);
   const u = v3dot(dir, up);
-  const pitchErr = Math.atan2(u, f);
-  const yawErr = Math.atan2(r, f);
-  const rollErr = Math.atan2(right[2], up[2]);
+  const pitchErr = atan2Det(u, f);
+  const yawErr = atan2Det(r, f);
+  const rollErr = atan2Det(right[2], up[2]);
   v3cross(_tmp, angVel, fwd);
   const pitchRate = v3dot(_tmp, up);
   const yawRate = v3dot(_tmp, right);
@@ -1932,7 +1935,7 @@ export class Bot {
     const right = this.carRight;
     const f = ddx * fwd[0] + ddy * fwd[1] + ddz * fwd[2];
     const r = ddx * right[0] + ddy * right[1] + ddz * right[2];
-    out.steer = Math.abs(f) < 1e-6 && Math.abs(r) < 1e-6 ? 0 : clamp1(TUNING.steerGain * Math.atan2(r, f));
+    out.steer = Math.abs(f) < 1e-6 && Math.abs(r) < 1e-6 ? 0 : clamp1(TUNING.steerGain * atan2Det(r, f));
     out.throttle = 1;
     out.boost = false;
     out.handbrake = false;

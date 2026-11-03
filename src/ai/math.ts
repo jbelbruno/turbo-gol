@@ -8,6 +8,8 @@
  * returns it, so hot loops never allocate. Only `vec3()` allocates (call it at construction time).
  */
 
+import { atan2Det } from './detmath';
+
 export type Vec3 = Float32Array;
 
 const EPS = 1e-6;
@@ -214,7 +216,7 @@ export function angleTo2D(fwd: Vec3, right: Vec3, dir: Vec3): number {
   const f = fwd[0] * dir[0] + fwd[1] * dir[1];
   const r = right[0] * dir[0] + right[1] * dir[1];
   if (Math.abs(f) < EPS && Math.abs(r) < EPS) return 0;
-  return Math.atan2(r, f);
+  return atan2Det(r, f);
 }
 
 /** Same as angleTo2D but for a target point (dir = to - from). */
@@ -224,12 +226,12 @@ export function angleToPoint2D(fwd: Vec3, right: Vec3, from: Vec3, to: Vec3): nu
   const f = fwd[0] * dx + fwd[1] * dy;
   const r = right[0] * dx + right[1] * dy;
   if (Math.abs(f) < EPS && Math.abs(r) < EPS) return 0;
-  return Math.atan2(r, f);
+  return atan2Det(r, f);
 }
 
 /** Heading angle of a direction vector in the ground plane (atan2(y, x)). */
 export function heading2D(v: Vec3): number {
-  return Math.atan2(v[1], v[0]);
+  return atan2Det(v[1], v[0]);
 }
 
 // ---- driving model (RocketSim constants; BotPhysics below for presets) -----------------

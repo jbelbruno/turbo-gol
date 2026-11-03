@@ -26,6 +26,7 @@ red.think(state, outs);                       // outs[i] = controls for slots[i]
 | `Bot.ts`    | `Bot` class (one car), `TeamContext`, difficulty table, tunables, pure helpers (`predictBallAt`, `firstReachable`, `steerToward`, `shotHitPoint`, `aimInAir`) |
 | `Team.ts`   | `BotTeam`: ranks the teammates every tick, assigns roles / kickoff duties through `bot.teamCtx`, `TEAM_TUNING` |
 | `math.ts`   | allocation-free `Float32Array(3)` vector helpers, the car driving model from RocketSim's constants (turn radius / curvature, ground acceleration, jump numbers), the `BotPhysics` profile (`STOCK_BOT_PHYSICS`), seeded `Rng` |
+| `detmath.ts` | `atan2Det`: `atan2` built only from operations the spec rounds exactly, so the tick path gives the same bits on every engine (see [Determinism](#determinism-detmathts)) |
 | `../../tests/bot.test.mjs` | node self-check of one bot with a fake state buffer (no wasm needed): `node --test tests/bot.test.mjs` |
 | `../../tests/bot-team.test.mjs` | node self-check of `BotTeam` (roles, hysteresis, kickoff duties, lane / yield rules, 1-slot equivalence) |
 
@@ -455,6 +456,29 @@ The prediction buffer is refreshed by the game every 4 ticks and its entries are
 refresh tick (`SimStateView.predTick`), so every lookup adds `tickCount - predTick` to its entry
 index (`predAge`); without that offset 3 of every 4 decisions would read a 1–3 tick stale ball
 (up to ~70 uu at shot speed).
+
+## Determinism (detmath.ts)
+
+Every P2P peer runs both `BotTeam`s on the confirmed timeline, so the same state has to produce the
+same 6 input bytes on Chrome, Firefox, Safari, workerd and Node. `+ - * /` and comparisons are
+fixed by the spec to IEEE-754 binary64; `Math.atan2`, `Math.acos`, `Math.hypot`, `Math.pow` and the
+rest of the transcendentals are "implementation-approximated", i.e. 1 ULP of difference between
+engines is conforming — and one different byte desyncs the match.
+
+`detmath.ts` has `atan2Det`: one reflection into the octant, two tangent-addition steps and a
+Taylor series truncated where the next term is below 3e-18. No table, no square root, no `Math` call
+other than the exact `Math.abs`: it tracks `Math.atan2` within 2 ULP and costs nothing.
+`firstReachable` gets its bearing from `atan2(cross, dot)` instead of `acos(dot / dist)` (well
+conditioned at every angle, and it removes the acos entirely); `keeperSpotDist` uses
+`sqrt(x^2 + y^2)` instead of `hypot`.
+
+The one approximated function still on the tick path is that `Math.sqrt` in the distance helpers
+(`v3len`, `dist2D`, …): it is on the same spec list, but its correctly rounded result is unique, so
+an engine can only differ by being wrong — every engine emits the hardware instruction. That is an
+assumption about the engines, kept in one place and written down here rather than assumed away.
+
+`tests/detmath.test.mjs` checks the ULP distance, pins the exact output bits, and fails when any
+file in `src/ai/` calls one of those `Math` functions again.
 
 ## Known gaps
 

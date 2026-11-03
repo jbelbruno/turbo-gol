@@ -43,7 +43,9 @@ export interface BotTeamOptions {
 
 /** Midway between the ball distances of the farthest kickoff spot (the keeper spot) and the next one. */
 function keeperSpotDist(): number {
-  const d = KICKOFF_SPAWNS.map((s) => Math.hypot(s[0], s[1])).sort((a, b) => a - b);
+  // Math.sqrt(x^2 + y^2) instead of Math.hypot: the spec approximates hypot (and engines have
+  // changed its precision), while the square root is correctly rounded everywhere. Same value.
+  const d = KICKOFF_SPAWNS.map((s) => Math.sqrt(s[0] * s[0] + s[1] * s[1])).sort((a, b) => a - b);
   return d.length >= 2 ? (d[d.length - 1] + d[d.length - 2]) / 2 : d.length === 1 ? d[0] : 0;
 }
 
