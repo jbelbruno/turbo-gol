@@ -19,6 +19,7 @@
  */
 import en from './locales/en';
 import es from './locales/es';
+import pt from './locales/pt';
 import { STORAGE_PREFIX } from './brand';
 
 /** A text with plural forms: `other` always, the categories the language uses (Intl.PluralRules) optionally. */
@@ -32,13 +33,20 @@ export type Params = Record<string, string | number>;
 interface Locale {
   /** The language's own name (endonym), shown in the language picker. */
   name: string;
+  /**
+   * The BCP 47 tag its Intl calls and the page's lang attribute use. The key is the lowercase
+   * language code the picker and the saved choice use; the tag adds the region when it matters
+   * (pt-BR speaks Brazilian Portuguese, not the European one).
+   */
+  tag: string;
   messages: Translation;
 }
 
 /** Every shipped language, one line each (a new locale file is registered here). */
 export const LOCALES = {
-  en: { name: 'English', messages: en },
-  es: { name: 'Español', messages: es },
+  en: { name: 'English', tag: 'en', messages: en },
+  es: { name: 'Español', tag: 'es', messages: es },
+  pt: { name: 'Português (Brasil)', tag: 'pt-BR', messages: pt },
 } satisfies Record<string, Locale>;
 
 export type LanguageCode = keyof typeof LOCALES;
@@ -94,7 +102,7 @@ function detect(): LanguageCode {
 const current: LanguageCode = detect();
 if (typeof document !== 'undefined') {
   try {
-    document.documentElement.lang = current;
+    document.documentElement.lang = LOCALES[current].tag;
   } catch {
     /* no root element */
   }
@@ -162,7 +170,7 @@ export function textIn(messages: Translation, locale: string, key: Key, params?:
 
 /** The text for `key` in the current language (English when this language lacks it). */
 export function t(key: Key, params?: Params): string {
-  return textIn(LOCALES[current].messages, current, key, params);
+  return textIn(LOCALES[current].messages, LOCALES[current].tag, key, params);
 }
 
 /** A wait or a ban length, rounded up to whole seconds, minutes or hours: "45 sec", "5 min", "24 hr" ("45 s", "24 h" in Spanish). */
@@ -170,7 +178,7 @@ export function duration(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   const unit = s < 60 ? 'second' : s < 3600 ? 'minute' : 'hour';
   const value = unit === 'second' ? s : unit === 'minute' ? Math.ceil(s / 60) : Math.ceil(s / 3600);
-  return new Intl.NumberFormat(current, { style: 'unit', unit, unitDisplay: 'short' }).format(value);
+  return new Intl.NumberFormat(LOCALES[current].tag, { style: 'unit', unit, unitDisplay: 'short' }).format(value);
 }
 
 /**

@@ -7,6 +7,9 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Portuguese (Brazil): the whole game in `pt` (tag `pt-BR`), picked from the browser's language or
+  in Settings' language list (Gameplay › Interface). It keeps the game's voice (você, no regional slang) and the copy rules
+  (no shop words, no emoji, the formats named 1v1 / 2v2 / 3v3).
 - Replays: stars and your own. A registered account can star a replay (guests see the counts), sort
   the list by the most starred and filter it to "My replays" (the matches its account played, after the
   usual delay). The server keeps who starred, never shows it: only the count. In the player, Esc (or

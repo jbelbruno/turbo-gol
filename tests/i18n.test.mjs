@@ -25,7 +25,9 @@ test('pickLanguage: saved choice, then the system list (exact tag, then base), t
   assert.equal(I.pickLanguage('xx', ['es-AR']), 'es', 'an unknown saved choice is ignored');
   assert.equal(I.pickLanguage(null, ['es-AR']), 'es');
   assert.equal(I.pickLanguage(null, ['fr-FR', 'es']), 'es', 'the first shipped language in the list');
-  assert.equal(I.pickLanguage(null, ['pt-BR']), 'en');
+  assert.equal(I.pickLanguage(null, ['pt-BR']), 'pt', 'Brazilian Portuguese, exact tag');
+  assert.equal(I.pickLanguage(null, ['pt-PT']), 'pt', 'any Portuguese falls back to the shipped one');
+  assert.equal(I.pickLanguage(null, ['pt']), 'pt');
   assert.equal(I.pickLanguage(null, []), 'en');
   assert.equal(I.pickLanguage('ES', ['EN-us']), 'es', 'case-insensitive');
   assert.equal(I.pickLanguage(null, ['ES-ar']), 'es');
@@ -63,8 +65,8 @@ test('a partial translation falls back to English per key', () => {
 const placeholders = (v) => new Set([...(typeof v === 'string' ? [v] : Object.values(v)).join(' ').matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
 
 test('every locale: placeholders exist in English, plural forms are valid for the language', () => {
-  for (const [code, { messages }] of Object.entries(I.LOCALES)) {
-    const categories = new Intl.PluralRules(code).resolvedOptions().pluralCategories;
+  for (const [code, { messages, tag }] of Object.entries(I.LOCALES)) {
+    const categories = new Intl.PluralRules(tag).resolvedOptions().pluralCategories;
     for (const [key, value] of Object.entries(messages)) {
       assert.ok(key in en, `${code}: unknown key ${key}`);
       const known = placeholders(en[key]);

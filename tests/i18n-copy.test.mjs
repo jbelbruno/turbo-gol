@@ -1,4 +1,4 @@
-// What the game never says, in English or Spanish (the Tablero plan §1.8 "Prohibido"): no shop words
+// What the game never says, in English, Spanish or Portuguese (the Tablero plan §1.8 "Prohibido"): no shop words
 // (cars are never bought, nothing is sold), no emoji in a translated text (icons are the SVG sprite
 // of src/ui/components/icons.ts), modes named only by format (1v1, 2v2, 3v3: no "Pairs", "Tríos",
 // "Mano a mano", no "N cars"), and no raw error codes in front of a player, nor a slot for one.
@@ -12,19 +12,28 @@ import assert from 'node:assert/strict';
 
 const en = (await import('../src/locales/en.ts')).default;
 const es = (await import('../src/locales/es.ts')).default;
+const pt = (await import('../src/locales/pt.ts')).default;
 
 const RULES = {
   // Shop words: buy / sell / store / price / coins / offer (and "gold" as a currency in Spanish).
-  shop: { en: /\b(?:buy|buying|bought|purchase\w*|shop\w*|store|stores|price\w*|coins?|offers?|sale|sell\w*)\b/i, es: /\b(?:compr\w*|tienda\w*|precio\w*|monedas?|ofertas?|rebaja\w*|vend\w*|dorad[oa]s?)\b/i },
+  shop: {
+    en: /\b(?:buy|buying|bought|purchase\w*|shop\w*|store|stores|price\w*|coins?|offers?|sale|sell\w*)\b/i,
+    es: /\b(?:compr\w*|tienda\w*|precio\w*|monedas?|ofertas?|rebaja\w*|vend\w*|dorad[oa]s?)\b/i,
+    pt: /\b(?:compr\w*|lojas?|pre[çc]os?|moedas?|ofertas?|vend\w*|venda\w*)\b/i,
+  },
   // Pictographic emoji (🔒 🌐 ⚙ ...): a translated text carries words, the icon is drawn.
-  emoji: { en: /\p{Extended_Pictographic}/u, es: /\p{Extended_Pictographic}/u },
+  emoji: { en: /\p{Extended_Pictographic}/u, es: /\p{Extended_Pictographic}/u, pt: /\p{Extended_Pictographic}/u },
   // Modes by format only.
-  modeNames: { en: /\b(?:one-on-one|pairs|trios)\b|\{count\} cars?\b|\b\d+ cars\b/i, es: /\b(?:mano a mano|parejas|tr[ií]os)\b|\{count\} autos?\b|\b\d+ autos\b/i },
+  modeNames: {
+    en: /\b(?:one-on-one|pairs|trios)\b|\{count\} cars?\b|\b\d+ cars\b/i,
+    es: /\b(?:mano a mano|parejas|tr[ií]os)\b|\{count\} autos?\b|\b\d+ autos\b/i,
+    pt: /\b(?:um contra um|duplas?|trios?)\b|\{count\} carros?\b|\b\d+ carros\b/i,
+  },
   // Raw codes: an HTTP status or a close code in brackets, 1006 anywhere.
-  rawCodes: { en: /\(\d{3,4}\b|\b1006\b/, es: /\(\d{3,4}\b|\b1006\b/ },
+  rawCodes: { en: /\(\d{3,4}\b|\b1006\b/, es: /\(\d{3,4}\b|\b1006\b/, pt: /\(\d{3,4}\b|\b1006\b/ },
   // ...nor a slot one would fill (plan PR 12): the HTTP status, a close code and its reason, a
   // server's raw reason go to the console and F4's panel; src/net/outcome.ts says what is left to do.
-  codeSlots: { en: /\{(?:status|detail|reason)\}/, es: /\{(?:status|detail|reason)\}/ },
+  codeSlots: { en: /\{(?:status|detail|reason)\}/, es: /\{(?:status|detail|reason)\}/, pt: /\{(?:status|detail|reason)\}/ },
 };
 
 /** `${lang}:${key}:${rule}` -> the plan PR that rewrites the text. Only ever shrinks. */
@@ -34,13 +43,13 @@ const KNOWN = {
 // The owner's own words, kept as drawn (plan PR 8, the Garage's PUNTOS DE SERVIDOR card): "Nunca se
 // venden" (never sold) trips the shop rule's vend\w* while saying what the rule is for. One key and
 // one rule each, never a pattern; a text that no longer trips it fails below (delete its line).
-const ALLOWED = new Set(['es:points.only:shop']);
+const ALLOWED = new Set(['es:points.only:shop', 'pt:points.only:shop']);
 
 const values = (v) => (typeof v === 'string' ? [v] : Object.values(v));
 
 function offenders() {
   const out = new Set();
-  for (const [lang, msgs] of [['en', en], ['es', es]]) {
+  for (const [lang, msgs] of [['en', en], ['es', es], ['pt', pt]]) {
     for (const [key, v] of Object.entries(msgs)) {
       for (const [rule, re] of Object.entries(RULES)) {
         if (values(v).some((text) => re[lang].test(text))) out.add(`${lang}:${key}:${rule}`);
@@ -53,7 +62,7 @@ function offenders() {
 test('no shop words, emoji, mode names or raw codes in a new text', () => {
   const found = offenders();
   const fresh = [...found].filter((k) => !(k in KNOWN) && !ALLOWED.has(k));
-  assert.deepEqual(fresh, [], 'a text breaks a copy rule (en.ts / es.ts)');
+  assert.deepEqual(fresh, [], 'a text breaks a copy rule (en.ts / es.ts / pt.ts)');
 });
 
 test('the known offenders are still offenders (delete a line once its PR rewrote the text)', () => {
@@ -65,7 +74,9 @@ test('the known offenders are still offenders (delete a line once its PR rewrote
 test('the rules catch what they are for', () => {
   assert.ok(RULES.shop.es.test('Compra este auto en la tienda'));
   assert.ok(RULES.shop.en.test('Buy coins'));
+  assert.ok(RULES.shop.pt.test('Compre este carro na loja'));
   assert.ok(!RULES.shop.es.test('Las contraseñas no coinciden'));
+  assert.ok(!RULES.shop.pt.test('As senhas não coincidem'));
   assert.ok(!RULES.shop.en.test('Restored your settings'));
   assert.ok(RULES.emoji.en.test('🔒 Account'));
   assert.ok(!RULES.emoji.en.test('SIGN IN · 1v1 › 2v2'));
