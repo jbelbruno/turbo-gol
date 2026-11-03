@@ -272,9 +272,11 @@ export function providersText(list: readonly OAuthProvider[], or: string): strin
 /**
  * A browser inside another app (Discord, Instagram, Facebook, TikTok, Line): Google refuses to sign
  * in there (disallowed_useragent), so the menus hide its button and say to open the page in a browser.
+ * Instagram and TikTok write their name and version with a space or an underscore ("Instagram 312.0.0",
+ * "musical_ly_32.5"), the others with a slash ("FBAN/FBIOS", "Line/13.5", "Discord/0.0.3").
  */
 export function inAppBrowser(userAgent: string): boolean {
-  return /\b(?:Discord|Instagram|FBAN|FBAV|FB_IAB|TikTok|musical_ly|BytedanceWebview|Line)\//i.test(userAgent);
+  return /\b(?:Discord|FBAN|FBAV|FB_IAB|BytedanceWebview|Line)\/|\b(?:Instagram|TikTok)[ /]|\bmusical_ly[_/ ]/i.test(userAgent);
 }
 
 // ---- the in-game name a new account starts with (the design's §3.1, §5.1) ----------------------------
