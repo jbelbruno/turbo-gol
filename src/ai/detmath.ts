@@ -16,8 +16,9 @@
  * dist2D, ...). Math.sqrt is on the same "implementation-approximated" list, but unlike atan2 the
  * correctly rounded result is unique (IEEE-754 defines the operation exactly), so an engine can
  * only disagree by returning a result that is wrong, not merely different — every engine emits the
- * hardware instruction. That is an assumption about the engines, not a spec guarantee: the boot
- * canary in the PR description is the detector if it ever stops holding.
+ * hardware instruction. That is an assumption about the engines, not a spec guarantee, so it is
+ * watched: mathFingerprint() at the bottom of this file pins what this engine returns for Math.sqrt
+ * and atan2Det, the test pins the same value, and boot() logs a named error when they differ.
  *
  * Contract: finite inputs (the bots only read the sim buffer, which never holds NaN or Inf — the
  * mutators reject non-finite values). The sign of zero is not reproduced: atan2Det(-0, -1)
@@ -92,3 +93,55 @@ export function atan2Det(y: number, x: number): number {
 // acos(dot / |d|) loses half the digits next to +-1. Any future need for an angle between two
 // directions should use the same (dot, cross) pair; a bare acos(c) would be
 // atan2Det(Math.sqrt((1 - c) * (1 + c)), c) — (1 - c) * (1 + c), never 1 - c * c.
+
+// ---- conformance canary ------------------------------------------------------
+//
+// The one operation the tick path still borrows from the engine is Math.sqrt (the distance helpers
+// in math.ts and a handful of call sites in Bot.ts). Everything else the bots compute is either
+// exact by spec or atan2Det above.
+//
+// This canary pins what the engine must return for the operations we depend on. The values were
+// recorded on V8 (Node 24, Chrome 156) and JavaScriptCore (Safari 18.5), which agree bit for bit on
+// all of them; a third engine that disagrees would desync against everyone else, so the boot check
+// makes it loud and the test makes it a CI failure instead of a mystery disconnect.
+//
+// Regenerate MATH_FINGERPRINT only when the probe list or atan2Det changes on purpose.
+
+/** Inputs for Math.sqrt: normal, subnormal, huge, powers of two, non-squares. */
+const SQRT_PROBES = [
+  0.5, 1, 2, 3, 4, 5, 7, 10, 0.1, 1e-8, 1e8, 1.7976931348623157e308, 5e-324, 1234.5678, 20000, 0.3333333333333333,
+];
+
+/** (y, x) pairs for atan2Det: quadrants, axes, huge and tiny ratios. */
+const ATAN2_PROBES: readonly [number, number][] = [
+  [1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [1, 0], [0, -1], [-1, 0],
+  [0.2, 0.9], [-0.2, 0.9], [3, 0.001], [0.001, 3], [1e-8, 1e8], [1e8, 1e-8], [0.5773502691896258, 1], [2.414213562373095, 1],
+];
+
+const bitsOf = new Float64Array(1);
+const bytesOf = new Uint8Array(bitsOf.buffer);
+
+function fnv32(h: number, value: number): number {
+  bitsOf[0] = value;
+  for (let i = 0; i < 8; i++) h = Math.imul(h ^ bytesOf[i], 16777619);
+  return h >>> 0;
+}
+
+/**
+ * Fingerprint of the engine operations the tick path depends on: Math.sqrt and atan2Det over a
+ * fixed probe set. Two peers with different fingerprints cannot stay in sync.
+ */
+export function mathFingerprint(): number {
+  let h = 0x811c9dc5;
+  for (const v of SQRT_PROBES) h = fnv32(h, Math.sqrt(v));
+  for (const [y, x] of ATAN2_PROBES) h = fnv32(h, atan2Det(y, x));
+  return h >>> 0;
+}
+
+/** mathFingerprint() as recorded on V8 and JavaScriptCore (they agree on every probe). */
+export const MATH_FINGERPRINT = 0xb7b36c97;
+
+/** False when this engine computes one of the operations above differently: online play would desync. */
+export function mathConforms(): boolean {
+  return mathFingerprint() === MATH_FINGERPRINT;
+}

@@ -475,10 +475,15 @@ conditioned at every angle, and it removes the acos entirely); `keeperSpotDist` 
 The one approximated function still on the tick path is that `Math.sqrt` in the distance helpers
 (`v3len`, `dist2D`, …): it is on the same spec list, but its correctly rounded result is unique, so
 an engine can only differ by being wrong — every engine emits the hardware instruction. That is an
-assumption about the engines, kept in one place and written down here rather than assumed away.
+assumption about the engines, kept in one place and written down here rather than assumed away, and
+it is watched: `mathFingerprint()` (16 `Math.sqrt` values + 16 `atan2Det` values, FNV-1a 32) is
+pinned in the module, checked by the test, and recomputed at boot, where a mismatch logs a named
+error instead of letting the peer desync. Node 24 / Chrome 156 (V8) and Safari 18.5
+(JavaScriptCore) give the same fingerprint.
 
 `tests/detmath.test.mjs` checks the ULP distance, pins the exact output bits, and fails when any
-file in `src/ai/` calls one of those `Math` functions again.
+file in `src/ai/` calls one of those `Math` functions again (or calls `Math.sqrt` outside the
+canary).
 
 ## Known gaps
 

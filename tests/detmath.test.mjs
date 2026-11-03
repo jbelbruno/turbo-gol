@@ -117,10 +117,22 @@ test('the bot sources do not call implementation-approximated Math functions', a
   assert.deepEqual(bad, [], `deterministic replacement missing (see src/ai/detmath.ts):\n${bad.join('\n')}`);
 });
 
-test('detmath itself only uses operations the spec rounds exactly', async () => {
+test('detmath calls Math.sqrt exactly once, and only to fingerprint it', async () => {
   const src = code(await readFile(new URL('../src/ai/detmath.ts', import.meta.url), 'utf8'));
   const used = [...new Set([...src.matchAll(/\bMath\.([a-zA-Z0-9_]+)/g)].map((m) => m[1]))];
-  const allowed = new Set(['abs', 'PI']);
+  const allowed = new Set(['abs', 'imul', 'PI', 'sqrt']); // abs/imul exact, sqrt only in the canary
   const banned = used.filter((name) => !allowed.has(name));
   assert.deepEqual(banned, [], `Math.${banned.join(', Math.')} is implementation-approximated`);
+  // Math.sqrt is the one approximated function left on the tick path, and it appears only in the
+  // canary that fingerprints it: the arithmetic here uses none.
+  assert.equal((src.match(/\bMath\.sqrt\b/g) ?? []).length, 1, 'Math.sqrt outside the canary');
+  const canary = src.indexOf('function mathFingerprint');
+  const sqrtAt = src.indexOf('Math.sqrt');
+  assert.ok(canary > 0 && sqrtAt > canary, 'Math.sqrt is not inside mathFingerprint');
+});
+
+test('the conformance canary matches the pinned fingerprint of this engine', async () => {
+  const { mathFingerprint, mathConforms, MATH_FINGERPRINT } = await import(new URL('../src/ai/detmath.ts', import.meta.url).href);
+  assert.equal(mathFingerprint(), MATH_FINGERPRINT, 'this engine computes Math.sqrt or atan2Det differently');
+  assert.equal(mathConforms(), true);
 });

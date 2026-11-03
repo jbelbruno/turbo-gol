@@ -25,6 +25,7 @@ import { loadSettings } from './settings';
 import { buildArenaMesh } from './sim/arenaMesh';
 import { RocketSim } from './sim/RocketSimBridge';
 import { CarPreset, TICK_RATE, Team } from './sim/types';
+import { MATH_FINGERPRINT, mathConforms, mathFingerprint } from './ai/detmath';
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -68,6 +69,16 @@ function showError(title: string, hint: string, err: unknown): void {
 async function boot(): Promise<void> {
   const canvas = byId<HTMLCanvasElement>('game-canvas');
   const hudContainer = byId<HTMLDivElement>('hud');
+  // The bots still borrow Math.sqrt from the engine (the distance helpers), and every peer runs
+  // them: an engine that rounds it differently cannot stay in sync with the others. The fingerprint
+  // is pinned by tests/detmath.test.mjs on the engines CI runs; this makes a mismatch loud on the
+  // engines it does not run (and in a bug report's console) instead of a mystery disconnect.
+  if (!mathConforms()) {
+    console.error(
+      `[turbogol] math fingerprint 0x${mathFingerprint().toString(16)} != 0x${MATH_FINGERPRINT.toString(16)}: ` +
+        'this engine computes Math.sqrt differently, so online matches against other engines would desync',
+    );
+  }
   // The tier (Super low too: everyone's pick, Settings > Graphics' switch), the scene's pace, the
   // resolution scale, the theme and the last mode.
   const prefs = loadPrefs();
