@@ -1530,9 +1530,14 @@ export class Game implements P2PGameHooks {
         else game.startWaitTraining(FREEPLAY_ID);
       },
       setQueuePrefer: (mode) => {
-        // Only a Casual search carries it; the hub updates the waiter in place (no restart).
-        if (net !== null && game.searchReq?.kind === 'casual') net.queuePrefer = mode;
-        if (game.searchReq?.kind === 'casual') game.searchReq.modes = [mode];
+        // Only a Casual search carries it; the hub updates the waiter in place (no restart). Its
+        // playlist follows (the body's `modes`, the panel's and the band's format).
+        if (game.searchReq?.kind !== 'casual') return;
+        game.searchReq.modes = [mode];
+        if (net !== null) {
+          net.queueModes = [mode];
+          net.queuePrefer = mode;
+        }
       },
       playLobbyMatch: (r) => game.playLobbyMatch(r),
       rejoinable: () => (game.online !== null ? game.online.rejoinable : null),
