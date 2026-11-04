@@ -174,7 +174,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, error, flag, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, error, flag, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
 import type { GameModeId, LockKind, NodesMode, PublicQueueKind, QueueKind, RoomKind } from './env';
 import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
 import type { Arrival, PlanGroup } from './queuePlan';
@@ -1117,7 +1117,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules exist only in custom P2P lobbies');
     const modes: GameModeId[] | null = isModeList(body.modes) ? body.modes.slice() : isMode(body.mode) ? [body.mode] : null;
     if (modes === null) return error(400, 'bad_request');
-    if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', "kind must be 'server' | 'ranked'");
+    if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', BAD_KIND_TEXT);
     const playerId = body.playerId;
     // Casual is 'server'; the 'p2p' of an older caller is read as it (there is no P2P queue any more).
     const kind = publicQueueKind(body.kind);

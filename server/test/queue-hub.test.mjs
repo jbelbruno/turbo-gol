@@ -83,6 +83,15 @@ test('Worker: the next POST of a search long-polls (/poll after /join); a second
   assert.match(ra.json.wsUrl, /^wss:\/\/turbo-gol\.com\/ws\//);
 });
 
+test('Worker and hub: an unknown kind is 400 bad_kind, and its message names every kind still read (p2p too)', async () => {
+  const w = await makeHubWorld();
+  const message = "kind must be 'server' | 'ranked' ('p2p', from an older page, is read as 'server')";
+  const r = await w.queue(await accountToken(pid()), { api: 2, mode: '2v2', kind: 'lobby' });
+  assert.deepEqual([r.status, r.json.error, r.json.message], [400, 'bad_kind', message]);
+  const h = await w.join(pid(), { kind: 'lobby' });
+  assert.deepEqual([h.status, h.json.error, h.json.message], [400, 'bad_kind', message]);
+});
+
 test('Worker: home is the pick (a REGIONS id) or the continent; anything else is SA; a bad pick is 400 bad_region', async () => {
   const w = await makeHubWorld();
   const t = await accountToken(pid());

@@ -96,7 +96,7 @@
  * call too): the control plane's kill switch. server/README.md lists which flag stops what.
  */
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
@@ -467,7 +467,7 @@ async function queue(request: Request, env: Env): Promise<Response> {
   if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules exist only in custom P2P lobbies, never in the casual or ranked queues');
   const modes: GameModeId[] | null = body && isModeList(body.modes) ? body.modes : body && isMode(body.mode) ? [body.mode] : null;
   if (!body || modes === null) return error(400, 'bad_mode', "mode must be '1v1' | '2v2' | '3v3' (or modes: a list of them)");
-  if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', "kind must be 'server' | 'ranked'");
+  if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', BAD_KIND_TEXT);
   // 'p2p' (an older caller) is Casual: there is no P2P queue any more, so its p2pProtocol does not matter.
   const kind = publicQueueKind(body.kind);
   if (body.region !== undefined && !isRegion(body.region)) return error(400, 'bad_region');

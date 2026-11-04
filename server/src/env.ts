@@ -384,6 +384,9 @@ export type RoomKind = 'p2p' | 'server';
 /** A matchmaker lock: one of the Worker's own rooms, or a match on a community node (NodeRegistryDO). */
 export type LockKind = RoomKind | 'node';
 
+/** The 400 bad_kind text of POST /api/queue and the hub's /join: every kind still read, 'p2p' included. */
+export const BAD_KIND_TEXT = "kind must be 'server' | 'ranked' ('p2p', from an older page, is read as 'server')";
+
 export function isQueueKind(v: unknown): v is QueueKind {
   return v === 'p2p' || v === 'server' || v === 'ranked';
 }
