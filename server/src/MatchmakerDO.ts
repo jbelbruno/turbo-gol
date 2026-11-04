@@ -2484,8 +2484,9 @@ export class MatchmakerDO extends DurableObject<Env> {
    * await in between: concurrent formations never pass a cap together); NoRoom when the Worker's
    * own servers are off (do_disabled: never a MatchDO, whether the nodes were asked or are not on
    * for the group), when a cap is reached, or when one of the humans left meanwhile. The results
-   * carry the hub's extras (mode, host, humans). The bots' level goes with the match (botLevelOf:
-   * Casual's from the KV flag bot_level, ranked none), read once, after the cap's slot is taken.
+   * carry the hub's extras (mode, host, humans). The bots' level goes with the match (botLevelOf;
+   * ranked none), read once per formation: before the first node ask when the nodes are on for
+   * the group, else past the cap's check and reservation.
    */
   private async formMatch(mode: GameModeId, humans: readonly HumanEntry[], now: number, opts: FormOptions = {}): Promise<FormedMatch> {
     // A MatchDO and a community node run the standard physics only (/custom never sends rules here).
