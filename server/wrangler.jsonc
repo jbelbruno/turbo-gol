@@ -120,6 +120,11 @@
     // once the texts are final; a new value asks every player to accept again. To try it locally,
     // set TERMS_VERSION in your own .dev.vars (or wrangler dev --var TERMS_VERSION:test-1).
     "TERMS_VERSION": "",
+    // Sign-in PR 9 (§3.10): the day the username-only sign-in closes, an ISO date (accountStore.ts
+    // legacyDateOf reads it as that day at 12:00 UTC, 09:00 in Argentina). The cutoff is the later of this
+    // date and 30 days after the Worker first sees the var, so a late deploy moves it by itself. Absent =
+    // no cutoff ('none'). The owner chose 2026-12-07 on 2026-11-03.
+    "LEGACY_PASSWORD_UNTIL": "2026-12-07",
     // Account deletion (sign-in PR 12): the days POST /api/me/delete leaves to call it off before the
     // daily alarm purges the account (env.ts deleteGraceMs; 14, the owner's answer, from 1 to 60).
     "DELETE_GRACE": 14,
