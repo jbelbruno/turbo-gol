@@ -189,7 +189,9 @@ The branch changes code that community servers run, so a deploy needs these step
 5. **Stale pages.** A page loaded before the deploy is told to reload when it joins a P2P room
    (there is no P2P queue any more). If an old page joins an experimental lobby, it fails at
    the room's welcome and the others start with a bot in its slot. Server matches, ranked and
-   community servers keep working for old pages until they reload.
+   community servers kept working for old pages until they reloaded; since the modes redesign
+   (2026-11-04) a page from before it gets 426 `reload_required` on its search (an account) and
+   on its lobby create or join, and 403 `account_required` on a guest's search.
 
 What only a person can check: a real gamepad and TV keyboard in the editor, a real touch screen, and
 `bot-bench --preset` plus `#diag` on the Mali-G31 TV box with the extreme presets.

@@ -11,7 +11,7 @@ Estructura:
 Inicio ── JUGAR ── Casual            (cuenta; todos los formatos juntos, región; siempre en
       │        │                       servidor)
       │        ├─ Competitivo         (solo cuentas: rango por playlist, clasificación, bloqueo)
-      │        ├─ Partidas personalizadas ── lista pública por región, unirse por código,
+      │        ├─ Partidas personalizadas ── lista pública (tu región primero), unirse por código,
       │        │                             crear sala ── Sala (equipos, anfitrión, iniciar)
       │        └─ Amistoso            (offline contra la IA)
       ├─ ENTRENAMIENTO  (Práctica libre + 9 packs: Definición / Atajadas / Aéreos × Principiante / Intermedio / Experto)
