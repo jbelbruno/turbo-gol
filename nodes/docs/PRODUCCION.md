@@ -301,7 +301,7 @@ las releases; sin `NODE_TRUSTED_OPERATORS`, nadie crea tokens (403 `not_trusted`
     403 `not_trusted` para una cuenta que no está en `NODE_TRUSTED_OPERATORS`; el DO lo vuelve a
     comprobar. La respuesta trae la línea de instalación de Linux.
   - Una cuenta de confianza tiene como mucho `NODE_TRUSTED_MAX_NODES` nodos (una var de
-    `wrangler.jsonc`, hoy 4; acotada en código de 2 a 8, y 2 si falta: `trustedNodeCap`,
+    `wrangler.jsonc`, hoy 6; acotada en código de 2 a 8, y 2 si falta: `trustedNodeCap`,
     `control-plane/registry.ts`). Un nodo retirado no ocupa lugar, y uno baneado tampoco para la
     cuenta del proyecto (para la comunidad sí); al salir de su baneo vuelve a ocupar uno, así que
     con el tope lleno sigue baneado (409 `too_many_nodes`). Con el tope lleno, `POST /nodes/tokens`
@@ -451,7 +451,7 @@ aviso.
   contraseña y al menos dos formas de entrar (no se puede desvincular por debajo de eso) y no se
   puede borrar. Un `ALERT` por cada inicio de sesión y cada confirmación con contraseña, con el
   método y el país (nunca la IP ni el correo), otro por cada token y cada registro (P24), y un
-  tope de `NODE_TRUSTED_MAX_NODES` nodos (4) para esa cuenta (P20).
+  tope de `NODE_TRUSTED_MAX_NODES` nodos (6) para esa cuenta (P20).
 - **Un solo DO para todo.** Quien juega en un nodo conoce el id de la partida y el del nodo. Sin
   topes, subidas de replays o conexiones sin autenticar pueden trabar el DO, y con 60 s sin
   heartbeats se anulan partidas en curso (P19, P20).
