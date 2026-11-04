@@ -3,11 +3,13 @@
 //   API=http://127.0.0.1:8787 node server/test/hardening.mjs
 //   WAIT_UNUSED=1 ...        also waits ~100 s for the 'unused room' alarm (a room nobody joins)
 //
-// guest -> queue (bot fill) -> WebSocket: Welcome roster has no playerId -> ping flood closes the
+// Casual is for accounts since the modes redesign: two dev accounts (POST /api/dev/signin, wrangler
+// dev with --var DEV_AUTH:1) queue together and form a 2v2 at once.
+// two accounts -> queue (a pair forms at once) -> WebSocket: Welcome roster has no playerId -> ping flood closes the
 // socket with 1008 'rate' -> rejoin replaces the socket (old one closed 4000 'replaced', the new one
 // keeps getting snapshots) -> /api/rejoin per-player rate limit (429) -> /api/guest per-IP rate
-// limit (429) -> [WAIT_UNUSED] a second guest's room that is never joined is gone after 90 s and
-// its lock is released (queue again -> not 409). Exit 0 = pass.
+// limit (429) -> [WAIT_UNUSED] a room nobody joins is gone after 90 s and its lock is released
+// (queue again -> not 409). Exit 0 = pass, 2 = no dev accounts.
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
 
@@ -56,9 +58,20 @@ async function api(path, body, token) {
   return { status: res.status, json, text };
 }
 
-async function queueUntilMatched(session, mode = '1v1') {
+/** A dev account's session (wrangler dev with DEV_AUTH=1), or null. */
+async function devSession(name) {
+  const r = await api('/api/dev/signin', { name });
+  return r.status === 200 && typeof r.json?.session === 'string' ? r.json.session : null;
+}
+
+/** `session` and `partner` queue Casual together (the pair forms at once); resolves `session`'s match. */
+async function queueUntilMatched(session, partner, mode = '2v2') {
+  const body = { api: 2, mode };
+  const first = await api('/api/queue', body, session);
+  if (first.status !== 200 || first.json.status === 'matched') return first;
+  await api('/api/queue', body, partner);
   for (let attempt = 0; attempt < 4; attempt++) {
-    const q = await api('/api/queue', { mode }, session);
+    const q = await api('/api/queue', body, session);
     if (q.status !== 200) return q;
     if (q.json.status === 'matched') return q;
   }
@@ -97,11 +110,13 @@ function openSocket(wsUrl, ticket) {
 }
 
 // ---- 1. a match ------------------------------------------------------------------------------
-const guest = await api('/api/guest', { name: 'Hardening' });
-check(guest.status === 200, `POST /api/guest -> ${guest.status}`);
-if (!guest.json?.session) process.exit(1);
-const session = guest.json.session;
-const q = await queueUntilMatched(session);
+const session = await devSession('hardening_a');
+const mate = await devSession('hardening_b');
+if (session === null || mate === null) {
+  log('no dev accounts: run wrangler dev with --var DEV_AUTH:1 (Casual is for accounts)');
+  process.exit(2);
+}
+const q = await queueUntilMatched(session, mate);
 check(q.status === 200 && q.json?.status === 'matched', `matched: ${q.text.slice(0, 80)}`);
 if (!q.json?.ticket) process.exit(1);
 const matchId = q.json.matchId;
@@ -175,11 +190,12 @@ c.ws.close(1000, 'done');
 // ---- 6. [optional] a room nobody joins is dropped at 90 s and its lock released ------------------
 if (WAIT_UNUSED) {
   await sleep(61_000); // a fresh guest minute
-  const g2 = await api('/api/guest', { name: 'Ghost' });
-  check(g2.status === 200, `ghost guest -> ${g2.status}`);
-  const q2 = await queueUntilMatched(g2.json.session);
+  const g2 = { json: { session: await devSession('hardening_ghost') } };
+  const ghostMate = await devSession('hardening_ghost_mate');
+  check(g2.json.session !== null && ghostMate !== null, 'ghost accounts');
+  const q2 = await queueUntilMatched(g2.json.session, ghostMate);
   check(q2.json?.status === 'matched', `ghost matched (room ${q2.json?.matchId?.slice(0, 8)}...) and never connects`);
-  const again = await api('/api/queue', { mode: '1v1' }, g2.json.session);
+  const again = await api('/api/queue', { api: 2, mode: '2v2' }, g2.json.session);
   check(again.status === 409, `queue again right away -> ${again.status} (lock held)`);
   log('waiting 100 s for the unused-room alarm...');
   await sleep(100_000);
@@ -187,7 +203,7 @@ if (WAIT_UNUSED) {
   check(rj.status === 404 && rj.json?.error === 'no_match', `rejoin the unused room after 100 s -> ${rj.status} ${rj.json?.error}`);
   // The lock is released: queue again long-polls, so bot-fill may answer 'matched' with a FRESH
   // room. A 409 (stuck lock) or the dead matchId coming back would be the failure.
-  const q3 = await api('/api/queue', { mode: '1v1' }, g2.json.session);
+  const q3 = await api('/api/queue', { api: 2, mode: '2v2' }, g2.json.session);
   const ok = q3.status === 200 && (q3.json?.status === 'waiting' || (q3.json?.status === 'matched' && q3.json.matchId !== q2.json.matchId));
   check(ok, `queue again -> ${q3.status} ${q3.json?.status ?? q3.json?.error} (lock released, no 409, not the dead room)`);
   await api('/api/leave', {}, g2.json.session);

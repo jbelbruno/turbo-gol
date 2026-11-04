@@ -227,13 +227,13 @@ check(tr3.status === 200 && Object.keys(tr3.json.records ?? { x: 1 }).length ===
 const guest = await api('/api/guest', { body: { name: 'SmokeGuest' } });
 const gtr = await api('/api/me/training', { body: { records: {} }, token: guest.json.session });
 check(gtr.status === 403 && gtr.json.error === 'account_required', 'a guest has no training records on the server', gtr.status);
-const gq = await api('/api/queue', { body: { modes: ['1v1'], kind: 'ranked', region }, token: guest.json.session });
+const gq = await api('/api/queue', { body: { api: 2, modes: ['1v1'], kind: 'ranked', region }, token: guest.json.session });
 check(gq.status === 403 && gq.json.error === 'account_required', 'a guest cannot queue ranked', gq.status);
-const qA = api('/api/queue', { body: { modes: ['1v1', '2v2'], kind: 'ranked', region }, token: tokA });
+const qA = api('/api/queue', { body: { api: 2, modes: ['1v1', '2v2'], kind: 'ranked', region }, token: tokA });
 await new Promise((r) => setTimeout(r, 400));
-const qB = await api('/api/queue', { body: { modes: ['1v1'], kind: 'ranked', region }, token: tokB });
+const qB = await api('/api/queue', { body: { api: 2, modes: ['1v1'], kind: 'ranked', region }, token: tokB });
 let rA = await qA;
-if (rA.json?.status === 'waiting') rA = await api('/api/queue', { body: { modes: ['1v1', '2v2'], kind: 'ranked', region }, token: tokA });
+if (rA.json?.status === 'waiting') rA = await api('/api/queue', { body: { api: 2, modes: ['1v1', '2v2'], kind: 'ranked', region }, token: tokA });
 check(rA.json?.status === 'matched' && qB.json?.status === 'matched' && rA.json.matchId === qB.json.matchId && rA.json.ranked === true, 'both matched into one ranked match', { a: rA.json?.status, b: qB.json?.status });
 const matchId = rA.json?.matchId;
 
@@ -279,7 +279,7 @@ if (matchId) {
   }
   check(resB.json?.status === 'done' && resB.json.outcome === 'win' && resB.json.mmrAfter > resB.json.mmrBefore, 'B rated: win, MMR up', resB.json);
   check(resA.json?.status === 'done' && resA.json.outcome === 'loss' && resA.json.left === true && resA.json.banUntil > Date.now(), 'A rated: loss as leaver + ranked ban', resA.json);
-  const banned = await api('/api/queue', { body: { modes: ['1v1'], kind: 'ranked', region }, token: tokA });
+  const banned = await api('/api/queue', { body: { api: 2, modes: ['1v1'], kind: 'ranked', region }, token: tokA });
   check(banned.status === 429 && banned.json.error === 'ranked_ban' && banned.json.retryAfterMs > 0, "A's next ranked queue: 429 ranked_ban", banned.status);
   const meA = await api('/api/me', { token: tokA });
   check(meA.json?.ratings?.[0]?.games === 1 && meA.json.rankedBanUntil > Date.now() && meA.json.abandons24h === 1, 'A /api/me shows the game and the ban', meA.json?.ratings?.[0]);
@@ -293,7 +293,7 @@ const board = await api('/api/leaderboard?playlist=1v1', { token: tokB });
 check(board.status === 200 && Array.isArray(board.json.entries), 'leaderboard (placement not done: B not listed yet)', { total: board.json?.total, you: board.json?.you });
 
 // ---- lobbies -------------------------------------------------------------------------------------
-const cl = await api('/api/lobbies', { body: { name: 'Smoke ' + rnd(), password: 'secret', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 180, region }, token: tokA });
+const cl = await api('/api/lobbies', { body: { api: 2, name: 'Smoke ' + rnd(), password: 'secret', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 180, region }, token: tokA });
 check(cl.status === 200 && /^[A-Z2-9]{6}$/.test(cl.json?.code ?? '') && cl.json.ticket, 'A creates a lobby', cl.json?.code ?? cl.text);
 function openLobby(t) {
   return new Promise((resolve, reject) => {
@@ -325,9 +325,9 @@ if (cl.status === 200) {
   const list = await api('/api/lobbies?region=' + region, { token: tokB });
   const row = list.json?.lobbies?.find((l) => l.code === cl.json.code);
   check(row && row.locked === true && row.players === 1 && row.max === 2, 'B sees the lobby in the public list (locked, 1/2)', row);
-  const wrong = await api('/api/lobbies/join', { body: { code: cl.json.code, password: 'nope' }, token: tokB });
+  const wrong = await api('/api/lobbies/join', { body: { api: 2, code: cl.json.code, password: 'nope' }, token: tokB });
   check(wrong.status === 403 && wrong.json.error === 'bad_password', 'wrong lobby password -> 403', wrong.status);
-  const jn = await api('/api/lobbies/join', { body: { code: cl.json.code.toLowerCase(), password: 'secret' }, token: tokB });
+  const jn = await api('/api/lobbies/join', { body: { api: 2, code: cl.json.code.toLowerCase(), password: 'secret' }, token: tokB });
   check(jn.status === 200 && jn.json.lobbyId === cl.json.lobbyId, 'B joins by code (any case)', jn.status);
   const lb = await openLobby(jn.json);
   check(await waitFor(() => la.states.at(-1)?.members.length === 2 && lb.states.length > 0), 'both see two members', la.states.at(-1)?.members);
@@ -374,12 +374,12 @@ function openRoom(r) {
 }
 const guestS = await api('/api/guest', { body: { name: 'Smoke guest' } });
 const tokG = guestS.json?.session;
-const expBody = { name: 'Smoke exp ' + rnd(), mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 180, region, physics: RULES };
+const expBody = { api: 2, name: 'Smoke exp ' + rnd(), mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 180, region, physics: RULES };
 const gx = await api('/api/lobbies', { body: expBody, token: tokG });
 check(gx.status === 403 && gx.json?.error === 'account_required', 'a guest cannot create a lobby with experimental rules', gx.status);
-const qx = await api('/api/queue', { body: { mode: '1v1', kind: 'p2p', p2pProtocol: P2.P2P_PROTOCOL_VERSION, physics: RULES }, token: tokB });
+const qx = await api('/api/queue', { body: { api: 2, mode: '1v1', kind: 'p2p', p2pProtocol: P2.P2P_PROTOCOL_VERSION, physics: RULES }, token: tokB });
 check(qx.status === 400 && qx.json?.error === 'experimental_lobby_only', 'the casual queue refuses rules', qx.status);
-const qrx = await api('/api/queue', { body: { modes: ['1v1'], kind: 'ranked', region, physics: RULES }, token: tokB });
+const qrx = await api('/api/queue', { body: { api: 2, modes: ['1v1'], kind: 'ranked', region, physics: RULES }, token: tokB });
 check(qrx.status === 400 && qrx.json?.error === 'experimental_lobby_only', 'the ranked queue refuses rules', qrx.status);
 const ex = await api('/api/lobbies', { body: expBody, token: tokA });
 check(ex.status === 200 && typeof ex.json?.ticket === 'string', 'A (signed in) creates a lobby with experimental rules', ex.status);
@@ -389,9 +389,9 @@ if (ex.status === 200) {
   await new Promise((r) => setTimeout(r, 3500)); // the Worker's list cache (3 s)
   const row = (await api('/api/lobbies?region=' + region)).json?.lobbies?.find((l) => l.code === ex.json.code);
   check(row && row.experimental === true && row.physics?.name === RULES.name, 'the public list tags it experimental, with its rules', row && { experimental: row.experimental, rules: row.physics?.name });
-  const gj = await api('/api/lobbies/join', { body: { code: ex.json.code }, token: tokG });
+  const gj = await api('/api/lobbies/join', { body: { api: 2, code: ex.json.code }, token: tokG });
   check(gj.status === 403 && gj.json?.error === 'account_required', 'a guest cannot join it', gj.status);
-  const bj = await api('/api/lobbies/join', { body: { code: ex.json.code }, token: tokB });
+  const bj = await api('/api/lobbies/join', { body: { api: 2, code: ex.json.code }, token: tokB });
   check(bj.status === 200, 'B (signed in) joins it', bj.status);
   const xb = await openLobby(bj.json);
   check(await waitFor(() => xb.states.at(-1)?.members.length === 2) && same(xb.states.at(-1).settings.physics, RULES), 'B sees the rules before the match');

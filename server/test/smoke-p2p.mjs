@@ -5,36 +5,36 @@
 //   API=https://turbo-gol.com node server/test/smoke-p2p.mjs
 //
 // Options (flags win over env): --api=<base url> / API (default http://127.0.0.1:8787), --session-a /
-// --session-b (ready-made guest sessions when the deploy has Turnstile on; see smoke.mjs),
-// --skip-fallback (skip the 15 s lone-human test).
+// --session-b (ready-made guest sessions when the deploy has Turnstile on; see smoke.mjs).
 //
-// Flow: health -> guest A, guest B -> both POST /api/queue { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL } at once -> both
-// matched with kind 'p2p', the same roomId and a wsUrl ending in /room/<id> -> GET /api/ice is gone (404) ->
-// both open the room socket with ['tg1', 'ticket.<jwt>'] -> each gets a RoomWelcome (protocol 2, 2 peer
-// slots, same seed, distinct 'you', iceServers with Cloudflare STUN) and B sees A's 'peerJoined' ->
-// a reused ticket is refused -> A signals B (fake offer) and B receives it with from = A's slot ->
-// ping/pong -> both 'ready' -> both receive 'start' with the same startAt ~1.5 s ahead (an
-// 'unreachable' sent before the start is ignored) -> A reports slot B unreachable at tick 100: no
-// drop (B's match loop reported a hash just now: a lone report never picks who leaves) -> B gives
-// its own seat up (its loop stalled: 'unreachable' about its own slot, tick 110) -> both receive
-// 'drop' { slot: B, atTick: 100 } (the smallest tick reported for B, no lead) -> a repeated report
-// gets the same drop -> A closes: B gets 'peerLeft' and A can queue again at once (its lock is
-// released with the socket) -> B closes. 2v2 with four humans: grace-alarm drop and majority drop; a
-// second 2v2 where an unready peer leaves -> 'start' for the three ready ones + its drop at tick 0.
-// Lock release (8d / 8e): a signal to a slot without a socket answers error 'signal_dropped' { to };
-// /api/rejoin with a room id -> 410 p2p_room; a peer that closes its room socket before the start
-// queues again within 1 s (no 409: the matchmaker verifies the lock with the room); a peer that never
-// connected frees its lock with POST /api/leave; /api/leave during a live room closes that peer's
-// socket (1000 'left'), the other peer gets 'peerLeft', the leaver queues at once; the peer still in
-// the room gets 409 with a reason. Staggered joins / no-shows (8f-8h, protocol 2): a p2p queue
-// without p2pProtocol answers 426 reload_required; in a 2v2 where two peers are ready and two join
-// 2 s later the start waits for all four (no drop); in a 2v2 where one ticket is never used the room
-// declares it a no-show after P2P_NO_SHOW_MS ('peerLeft' { slot, peerId: '' }), the present peers
-// start and get 'drop' { slot, 0 }, the dead ticket is refused (and, since it did reach the room,
-// late, its strike is forgiven); three unused tickets -> the p2p queue answers 429 no_show
-// (retryAfterMs) while a server queue still works. Then a lone guest C
-// queues p2p 1v1 and, after ~15 s, gets the phase 1 QueueResult (matchId, wsUrl /ws/<id>) of a
-// Durable Object match with a bot.
+// Since the modes redesign (November 2026) P2P rooms come only from lobbies: every room here is a
+// private lobby (POST /api/lobbies { api: 2 }, the others POST /api/lobbies/join, each opens its
+// lobby socket, the host sends { t: 'start' } and every member gets { t: 'match', result } with
+// its room ticket); then the members leave the lobby. Casual and ranked are for accounts: a guest's
+// POST /api/queue answers 403 account_required, and a lobby request without api >= 2 answers 426
+// reload_required.
+//
+// Flow: health -> guest A, guest B -> the account gate and the version marker -> a 1v1 lobby room of A
+// and B: both matched with kind 'p2p', the same roomId and a wsUrl ending in /room/<id> -> GET
+// /api/ice is gone (404) -> both open the room socket with ['tg1', 'ticket.<jwt>'] -> each gets a
+// RoomWelcome (2 peer slots, same seed, distinct 'you', iceServers with Cloudflare STUN) and B sees
+// A's 'peerJoined' -> a reused ticket is refused -> A signals B (fake offer) and B receives it with
+// from = A's slot -> ping/pong -> both 'ready' -> both receive 'start' with the same startAt ~1.5 s
+// ahead (an 'unreachable' sent before the start is ignored) -> A reports slot B unreachable at tick
+// 100: no drop (a lone report never picks who leaves) -> B gives its own seat up -> both receive
+// 'drop' { slot: B, atTick: 100 } -> a repeated report gets the same drop -> A closes: B gets
+// 'peerLeft' and A is free for another room at once (its lock is released with the socket) -> B
+// closes. 2v2 with four humans: grace-alarm drop and majority drop; a second 2v2 where an unready
+// peer leaves -> 'start' for the three ready ones + its drop at tick 0. Lock release (8d / 8e): a
+// signal to a slot without a socket answers error 'signal_dropped' { to }; /api/rejoin with a room
+// id -> 410 p2p_room; a peer that closes its room socket before the start is free for another room
+// within 1 s; a peer that never connected frees its lock with POST /api/leave; /api/leave during a
+// live room closes that peer's socket (1000 'left'), the other peer gets 'peerLeft'; the peer
+// still in the room makes a new lobby's start fail member_busy. Staggered joins / no-shows (8f, 8g):
+// in a 2v2 where two peers are ready and two join 2 s later the start waits for all four (no drop);
+// in a 2v2 where one ticket is never used the room declares it a no-show after P2P_NO_SHOW_MS
+// ('peerLeft' { slot, peerId: '' }), the present peers start and get 'drop' { slot, 0 }, the dead
+// ticket is refused. 9: a lone host's INICIAR answers need_players.
 // Exit 0 = pass, 1 = a check failed, 2 = cannot run (no session: Turnstile).
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
@@ -56,8 +56,10 @@ registerHooks({
 
 const P = await import('../../src/net/protocol.ts');
 const P2 = await import('../../src/net/p2p/protocol.ts');
-/** What the client sends in a p2p queue (P2P_PROTOCOL_VERSION); without it the Worker answers 426 reload_required. */
+/** The room protocol a client speaks (P2P_PROTOCOL_VERSION): the welcome says the same. */
 const P2P_PROTOCOL = P2.P2P_PROTOCOL_VERSION;
+/** The modes redesign's client-version marker (src/net/queueWait.ts QUEUE_API): lobby requests carry it. */
+const API_MARKER = 2;
 
 // ---- options ---------------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -68,14 +70,11 @@ const argOf = (name) => {
 const API = (argOf('api') ?? process.env.API ?? 'http://127.0.0.1:8787').replace(/\/+$/, '');
 const SESSION_A = (argOf('session-a') ?? process.env.SESSION_A ?? '').trim();
 const SESSION_B = (argOf('session-b') ?? process.env.SESSION_B ?? '').trim();
-const SKIP_FALLBACK = argv.includes('--skip-fallback') || process.env.SKIP_FALLBACK === '1';
 if (!/^https?:\/\//.test(API)) {
   console.error(`API must be an http(s) URL, got '${API}'`);
   process.exit(2);
 }
 const WS_BASE = API.replace(/^http/, 'ws');
-/** The matchmaker's p2p fill wait (src/net/p2p/protocol.ts P2P_FILL_WAIT_MS) + the long-poll slack. */
-const FALLBACK_WAIT_MS = 15_000;
 const START_DELAY_MS = 1_500;
 /** server/src/RoomDO.ts DROP_LEAD_TICKS: the drop tick is min(reported), nothing added. */
 const DROP_LEAD_TICKS = 0;
@@ -127,10 +126,11 @@ async function guest(name, session) {
   return g.json.session;
 }
 
-/** A JSON WebSocket client for the room: queues every message; `next(type)` resolves the next one of that type. */
+/** A JSON WebSocket client for the room (or, with key 't', a lobby): queues every message; `next(type)` resolves the next one of that type. */
 class RoomPeer {
-  constructor(label, url, ticket) {
+  constructor(label, url, ticket, key = 'type') {
     this.label = label;
+    this.key = key;
     this.inbox = [];
     this.waiters = [];
     this.closed = null;
@@ -151,7 +151,7 @@ class RoomPeer {
           check(false, `${label}: non-JSON frame`);
           return;
         }
-        const i = this.waiters.findIndex((w) => w.type === msg.type);
+        const i = this.waiters.findIndex((w) => w.type === msg[this.key]);
         if (i >= 0) this.waiters.splice(i, 1)[0].resolve(msg);
         else this.inbox.push(msg);
       };
@@ -159,7 +159,7 @@ class RoomPeer {
     this.opened.catch(() => undefined);
   }
   next(type, timeoutMs = 5000) {
-    const i = this.inbox.findIndex((m) => m.type === type);
+    const i = this.inbox.findIndex((m) => m[this.key] === type);
     if (i >= 0) return Promise.resolve(this.inbox.splice(i, 1)[0]);
     if (this.closed) return Promise.reject(new Error(`${this.label}: already closed (${this.closed.code})`));
     return new Promise((resolve, reject) => {
@@ -167,7 +167,7 @@ class RoomPeer {
       const timer = setTimeout(() => {
         const j = this.waiters.indexOf(w);
         if (j >= 0) this.waiters.splice(j, 1);
-        reject(new Error(`${this.label}: no '${type}' within ${timeoutMs} ms (inbox: ${this.inbox.map((m) => m.type).join(',') || 'empty'})`));
+        reject(new Error(`${this.label}: no '${type}' within ${timeoutMs} ms (inbox: ${this.inbox.map((m) => m[this.key]).join(',') || 'empty'})`));
       }, timeoutMs);
       w.resolve = (m) => {
         clearTimeout(timer);
@@ -203,23 +203,69 @@ class RoomPeer {
   }
 }
 
-/** POST /api/queue that must NOT answer 409: after 300 ms the queue is left (the long-poll then answers 'waiting' at once); resolves with the answer. */
-async function queueThenLeave(label, session, body) {
-  const pending = api('/api/queue', body, session);
-  await sleep(300);
-  const left = await api('/api/leave', {}, session);
-  const q = leftQueue(await Promise.race([pending, sleep(4000).then(() => ({ status: 0, json: null, text: 'timeout' }))]));
-  log(`${label}: POST /api/queue -> ${q.status} ${q.text.slice(0, 80)}; left ${left.json?.left}`);
-  return q;
+/**
+ * A P2P room of `players` ([label, session], the first hosts) through a private lobby of `mode`:
+ * create, join by code, every lobby socket in, the host's start, each member's { t: 'match' }
+ * result, then everyone leaves the lobby (it closes: a session may keep only 3 lobbies). Resolves
+ * each player's result as { status, json, text } (json: the QueueResultP2p), or the host's start
+ * error as { status: 409, json: { error }, ... } for every player.
+ */
+async function lobbyRoom(players, mode) {
+  const fail = (status, json, text) => players.map(() => ({ status, json, text }));
+  const created = await api('/api/lobbies', { api: API_MARKER, mode, visibility: 'private', net: 'p2p', matchLengthSeconds: 180 }, players[0][1]);
+  if (created.status !== 200) return fail(created.status, created.json, created.text);
+  const tickets = [created.json];
+  for (const [label, session] of players.slice(1)) {
+    const j = await api('/api/lobbies/join', { api: API_MARKER, code: created.json.code }, session);
+    if (j.status !== 200) return fail(j.status, j.json, `${label}: join ${j.text}`);
+    tickets.push(j.json);
+  }
+  const sockets = [];
+  for (let i = 0; i < players.length; i++) {
+    const ls = new RoomPeer(players[i][0] + ' (lobby)', resolveWs(tickets[i].wsUrl), tickets[i].ticket, 't');
+    try {
+      await ls.opened;
+    } catch (e) {
+      return fail(0, null, e.message);
+    }
+    sockets.push(ls);
+  }
+  const host = sockets[0];
+  for (let tries = 0; tries < 20; tries++) {
+    const st = await host.next('state', 3000).catch(() => null);
+    if (st === null || st.lobby.members.length === players.length) break;
+  }
+  host.send({ t: 'start' });
+  const first = await Promise.race([host.next('match', 8000).then((m) => ({ m })), host.next('error', 8000).then((e) => ({ e }))]).catch((e) => ({ e: { code: 'timeout', message: e.message } }));
+  let out;
+  if (first.e) out = fail(409, { error: first.e.code, message: first.e.message }, JSON.stringify(first.e));
+  else {
+    const rest = await Promise.all(sockets.slice(1).map((ls) => ls.next('match', 8000).catch(() => null)));
+    out = [first.m, ...rest].map((m) => (m === null ? { status: 0, json: null, text: 'no match frame' } : { status: 200, json: m.result, text: JSON.stringify(m.result) }));
+  }
+  for (const ls of sockets) {
+    try {
+      ls.send({ t: 'leave' });
+    } catch {
+      /* closed */
+    }
+  }
+  await Promise.all(sockets.map((ls) => ls.whenClosed(2000)));
+  return out;
 }
 
+/** A free guest that is never in a room: the partner of checkFree's rooms (created in section 1). */
+let sessionZ = '';
+
 /**
- * The Worker's /api/queue is join + long-poll. On the deploy the leave can land between the two
- * (Worker <-> matchmaker latency): the join succeeded (no 409) and the poll then finds the player
- * gone -> 404 not_queued. Same outcome as 'waiting' for these checks: queued, then left.
+ * `session`'s room lock is gone: a new lobby room of it and Z starts (no member_busy). Neither ever
+ * connects; both free that room's lock again with POST /api/leave. Resolves the start's answer.
  */
-function leftQueue(q) {
-  if (q.status === 404 && q.json?.error === 'not_queued') return { status: 200, json: { status: 'waiting', waiting: 0, raced: true }, text: '{"status":"waiting","raced":"leave before poll"}' };
+async function checkFree(label, session) {
+  const [q] = await lobbyRoom([[label, session], ['Z', sessionZ]], '1v1');
+  log(`${label}: a new lobby room -> ${q.status} ${q.text.slice(0, 80)}`);
+  await api('/api/leave', {}, session);
+  await api('/api/leave', {}, sessionZ);
   return q;
 }
 
@@ -238,36 +284,28 @@ const health = await api('/api/health');
 check(health.status === 200 && health.json?.ok === true, `GET /api/health -> ${health.status} ${health.text}`);
 const sessionA = await guest('Peer A', SESSION_A);
 const sessionB = await guest('Peer B', SESSION_B);
-const badKind = await api('/api/queue', { mode: '1v1', kind: 'nope' }, sessionA);
-check(badKind.status === 400 && badKind.json?.error === 'bad_kind', `POST /api/queue bad kind -> ${badKind.status} ${badKind.json?.error}`);
-// A page from before the protocol bump (no p2pProtocol) or of another version is told to reload, before any seat.
-const stale = await api('/api/queue', { mode: '1v1', kind: 'p2p' }, sessionA);
-check(stale.status === 426 && stale.json?.error === 'reload_required' && stale.json?.p2pProtocol === P2P_PROTOCOL, `p2p queue without p2pProtocol (a version 1 page) -> ${stale.status} ${stale.json?.error}: ${stale.json?.message}`);
-const otherVersion = await api('/api/queue', { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL + 1 }, sessionA);
-check(otherVersion.status === 426 && otherVersion.json?.error === 'reload_required', `p2p queue with p2pProtocol ${P2P_PROTOCOL + 1} -> ${otherVersion.status} ${otherVersion.json?.error}`);
-
-// ---- 2. both queue p2p 1v1 at once -> the same room --------------------------------------------------
-// Each request long-polls up to 25 s; a 'waiting' answer (e.g. the poll landed while the room was
-// being created) is simply asked again, as the client does.
-async function queueUntilMatched(label, session, body, attempts = 4) {
-  for (let i = 0; i < attempts; i++) {
-    const q = await api('/api/queue', body, session);
-    log(`${label}: POST /api/queue -> ${q.status} ${q.text.slice(0, 120)}`);
-    if (q.status !== 200 || q.json?.status === 'matched') return q;
-  }
-  return { status: 0, json: null, text: 'never matched' };
+sessionZ = await guest('Peer Z', '');
+// Casual and ranked are for accounts: a guest's queue is refused whatever it sends.
+for (const body of [{ api: API_MARKER, mode: '1v1' }, { mode: '1v1', kind: 'p2p', p2pProtocol: 5 }, { api: API_MARKER, mode: '2v2', kind: 'ranked' }]) {
+  const q = await api('/api/queue', body, sessionA);
+  check(q.status === 403 && q.json?.error === 'account_required', `a guest's POST /api/queue ${JSON.stringify(body)} -> ${q.status} ${q.json?.error}: ${q.json?.message}`);
 }
+// A page from before the redesign (no api marker) is told to reload, before any lobby exists.
+const stale = await api('/api/lobbies', { mode: '1v1', visibility: 'private', net: 'p2p', matchLengthSeconds: 180 }, sessionA);
+check(stale.status === 426 && stale.json?.error === 'reload_required', `POST /api/lobbies without api -> ${stale.status} ${stale.json?.error}: ${stale.json?.message}`);
+const staleJoin = await api('/api/lobbies/join', { code: 'ABC234' }, sessionA);
+check(staleJoin.status === 426 && staleJoin.json?.error === 'reload_required', `POST /api/lobbies/join without api -> ${staleJoin.status} ${staleJoin.json?.error}`);
+
+// ---- 2. a 1v1 lobby of A and B -> one room ------------------------------------------------------------
 const tQueue = performance.now();
-const [qa, qb] = await Promise.all([queueUntilMatched('A', sessionA, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }), queueUntilMatched('B', sessionB, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })]);
-check(qa.status === 200 && qa.json?.status === 'matched' && qa.json?.kind === 'p2p', `A matched p2p (${((performance.now() - tQueue) / 1000).toFixed(2)} s for both)`);
+const [qa, qb] = await lobbyRoom([['A', sessionA], ['B', sessionB]], '1v1');
+check(qa.status === 200 && qa.json?.status === 'matched' && qa.json?.kind === 'p2p', `A matched p2p (${((performance.now() - tQueue) / 1000).toFixed(2)} s for the lobby and its start)`);
 check(qb.status === 200 && qb.json?.status === 'matched' && qb.json?.kind === 'p2p', 'B matched p2p');
 if (qa.json?.status !== 'matched' || qb.json?.status !== 'matched') process.exit(1);
 const roomId = qa.json.roomId;
 check(/^[0-9a-f]{64}$/.test(roomId) && qb.json.roomId === roomId, `same roomId ${roomId.slice(0, 12)}...`);
 check(typeof qa.json.ticket === 'string' && qa.json.ticket.split('.').length === 3 && qa.json.ticket !== qb.json.ticket, 'distinct JWT tickets');
 check(typeof qa.json.wsUrl === 'string' && qa.json.wsUrl.endsWith('/room/' + roomId), `wsUrl ${qa.json.wsUrl}`);
-const again = await api('/api/queue', { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionA);
-check(again.status === 409 && again.json?.error === 'active_match' && again.json?.matchId === roomId && again.json?.kind === 'p2p', `queue again while the room is alive -> ${again.status} ${again.json?.error} kind ${again.json?.kind}`);
 
 // ---- 3. no /api/ice: the room welcome carries the ICE servers (checked below) ---------------------------
 const ice = await api('/api/ice', undefined, sessionA);
@@ -376,11 +414,8 @@ const dropAgain = await expectNext(A, 'drop');
 check(dropAgain !== null && dropAgain.atTick === 100 + DROP_LEAD_TICKS, 'a repeated report gets the same drop again (idempotent)');
 // B was dropped: its lock is free -> B can queue again right away (then leaves the queue)
 {
-  const pending = api('/api/queue', { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionB);
-  await sleep(300);
-  const left = await api('/api/leave', {}, sessionB);
-  const q = leftQueue(await Promise.race([pending, sleep(4000).then(() => ({ status: 0, json: null, text: 'timeout' }))]));
-  check(q.status === 200 && q.json?.status === 'waiting' && left.json?.left === true, `B (dropped) can queue again: ${q.status} ${q.text.slice(0, 60)}; left ${left.json?.left}`);
+  const q = await checkFree('B', sessionB);
+  check(q.status === 200 && q.json?.status === 'matched', `B (dropped) is free for another room: ${q.status} ${q.text.slice(0, 60)}`);
 }
 
 // ---- 8. close -----------------------------------------------------------------------------------------
@@ -388,20 +423,17 @@ await A.close(1000);
 const leftMsg = await expectNext(B, 'peerLeft');
 check(leftMsg !== null && leftMsg.slot === slotA && leftMsg.peerId === welcomeA.you.peerId, `B received peerLeft for A (${JSON.stringify(leftMsg)})`);
 {
-  // A's lock is released with its socket: queue -> not 409 (then leave the queue at once)
+  // A's lock is released with its socket: a new lobby room of it starts (no member_busy).
   await sleep(300);
-  const pending = api('/api/queue', { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionA);
-  await sleep(300);
-  const left = await api('/api/leave', {}, sessionA);
-  const q = await Promise.race([pending, sleep(4000).then(() => ({ status: 0, json: null, text: 'timeout' }))]);
-  check(q.status === 200 && q.json?.status === 'waiting' && left.json?.left === true, `A can queue again after closing its room socket: ${q.status} ${q.text.slice(0, 60)}; left ${left.json?.left}`);
+  const q = await checkFree('A', sessionA);
+  check(q.status === 200 && q.json?.status === 'matched', `A is free for another room after closing its room socket: ${q.status} ${q.text.slice(0, 60)}`);
 }
 const closedB = await B.close(1000);
 check(closedB.code === 1000, `B closed (${closedB.code})`);
 
 // ---- 8b. 2v2 with four humans: the close-grace alarm and the majority vote ---------------------------------
 // A and B are free again (lock released with the socket / the drop); D and E are new guests (reused by
-// 8d, as F and G are by 8e: POST /api/guest is limited to 10 per client IP per minute).
+// 8d, as F and G are by 8e). D hosts this lobby, F the next one (a session creates 5 lobbies a minute).
 let sessionD = '';
 let sessionE = '';
 let sessionF = '';
@@ -410,12 +442,12 @@ let sessionG = '';
   sessionD = await guest('Peer D', '');
   sessionE = await guest('Peer E', '');
   const four = [
-    ['A', sessionA],
-    ['B', sessionB],
     ['D', sessionD],
+    ['B', sessionB],
+    ['A', sessionA],
     ['E', sessionE],
   ];
-  const results = await Promise.all(four.map(([label, s]) => queueUntilMatched(label, s, { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })));
+  const results = await lobbyRoom(four, '2v2');
   const room2 = results[0].json?.roomId;
   check(results.every((r) => r.status === 200 && r.json?.status === 'matched' && r.json?.kind === 'p2p' && r.json?.roomId === room2), `2v2: all four matched into room ${String(room2).slice(0, 12)}...`);
   if (results.every((r) => r.json?.status === 'matched' && r.json?.kind === 'p2p')) {
@@ -438,8 +470,8 @@ let sessionG = '';
     for (const p of peers) p.send({ type: 'ready' });
     const starts = await Promise.all(peers.map((p) => expectNext(p, 'start')));
     check(starts.every((s) => s !== null && s.startAt === starts[0].startAt), `2v2: start to all four (startAt ${starts[0]?.startAt})`);
-    const [pA, pB, pD, pE] = peers;
-    const [sA, sB, , sE] = slots;
+    const [pD, pB, pA, pE] = peers;
+    const [, sB, sA, sE] = slots;
     // E leaves; A alone reports it: 1 of 3 voters is no majority, but E's socket is closed, so the
     // room re-checks after the 5 s grace (alarm) and drops E without a second report.
     await pE.close(1000);
@@ -457,7 +489,7 @@ let sessionG = '';
     pD.send({ type: 'unreachable', slot: sB, atTick: 300 });
     const dropsB = await Promise.all([pA, pB, pD].map((p) => expectNext(p, 'drop')));
     check(dropsB.every((d) => d !== null && d.slot === sB && d.atTick === 300 + DROP_LEAD_TICKS), `majority drop { slot: ${sB}, atTick: ${dropsB[0]?.atTick} } (the smallest reported tick) to everyone, the dropped peer included`);
-    check(sA !== undefined, `voters were slots ${sA} and ${slots[2]}`);
+    check(sA !== undefined, `voters were slots ${sA} and ${slots[0]}`);
     for (const p of [pA, pB, pD]) await p.close(1000);
   }
 }
@@ -467,12 +499,12 @@ let sessionG = '';
   sessionF = await guest('Peer F', '');
   sessionG = await guest('Peer G', '');
   const four = [
-    ['A', sessionA],
-    ['B', sessionB],
     ['F', sessionF],
+    ['B', sessionB],
+    ['A', sessionA],
     ['G', sessionG],
   ];
-  const results = await Promise.all(four.map(([label, s]) => queueUntilMatched(label, s, { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })));
+  const results = await lobbyRoom(four, '2v2');
   const room3 = results[0].json?.roomId;
   check(results.every((r) => r.status === 200 && r.json?.status === 'matched' && r.json?.kind === 'p2p' && r.json?.roomId === room3), `2v2 (second room): all four matched into room ${String(room3).slice(0, 12)}...`);
   if (results.every((r) => r.json?.status === 'matched' && r.json?.kind === 'p2p')) {
@@ -489,7 +521,7 @@ let sessionG = '';
     }
     const slots = welcomes.map((w) => w?.you?.slot);
     for (const p of peers) p.inbox.length = 0;
-    const [pA, pB, pF, pG] = peers;
+    const [pF, pB, pA, pG] = peers;
     const sG = slots[3];
     for (const p of [pA, pB, pF]) p.send({ type: 'ready' });
     await sleep(400);
@@ -509,7 +541,7 @@ let sessionG = '';
   const sessionH = sessionD; // D and E are free again: their 2v2 room sockets closed in 8b
   const sessionI = sessionE;
   const tMatch = performance.now();
-  const [qh, qi] = await Promise.all([queueUntilMatched('H', sessionH, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }), queueUntilMatched('I', sessionI, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })]);
+  const [qh, qi] = await lobbyRoom([['H', sessionH], ['I', sessionI]], '1v1');
   const roomHI = qh.json?.roomId;
   check(qh.json?.status === 'matched' && qh.json?.kind === 'p2p' && qi.json?.roomId === roomHI, `H and I matched into room ${String(roomHI).slice(0, 12)}...`);
   if (qh.json?.status === 'matched' && qi.json?.roomId === roomHI) {
@@ -528,19 +560,19 @@ let sessionG = '';
     // A room id through /api/rejoin: a clear 410 p2p_room (never a 400 / a MatchDO lookup).
     const rj = await api('/api/rejoin', { matchId: roomHI }, sessionH);
     check(rj.status === 410 && rj.json?.error === 'p2p_room', `POST /api/rejoin with the room id -> ${rj.status} ${rj.json?.error}`);
-    // H closes its room socket before any start: it can queue again within 1 s, without 409.
+    // H closes its room socket before any start: it is free for another room within 1 s (no member_busy).
     await H.close(1000);
     const sinceMatch = performance.now() - tMatch;
     if (sinceMatch < 2300) await sleep(2300 - sinceMatch); // the matchmaker trusts a lock younger than 2 s (LOCK_VERIFY_AFTER_MS) without asking the room
     const tClose = performance.now();
     await sleep(300);
-    const qh2 = await queueThenLeave('H', sessionH, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-    check(qh2.status === 200 && qh2.json?.status === 'waiting', `H queued ${((performance.now() - tClose) / 1000).toFixed(1)} s after closing its room socket pre-start (no 409)`);
-    // I never opened its socket: POST /api/leave releases its lock (and tells the room); it can queue at once.
+    const qh2 = await checkFree('H', sessionH);
+    check(qh2.status === 200 && qh2.json?.status === 'matched', `H in another room ${((performance.now() - tClose) / 1000).toFixed(1)} s after closing its room socket pre-start (no member_busy)`);
+    // I never opened its socket: POST /api/leave releases its lock (and tells the room); it is free at once.
     const li = await api('/api/leave', {}, sessionI);
     check(li.status === 200 && li.json?.released === true, `I (never connected) POST /api/leave -> ${li.status} released ${li.json?.released}`);
-    const qi2 = await queueThenLeave('I', sessionI, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-    check(qi2.status === 200 && qi2.json?.status === 'waiting', 'I can queue right after /api/leave (no 409)');
+    const qi2 = await checkFree('I', sessionI);
+    check(qi2.status === 200 && qi2.json?.status === 'matched', 'I is free for another room right after /api/leave');
     // Idempotent: nothing left to release.
     const li2 = await api('/api/leave', {}, sessionI);
     check(li2.status === 200 && li2.json?.released === false, `a second /api/leave releases nothing (${li2.text.slice(0, 60)})`);
@@ -551,7 +583,7 @@ let sessionG = '';
 {
   const sessionJ = sessionF; // F and G are free again (8c)
   const sessionK = sessionG;
-  const [qj, qk] = await Promise.all([queueUntilMatched('J', sessionJ, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }), queueUntilMatched('K', sessionK, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })]);
+  const [qj, qk] = await lobbyRoom([['J', sessionJ], ['K', sessionK]], '1v1');
   const roomJK = qj.json?.roomId;
   check(qj.json?.status === 'matched' && qj.json?.kind === 'p2p' && qk.json?.roomId === roomJK, `J and K matched into room ${String(roomJK).slice(0, 12)}...`);
   if (qj.json?.status === 'matched' && qk.json?.roomId === roomJK) {
@@ -585,16 +617,16 @@ let sessionG = '';
     check(J.ws.readyState >= 2, `the room closed J's socket: readyState ${J.ws.readyState} after ${(performance.now() - tKick).toFixed(0)} ms${closedJ ? ` (close ${closedJ.code} ${closedJ.reason})` : ' (close frame received, TCP still open: CLOSING)'}`);
     const plK = K !== null ? await expectNext(K, 'peerLeft') : null;
     check(plK !== null && wJ !== null && plK.slot === wJ.you.slot, `K got peerLeft for J ${(performance.now() - tLeave).toFixed(0)} ms after the leave`);
-    // J queues immediately (no sleep): the lock was deleted before /api/leave answered.
-    const qj2 = await queueThenLeave('J', sessionJ, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-    check(qj2.status === 200 && qj2.json?.status === 'waiting', 'J queued right after /api/leave (no 409)');
-    // K is still in the room: its queue is refused with the reason, then it leaves and can queue.
-    const qk409 = await api('/api/queue', { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionK);
-    check(qk409.status === 409 && qk409.json?.error === 'active_match' && qk409.json?.kind === 'p2p' && typeof qk409.json?.message === 'string', `K (still in the room) -> ${qk409.status} ${qk409.json?.error}: ${qk409.json?.message}`);
+    // J is free at once (no sleep): the lock was deleted before /api/leave answered.
+    const qj2 = await checkFree('J', sessionJ);
+    check(qj2.status === 200 && qj2.json?.status === 'matched', 'J is free for another room right after /api/leave');
+    // K is still in the room: a new lobby's start with it fails member_busy, then it leaves and is free.
+    const [qk409] = await lobbyRoom([['K', sessionK], ['Z', sessionZ]], '1v1');
+    check(qk409.status === 409 && qk409.json?.error === 'member_busy' && typeof qk409.json?.message === 'string', `K (still in the room) -> ${qk409.status} ${qk409.json?.error}: ${qk409.json?.message}`);
     if (K !== null) await K.close(1000);
-    await sleep(300);
-    const qk2 = await queueThenLeave('K', sessionK, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-    check(qk2.status === 200 && qk2.json?.status === 'waiting', 'K can queue after closing its socket (lock released by the room, verified by the matchmaker)');
+    await sleep(2500); // past the matchmaker's trust of a fresh lock (LOCK_VERIFY_AFTER_MS): it asks the room
+    const qk2 = await checkFree('K', sessionK);
+    check(qk2.status === 200 && qk2.json?.status === 'matched', 'K is free after closing its socket (lock released by the room, verified by the matchmaker)');
   }
 }
 
@@ -612,18 +644,18 @@ async function enterRoom(label, q) {
 }
 {
   const four = [
-    ['A', sessionA],
     ['B', sessionB],
+    ['A', sessionA],
     ['D', sessionD],
     ['F', sessionF],
   ];
-  const results = await Promise.all(four.map(([label, s]) => queueUntilMatched(label, s, { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })));
+  const results = await lobbyRoom(four, '2v2');
   const roomS = results[0].json?.roomId;
-  check(results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomS), `8f: A, B, D, F matched into room ${String(roomS).slice(0, 12)}...`);
+  check(results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomS), `8f: B, A, D, F matched into room ${String(roomS).slice(0, 12)}...`);
   if (results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomS)) {
     const tMatch = performance.now();
-    const a = await enterRoom('A', results[0]);
-    const b = await enterRoom('B', results[1]);
+    const a = await enterRoom('A', results[1]);
+    const b = await enterRoom('B', results[0]);
     const absentSlots = (a.w?.slots ?? []).filter((s) => !s.connected && s.slot !== b.w?.you?.slot).map((s) => s.slot);
     check(a.w !== null && b.w !== null && absentSlots.length === 2 && a.w.slots.every((s) => s.left === undefined), `8f: A and B in; slots ${absentSlots.join(',')} not joined yet (not left)`);
     a.p.send({ type: 'ready' });
@@ -651,24 +683,22 @@ async function enterRoom(label, q) {
 // ---- 8g. 2v2 where one ticket never connects: the no-show grace, then start + drop { slot, 0 } -------------
 // A, B and D connect and (like the real client) say ready only once every expected human is in;
 // G never opens its socket. The room declares it a no-show NO_SHOW_MS after it was created
-// ('peerLeft' with an empty peerId), the three then say ready -> 'start' + 'drop' { G, 0 } (a
-// no-show strike for G); G's ticket is refused afterwards (403 'left'), and because that late ticket
-// did reach the room the room asks the matchmaker to forgive the strike (G was slow, not absent); G
-// is not stuck with a lock.
+// ('peerLeft' with an empty peerId), the three then say ready -> 'start' + 'drop' { G, 0 }; G's
+// ticket is refused afterwards (403 'left'); G is not stuck with a lock.
 const NO_SHOW_MS = P2.P2P_NO_SHOW_MS;
 {
   const four = [
-    ['A', sessionA],
-    ['B', sessionB],
     ['D', sessionD],
+    ['B', sessionB],
+    ['A', sessionA],
     ['G', sessionG],
   ];
-  const results = await Promise.all(four.map(([label, s]) => queueUntilMatched(label, s, { mode: '2v2', kind: 'p2p', p2pProtocol: P2P_PROTOCOL })));
+  const results = await lobbyRoom(four, '2v2');
   const tMatch = performance.now();
   const roomN = results[0].json?.roomId;
-  check(results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomN), `8g: A, B, D, G matched into room ${String(roomN).slice(0, 12)}...`);
+  check(results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomN), `8g: D, B, A, G matched into room ${String(roomN).slice(0, 12)}...`);
   if (results.every((r) => r.json?.status === 'matched' && r.json?.roomId === roomN)) {
-    const present = [await enterRoom('A', results[0]), await enterRoom('B', results[1]), await enterRoom('D', results[2])];
+    const present = [await enterRoom('D', results[0]), await enterRoom('B', results[1]), await enterRoom('A', results[2])];
     const peers = present.map((e) => e.p);
     const mine = new Set(present.map((e) => e.w?.you?.slot));
     const slotG = [0, 1, 2, 3].find((s) => !mine.has(s));
@@ -683,9 +713,7 @@ const NO_SHOW_MS = P2.P2P_NO_SHOW_MS;
     check(starts.every((s) => s !== null && s.startAt === starts[0].startAt), '8g: start to the three present peers');
     const drops = await Promise.all(peers.map((p) => expectNext(p, 'drop')));
     check(drops.every((d) => d !== null && d.slot === slotG && d.atTick === 0), `8g: drop { slot: ${slotG}, atTick: 0 } to all three: G's car is the team AI from tick 0`);
-    // G's ticket is dead now (403 'left' at the room: the upgrade is refused); a late ticket is not a
-    // no-show, so the room forgives the strike of the start drop (checked in 8h: two strikes later G
-    // is not blocked yet).
+    // G's ticket is dead now (403 'left' at the room: the upgrade is refused).
     const lateG = await new Promise((resolve) => {
       const ws = new WebSocket(resolveWs(results[3].json.wsUrl), [P.WS_SUBPROTOCOL, P.WS_TICKET_PREFIX + results[3].json.ticket]);
       const timer = setTimeout(() => resolve('timeout'), 5000);
@@ -700,68 +728,31 @@ const NO_SHOW_MS = P2.P2P_NO_SHOW_MS;
       };
     });
     check(lateG === 'rejected', `8g: G's ticket after the no-show -> ${lateG}`);
-    // G's lock was freed by the start drop: G queues without 409.
-    const qg = await queueThenLeave('G', sessionG, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-    check(qg.status === 200 && qg.json?.status === 'waiting', 'G can queue again (no 409)');
+    // G's lock was freed by the start drop: G is free for another room.
+    const qg = await checkFree('G', sessionG);
+    check(qg.status === 200 && qg.json?.status === 'matched', 'G is free for another room (no member_busy)');
     for (const p of peers) await p.close(1000);
   }
 }
 
-// ---- 8h. no-show backoff: G leaves three room tickets unused -> its p2p queue answers 429 no_show ----------
-// (8g's strike was forgiven: G's late ticket reached the room.) Each round: G and E match 1v1, E
-// opens its socket (no strike for E), G leaves without ever connecting (POST /api/leave: a strike).
-// Two strikes do not block; after the third the p2p queue is refused with retryAfterMs; a server
-// queue still works.
+// ---- 9. a lone host's INICIAR: need_players (lobbies are P2P only, two players to start) ----------------
 {
-  for (let round = 1; round <= 3; round++) {
-    const [qg, qe] = await Promise.all([
-      queueUntilMatched('G', sessionG, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }),
-      queueUntilMatched('E', sessionE, { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }),
-    ]);
-    if (qg.json?.status !== 'matched' || qe.json?.roomId !== qg.json?.roomId) {
-      check(false, `8h round ${round}: G and E not matched together (${qg.text.slice(0, 80)} | ${qe.text.slice(0, 80)})`);
-      break;
+  const created = await api('/api/lobbies', { api: API_MARKER, mode: '1v1', visibility: 'private', net: 'server', matchLengthSeconds: 180 }, sessionE);
+  check(created.status === 200, `E creates a lobby (net 'server' is read as P2P) -> ${created.status}`);
+  if (created.status === 200) {
+    const ls = new RoomPeer('E (lobby)', resolveWs(created.json.wsUrl), created.json.ticket, 't');
+    try {
+      await ls.opened;
+      const st = await ls.next('state');
+      check(st.lobby.settings.net === 'p2p', `the lobby is P2P (${st.lobby.settings.net})`);
+      ls.send({ t: 'start' });
+      const e = await ls.next('error');
+      check(e.code === 'need_players' && e.message === 'Hace falta otro jugador para iniciar', `a lone host's INICIAR -> ${e.code}: ${e.message}`);
+      ls.send({ t: 'leave' });
+      await ls.whenClosed(2000);
+    } catch (err) {
+      check(false, err.message);
     }
-    const e = await enterRoom('E', qe);
-    const lg = await api('/api/leave', {}, sessionG);
-    check(lg.status === 200 && lg.json?.released === true, `8h round ${round}: G took a ticket and left without connecting (strike ${round})`);
-    await expectNext(e.p, 'peerLeft');
-    await e.p.close(1000);
-    await sleep(800); // E's lock goes with its socket (released in the background): the next round must not see it fresh
-    if (round === 2) {
-      const q2 = await queueThenLeave('G', sessionG, { mode: '3v3', kind: 'p2p', p2pProtocol: P2P_PROTOCOL });
-      check(q2.status === 200 && q2.json?.status === 'waiting', `8h: two strikes (8g's was forgiven) -> not blocked yet (${q2.status} ${q2.json?.error ?? q2.json?.status})`);
-    }
-  }
-  const blocked = await api('/api/queue', { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionG);
-  check(blocked.status === 429 && blocked.json?.error === 'no_show' && blocked.json?.retryAfterMs > 250_000, `8h: G's p2p queue -> ${blocked.status} ${blocked.json?.error} retryAfterMs ${blocked.json?.retryAfterMs}: ${blocked.json?.message}`);
-  const serverOk = await queueThenLeave('G', sessionG, { mode: '1v1', kind: 'server' });
-  check(serverOk.status === 200 && serverOk.json?.status === 'waiting', '8h: G can still queue a server match');
-}
-
-// ---- 9. a lone human in p2p 1v1 falls back to a Durable Object match after ~15 s -------------------------
-if (SKIP_FALLBACK) {
-  log('SKIP fallback test (--skip-fallback)');
-} else {
-  const sessionC = await guest('Peer C', '');
-  const tC = performance.now();
-  let result = null;
-  for (let attempt = 0; attempt < 3 && result === null; attempt++) {
-    const q = await api('/api/queue', { mode: '1v1', kind: 'p2p', p2pProtocol: P2P_PROTOCOL }, sessionC);
-    log(`C: POST /api/queue -> ${q.status} ${q.text.slice(0, 120)}`);
-    if (q.status !== 200) {
-      failures++;
-      break;
-    }
-    if (q.json.status === 'matched') result = q.json;
-  }
-  const waited = (performance.now() - tC) / 1000;
-  check(result !== null, `C matched after ${waited.toFixed(1)} s`);
-  if (result) {
-    check(result.kind !== 'p2p' && /^[0-9a-f]{64}$/.test(result.matchId ?? '') && typeof result.ticket === 'string', `C fell back to a server match: matchId ${result.matchId?.slice(0, 12)}...`);
-    check(typeof result.wsUrl === 'string' && result.wsUrl.endsWith('/ws/' + result.matchId), `C wsUrl ${result.wsUrl}`);
-    check(waited >= FALLBACK_WAIT_MS / 1000 - 1 && waited < FALLBACK_WAIT_MS / 1000 + 10, `fallback took ~${(FALLBACK_WAIT_MS / 1000).toFixed(0)} s (${waited.toFixed(1)} s)`);
-    // Do not join it: the MatchDO's 'unused room' alarm drops it after 90 s and frees C's lock.
   }
 }
 

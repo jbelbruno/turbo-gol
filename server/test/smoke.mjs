@@ -5,33 +5,36 @@
 //   API=https://turbo-gol.com MODE=1v1 node server/test/smoke.mjs --duration=20
 //
 // Options (flags win over env): --api=<base url> / API (default http://127.0.0.1:8787; the match socket
-// uses ws:// or wss:// from the same scheme), --mode=<1v1|2v2|3v3> / MODE, --duration=<s> / SECONDS
-// (seconds of snapshot capture, default 10), --session=<jwt> / SESSION (a ready-made guest session,
-// see Turnstile below).
+// uses ws:// or wss:// from the same scheme), --mode=<1v1|2v2|3v3> / MODE (the format the account
+// prefers; two humans always play a 2v2), --duration=<s> / SECONDS (seconds of snapshot capture,
+// default 10), --session=<jwt> / SESSION and --session2=<jwt> / SESSION2 (two ready-made ACCOUNT
+// sessions, see Sessions below).
 //
-// Flow: health -> /api/where (edge colo) -> /api/config (Turnstile sitekey?) -> guest -> queue (bot fill
-// after ~10 s) -> a second guest queues 2v2 and leaves (POST /api/leave answers its long-poll at once and
-// no room opens for it) -> WebSocket with ['tg1', 'ticket.<jwt>'] -> Welcome (prints hostColo, the
+// Casual is for accounts since the modes redesign (November 2026): two accounts searching together
+// form a match at once (2 humans: a 2v2 with a bot each), a lone one only after 5:00.
+// Flow: health -> /api/where (edge colo) -> /api/config (botFillMs null, queue clocks) -> a guest's
+// queue is 403 account_required -> an account's request without api is 426 reload_required -> A
+// queues (the first answer comes at once: waiting + wait) -> B queues: matched at once (2v2, mode,
+// host, humans) -> A's next POST collects its match -> a third account queues and leaves (POST
+// /api/leave answers at once) -> WebSocket with ['tg1', 'ticket.<jwt>'] -> Welcome (prints hostColo, the
 // Cloudflare colo the match object runs in) -> Ready -> inputs at 60 pps (2 ticks each, packet size
 // steered by bufferHint) for the duration -> asserts >= 25 snapshots per second, strictly increasing
 // ticks, decodes every frame with src/net/protocol.ts and, when the shared wasm exposes save/load,
 // re-creates the arena in node, loads every snapshot blob and checks stateHash() === snapshot.stateHash
 // (host == client sim). Then the explicit quit (OnlineSession.leave from the menu): POST /api/leave
 // { matchId } -> 200 released, the host closes our socket (1000 'left') and its bots take the car, a
-// P2P queue right after is not refused with 409 (it long-polls; POST /api/leave {} drops that waiter)
-// and POST /api/rejoin answers 410 'left' (another human still plays) or 404 'no_match' (we were the last
-// human: the quit ended the match, its capacity slot is free). Prints RTT stats (4-timestamp pings at 4 Hz), the snapshot
+// queue right after is not refused with 409 (its first answer is 'waiting' at once; POST
+// /api/leave {} drops that waiter) and POST /api/rejoin answers 410 'left' (B still holds its seat)
+// or 404 'no_match' (we were the last human). Prints RTT stats (4-timestamp pings at 4 Hz), the snapshot
 // interval and the bufferHint distribution, then one line to paste into docs/online/PHASE1.md:
 //   SUMMARY edge=<colo> host=<colo> rtt_p50=.. rtt_p90=.. jitter=.. snap_p50=.. snap_p90=.. snap_max=.. hint_mode=.. desyncs=..
-// Exit 0 = pass, 1 = a check failed, 2 = cannot run (no session: Turnstile).
+// Exit 0 = pass, 1 = a check failed, 2 = cannot run (no account sessions).
 //
-// Turnstile: a deploy with TURNSTILE_SECRET + TURNSTILE_SITEKEY (GET /api/config reports the sitekey)
-// only creates guests for a browser that solved the challenge, which this script cannot do. Give it a
-// session instead: open the deployed game, press ONLINE once (that registers the guest through the
-// widget), then in the DevTools console copy
-//   JSON.parse(localStorage.getItem('turbogol.guest')).session.session
-// and run `SESSION=<that jwt> API=https://... node server/test/smoke.mjs`. Guest creation is skipped
-// (so is the second-guest leave test); sessions last 24 h.
+// Sessions: under wrangler dev with --var DEV_AUTH:1 the script signs in three dev accounts itself
+// (POST /api/dev/signin, loopback only). Elsewhere give it two account sessions: sign in on the
+// game in two browsers and copy each tab's Bearer (DevTools > Network, any /api/ call) into
+// SESSION and SESSION2; the third-account leave test is then skipped. A deploy with Turnstile also
+// needs a browser for its guest: the guest check is skipped when POST /api/guest is refused.
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
 
@@ -157,57 +160,81 @@ if (sitekey !== null) {
   log(`turnstile: the deploy reports a sitekey (${sitekey.slice(0, 10)}...): POST /api/guest needs a browser challenge; ${SESSION ? 'using the SESSION token instead of creating a guest' : 'without SESSION the guest step below may fail (see the header comment)'}`);
 }
 
+/** An account session of the dev sign-in (wrangler dev with DEV_AUTH=1, a loopback host), or null. */
+async function devAccount(name) {
+  const r = await api('/api/dev/signin', { name });
+  return r.status === 200 && typeof r.json?.session === 'string' && r.json.kind === 'account' ? r.json : null;
+}
+const SESSION2 = (argOf('session2') ?? process.env.SESSION2 ?? '').trim();
 let session = SESSION;
+let session2 = SESSION2;
+let session3 = '';
 let playerName = null;
-/** false when the script cannot create guests (SESSION given, or Turnstile refused it): skips the second-guest test. */
-let canCreateGuests = SESSION.length === 0;
-if (SESSION.length > 0) {
-  const claims = jwtPayload(SESSION);
-  check(claims !== null && typeof claims.sub === 'string', `SESSION is a JWT (sub ${claims?.sub ?? '?'}, name ${claims?.name ?? '?'}, exp ${claims?.exp ? new Date(claims.exp * 1000).toISOString() : '?'})`);
-  // A guest's name is the server's for its id, whatever an older session carries (verifySession).
-  playerName = claims?.acct !== 1 && typeof claims?.sub === 'string' ? guestNameOf(claims.sub) : typeof claims?.name === 'string' ? claims.name : null;
-  log('guest creation skipped (SESSION given)');
+if (SESSION.length > 0 || SESSION2.length > 0) {
+  for (const [label, tok] of [['SESSION', SESSION], ['SESSION2', SESSION2]]) {
+    const claims = jwtPayload(tok);
+    check(claims !== null && claims.acct === 1, `${label} is an account session (sub ${claims?.sub ?? '?'}, exp ${claims?.exp ? new Date(claims.exp * 1000).toISOString() : '?'})`);
+  }
+  playerName = jwtPayload(SESSION)?.name ?? null;
+  log('dev sign-in skipped (SESSION / SESSION2 given); the leave test needs a third account: skipped');
 } else {
-  const guest = await api('/api/guest', { name: 'Smoke Tester' });
-  const turnstileBlocked = (guest.status === 403 && guest.json?.error === 'turnstile_failed') || (guest.status === 503 && guest.json?.error === 'turnstile_unconfigured');
-  if (turnstileBlocked) {
-    log(`POST /api/guest -> ${guest.status} ${guest.json?.error}: this deploy only registers guests through the Turnstile widget.`);
-    log("Run again with a browser session: open the game, press ONLINE once, then in the DevTools console copy JSON.parse(localStorage.getItem('turbogol.guest')).session.session and pass it as SESSION=<jwt> (or --session=<jwt>).");
+  const [a, b, c] = [await devAccount('smoke_a'), await devAccount('smoke_b'), await devAccount('smoke_c')];
+  if (a === null || b === null || c === null) {
+    log('no account sessions: run wrangler dev with --var DEV_AUTH:1, or pass SESSION and SESSION2 (see the header comment)');
     process.exit(2);
   }
-  check(guest.status === 200 && /^[0-9a-f]{16}$/.test(guest.json?.playerId ?? ''), `POST /api/guest -> ${guest.status} ${guest.text.slice(0, 120)}`);
-  if (!guest.json?.session) {
-    log('cannot continue without a session');
-    process.exit(1);
-  }
-  session = guest.json.session;
-  playerName = guest.json.name;
-  check(GUEST_NAME_RE.test(guest.json.name) && guest.json.name === guestNameOf(guest.json.playerId), `the server names the guest (the name sent is ignored): ${guest.json.name}`);
+  [session, session2, session3] = [a.session, b.session, c.session];
+  playerName = a.name;
+  check(true, `three dev accounts signed in (${a.name}, ${b.name}, ${c.name})`);
 }
+if (session.length === 0 || session2.length === 0) {
+  log('two account sessions are needed (SESSION and SESSION2)');
+  process.exit(2);
+}
+check(config.json?.botFillMs === null && config.json?.queue?.soloAfterMs === 300_000 && config.json?.queue?.accountRequired === true, `GET /api/config: botFillMs ${config.json?.botFillMs}, queue ${JSON.stringify(config.json?.queue)}`);
+// A guest never queues (decision 2): 403 account_required, whatever its page sends.
+const guestTry = await api('/api/guest', { name: 'Smoke Guest' });
+if (guestTry.status === 200 && typeof guestTry.json?.session === 'string') {
+  const gq = await api('/api/queue', { api: 2, mode: MODE }, guestTry.json.session);
+  check(gq.status === 403 && gq.json?.error === 'account_required', `a guest's POST /api/queue -> ${gq.status} ${gq.json?.error}: ${gq.json?.message}`);
+  check(GUEST_NAME_RE.test(guestTry.json.name) && guestTry.json.name === guestNameOf(guestTry.json.playerId), `the server names the guest (the name sent is ignored): ${guestTry.json.name}`);
+} else log(`SKIP the guest check: POST /api/guest -> ${guestTry.status} ${guestTry.json?.error ?? ''}`);
+// A page cached from before the deploy (no api marker): told to reload.
+const oldPage = await api('/api/queue', { mode: MODE, kind: 'p2p', p2pProtocol: 5 }, session);
+check(oldPage.status === 426 && oldPage.json?.error === 'reload_required', `an account's queue without api -> ${oldPage.status} ${oldPage.json?.error}: ${oldPage.json?.message}`);
 const noAuth = await api('/api/queue', { mode: MODE });
 check(noAuth.status === 401, `POST /api/queue without a session -> ${noAuth.status}`);
-const badMode = await api('/api/queue', { mode: '9v9' }, session);
+const badMode = await api('/api/queue', { api: 2, mode: '9v9' }, session);
 check(badMode.status === 400, `POST /api/queue bad mode -> ${badMode.status}`);
 
-// ---- 2. queue (long-poll; the bot fill kicks in after ~10 s) ---------------------------------------
-// Each request long-polls up to 25 s on the server; six of them cover a slow remote fill with margin.
-let queued = null;
+// ---- 2. queue: A's first answer at once, B forms the match at once, A collects it -------------------
+const QUEUE = { api: 2, mode: MODE, prefer: MODE, visible: true };
 const qStart = performance.now();
-for (let attempt = 0; attempt < 6 && !queued; attempt++) {
-  const q = await api('/api/queue', { mode: MODE }, session);
-  log(`POST /api/queue -> ${q.status} ${q.text.slice(0, 100)}`);
-  if (q.status === 401 && SESSION.length > 0) {
-    log('the SESSION token was rejected (expired or signed by another JWT_SECRET): get a fresh one from the browser');
-    process.exit(2);
-  }
+const first = await api('/api/queue', QUEUE, session);
+log(`A: POST /api/queue -> ${first.status} ${first.text.slice(0, 160)}`);
+if (first.status === 401 && SESSION.length > 0) {
+  log('the SESSION token was rejected (expired or signed by another JWT_SECRET): get a fresh one from the browser');
+  process.exit(2);
+}
+const firstMs = performance.now() - qStart;
+check(first.status === 200 && first.json?.status === 'waiting' && typeof first.json?.wait?.botsInMs === 'number', `A's first answer: waiting with its wait, ${firstMs.toFixed(0)} ms (no long-poll)`);
+check(firstMs < 5_000 + 4 * httpRtt, 'the first answer came at once');
+const b = await api('/api/queue', QUEUE, session2);
+log(`B: POST /api/queue -> ${b.status} ${b.text.slice(0, 160)}`);
+check(b.status === 200 && b.json?.status === 'matched' && b.json?.humans === 2 && b.json?.mode === '2v2', `B matched at once: ${b.json?.mode}, ${b.json?.humans} humans, host ${b.json?.host}`);
+let queued = null;
+for (let attempt = 0; attempt < 3 && !queued; attempt++) {
+  const q = await api('/api/queue', QUEUE, session);
+  log(`A: POST /api/queue -> ${q.status} ${q.text.slice(0, 100)}`);
   if (q.status !== 200) {
     failures++;
     break;
   }
   if (q.json.status === 'matched') queued = q.json;
 }
-check(queued !== null, `matched after ${((performance.now() - qStart) / 1000).toFixed(1)} s`);
+check(queued !== null, `A matched after ${((performance.now() - qStart) / 1000).toFixed(1)} s`);
 if (!queued) process.exit(1);
+check(queued.matchId === b.json?.matchId, 'the same match for A and B');
 check(/^[0-9a-f]{64}$/.test(queued.matchId), `matchId ${queued.matchId}`);
 check(typeof queued.ticket === 'string' && queued.ticket.split('.').length === 3, 'ticket is a JWT');
 check(typeof queued.wsUrl === 'string' && queued.wsUrl.endsWith('/ws/' + queued.matchId), `wsUrl ${queued.wsUrl}`);
@@ -215,30 +242,27 @@ const wsTarget = resolveWs(queued.wsUrl);
 check(wsTarget.startsWith(WS_BASE.slice(0, WS_BASE.indexOf('://') + 3)), `socket scheme matches the API (${wsTarget.slice(0, wsTarget.indexOf('://') + 3)} for ${API.slice(0, API.indexOf('://') + 3)})`);
 
 // a second queue request while the match is active is refused (one active match per player)
-const again = await api('/api/queue', { mode: MODE }, session);
+const again = await api('/api/queue', QUEUE, session);
 check(again.status === 409 && again.json?.error === 'active_match', `queue again during a match -> ${again.status} ${again.json?.error}`);
 
-// ---- 2b. leave: a second guest that stops waiting is dropped before the bot fill ---------------------
-if (!canCreateGuests) {
-  log('SKIP leave test (needs a second guest; SESSION mode)');
+// ---- 2b. leave: a third account that stops waiting is dropped at once ----------------------------------
+if (session3.length === 0) {
+  log('SKIP leave test (needs a third account; SESSION mode)');
 } else {
-  const g2 = await api('/api/guest', { name: 'Smoke Leaver' });
-  check(g2.status === 200 && typeof g2.json?.session === 'string', `second guest -> ${g2.status}`);
-  if (g2.json?.session) {
-    const s2 = g2.json.session;
-    const tLeave = performance.now();
-    // 2v2 needs four humans: alone, this request would hang until the bot fill at 10 s. The join
-    // must have reached the matchmaker before the leave: wait a few round trips on a remote.
-    const settleMs = Math.max(300, Math.ceil(4 * httpRtt));
-    const pending = api('/api/queue', { mode: '2v2' }, s2);
-    await sleep(settleMs);
-    const left = await api('/api/leave', {}, s2);
-    check(left.status === 200 && left.json?.left === true, `POST /api/leave -> ${left.status} ${left.text} (after ${settleMs} ms)`);
-    const q2 = await Promise.race([pending, sleep(3000 + 4 * httpRtt).then(() => ({ status: 0, json: null, text: 'timeout' }))]);
-    check(q2.status === 200 && q2.json?.status === 'waiting', `the pending queue request answered 'waiting' ${((performance.now() - tLeave) / 1000).toFixed(2)} s after the leave (${q2.text.slice(0, 60)})`);
-    const again2 = await api('/api/leave', {}, s2);
-    check(again2.status === 200 && again2.json?.left === false, `leave when not queued -> left: ${again2.json?.left}`);
-  }
+  const s3 = session3;
+  const tLeave = performance.now();
+  const q1 = await api('/api/queue', QUEUE, s3);
+  check(q1.status === 200 && q1.json?.status === 'waiting', `the third account's first answer: ${q1.text.slice(0, 80)}`);
+  // Its next POST long-polls (up to 25 s); the leave answers it at once.
+  const settleMs = Math.max(300, Math.ceil(4 * httpRtt));
+  const pending = api('/api/queue', QUEUE, s3);
+  await sleep(settleMs);
+  const left = await api('/api/leave', {}, s3);
+  check(left.status === 200 && left.json?.left === true, `POST /api/leave -> ${left.status} ${left.text} (after ${settleMs} ms)`);
+  const q2 = await Promise.race([pending, sleep(3000 + 4 * httpRtt).then(() => ({ status: 0, json: null, text: 'timeout' }))]);
+  check((q2.status === 200 && q2.json?.status === 'waiting') || (q2.status === 404 && q2.json?.error === 'not_queued'), `the pending queue request answered ${((performance.now() - tLeave) / 1000).toFixed(2)} s after the leave (${q2.text.slice(0, 60)})`);
+  const again2 = await api('/api/leave', {}, s3);
+  check(again2.status === 200 && again2.json?.left === false, `leave when not queued -> left: ${again2.json?.left}`);
 }
 
 // ---- 3. WebSocket -----------------------------------------------------------------------------------
@@ -276,7 +300,7 @@ const welcome = await new Promise((resolve, reject) => {
 });
 check(ws.protocol === P.WS_SUBPROTOCOL, `negotiated subprotocol '${ws.protocol}'`);
 check(welcome.protocol === P.PROTOCOL_VERSION && welcome.matchId === queued.matchId, `Welcome: match ${welcome.matchId} mode ${welcome.mode} slot ${welcome.slot} carId ${welcome.carId}`);
-check(Array.isArray(welcome.roster) && welcome.roster.length === 2 * Number(MODE[0]), `roster has ${welcome.roster?.length} entries: ${welcome.roster.map((r) => `${r.slot}:${r.kind}/${r.team}`).join(' ')}`);
+check(Array.isArray(welcome.roster) && welcome.roster.length === 2 * Number(queued.mode[0]), `roster has ${welcome.roster?.length} entries: ${welcome.roster.map((r) => `${r.slot}:${r.kind}/${r.team}`).join(' ')}`);
 check(welcome.roster[welcome.slot]?.kind === 'player' && welcome.roster[welcome.slot]?.carId === welcome.carId, 'our slot is a player with our carId');
 if (playerName !== null) check(welcome.roster[welcome.slot]?.name === playerName, `our roster name is '${welcome.roster[welcome.slot]?.name}'`);
 const hostColo = typeof welcome.hostColo === 'string' && welcome.hostColo.length > 0 ? welcome.hostColo : 'missing';
@@ -510,20 +534,13 @@ check(quit.status === 200 && quit.json?.released === true, `POST /api/leave { ma
 const closeEv = await Promise.race([socketClosed, sleep(3000 + 4 * httpRtt).then(() => null)]);
 check(closeEv !== null && closeEv.code === 1000 && closeEv.reason === 'left', `the host closed our socket after the quit: ${closeEv ? `${closeEv.code} '${closeEv.reason}'` : 'still open'}`);
 
-const P2 = await import('../../src/net/p2p/protocol.ts');
-const pendingP2p = api('/api/queue', { mode: MODE, kind: 'p2p', p2pProtocol: P2.P2P_PROTOCOL_VERSION }, session);
-// A 409 comes back from the matchmaker's join at once; a queued P2P request long-polls (up to 25 s).
-const early = await Promise.race([pendingP2p, sleep(Math.max(1500, 6 * httpRtt)).then(() => null)]);
-if (early !== null) {
-  check(early.status === 200, `POST /api/queue { kind: 'p2p' } after the quit -> ${early.status} ${early.text.slice(0, 120)} (not 409)`);
-  // Another P2P waiter was there (a live deploy): free whatever was formed.
-  if (early.json?.status === 'matched') await api('/api/leave', { matchId: early.json.roomId ?? early.json.matchId }, session);
-} else {
-  check(true, "POST /api/queue { kind: 'p2p' } after the quit is long-polling: queued, not 409");
+// After the quit a queue is not refused with 409: its first answer is 'waiting' at once ('p2p' is Casual now).
+const afterQuit = await api('/api/queue', { ...QUEUE, kind: 'p2p' }, session);
+check(afterQuit.status === 200 && (afterQuit.json?.status === 'waiting' || afterQuit.json?.status === 'matched'), `POST /api/queue after the quit -> ${afterQuit.status} ${afterQuit.text.slice(0, 120)} (not 409)`);
+if (afterQuit.json?.status === 'matched') await api('/api/leave', { matchId: afterQuit.json.matchId }, session);
+else {
   const dropped = await api('/api/leave', {}, session);
-  check(dropped.status === 200 && dropped.json?.left === true, `POST /api/leave {} drops the P2P waiter -> ${dropped.status} ${dropped.text}`);
-  const q = await Promise.race([pendingP2p, sleep(3000 + 4 * httpRtt).then(() => ({ status: 0, json: null, text: 'timeout' }))]);
-  check(q.status === 200 && q.json?.status === 'waiting', `the P2P long-poll answered 'waiting' after that leave (${q.text.slice(0, 60)})`);
+  check(dropped.status === 200 && dropped.json?.left === true, `POST /api/leave {} drops that waiter -> ${dropped.status} ${dropped.text}`);
 }
 const rejoinAfterQuit = await api('/api/rejoin', { matchId: queued.matchId }, session);
 const [wantStatus, wantError] = otherHumans > 0 ? [410, 'left'] : [404, 'no_match'];
