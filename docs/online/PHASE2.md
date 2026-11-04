@@ -1,5 +1,11 @@
 # Fase 2: P2P con rollback determinista en malla (casual)
 
+> **Histórico.** Es el plan de la fase 2 tal como se escribió, y no se actualiza. El juego de hoy
+> es otro: desde el 2026-11-04 no hay cola P2P. Casual y Competitivo necesitan una cuenta y se
+> juegan siempre en servidor; el P2P con rollback de este plan queda solo para las salas,
+> públicas y privadas, que necesitan 2 personas para empezar y nunca pasan a un servidor. Lo
+> vigente está en [`server/README.md`](../../server/README.md) y en [`DECISIONS.md`](DECISIONS.md).
+
 Objetivo: partidos casuales entre 2–6 navegadores **sin servidor de simulación**. Cada par corre la
 misma física (RocketSim WASM), los mismos bots (sembrados) y el mismo flujo de partido; sólo se
 intercambian inputs. Cloudflare sólo señaliza (RoomDO con WebSockets hibernables) y da STUN

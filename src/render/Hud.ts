@@ -202,6 +202,11 @@ export class Hud {
   private readonly scoreRed: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly scoreBox: HTMLElement;
+  /** The search strip under the scorebug (setSearch), and what it shows: a search's, or a waiting lobby's (room play). */
+  private readonly searchStrip: HTMLElement;
+  private lastSearch: string | null = null;
+  private lastSearchWarn = false;
+  private lastSearchKind: 'search' | 'room' = 'search';
   /** The network bars by the clock (online; netBars). */
   private readonly netBarsEl: HTMLElement;
   private lastBars = -1;
@@ -357,6 +362,14 @@ export class Hud {
     this.scoreBox = board;
     top.append(board, el('span', 'hud-notch'));
     this.root.appendChild(top);
+
+    // The search strip under the scorebug (setSearch): a match against the bots while a search
+    // runs ("Finding CASUAL · 1:23 · Bots in 3:37 at most · Pause: cancel"), or why it ended; a
+    // lone host's local play while the lobby waits ("Lobby ABC 234 · waiting for players · ...").
+    this.searchStrip = el('div', 'hud-search');
+    this.searchStrip.setAttribute('role', 'status');
+    this.searchStrip.hidden = true;
+    this.root.appendChild(this.searchStrip);
 
     const fpsBox = el('div', 'hud-fps');
     this.fps = el('span', 'hud-fps-value', '');
@@ -519,6 +532,24 @@ export class Hud {
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('resize', this.onResize);
+  }
+
+  /**
+   * The search strip under the scorebug while the player plays waiting for a match (the modes
+   * redesign: Game's wait play, at 2 Hz): `text` (null hides it), `warn` for a line that says
+   * something is wrong (no network, the search ended). Written on a change only.
+   * `kind` 'room': the same strip for a lone host playing while the lobby waits (Game's room play:
+   * "Lobby ABC 234 · waiting for players · Pause: back to the lobby"), `data-kind` on it.
+   */
+  setSearch(text: string | null, warn = false, kind: 'search' | 'room' = 'search'): void {
+    if (text === this.lastSearch && warn === this.lastSearchWarn && kind === this.lastSearchKind) return;
+    this.lastSearch = text;
+    this.lastSearchWarn = warn;
+    this.lastSearchKind = kind;
+    this.searchStrip.hidden = text === null;
+    this.searchStrip.textContent = text ?? '';
+    this.searchStrip.classList.toggle('hud-search-warn', warn);
+    this.searchStrip.dataset.kind = kind;
   }
 
   /** Show / hide the debug readouts (speed, fps, draw calls, GPU time). F3 toggles this. */
@@ -954,6 +985,9 @@ export class Hud {
       }
       buttons.push(b);
     }
+    // A held QUIT with its own line (the search goes on, ranked's abandon): three lines, a taller
+    // button on a finger's dock (styles/screens/wait.css).
+    menu.classList.toggle('hud-pause-menu-tall', entries.some((e) => e.kind === 'quit' && e.hold === true && (e.sub?.() ?? null) !== null));
     // The focus starts on the first entry (RESUME), as before; a finger's pause focuses nothing (no ring).
     if (buttons.length > 0 && !touchMode()) this.pauseNav.focus(buttons[0]);
   }

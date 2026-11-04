@@ -446,17 +446,35 @@ html:not(.tg-touch) .mn .mn-codecells:focus-within {
   color: var(--warn);
 }
 
-/* The action bar, fixed at the bottom of the stage. */
-.mn-sala-bar {
+/* The foot, fixed at the bottom of the stage: a lone host's line (START waits for a second
+   player), the action bar and the wait line (VS BOTS · TRAIN) stay in sight when the Sala
+   scrolls (a phone, a TV); the teams go under it. */
+.mn-sala-foot {
   position: sticky;
   bottom: 0;
   z-index: 1;
   display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.75rem 0 0.25rem;
   background: var(--surface-0);
   border-top: 1px solid var(--edge);
+}
+
+.mn-sala-foot > .mn-sala-wait {
+  margin-top: 0;
+}
+
+/* A row the arrows focus scrolls in above the foot, not under it (lobby.ts writes its height). */
+.mn-sala-teams [data-nav] {
+  scroll-margin-bottom: calc(var(--mn-sala-foot, 0px) + 1rem);
+}
+
+/* The action bar. */
+.mn-sala-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 .mn-sala-go {
@@ -557,7 +575,8 @@ html[data-shell='rail'] .mn-sala-more {
   min-height: 2.75rem;
 }
 
-html[data-shell='rail'] .mn-sala-bar {
+html[data-shell='rail'] .mn-sala-foot {
+  gap: 0.25rem;
   padding-top: 0.5rem;
 }
 

@@ -159,11 +159,28 @@
  * speed, shows "Rules: name" and a RULES pause entry (the settings screen's Experimental tab; the
  * pick there applies once, when it closes: applyFreePlayRules) and saves no records; packs are
  * always stock, and any training whose physics differ from the arena's rebuilds it.
- * Search practice (MODOS' "While you wait: Free play", startSearchPractice): free play over a menu
- * search that keeps queueing; the frame watches the session (watchSearchPractice): once it leaves
- * its queue the one hand-off, practiceToMatch, ends practice under the PARTIDO ENCONTRADO band and
- * today's found -> match path plays (a failed connect brings the menus back); quitting practice
- * returns to the menus still searching (stopTraining -> showMenu(true)).
+ * Wait play (the modes redesign, November 2026; the pure transitions in ./waitPlay.ts): while a
+ * menu search queues, any offline start keeps it. VS AI's PLAY, the hero's or "While you search"'s
+ * VS BOTS start an unlimited match against the bots (startWaitBots: `match` is `waitMatch`, a Match
+ * of length 0, no whistle, so no FINAL; the match kind stays the search's), free play and the packs
+ * keep the session (startWaitTraining). The HUD's strip (and the TrainingHud's line) says the
+ * search's clock and estimate at 2 Hz with the way to cancel; the pause menu offers CANCEL SEARCH,
+ * or SEARCH AGAIN once it died (the local play goes on, its line says why), and QUIT back to the
+ * menus still searching. The frame watches the session (watchWaitPlay), and so do the session's
+ * own callbacks (setSession, the rosters), a hidden tab too: once it leaves its queue the one
+ * hand-off, waitToMatch, ends the local play (its score is lost: `match` back to `timedMatch`,
+ * the offline roster) under the PARTIDO ENCONTRADO band and today's found -> match path plays (a
+ * failed connect brings the menus back). The found cue and the tab's title come from the queue's
+ * answer (OnlineSession.onFound: foundNotify), the band from the frame (matchFound).
+ * Room play (step 2; the pure transitions in ./roomPlay.ts): a lone host in a Sala, with no search
+ * or other session up, gets VS BOTS · TRAIN under the action bar (lobby.ts, installRoomPlay): the
+ * same unlimited bots match (in the lobby's format) or free play, `roomPlay`, separate from `wait`.
+ * The lobby socket stays open, so the lobby stays and is listed. The HUD's strip says "Lobby ABC 234 ·
+ * waiting for players · Pause: back to the lobby"; the pause offers BACK TO THE LOBBY in QUIT's
+ * place. The lobby's own callbacks watch it (a hidden tab runs them): someone came in -> the cue
+ * (and the tab's title when hidden) at once, local play ends, the Sala and "{name} joined your
+ * lobby" (once the tab is seen); the lobby gone -> the menus with its close text; reconnecting ->
+ * it goes on. A search or a session taking the loop ends it; every way out puts the timed match back.
  */
 import * as THREE from 'three/webgpu';
 import type { Difficulty } from '../ai/Bot';
@@ -186,8 +203,9 @@ import { arenaMutators } from '../sim/mutators';
 import { STOCK_ARENA_FINGERPRINT, accumulate, buildTrainingArena, needsTrainingArena, planTrainingArena, trainingRules, type TrainingArenaPlan } from './experimentalTraining';
 import type { ExperimentalContext, ExperimentalOptions } from '../render/experimentalPage';
 import { lobbyRulesLine, presetName } from '../render/rulesText';
-import { LobbyClient } from '../net/LobbyClient';
-import { installJoinLink, installLobbyReturn } from '../ui/screens/lobby';
+import { LobbyClient, lobbyCloseText } from '../net/LobbyClient';
+import { installJoinLink, installLobbyReturn, installRoomPlay, toList } from '../ui/screens/lobby';
+import { spacedCode } from '../ui/screens/lobbyModel';
 import { installTvLink } from '../ui/screens/tvSignIn';
 import { confirmPending } from '../ui/screens/accountLinks';
 import { UrlSheets, takeDetour } from '../ui/screens/accountLinksModel';
@@ -205,6 +223,10 @@ import type { Menu, MenuConfig, MenuHost, SearchRequest, SearchView } from '../u
 import { finalScreen, installFinalSample, type FinalScreen } from '../ui/screens/match/final';
 import { goalScorer, type FinalKind, type FinalPlayer, type FinalView } from '../ui/screens/match/finalModel';
 import { MatchFound } from '../ui/screens/match/found';
+import { searchStart, waitLines, type QueueTimes } from '../ui/screens/searchModel';
+import { hudSearchLine } from '../ui/screens/searchText';
+import { WAIT_OFF, entered, enterFailed, foundParts, handOff, isLocal, nextLevelKeeps, pauseSearchEntry, queueLocal, quitWait, searchAgain, searchDied, startWait, type WaitState } from './waitPlay';
+import { newcomer, pauseExit, roomPlayOffered, roomStep, roomStrip, startRoom, type RoomBusy, type RoomPlay, type RoomView } from './roomPlay';
 import { playerName, regionName } from '../ui/names';
 import type { NetStatsView } from '../net/NetStats';
 import { P2PSession, kickoffSeedOf, type P2PGameHooks } from '../net/p2p/P2PSession';
@@ -506,6 +528,8 @@ const GO_CAPTION_SECONDS = 0.8;
 const MUSIC_TENSION_SECONDS = 30;
 /** Seconds after the final whistle before the FINAL comes (plan §1.7: 2 s). */
 const FINAL_SECONDS = 2;
+/** The wait's HUD strip (and the TrainingHud's line) is written at most this often (2 Hz). */
+const WAIT_HUD_MS = 500;
 const FPS_INTERVAL = 0.25;
 /** Menu camera orbit (uu). */
 const MENU_ORBIT_RADIUS = 3600;
@@ -687,7 +711,12 @@ export class Game implements P2PGameHooks {
   readonly bots: BotTeam;
   /** The player's blue teammates' brain; it has no slots in 1v1 and is then never asked to think. */
   readonly mates: BotTeam;
-  readonly match: Match;
+  /** The offline match on screen: `timedMatch`, or `waitMatch` while playing the bots waiting for a search (startWaitBots). */
+  match: Match;
+  /** The offline match against the AI (its length: GameOptions.matchLengthSeconds). */
+  private readonly timedMatch: Match;
+  /** Wait play's match against the bots: no time limit (Match length 0), so no whistle and no FINAL. */
+  private readonly waitMatch = new Match({ lengthSeconds: 0 });
   readonly hud: Hud;
   /** On-screen touch controls; null without a touch screen (no DOM, no listeners). Debug: window.__game.touch. */
   readonly touch: TouchControls | null;
@@ -881,8 +910,25 @@ export class Game implements P2PGameHooks {
   /** The menu search in progress (banner): its kind, playlists and start time. */
   private searchReq: SearchRequest | null = null;
   private searchSince = 0;
-  /** Search practice: free play over the search ('practice'), or its match found and on its way ('entering'). */
-  private searchPractice: 'off' | 'practice' | 'entering' = 'off';
+  /** Local play over a search (./waitPlay.ts): the bots match or training while it queues, or its match on its way ('entering'). */
+  private wait: WaitState = WAIT_OFF;
+  /** The search the local play waits for (kept when it dies: the HUD's line, SEARCH AGAIN). */
+  private waitReq: SearchRequest | null = null;
+  /**
+   * A lone host's local play while the lobby waits (./roomPlay.ts): the unlimited bots match or free
+   * play. Separate from `wait`: a search wins (the Sala offers it only with no session up).
+   */
+  private roomPlay: RoomPlay = 'off';
+  /** What the lobby said while the tab was hidden ("{name} joined your lobby", its close text): a toast once it is seen. */
+  private roomNotice: { text: string; kind: 'info' | 'error' } | null = null;
+  /** performance.now() of the wait HUD's last write (2 Hz). */
+  private waitHudAt = 0;
+  /** GET /api/config's queue times (the HUD's estimate without an answer yet), null before the config or from an older Worker. */
+  private queueTimes: QueueTimes | null = null;
+  /** A match against the AI reached its FINAL on this page (MenuHost.aiMatchEnded: a guest's "next" card). */
+  private aiEnded = false;
+  /** The found cue already played from the queue's answer (foundNotify): the frame's band does not play it again. */
+  private foundCued = false;
   /** The last match's result, shown as a toast when the menu comes back (null = none). */
   private lastResult: { winner: 0 | 1 | null; blue: number; red: number } | null = null;
   /** A message for that toast instead of the score (a disconnect reason...), or alone without a result. */
@@ -979,6 +1025,12 @@ export class Game implements P2PGameHooks {
     // A background tab may lose the canvas' last frame: a held one is drawn again.
     if (!document.hidden) this.redraw = true;
     if (document.hidden && !this.menuShown && !this.paused) this.setPaused(true);
+    // What the lobby said while the host's tab was hidden (room play): now that it is seen.
+    const notice = this.roomNotice;
+    if (!document.hidden && notice !== null) {
+      this.roomNotice = null;
+      this.menu.toast(notice.text, notice.kind);
+    }
   };
 
   /** Focus lost: the browser drops the pointer lock itself, but make it explicit (and immediate). */
@@ -1090,7 +1142,8 @@ export class Game implements P2PGameHooks {
     this.input = new Input(window, settings, { onChange: () => this.applySettings() });
     this.input.onPointerLockChange = (locked) => this.onPointerLock(locked);
     sim.setCarDodgeDeadzone(this.playerCarId, settings.controls.dodgeDeadzone);
-    this.match = new Match({ lengthSeconds: opts.matchLengthSeconds ?? DEFAULT_MATCH_SECONDS });
+    this.timedMatch = new Match({ lengthSeconds: opts.matchLengthSeconds ?? DEFAULT_MATCH_SECONDS });
+    this.match = this.timedMatch;
     this.hud = new Hud(opts.hudContainer);
     this.loading = opts.loading ?? new LoadingOverlay(overlayHost(opts.hudContainer));
     // Touch screens only: the controls layer goes right after the Hud root and drives Input like a keyboard.
@@ -1120,6 +1173,8 @@ export class Game implements P2PGameHooks {
     // Online sessions: only the stored guest name is read now; the network is touched on ONLINE.
     const online = new OnlineSession(this);
     this.online = online;
+    // The found cue and the tab's title from the queue's answer (a hidden tab runs no frames).
+    online.onFound = () => this.foundNotify();
     this.p2p = new P2PSession(this, {
       client: online.client,
       engineFactory: (p2pSim, numSlots, humanSlots, localSlot, hooks, opts) => new RollbackEngine(p2pSim, numSlots, humanSlots, localSlot, hooks, opts),
@@ -1147,6 +1202,13 @@ export class Game implements P2PGameHooks {
     // The account's cars: its session's car and inventory widen what the pick may hold (the views exist: it may dress the player's car).
     this.garage = new Garage(accounts, this.carPick, () => this.dressLocalCar());
     this.menu = createMenu(this.menuHost(), opts.hudContainer);
+    // A lone host's local play while the lobby waits: the Sala's buttons and the lobby's news (room play).
+    installRoomPlay({
+      offered: () => roomPlayOffered(this.roomPlay, this.roomView(), this.roomBusy()),
+      start: (kind) => this.startRoomPlay(kind),
+      changed: () => this.watchRoomPlay(),
+      closed: (reason) => this.roomLobbyClosed(reason),
+    });
     // A join link (#sala=ABC234) on this load or a later hashchange: its sheet once the menus are up.
     // The Sala a reload left (the game's own, restartOn, or the player's: pagehide, not a page kept
     // in the back/forward cache): joined again, its screen.
@@ -1435,13 +1497,20 @@ export class Game implements P2PGameHooks {
         preview: (id) => game.previewCar(id),
       },
       config: async (): Promise<MenuConfig> => {
-        if (net === null) return { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null };
+        if (net === null) return { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null, queue: null };
         const c = await net.config();
-        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null };
+        game.queueTimes = c.queue ?? null;
+        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, queue: c.queue ?? null, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null };
       },
       // A guest's only: an account (or a page that was one: its hint) registers no guest.
       prewarmAntiBot: () => {
         if (!game.accounts.signedIn && game.accounts.hintName === null) net?.prewarmAntiBot();
+      },
+      get antiBotReady() {
+        return net !== null && net.antiBotReady;
+      },
+      get aiMatchEnded() {
+        return game.aiEnded;
       },
       // The server's name for this guest (its wire form: Menu shows it through playerName), the word before its first session.
       guestName: () => game.online?.name || t('game.guestName'),
@@ -1460,6 +1529,11 @@ export class Game implements P2PGameHooks {
       },
       setTheme: (id) => void game.switchTheme(id),
       playFriendly: (mode, difficulty) => {
+        // A search queueing: its unlimited match against the bots instead (the search goes on).
+        if (game.searchQueueing()) {
+          game.startWaitBots(mode, difficulty);
+          return;
+        }
         if (game.session !== null && game.session.busy) game.session.cancel();
         game.setDifficulty(difficulty);
         game.setMode(mode);
@@ -1468,6 +1542,11 @@ export class Game implements P2PGameHooks {
         game.startMatch();
       },
       startTraining: (id, opts) => {
+        // A search queueing: training keeps it (stock physics only: LAB is not offered then).
+        if (game.searchQueueing()) {
+          game.startWaitTraining(id);
+          return;
+        }
         if (game.session !== null && game.session.busy) game.session.cancel();
         game.startTraining(id, opts);
       },
@@ -1477,7 +1556,20 @@ export class Game implements P2PGameHooks {
         game.searchReq = null;
       },
       searchView: () => game.menuSearchView(),
-      practiceWhileSearching: () => game.startSearchPractice(),
+      waitPlay: (kind) => {
+        if (kind === 'bots') game.startWaitBots(game.mode, game.difficulty);
+        else game.startWaitTraining(FREEPLAY_ID);
+      },
+      setQueuePrefer: (mode) => {
+        // Only a Casual search carries it; the hub updates the waiter in place (no restart). Its
+        // playlist follows (the body's `modes`, the panel's and the band's format).
+        if (game.searchReq?.kind !== 'casual') return;
+        game.searchReq.modes = [mode];
+        if (net !== null) {
+          net.queueModes = [mode];
+          net.queuePrefer = mode;
+        }
+      },
       playLobbyMatch: (r) => game.playLobbyMatch(r),
       rejoinable: () => (game.online !== null ? game.online.rejoinable : null),
       rejoinMatch: () => game.rejoinMatch(),
@@ -1504,28 +1596,55 @@ export class Game implements P2PGameHooks {
     };
   }
 
-  /** Menu search: casual (P2P room or server match) or ranked (accounts, server), several playlists at once. */
+  /**
+   * Menu search, always on a server (the modes redesign): Casual (its preferred format as `prefer`:
+   * the hub pools every format) or ranked (accounts, several playlists at once). Casual leaves the
+   * menus' roster as it is (the VS AI tab's format, which the wait's bots match plays).
+   */
   private menuSearch(req: SearchRequest): void {
     const online = this.online;
     if (online === null) return;
     if (this.session !== null && this.session.busy) this.session.cancel();
+    // Another session still up and not busy (a P2P room's 'ended'): no search over it (startOnline's rule).
+    if (this.session !== null && this.session !== online && this.session.state !== 'idle') return;
+    // A search wins over a lone host's play while the lobby waits: never both (back to the Sala).
+    if (this.roomPlay !== 'off') this.leaveRoomPlay();
     const client = online.client;
     client.queueModes = req.modes.slice();
     client.region = req.region;
     const mode = req.modes[0];
+    client.queuePrefer = req.kind === 'casual' ? mode : null;
+    client.queueLocal = queueLocal(this.wait);
     this.searchReq = { ...req, modes: req.modes.slice() };
     this.searchSince = performance.now();
-    this.holdForGuest = mode !== this.mode && !this.accounts.signedIn && !guestReady(client);
     this.matchKind = req.kind;
+    this.foundCued = false;
+    if (online.state !== 'idle') return;
     if (req.kind === 'ranked') {
-      if (online.state !== 'idle') return;
+      this.holdForGuest = mode !== this.mode && !this.accounts.signedIn && !guestReady(client);
       this.setMode(mode);
-      this.menuReturnAt = -1;
-      this.setSession(online);
-      online.quickMatch(mode, '', 'ranked');
-      return;
     }
-    this.startSession(mode, req.net === 'server' ? 'server' : 'p2p');
+    this.menuReturnAt = -1;
+    this.setSession(online);
+    online.quickMatch(mode, '', req.kind === 'ranked' ? 'ranked' : 'server');
+  }
+
+  /**
+   * When the running search started, for its every clock (the menus', the HUD's): the server's once
+   * an answer said it (searchModel.ts searchStart: `waitedMs`, a restored search's too), else when
+   * its first POST left; a search queueing before that POST (the terms sheet, the sign-in) stands at
+   * 0:00. A rejoin connecting counts from its press, as before.
+   */
+  private searchClock(): number {
+    const online = this.online !== null && this.session === this.online ? this.online : null;
+    const queueing = online !== null && online.state === 'queue';
+    return searchStart(this.searchSince, online?.wait ?? null, online?.waitAt ?? 0, online?.postedAt ?? 0, queueing ? performance.now() : this.searchSince);
+  }
+
+  /** A menu search is queueing (not yet matched): local play keeps it (wait play). */
+  private searchQueueing(): boolean {
+    const s = this.session;
+    return s !== null && s.state === 'queue' && this.searchReq !== null;
   }
 
   private menuSearchView(): SearchView {
@@ -1537,14 +1656,21 @@ export class Game implements P2PGameHooks {
       this.searchReq = null;
     }
     const error = s !== null && !s.busy && !s.inMatch && s.state === 'idle' ? s.statusText : null;
+    const online = this.online !== null && s === this.online ? this.online : null;
     return {
       active: busy && req !== null,
       kind: req?.kind ?? null,
       modes: req?.modes ?? [],
       text: busy ? (s?.statusText ?? '') : '',
-      since: this.searchSince,
+      since: this.searchClock(),
       region: req?.region ?? null,
-      net: req?.net ?? null,
+      wait: online?.wait ?? null,
+      waitAt: online?.waitAt ?? 0,
+      answers: online?.waitingAnswers ?? 0,
+      queueing: online !== null && online.state === 'queue',
+      postedAt: online?.postedAt ?? 0,
+      waitRegion: online?.waitRegion ?? null,
+      retrying: online?.retrying ?? false,
       error: error !== null && error.length > 0 ? error : null,
       // 426 reload_required (a stale page: P2PSession STATUS.reload, OnlineSession's netErrorText):
       // the menus' blocking sheet instead of a toast.
@@ -1563,6 +1689,9 @@ export class Game implements P2PGameHooks {
   private playLobbyMatch(r: QueueResult | QueueResultP2p): void {
     const st = this.lobby.state;
     const mode: GameMode = st !== null && isPlaylist(st.settings.mode) ? st.settings.mode : this.mode;
+    // Playing locally while a search queued, or while the lobby waited: the lobby's match takes over (the search goes).
+    this.waitToMatch(true);
+    this.endRoomPlay();
     if (this.session !== null && this.session.busy) this.session.cancel();
     this.searchReq = null;
     this.matchKind = 'lobby';
@@ -1648,13 +1777,27 @@ export class Game implements P2PGameHooks {
    * RESUME leaves no match; in Competitivo its line says it counts as an abandon); training adds its entries on one row (pack: reset / previous / next shot;
    * free play: reset ball / reset car / unlimited boost) and QUIT leaves training; experimental
    * free play also gets RULES (the settings screen on its Experimental tab). Paused under a pack
-   * summary: nothing (the summary's own buttons stay the only ones).
+   * summary: nothing (the summary's own buttons stay the only ones). Playing locally over a search
+   * (wait play): CANCEL SEARCH (SEARCH AGAIN once it died) before QUIT, whose line says the search
+   * goes on (back to the menus still searching).
    */
   private pauseEntries(): PauseEntry[] {
     const resume: PauseEntry = { id: 'resume', kind: 'primary', label: () => t('pause.resume'), select: (mouse) => this.resumeFromMenu(mouse) };
     const settings: PauseEntry = { id: 'settings', label: () => t('pause.settings'), select: () => this.openPauseSettings() };
+    const searchEntry = pauseSearchEntry(this.wait);
+    const waitEntries: PauseEntry[] =
+      searchEntry === 'cancelSearch'
+        ? [{ id: 'cancel-search', label: () => t('pause.cancelSearch'), select: () => this.cancelWaitSearch() }]
+        : searchEntry === 'searchAgain'
+          ? [{ id: 'search-again', label: () => t('pause.searchAgain'), select: () => this.searchWaitAgain() }]
+          : [];
+    const waitingSub = (): string | null => (this.wait.searching ? t('pause.quitWaiting') : null);
+    // A lone host playing while the lobby waits: BACK TO THE LOBBY in QUIT's place (the same way out).
+    const roomBack = pauseExit(this.roomPlay) !== null ? { id: 'back-to-lobby', kind: 'quit' as const, label: () => t('pause.backToLobby'), select: () => this.leaveRoomPlay() } : null;
     const tr = this.training;
     if (tr === null) {
+      if (roomBack !== null) return [resume, settings, { ...roomBack, hold: true }];
+      if (this.wait.play === 'bots') return [resume, settings, ...waitEntries, { id: 'quit', kind: 'quit', hold: true, label: () => t('pause.quit'), sub: waitingSub, select: () => this.quitWaitBots() }];
       const ranked = this.onlineActive && this.online !== null && this.session === this.online && this.online.ranked;
       return [resume, settings, { id: 'quit', kind: 'quit', hold: true, label: () => t('pause.quit'), sub: () => (ranked ? t('pause.quitRanked') : null), select: () => this.quitToMenu() }];
     }
@@ -1681,7 +1824,14 @@ export class Game implements P2PGameHooks {
           { id: 'next-shot', kind: 'row', label: () => t('trainingHud.nextShot'), select: (mouse) => resumeAnd(mouse, (s) => s.nextShot()) },
         ];
     if (tr.isFreeplay && this.freePlayRules !== null) extras.push({ id: 'rules', label: () => t('pause.rules'), select: () => this.openPauseSettings('experimental') });
-    return [resume, ...extras, settings, { id: 'quit', kind: 'quit', label: () => t('trainingHud.quit'), select: () => this.stopTraining() }];
+    const waiting = this.wait.play === 'training';
+    if (roomBack !== null) return [resume, ...extras, settings, roomBack];
+    return [resume, ...extras, settings, ...(waiting ? waitEntries : []), { id: 'quit', kind: 'quit', label: () => t('trainingHud.quit'), sub: waiting ? waitingSub : undefined, select: () => this.stopTraining() }];
+  }
+
+  /** The pause menu's entries again (the wait's search entry changed under it). */
+  private refreshPauseEntries(): void {
+    if (this.paused && !this.menuShown) this.hud.setPaused(true, this.pauseEntries(), this.pauseHint(), this.onlineActive);
   }
 
   /** The pause menu's key line, from the live pause bindings (rebindable, never unbound) and the back keys that resume too. */
@@ -2152,12 +2302,13 @@ export class Game implements P2PGameHooks {
 
   /** Make `s` the session the loop hosts (null = offline). The previous one is left first. */
   setSession(s: GameSession | null): void {
-    // An online match replaces the training roster: leave training first (offline roster back);
-    // search practice hands off to its match (a P2P search's lone player handed a server match).
-    if (s !== null && this.training !== null) {
-      if (this.searchPractice === 'practice') this.practiceToMatch();
-      else this.endTraining();
-    }
+    // Another session takes over while the player plays waiting: the hand-off (the same session
+    // starting its search again, SEARCH AGAIN, keeps the local play). An online match replaces a
+    // training roster that waits for nothing: training ends first (offline roster back).
+    if (s !== null && s !== this.session) this.waitToMatch(true);
+    // A session takes the loop: a lone host's play while the lobby waited ends (never both).
+    if (s !== null) this.endRoomPlay();
+    if (s !== null && this.training !== null && !isLocal(this.wait)) this.endTraining();
     // Super low still plays online; one line says this device may not keep up (once a session).
     if (s !== null && this.cpuLite && !this.liteOnlineNoticed) {
       this.liteOnlineNoticed = true;
@@ -2211,7 +2362,8 @@ export class Game implements P2PGameHooks {
    * car all the same.
    */
   applyOnlineRoster(w: Welcome, cars?: ReadonlyArray<CarId | null> | null): void {
-    this.practiceToMatch(); // search practice still on (the frame's watch had not seen the match found yet)
+    // Local play still on (the frame's watch had not seen the match found yet: a hidden tab runs none).
+    this.waitToMatch(true);
     const sim = this.sim;
     const roster = w.roster.slice().sort((a, b) => a.slot - b.slot);
     if (roster.length === 0 || roster.length > MAX_CARS) throw new Error(`roster of ${roster.length} cars`);
@@ -2260,7 +2412,7 @@ export class Game implements P2PGameHooks {
    * car): a look only, never part of the shared simulation.
    */
   applyP2PRoster(w: RoomWelcome): void {
-    this.practiceToMatch(); // search practice still on (the frame's watch had not seen the match found yet)
+    this.waitToMatch(true); // local play still on (the frame's watch had not seen the match found yet)
     const sim = this.sim;
     const roster = w.slots.slice().sort((a, b) => a.slot - b.slot);
     if (roster.length === 0 || roster.length > MAX_CARS) throw new Error(`roster of ${roster.length} cars`);
@@ -2608,7 +2760,7 @@ export class Game implements P2PGameHooks {
     if (online.state !== 'idle') return;
     const region = online.client.region;
     // A lobby's match shows as a Casual search while it connects; its FINAL goes back to the lobby.
-    this.searchReq = { kind: rec.kind === 'ranked' ? 'ranked' : 'casual', modes: rec.modes.slice(), region: isRegion(region) ? region : null, net: 'server' };
+    this.searchReq = { kind: rec.kind === 'ranked' ? 'ranked' : 'casual', modes: rec.modes.slice(), region: isRegion(region) ? region : null };
     this.searchSince = performance.now();
     this.matchKind = rec.kind;
     this.setMode(rec.modes[0]);
@@ -2735,65 +2887,322 @@ export class Game implements P2PGameHooks {
    */
   stopTraining(): void {
     if (this.training === null) return;
-    // Search practice: back to the menus with the search still queueing.
-    const keep = this.searchPractice === 'practice';
-    this.searchPractice = 'off';
+    // Free play while the lobby waits: back to the Sala (room play).
+    if (this.roomPlay === 'training') {
+      this.leaveRoomPlay();
+      return;
+    }
+    // Training while waiting: back to the menus with the search still queueing (quitWait).
+    const keep = this.training !== null && this.wait.play === 'training' ? quitWait(this.wait).keepSearch : false;
+    if (this.wait.play === 'training') this.setWait(WAIT_OFF);
     this.endTraining();
     this.lastResult = null;
     this.menuNotice = undefined;
     this.showMenu(keep);
   }
 
-  /**
-   * MODOS' "While you wait: Free play" (MenuHost.practiceWhileSearching): free play over the running
-   * menu search, which goes on queueing under it (startTraining keeps the session). The frame
-   * watches it (watchSearchPractice); quitting comes back to the menus still searching.
-   */
-  private startSearchPractice(): void {
-    const s = this.session;
-    if (s === null || !s.busy || this.searchReq === null) return;
-    this.startTraining(FREEPLAY_ID, { keepSession: true });
-    if (this.training === null) return;
-    this.searchPractice = 'practice';
-    this.trainingHud?.setRules(t('search.practiceLine'));
+  // ---- wait play: local play while a search queues (./waitPlay.ts) -----------------------
+
+  /** The wait state moves on; the queue's `local` follows it (the daily counters), the HUD at once. */
+  private setWait(next: WaitState): void {
+    this.wait = next;
+    if (this.online !== null) this.online.client.queueLocal = queueLocal(next);
+    this.waitHudAt = 0;
+    // Playing while waiting: a "While you search" still owed never pops up later in the menus.
+    if (isLocal(next)) this.menu.waitPlayStarted();
   }
 
   /**
-   * Every frame of search practice: the session left its queue (a match found: OnlineSession
-   * 'connecting', P2PSession 'signaling') -> practiceToMatch; a search that ended without one goes
-   * on as plain free play, its reason on the TrainingHud's line (the menus toast it too). Then,
-   * entering, until the match is on screen (sessionMatchOnScreen hides the banner), or back to the
-   * menus when its connection failed (their toast says why).
+   * An unlimited match against the bots (`mode`, `difficulty`: the VS AI tab's) over the running
+   * search: the menus' "While you search" / MODOS' VS BOTS, VS AI's PLAY, the FINAL's restart. Like
+   * startMatch on `waitMatch` (no whistle: no FINAL), the session kept, the match kind the search's.
+   * Nothing starts when no search queues.
    */
-  private watchSearchPractice(): void {
+  private startWaitBots(mode: GameMode, difficulty: Difficulty): void {
+    const next = startWait(this.wait, 'bots', this.searchQueueing());
+    if (next === null) return;
+    this.waitReq = this.searchReq;
+    if (this.training !== null) this.endTraining();
+    this.setDifficulty(difficulty);
+    this.useMatch(this.waitMatch);
+    this.setMode(mode);
+    this.lastResult = null;
+    this.menuNotice = undefined;
+    this.beginLocalMatch();
+    this.matchKind = this.searchReq?.kind ?? this.matchKind;
+    this.setWait(next);
+  }
+
+  /**
+   * Free play or a pack (`id`) over the running search (startTraining keeping the session): the
+   * menus' TRAIN, ENTRENAMIENTO's tiles and packs while searching. Nothing starts when no search queues.
+   */
+  private startWaitTraining(id: string): void {
+    const next = startWait(this.wait, 'training', this.searchQueueing());
+    if (next === null) return;
+    this.waitReq = this.searchReq;
+    this.useMatch(this.timedMatch);
+    this.startTraining(id, { keepSession: true });
+    if (this.training === null) return;
+    this.setWait(next);
+  }
+
+  /** `m` is the offline match from now on (the other one reset): the bots match while waiting, the timed one otherwise. */
+  private useMatch(m: Match): void {
+    if (this.match === m) return;
+    this.match.reset();
+    this.match = m;
+    m.reset();
+  }
+
+  /**
+   * The hand-off: the search left its queue (a match issued; `force`: a match is coming anyway, a
+   * Welcome, another session taking over), so local play ends at once and its score is lost
+   * (training ends, or the bots match: `match` back to `timedMatch`, the offline roster), the
+   * match kind is the search's, and the match is on its way ('entering') under the PARTIDO
+   * ENCONTRADO band. From the frame's watch, setSession and the session rosters (a hidden tab:
+   * the socket's callbacks). No-op unless playing locally.
+   */
+  private waitToMatch(force = false): void {
+    const h = handOff(this.wait.searching || !force ? this.wait : { ...this.wait, searching: true }, this.waitReq?.kind ?? this.searchReq?.kind ?? 'casual');
+    if (h === null) return;
+    this.setWait(h.state);
+    if (this.training !== null) this.endTraining();
+    else {
+      this.useMatch(this.timedMatch);
+      this.hud.hideBanner();
+      this.hud.showCountdown(null);
+      this.goCaptionUntil = -1;
+      this.restoreOfflineRoster();
+    }
+    this.setPaused(false);
+    this.hud.setSearch(null);
+    if (this.searchReq !== null) this.matchKind = h.matchKind;
+  }
+
+  /**
+   * Every frame of local play over a search, and of its match on the way: the session left its
+   * queue (a match found) -> waitToMatch; the search died -> the local play goes on and its line
+   * says why (the menus show it too when they come back); entering, until the match is on screen
+   * (or back to the menus when its connection failed: their sheet says why).
+   */
+  private watchWaitPlay(): void {
     const s = this.session;
-    if (this.searchPractice === 'practice') {
-      if (this.training === null) this.searchPractice = 'off';
-      else if (s === null || s.state === 'idle') {
-        this.searchPractice = 'off';
-        this.trainingHud?.setRules(s !== null && s.statusText !== null && s.statusText.length > 0 ? s.statusText : null);
-      } else if (s.state !== 'queue') this.practiceToMatch();
+    const w = this.wait;
+    if (isLocal(w)) {
+      // Training ended some other way (its summary's TRAINING button, a stop): nothing waits for it.
+      if (w.play === 'training' && this.training === null) {
+        this.setWait(WAIT_OFF);
+        return;
+      }
+      if (!w.searching) return;
+      if (s === null || s.state === 'idle') {
+        const why = s !== null && s.statusText !== null && s.statusText.length > 0 ? s.statusText : null;
+        this.setWait(searchDied(w, why));
+        this.refreshPauseEntries(); // SEARCH AGAIN instead of CANCEL SEARCH
+      } else if (s.state !== 'queue') this.waitToMatch();
       return;
     }
-    if (s !== null && s.inMatch) this.searchPractice = 'off';
+    if (w.play !== 'entering') return;
+    if (s !== null && s.inMatch) this.setWait(entered(w));
     else if (s === null || s.state === 'idle') {
-      this.searchPractice = 'off';
+      this.setWait(enterFailed(w).state);
       this.hud.hideBanner();
       this.showMenu();
     }
   }
 
+  /** The pause's CANCEL SEARCH while playing locally: the search goes, the local play stays (its pause offers SEARCH AGAIN). */
+  private cancelWaitSearch(): void {
+    this.setWait(searchDied(this.wait, null));
+    this.menu.cancelSearch();
+    this.refreshPauseEntries();
+  }
+
+  /** The pause's SEARCH AGAIN: the same request again (the menus' search), the local play goes on. */
+  private searchWaitAgain(): void {
+    const req = this.waitReq;
+    if (req === null || !isLocal(this.wait)) return;
+    // Before the search: its first POST already says what the player does locally.
+    this.setWait(searchAgain(this.wait));
+    this.menu.startSearch({ kind: req.kind, modes: req.modes.slice(), region: req.region });
+    if (!this.searchQueueing()) this.setWait(searchDied(this.wait, null));
+    this.resumeFromMenu();
+  }
+
+  /** The pause's QUIT from the bots match while waiting: the menus, still searching when the search runs. */
+  private quitWaitBots(): void {
+    const q = quitWait(this.wait);
+    this.setWait(q.state);
+    this.useMatch(this.timedMatch);
+    this.resetToKickoff();
+    this.goCaptionUntil = -1;
+    this.lastResult = null;
+    this.menuNotice = undefined;
+    this.showMenu(q.keepSearch);
+  }
+
+  /** The HUD's line for the local play: the search's clock and estimate (or what is wrong) and the way to cancel, or why it ended. */
+  private waitHudText(): { text: string | null; warn: boolean } {
+    const w = this.wait;
+    const req = this.waitReq;
+    if (!isLocal(w) || req === null) return { text: null, warn: false };
+    if (!w.searching) return w.ended !== null ? { text: t('search.ended', { why: w.ended }), warn: true } : { text: null, warn: false };
+    const online = this.online;
+    const lines = waitLines({ kind: req.kind, since: this.searchClock(), wait: online?.wait ?? null, waitAt: online?.waitAt ?? 0, retrying: online?.retrying ?? false, times: this.queueTimes }, performance.now());
+    return { text: hudSearchLine(req.kind, lines), warn: lines.override === 'retrying' };
+  }
+
+  /** The wait's HUD strip and the TrainingHud's line at 2 Hz (written on a change only). */
+  private updateWaitHud(): void {
+    const now = performance.now();
+    if (now - this.waitHudAt < WAIT_HUD_MS) return;
+    this.waitHudAt = now;
+    const h = this.waitHudText();
+    if (this.training !== null) {
+      this.hud.setSearch(null);
+      this.trainingHud?.setSearch(h.text);
+      return;
+    }
+    // A first match's touch card up (the match held under it): the card alone, high in the middle
+    // where the strip runs on a phone held sideways; the strip is back once it is read.
+    const card = this.touch !== null && this.touch.cardsUp;
+    this.hud.setSearch(this.menuShown || card ? null : h.text, h.warn);
+  }
+
+  // ---- room play: a lone host plays while the lobby waits (./roomPlay.ts) -----------------
+
+  /** What room play reads of the lobby now. */
+  private roomView(): RoomView {
+    const l = this.lobby;
+    return { status: l.status, host: l.isHost, members: l.state?.members.length ?? 0, lobby: l.state?.status ?? null };
+  }
+
+  /** What else holds the player: any session up (a search queueing wins), wait play. */
+  private roomBusy(): RoomBusy {
+    const s = this.session;
+    return { session: s !== null && s.state !== 'idle', waitPlay: this.wait.play !== 'off' };
+  }
+
   /**
-   * Search practice found its match: practice ends (the offline roster back, frozen at kickoff
-   * under the PARTIDO ENCONTRADO band, which the frame's watch shows: matchFound) and today's
-   * found -> match path takes over (the session's roster, its kickoff countdown). The one hand-off
-   * from practice to a match (the frame's watch, setSession, the session rosters). No-op unless
-   * practising with a search.
+   * The Sala's VS BOTS · TRAIN (a lone host, nothing else on): the unlimited match against the bots
+   * in the lobby's format (`waitMatch`: no whistle, no FINAL), or free play. The lobby socket stays
+   * open (the page lives), so the lobby stays and is listed; its callbacks end it (watchRoomPlay).
    */
-  private practiceToMatch(): void {
-    if (this.searchPractice !== 'practice') return;
-    this.searchPractice = 'entering';
-    this.endTraining();
+  private startRoomPlay(kind: 'bots' | 'training'): void {
+    const next = startRoom(this.roomPlay, kind, this.roomView(), this.roomBusy());
+    if (next === null) return;
+    if (kind === 'bots') {
+      const st = this.lobby.state;
+      const mode: GameMode = st !== null && isPlaylist(st.settings.mode) ? st.settings.mode : this.mode;
+      if (this.training !== null) this.endTraining();
+      this.useMatch(this.waitMatch);
+      this.setMode(mode);
+      this.lastResult = null;
+      this.menuNotice = undefined;
+      this.beginLocalMatch();
+      this.matchKind = 'ai';
+    } else {
+      this.useMatch(this.timedMatch);
+      this.startTraining(FREEPLAY_ID);
+      if (this.training === null) return;
+    }
+    this.roomPlay = next;
+    this.waitHudAt = 0; // the strip at once
+  }
+
+  /**
+   * The lobby moved (its socket's callbacks: a hidden tab too; the frame as a backstop) while the
+   * host plays: someone came in -> back to the Sala with the notice; the lobby gone -> the menus;
+   * reconnecting -> it goes on (roomPlay.ts roomStep).
+   */
+  private watchRoomPlay(): void {
+    const step = roomStep(this.roomPlay, this.roomView());
+    if (step === 'back') this.roomJoined();
+    else if (step === 'menus') this.roomGone(null, 'info');
+  }
+
+  /**
+   * Someone came in: the cue at once (and the tab's title when it is hidden: a visible one sees the
+   * Sala), local play ends (its score is lost), the Sala and "{name} joined your lobby" (once the
+   * tab is seen again).
+   */
+  private roomJoined(): void {
+    const st = this.lobby.state;
+    const who = st !== null ? newcomer(st.members, st.you) : null;
+    this.audio.play('matchFound');
+    if (document.hidden) this.found.tab();
+    this.leaveRoomPlay();
+    if (who !== null) this.roomToast(t('lobby.joinedBack', { name: playerName(who.name) }), 'info');
+  }
+
+  /** The lobby closed while the host played (lobby.ts onClosed): the menus with its close text; false when not playing. */
+  private roomLobbyClosed(reason: string): boolean {
+    if (this.roomPlay === 'off') return false;
+    this.roomGone(lobbyCloseText(reason), reason === 'kicked' ? 'error' : 'info');
+    return true;
+  }
+
+  /** The lobby is gone: local play ends, the menus on the lobby list, its close text (`text`; null: none) once the tab is seen. */
+  private roomGone(text: string | null, kind: 'info' | 'error'): void {
+    if (!this.endRoomPlay()) return;
+    this.lastResult = null;
+    this.menuNotice = undefined;
+    this.showMenu();
+    toList(this.menu);
+    if (text !== null) this.roomToast(text, kind);
+  }
+
+  /** BACK TO THE LOBBY (the pause), someone came in, a search starting: local play ends, the menus on the Sala. */
+  private leaveRoomPlay(): void {
+    if (!this.endRoomPlay()) return;
+    this.lastResult = null;
+    this.menuNotice = undefined;
+    this.showMenu();
+    if (this.lobby.inLobby && this.menu.top()?.id !== 'lobby') this.menu.open('lobby');
+  }
+
+  /**
+   * Room play off, without the menus (a session or another match takes over; the ways above open
+   * them): training ends, or the bots match goes back to the timed one at kickoff. False when none ran.
+   */
+  private endRoomPlay(): boolean {
+    if (this.roomPlay === 'off') return false;
+    this.roomPlay = 'off';
+    if (this.training !== null) this.endTraining();
+    else {
+      this.useMatch(this.timedMatch);
+      this.hud.hideBanner();
+      this.hud.showCountdown(null);
+      this.goCaptionUntil = -1;
+      this.resetToKickoff();
+    }
+    this.setPaused(false);
+    this.hud.setSearch(null);
+    return true;
+  }
+
+  /** A toast now, or once the tab is seen again (a hidden tab's: nobody would read it). */
+  private roomToast(text: string, kind: 'info' | 'error'): void {
+    if (typeof document !== 'undefined' && document.hidden) this.roomNotice = { text, kind };
+    else this.menu.toast(text, kind);
+  }
+
+  /** The room strip ("Lobby ABC 234 · waiting for players · Pause: back to the lobby") and the training panel's line, at 2 Hz. */
+  private updateRoomHud(): void {
+    const now = performance.now();
+    if (now - this.waitHudAt < WAIT_HUD_MS) return;
+    this.waitHudAt = now;
+    const code = this.lobby.code;
+    const strip = roomStrip(code !== null ? spacedCode(code) : '', this.lobby.reconnecting, t);
+    if (this.training !== null) {
+      this.hud.setSearch(null);
+      this.trainingHud?.setSearch(strip.text);
+      return;
+    }
+    // A first match's touch card up: the card alone, as the search's strip (updateWaitHud).
+    const card = this.touch !== null && this.touch.cardsUp;
+    this.hud.setSearch(this.menuShown || card ? null : strip.text, strip.warn, 'room');
   }
 
   /** Training off without opening the menu (startMatch / an online session take over from here). */
@@ -2936,7 +3345,8 @@ export class Game implements P2PGameHooks {
   private trainingNextLevel(): void {
     const pack = this.training?.pack ?? null;
     const next = pack === null ? null : nextLevel(TRAINING_PACKS, pack.id, TRAINING_DIFFICULTIES);
-    if (next !== null) this.startTraining(next.id);
+    // Waiting for a search: the next level keeps it.
+    if (next !== null) this.startTraining(next.id, { keepSession: nextLevelKeeps(this.wait) });
   }
 
   /** Free play: unlimited boost on / off (the wrapper refills to 100 every tick while on). */
@@ -3467,8 +3877,19 @@ export class Game implements P2PGameHooks {
     return this.running && this.paused && !this.menuShown && !this.pauseSettings.isOpen && (this.match.phase !== 'menu' || this.onlineActive || this.training !== null);
   }
 
-  /** Start a match from the menu (also used by the debug console). */
+  /** Start a match from the menu (also used by the debug console): the timed match against the AI. */
   startMatch(): void {
+    // Nothing waits for a search any more: the timed match (a wait's bots match ends here, and a
+    // lone host's while the lobby waited).
+    if (isLocal(this.wait)) this.setWait(WAIT_OFF);
+    this.roomPlay = 'off';
+    this.useMatch(this.timedMatch);
+    this.beginLocalMatch();
+    this.matchKind = 'ai';
+  }
+
+  /** startMatch's work on whichever match is on (`match`: the timed one, or the wait's bots match). */
+  private beginLocalMatch(): void {
     if (this.training !== null) this.endTraining(); // back to the offline roster of the mode first
     if (this.settingsCapturing) this.input.cancelRebind();
     this.hideMenus();
@@ -3481,7 +3902,6 @@ export class Game implements P2PGameHooks {
     this.setPaused(false);
     this.menuReturnAt = -1;
     this.ballPinned = false;
-    this.matchKind = 'ai';
     this.newMatchStats();
     this.bots.reset();
     this.mates.reset();
@@ -3499,6 +3919,16 @@ export class Game implements P2PGameHooks {
     if (this.menuShown) return;
     if (this.training !== null) {
       this.stopTraining();
+      return;
+    }
+    // The bots match while the lobby waits: back to the Sala (room play).
+    if (this.roomPlay === 'bots') {
+      this.leaveRoomPlay();
+      return;
+    }
+    // The bots match while waiting: the menus, still searching.
+    if (this.wait.play === 'bots') {
+      this.quitWaitBots();
       return;
     }
     const online = this.onlineActive;
@@ -3681,8 +4111,10 @@ export class Game implements P2PGameHooks {
   private readonly frame = (t: number): void => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.frame);
-    // Before the session is read: a search found under practice ends it first (practiceToMatch).
-    if (this.searchPractice !== 'off') this.watchSearchPractice();
+    // Before the session is read: a search found under local play ends it first (waitToMatch).
+    if (this.wait.play !== 'off') this.watchWaitPlay();
+    // A lone host's play: the lobby callbacks watch it; this catches a lobby left without one.
+    if (this.roomPlay !== 'off' && !this.lobby.inLobby) this.watchRoomPlay();
     const inMenu = this.menuShown;
     // Online the host / the peers keep running: the pause overlay only takes the input away, and
     // the menu (still up while a P2P room connects) must not stop the session's ready / fallback
@@ -4067,6 +4499,14 @@ export class Game implements P2PGameHooks {
     }
     // Training's panel (its setters skip unchanged values): the pause's Unlimited boost shows at once over a held frame.
     if (this.training !== null) this.updateTrainingHud();
+    // The search's strip while the player plays waiting for it (2 Hz; nothing outside local play).
+    if (isLocal(this.wait)) this.updateWaitHud();
+    else if (this.roomPlay !== 'off') this.updateRoomHud(); // the lobby's strip while the lone host plays
+    else if (this.waitHudAt !== -1) {
+      this.waitHudAt = -1;
+      this.hud.setSearch(null);
+      this.trainingHud?.setSearch(null);
+    }
     // On-screen controls (touch screens): up while a match is played in touch mode, the HUD in its
     // touch layout while that match is on screen (paused too). The last input used sets the mode; a
     // gamepad press turns it off (Input counts them, hasGamepad only says connected).
@@ -4313,6 +4753,8 @@ export class Game implements P2PGameHooks {
    */
   private matchEnded(winner: 0 | 1 | null, blue: number, red: number): void {
     this.lastResult = { winner, blue, red };
+    // A guest's "next" card on Inicio (homeModel.ts nextCard): a match against the AI played to its FINAL.
+    if (this.matchKind === 'ai') this.aiEnded = true;
     this.menuReturnAt = performance.now() * 0.001 + FINAL_SECONDS;
     this.input.exitPointerLock();
     const me = this.sbRows[this.playerSlot];
@@ -4337,16 +4779,32 @@ export class Game implements P2PGameHooks {
 
   /**
    * A search found its match (the Worker's matched answer, a P2P room): PARTIDO ENCONTRADO over
-   * whatever is on screen, a short cue and the tab's title; the match follows by itself. The one
-   * entry point for it (plan PR 6: a free practice during the search hands off through here).
+   * whatever is on screen, with the matched answer's format and host region ("Casual · 2v2 ·
+   * Sudamérica"; else the search's own line), and the tab's title; the match follows by itself.
+   * From the frame (the band waits for a hidden tab to show); the cue comes from the queue's answer
+   * (foundNotify), here only when it did not (a P2P room's).
    */
   matchFound(): void {
     const req = this.searchReq;
     if (req === null) return;
-    const region = req.region ?? this.menu.regionId;
-    const line = [t(req.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...req.modes, region !== null ? regionName(region) : null].filter((x) => x !== null).join(' · ');
+    const extra = this.online !== null && this.session === this.online ? this.online.client.lastMatched : null;
+    // The answer's format and host; without its format (a 409 rejoin, an older server) today's line.
+    const p = foundParts(req, extra, this.menu.regionId, isRegion);
+    const line = [t(p.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...p.modes, p.region !== null ? regionName(p.region) : null].filter((x) => x !== null).join(' · ');
     this.found.show(line);
+    if (!this.foundCued) this.audio.play('matchFound');
+    this.foundCued = false;
+  }
+
+  /**
+   * The queue's answer found the match (OnlineSession.onFound, from the answer's handler: a hidden
+   * tab too, which runs no frames): the cue and the tab's title now; the band in the next frame
+   * that runs (matchFound).
+   */
+  private foundNotify(): void {
+    this.foundCued = true;
     this.audio.play('matchFound');
+    this.found.tab();
   }
 
   // ---- menu ------------------------------------------------------------------------------
@@ -4356,6 +4814,16 @@ export class Game implements P2PGameHooks {
     // An online match (or one being set up) ends here: sockets closed, offline roster back.
     const session = this.session;
     if (session !== null && session.state !== 'idle' && !(keepSearch && session.busy)) session.leave();
+    // Local play over a search (or its match on the way) ends with the menus: the timed match back
+    // (the bots match is unlimited; its roster is at kickoff, as after a quit).
+    if (this.wait.play !== 'off') this.setWait(WAIT_OFF);
+    // So does a lone host's play while the lobby waits (training off, or the timed match back).
+    this.endRoomPlay();
+    if (this.match === this.waitMatch) {
+      this.useMatch(this.timedMatch);
+      this.resetToKickoff();
+    }
+    this.hud.setSearch(null);
     const online = this.online;
     this.setPaused(false);
     this.ballPinned = false;

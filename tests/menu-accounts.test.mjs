@@ -412,6 +412,7 @@ test('LobbyClient: create -> socket with the ticket -> state -> match -> leave',
     '/api/lobbies': (b, h) => {
       assert.equal(h.authorization, 'Bearer guest-jwt');
       assert.equal(b.password, 'pw');
+      assert.equal(b.api, 2, 'the client-version marker (QUEUE_API)');
       return res(200, { lobbyId: 'L'.repeat(64), code: 'ABC234', ticket: 'TICKET', wsUrl: 'ws://x/lobby/L' });
     },
     '/api/lobbies/join': () => res(403, { error: 'bad_password', message: 'Contraseña incorrecta' }),

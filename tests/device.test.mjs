@@ -28,6 +28,27 @@ test('tapGuarded: a finger down before the mount or within 450 ms after it press
   assert.equal(DEV.tapGuarded(5, -Infinity), false, 'nothing mounted yet');
 });
 
+test('final review: QUIT held in the pause and lifted over the rail presses nothing there; the menus coming up count for every target', async () => {
+  // The menus came up at 10_000 (the hold fired); the finger went down on QUIT at 8_900.
+  const at = { mountedAt: 10_000, chromeMovedAt: 2_000, shownAt: 10_000 };
+  const down = 8_900;
+  assert.equal(DEV.tapGuardSince('chrome', at), 10_000, "the rail's info button: from the menus' coming up, not the rail's last move");
+  assert.equal(DEV.tapGuarded(down, DEV.tapGuardSince('chrome', at)), true, 'ACERCA DE does not open');
+  assert.equal(DEV.tapGuarded(down, DEV.tapGuardSince('tabbar', at)), true, "an upright phone's tab bar too");
+  assert.equal(DEV.tapGuarded(down, DEV.tapGuardSince(null, at)), true, "a screen's control: its mount, as before");
+  // Menus up for a while: the bars keep their own rule (a second tap on the rail is meant).
+  const later = { mountedAt: 30_000, chromeMovedAt: 2_000, shownAt: 10_000 };
+  assert.equal(DEV.tapGuarded(30_100, DEV.tapGuardSince('chrome', later)), false, 'a rail tap after a new screen mounted');
+  assert.equal(DEV.tapGuarded(30_100, DEV.tapGuardSince(null, later)), true, "a screen's control right after its mount");
+  assert.equal(DEV.tapGuardSince('tabbar', { mountedAt: 5, chromeMovedAt: 5, shownAt: -Infinity }), -Infinity);
+  // Menu: a finger is noted on the whole page (the HUD's QUIT is outside the menus), and show() stamps the coming up.
+  const { readFile } = await import('node:fs/promises');
+  const menu = await readFile(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /window\.addEventListener\('pointerdown', \(e\) => \{\s*if \(finger\(e\)\) this\.touchDownAt = performance\.now\(\);\s*\}, true\);/);
+  assert.match(menu, /if \(!this\.visibleNow\) this\.shownAt = performance\.now\(\);\s*this\.root\.hidden = false;/);
+  assert.match(menu, /const since = tapGuardSince\(bar === null \? null : bar\.classList\.contains\('mn-tabbar'\) \? 'tabbar' : 'chrome', \{ mountedAt: this\.mountedAt, chromeMovedAt: this\.chromeMovedAt, shownAt: this\.shownAt \}\);/);
+});
+
 test('keyInput: the remote is the arrows / OK / Back on a TV with no controller; else the keyboard; silent keys say nothing', () => {
   assert.equal(DEV.keyInput('ArrowDown', 'ArrowDown', true, false), 'remote');
   assert.equal(DEV.keyInput('Enter', 'Enter', true, false), 'remote');

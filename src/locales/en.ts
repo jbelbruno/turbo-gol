@@ -210,6 +210,17 @@ export default {
   // Screen-reader names of the plate's two buttons; {rank} is a rank ('Gold II · 2v2') or home.unranked
   'home.plateProfile': 'Profile: {name}, {rank}',
   'home.plateGarage': 'Garage: your car is {car}',
+  // A guest's hero tag: the offline match against the bots starts at once
+  'home.instant': 'RIGHT AWAY',
+  // The card over Inicio's tiles after a guest's offline match (VER SALAS, CREAR CUENTA, close)
+  'home.nextTitle': 'Now, with people?',
+  'home.nextLine': 'Join a public lobby, or make an account to play Casual.',
+  'home.nextLineTv': 'Sign in with your phone to join lobbies and play Casual.',
+  'home.nextRooms': 'SEE LOBBIES',
+  'home.nextAccount': 'CREATE ACCOUNT',
+  'home.nextClose': 'Close',
+  // The tag of the LOBBIES tile (its title is modes.friends)
+  'home.lobbiesSlot': 'PUBLIC',
 
   // GARAJE (src/ui/screens/garage.ts, plan §1.4.2): the cars and the stadiums. Server points are
   // earned only by hosting a community server (nodes/docs/RECOMPENSAS.md): never bought, won by
@@ -290,12 +301,12 @@ export default {
   'modes.casual': 'CASUAL',
   'modes.casualSub': 'Quick matches, no rank',
   'modes.casualSubShort': 'Quick, no rank',
-  'modes.friends': 'WITH FRIENDS',
-  'modes.friendsSub': 'Make a lobby, share the link',
-  'modes.friendsSubShort': 'Private lobby, link',
+  'modes.friends': 'LOBBIES',
+  'modes.friendsSub': 'Public or private, with anyone',
+  'modes.friendsSubShort': 'Public or private',
   // The short form on a TV (no link to share there: a code)
-  'modes.friendsSubTv': 'Make a lobby with a code',
-  // The tag of WITH FRIENDS
+  'modes.friendsSubTv': 'Public or by code',
+  // MODES' lobbies tab and its action zone's summary
   'modes.lobbies': 'LOBBIES',
   // Against the bots, offline (also the offline hero's title)
   'modes.vsAi': 'VS AI',
@@ -310,25 +321,19 @@ export default {
 
   // MODES (src/ui/screens/modes.ts): its tabs (the titles above), the second line of two of them, and
   // a guest's on COMPETITIVE
-  'modes.tabLobbiesSub': 'With friends, by code',
+  'modes.tabLobbiesSub': 'Public or by code',
   'modes.tabAiSub': 'Friendly · offline',
   'modes.rankedLocked': 'Needs an account',
   'modes.rankedIntro': 'One rank per format. Leaving a match locks Competitive.',
   'modes.format': 'FORMAT',
-  // Region's row is common.region; this row opens the connection sheet
-  'modes.advanced': 'Advanced',
-  'modes.connection': 'Connection',
-  // The Advanced row's value; {net} is modes.netAuto / netP2p / netServer
-  'modes.connectionValue': 'Connection: {net}',
-  'modes.netAuto': 'Auto',
-  'modes.netP2p': 'P2P',
-  'modes.netServer': 'Server',
-  // Each choice's line in the connection sheet
-  'modes.netAutoHelp': 'The matchmaker picks: P2P with other players, a server if you play alone',
-  'modes.netP2pHelp': 'Cars sync directly between players; alone, a server with bots',
-  'modes.netServerHelp': 'A server in your region; bots join sooner',
-  // LOBBIES' action zone, over CREATE LOBBY
-  'modes.lobbiesAction': 'Make a lobby and share its code',
+  // Casual's format grid: the format of an online match against bots (the 5-minute one); with other
+  // people searching the format follows how many they are
+  'modes.formatPrefer': 'FORMAT IF YOU PLAY BOTS',
+  'modes.formatPreferNote': 'With more people searching, the format depends on how many there are.',
+  // LOBBIES' action zone, over CREATE PUBLIC LOBBY · CREATE PRIVATE LOBBY
+  'modes.lobbiesAction': 'Make a public lobby for anyone, or a private one for your friends',
+  // A TV guest whose anti-bot check is not ready: the line over the phone's sign-in (tvsign.tile)
+  'modes.lobbiesTvLocked': 'Sign in with your phone',
   // The formats: a playlist is its format (1v1, 2v2, 3v3); ANY is whichever fills first
   'format.any': 'ANY',
   'format.anySub': '1v1, 2v2 or 3v3',
@@ -342,9 +347,9 @@ export default {
   'search.where': 'Looking for {format} in {region}',
   // Followed by the time left (m:ss)
   'search.bots': 'Bots join in',
-  'search.always': "There's always a match: if nobody comes, you play bots.",
+  'search.always': 'If nobody comes within 5 minutes, you play bots online. Meanwhile, play here.',
   'search.cancel': 'CANCEL SEARCH',
-  // Followed by training.freePlay, underlined: free play with the search still on
+  // Followed by search.waitBots · search.waitTraining: local play with the search still on
   'search.whileWaiting': 'While you wait:',
   'search.formatRestarts': 'Changing the format restarts the search.',
   'search.needsAccount': 'Competitive needs an account',
@@ -353,9 +358,40 @@ export default {
   'search.banned': 'Competitive locked · {time}',
   'search.bannedLine': 'For leaving matches',
   'search.playCasual': 'PLAY CASUAL',
-  // Free play while searching found a match: the banner until the match is on screen
-  // Free play's line on the training HUD while the search goes on
-  'search.practiceLine': 'Finding a match…',
+  'search.casualNeedsAccount': 'Casual needs an account',
+  // Casual's searching panel: every format at once, so only the region; {region} a region's name
+  'search.whereCasual': 'Searching in {region}',
+  // "While you wait:" VS BOTS · TRAIN (the searching panel's chooser)
+  'search.waitBots': 'VS BOTS',
+  'search.waitTraining': 'TRAIN',
+  // The estimate; {time} is duration(): '2 min', '30 sec'
+  'search.estimate': 'Match in ~{time}',
+  // {time} as m:ss, counting down to the online bots match
+  'search.estimateBots': 'Bots in {time} at most',
+  'search.estimateNone': 'No estimate yet',
+  'search.searching': { one: '{count} person searching', other: '{count} people searching' },
+  'search.searchingAlone': 'Only you for now',
+  // After search.searching: how many of them in your region
+  'search.searchingHere': '{count} in {region}',
+  // {time} as m:ss
+  'search.widenIn': 'In {time} we also search other regions',
+  'search.widened': 'Searching every region',
+  'search.busy': 'Servers are full: you stay in the queue',
+  'search.retrying': 'Offline: the search goes on when the network is back',
+  // The HUD when the search ended while you played; {why} is the player's text of why (never a code)
+  'search.ended': 'The search ended: {why}',
+  // The HUD's strip while you play waiting; {kind} is CASUAL or COMPETITIVE, {time} m:ss
+  'search.hudLine': 'Finding {kind} · {time}',
+  'search.hudCancel': 'Pause: cancel',
+
+  // "While you search" (src/ui/screens/waitSheet.ts): what to do while a search runs
+  'wait.title': 'While you search',
+  'wait.bots': 'VS BOTS',
+  'wait.botsSub': 'No time limit. You join your match as soon as it is found',
+  'wait.training': 'TRAIN',
+  'wait.trainingSub': 'Free play. Shot packs are in TRAINING',
+  'wait.menu': 'STAY IN THE MENU',
+  'wait.menuSub': 'A sound tells you when your match is found',
 
   // A TV without a controller: the hero's tag, then a sheet at a match's start (it closes by itself
   // when a controller connects)
@@ -386,6 +422,8 @@ export default {
   // Under the stadium sheet's title (components/stadium.ts): the pick is not for this match only
   'friendly.themeNote': 'Used in all your matches and behind the menus',
   'friendly.intro': 'A 3-minute offline match against the AI. Your teammates, if any, are bots too.',
+  // The same tab while a search runs: its PLAY starts the unlimited match the search ends
+  'friendly.introWaiting': 'While you search: a match against the AI with no time limit. It ends when your match is found or when you quit.',
   // Starts the friendly match
   'friendly.play': 'PLAY',
 
@@ -394,10 +432,6 @@ export default {
   'custom.noLimit': 'No limit',
   // Match length in minutes (3, 5 or 10)
   'custom.minutes': { one: '{count} min', other: '{count} min' },
-  // Connection type: peer to peer
-  'custom.netP2p': 'P2P',
-  // Connection type: a server hosts the match
-  'custom.netServer': 'Server',
   'custom.wrongPassword': 'Wrong password',
   'custom.joinPassword': 'Lobby password',
   // Title of the password dialog; {code} is the 6-character join code
@@ -414,10 +448,10 @@ export default {
   'custom.rowFull': 'Full',
   // Lobby list, status column
   'custom.rowOpen': 'Open',
-  'custom.noLobbies': 'No public lobbies in {region}. Create one!',
+  'custom.noLobbies': 'No public lobbies right now. Make one!',
   // Under the lobby list: how many public lobbies, and the region
   'custom.lobbyCount': { one: '{count} lobby · {region}', other: '{count} lobbies · {region}' },
-  'custom.subtitle': 'Public lobbies in your region, or private ones by code. They never change your rank.',
+  'custom.subtitle': 'Public lobbies (your region first) or private ones by code. They are played P2P and never change your rank.',
   // Button on the lobby browser and heading of the create screen
   'custom.createLobby': 'CREATE LOBBY',
   'custom.refresh': 'REFRESH',
@@ -426,7 +460,6 @@ export default {
   'custom.colMode': 'Mode',
   'custom.colPlayers': 'Players',
   'custom.colHost': 'Host',
-  'custom.colNet': 'Network',
   'custom.colState': 'Status',
   'custom.loading': 'Loading lobbies…',
   // Lobby settings labels (settingMode ... settingLength)
@@ -434,8 +467,6 @@ export default {
   'custom.settingVisibility': 'Visibility',
   'custom.visibilityPublicListed': 'Public (listed)',
   'custom.visibilityPrivateCode': 'Private (code only)',
-  'custom.settingNet': 'Connection',
-  'custom.netP2pRecommended': 'P2P (recommended)',
   'custom.settingLength': 'Duration',
   'custom.nameField': 'Lobby name',
   'custom.passwordOptional': 'Password (optional)',
@@ -462,8 +493,8 @@ export default {
   'custom.joining': 'Joining the lobby…',
   'custom.notInLobby': "You're not in a lobby",
   'custom.back': 'BACK',
-  // Lobby summary line, e.g. '2v2 · P2P · 5 min · Public'. {lock} is ' · 🔒' when the lobby has a password, else empty.
-  'custom.info': '{mode} · {net} · {length} · {visibility}{lock}',
+  // Lobby summary line, e.g. '2v2 · 5 min · Public' (lobbies are always P2P). {lock} is ' · 🔒' when the lobby has a password, else empty.
+  'custom.info': '{mode} · {length} · {visibility}{lock}',
   'custom.public': 'Public',
   'custom.private': 'Private',
   // Label next to the lobby's join code
@@ -504,17 +535,17 @@ export default {
   'custom.tagExperimental': 'EXP',
 
   // Salas and the lobby (plan PR 12: src/ui/screens/lobby.ts, custom.ts, components/codecells.ts)
-  // MODOS › SALAS' primary: a private lobby with the last format, then its screen
-  'lobby.createShare': 'CREATE LOBBY AND SHARE',
-  // The empty list's own button (the same private lobby)
+  // MODOS › SALAS' primary (and the empty list's button): a public lobby with the last format, then its screen
+  'lobby.createPublic': 'CREATE PUBLIC LOBBY',
+  // MODOS › SALAS' secondary: the same, private (by code)
   'lobby.createPrivate': 'CREATE PRIVATE LOBBY',
   // The primary while the player is in a lobby; {code} as 'ABC 234'
   'lobby.backTo': 'BACK TO LOBBY {code}',
   'lobby.joinCode': 'JOIN WITH CODE',
   'lobby.joinCodeSub': '6 letters or numbers',
   'lobby.public': 'PUBLIC LOBBIES',
-  // Empty list; {region} is the region's name
-  'lobby.empty': 'No public lobbies in {region}',
+  // Empty list (the public list spans every region, your own first)
+  'lobby.empty': 'No public lobbies right now',
   // A list row's state slot
   'lobby.rowOpen': 'OPEN',
   'lobby.rowInMatch': 'IN MATCH',
@@ -572,6 +603,14 @@ export default {
   // A restart (Super low) took longer than the server keeps a place in the lobby
   'lobby.stayLate': 'Lobby {code} went on without you: join it again with its code',
   'lobby.stayBack': 'Back in lobby {code}: you took a while, the host may have changed',
+  // A lone host plays while the lobby waits (the Sala, under its action bar; then search.waitBots · search.waitTraining)
+  'lobby.waitLine': 'While you wait for someone to join:',
+  // Toast when someone joined while the host played; {name} is the player
+  'lobby.joinedBack': '{name} joined your lobby',
+  // The HUD's strip while the host plays; {code} as 'ABC 234'
+  'lobby.hudWaiting': 'Lobby {code} · waiting for players',
+  // After lobby.hudWaiting on that strip: the pause menu's BACK TO THE LOBBY (on a phone, its pause button)
+  'lobby.hudBack': 'Pause: back to the lobby',
 
   // A lost server match (plan PR 12: src/ui/screens/match/lost.ts)
   'lost.title': 'Your connection dropped',
@@ -1174,9 +1213,10 @@ export default {
   'error.lobby.short_password': 'The password needs 4 to 32 characters',
   'error.lobby.password_locked': 'Too many password attempts on this lobby, wait a few minutes',
   'error.lobby.password_attempts': 'Someone is trying passwords on your lobby: joining with the password is paused for a few minutes',
+  'error.lobby.need_players': 'You need one more player to start',
   // Matchmaking: Casual and Competitive searches (POST /api/queue, /api/rejoin, the guest session)
   'error.queue.rate_limited': 'Too many attempts, wait a minute',
-  'error.queue.account_required': 'Sign in to play Competitive',
+  'error.queue.account_required': 'Sign in to play Casual and Competitive',
   // {time}: what is left of the lock, in the page language ('5 min', '24 hr')
   'error.queue.ranked_ban': 'Competitive locked for leaving matches: {time}',
   // The server still holds a match of this player that the game could not free
@@ -1420,6 +1460,13 @@ export default {
   'pause.dblHint': 'Double-click to leave',
   // Under QUIT in a Competitive match
   'pause.quitRanked': 'Counts as an abandon',
+  // The pause while you play waiting for a match: cancel the search, or search again once it ended
+  'pause.cancelSearch': 'CANCEL SEARCH',
+  'pause.searchAgain': 'SEARCH AGAIN',
+  // Under QUIT while waiting: back to the menus, still searching
+  'pause.quitWaiting': 'The search goes on',
+  // A lone host's pause while the lobby waits (same as QUIT there)
+  'pause.backToLobby': 'BACK TO THE LOBBY',
 
   // The final screen (src/ui/screens/match/final.ts), about 2 s after the whistle
   // Its slot's first word ("FINAL · COMPETITIVE · 2V2 · SOUTH AMERICA"), uppercase
@@ -1843,6 +1890,8 @@ export default {
   'training.expFreePlayText': 'Free play with your own physics',
   // The LAB tile's line where the long one has no room (a larger interface size)
   'training.expFreePlayShort': 'Your own physics',
+  // The LAB tile while a search runs (search matches are stock physics)
+  'training.labWhileSearching': 'Not available while you search',
   'training.editPresets': 'Edit presets',
   // Pack category
   'training.catShooting': 'Shooting',
@@ -2140,7 +2189,7 @@ export default {
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
   // Its consent covers what it names: storage in the United States and Brazil (the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)
-  'legal.notice': 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.',
+  'legal.notice': 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.',
   'legal.termsLink': 'Terms',
   'legal.privacyLink': 'Privacy policy',
   // The two pages' names (the About sheet, PROFILE's ABOUT)

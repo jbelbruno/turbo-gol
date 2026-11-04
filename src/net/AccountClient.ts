@@ -1419,6 +1419,19 @@ export class AccountClient {
     return r.certificate;
   }
 
+  /**
+   * The queues' anonymous daily counters (GET /nodes/admin/queue-stats?days=, server/src/queueStats.ts
+   * QueueDay), newest first, today's included, from the browser's console on turbo-gol.com:
+   * `await __game.accounts.queueStats(30)`. `days` 1 to 90. Refusals as adminDeleteAccount's
+   * (reauth_required { level: 2 }: PERFIL's CONFIRMAR CON LA CONTRASEÑA first; not_trusted).
+   */
+  async queueStats(days = 30): Promise<unknown[]> {
+    const n = Math.min(90, Math.max(1, Math.floor(Number.isFinite(days) ? days : 30)));
+    const r = (await this.ownCall('/nodes/admin/queue-stats?days=' + n)) as { days?: unknown } | null;
+    if (!Array.isArray(r?.days)) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r.days;
+  }
+
   /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */
   startedProvider(): OAuthProvider | null {
     try {

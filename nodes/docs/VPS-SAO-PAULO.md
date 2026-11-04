@@ -349,9 +349,8 @@ del PR [7]: los jugadores con un lock de partida de nodo quedarían atascados ha
 
 Las pruebas antes de abrir la beta están en `PRODUCCION.md`. Para todas:
 - Juega con dos cuentas que no sean la del proyecto (ver "Antes de instalar el nodo", paso 3).
-- La casual, con la conexión en "Servidor". Una sala P2P nunca llega a un nodo, pero un jugador
-  solo en la cola P2P, pasada la espera, juega en el servidor contra bots
-  (`server/src/MatchmakerDO.ts:1028-1041`) y puede caer en el VPS.
+- Casual (siempre en servidor): dos cuentas con región Sudamérica buscando a la vez caen en el
+  nodo si tiene lugar. Una sala nunca llega a un nodo.
 - En la partida, `hostColo` tiene que decir `node:sao-paulo-1`. Hoy no aparece en ninguna
   pantalla: míralo en la consola del navegador con `window.__game.online.welcome.hostColo`
   (`src/game/Game.ts:672`). El PR [3] lo suma al panel de red.

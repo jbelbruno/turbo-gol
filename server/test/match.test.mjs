@@ -538,12 +538,13 @@ test('Worker /api/leave forwards { playerId, matchId } to the matchmaker (matchI
   assert.ok(h.mmCalls.every((c) => c.path === '/leave'));
 });
 
-test("Worker /api/config hands the client the server queue's bot fill (MatchmakerDO BOT_FILL_MS: the menus' bots countdown)", async () => {
-  const { BOT_FILL_MS } = await import('../src/MatchmakerDO.ts');
+test("Worker /api/config: botFillMs null (older pages hide their server countdown) and the queues' clocks (the 5:00 solo match, the widening; accounts only)", async () => {
+  const Q = await import('../src/queuePlan.ts');
   const { env } = workerEnv({ status: 200, body: {} });
   const res = await worker.fetch(new Request('http://127.0.0.1:8787/api/config'), env);
   assert.equal(res.status, 200);
   const cfg = await res.json();
-  assert.equal(cfg.botFillMs, BOT_FILL_MS);
-  assert.equal(cfg.botFillMs, 10_000, 'the constant the server queue fills with');
+  assert.equal(cfg.botFillMs, null);
+  assert.deepEqual(cfg.queue, { soloAfterMs: Q.SOLO_AFTER_MS, widenMs: { casual: Q.CASUAL_WIDEN_MS, ranked: Q.RANKED_WIDEN_MS }, accountRequired: true });
+  assert.deepEqual(cfg.queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true });
 });

@@ -1,7 +1,8 @@
 /**
  * LobbyDO: one custom-match lobby (private by code, or listed in the public lobby browser): a
  * join code, an optional password, public or private, the host's settings (name,
- * playlist, P2P or server, match length) and the members on two teams. Hibernating WebSockets
+ * playlist, match length; `net` is always 'p2p' since the modes redesign: a 'server' sent by an
+ * older page, or stored by one, is read as 'p2p') and the members on two teams. Hibernating WebSockets
  * (JSON text frames, src/net/account.ts LobbyServerMsg / LobbyClientMsg): a lobby where nobody
  * talks costs nothing; the whole state lives in one storage record so a wake-up rebuilds it.
  *
@@ -14,8 +15,8 @@
  *
  * Flow: the Worker admits a player (password, room, kick list), mints a lobby ticket and the
  * socket follows within ADMIT_TTL_MS; the member lands on the team with fewer players. The host
- * starts -> the region's matchmaker forms the match with these exact teams (POST /custom: P2P room
- * or MatchDO, bots in the free slots, the usual locks) -> every member gets its own result on the
+ * starts (2 members at least: 'need_players' otherwise) -> the region's matchmaker forms the match
+ * with these exact teams (POST /custom: a P2P room, bots in the free slots, the usual locks) -> every member gets its own result on the
  * socket ({ t: 'match' }) and plays; the lobby stays open meanwhile (status 'in_game') and each
  * member's { t: 'back' } brings it back to 'open'. The host leaving hands the lobby to the
  * longest-standing member; the last member leaving (or idling past IDLE_CLOSE_MS without sockets)
@@ -35,7 +36,7 @@
  *
  * Experimental rules (LobbySettings.physics, a copy of a signed-in host's preset: src/game/
  * physicsRules.ts parseLobbyRules, strict; a snapshot that changes nothing is standard physics):
- * only with net 'p2p' (else 'experimental_p2p_only') and only while EVERY member is signed in. A
+ * (every lobby is P2P, with 2 members at least to start) and only while EVERY member is signed in. A
  * guest is refused at every door: create (403 account_required, the Worker checks the session
  * first), /internal/admit (403 account_required), the socket upgrade of an admit (403: an admit
  * taken up to ADMIT_TTL_MS before the rules were set), settings with rules while a guest is a
@@ -47,7 +48,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { error, json, readJson } from './env';
+import { NEED_PLAYERS_TEXT, error, json, readJson } from './env';
 import { INTERNAL_HEADER, checkInternal, internalSecret } from './auth';
 import { MODES } from '../../src/sim/constants';
 import { LOBBY_LENGTHS, isPlaylist, lobbyNameIssue, sanitizeLobbyName } from '../../src/net/account';
@@ -96,9 +97,9 @@ export const PUBLISH_MIN_MS = 5_000;
  */
 export const START_MIN_MS = 3_000;
 /**
- * A server match (net 'server', or a lone member's) with a guest in it lasts at most this long
- * (mirrors MatchmakerDO GUEST_MAX_MATCH_SECONDS, which refuses it too: 400 guest_length): a guest
- * cannot hold a MatchDO for 600 s or an unlimited match.
+ * DORMANT since the modes redesign (lobbies are P2P only, no lobby match runs on a MatchDO): a
+ * server match with a guest in it lasted at most this long (400 guest_length). Kept for the
+ * tests until its removal (backlog).
  */
 export const GUEST_SERVER_MAX_SECONDS = 300;
 export const START_AGAIN_MS = 5_000;
@@ -277,10 +278,9 @@ function parseSettings(v: unknown, base: LobbySettings): LobbySettings | string 
     if (o.visibility !== 'public' && o.visibility !== 'private') return 'bad_visibility';
     out.visibility = o.visibility;
   }
-  if (o.net !== undefined) {
-    if (o.net !== 'p2p' && o.net !== 'server') return 'bad_net';
-    out.net = o.net;
-  }
+  if (o.net !== undefined && o.net !== 'p2p' && o.net !== 'server') return 'bad_net';
+  // Lobbies are P2P only (the modes redesign): a 'server' (an older page) is played as P2P, silently.
+  out.net = 'p2p';
   if (o.matchLengthSeconds !== undefined) {
     if (typeof o.matchLengthSeconds !== 'number' || !LOBBY_LENGTHS.includes(o.matchLengthSeconds)) return 'bad_length';
     out.matchLengthSeconds = o.matchLengthSeconds;
@@ -292,7 +292,6 @@ function parseSettings(v: unknown, base: LobbySettings): LobbySettings | string 
     if (rules === 'bad') return 'bad_physics';
     out.physics = rules;
   }
-  if (out.physics !== null && out.net !== 'p2p') return 'experimental_p2p_only';
   return out;
 }
 
@@ -359,7 +358,11 @@ export class LobbyDO extends DurableObject<Env> {
     super(ctx, env);
     this.loaded = ctx.blockConcurrencyWhile(async () => {
       this.rec = (await ctx.storage.get<LobbyRecord>('lobby')) ?? null;
-      if (this.rec !== null) settleGuestNames(this.rec); // the alarm's save and publish keep it
+      if (this.rec !== null) {
+        settleGuestNames(this.rec); // the alarm's save and publish keep it
+        // A record of a lobby made before the modes redesign with net 'server' is played as P2P.
+        if (this.rec.settings.net !== 'p2p') this.rec.settings = { ...this.rec.settings, net: 'p2p' };
+      }
     });
     // A plain 'ping' text frame is answered without waking the object (keep-alive through proxies).
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
@@ -554,7 +557,7 @@ export class LobbyDO extends DurableObject<Env> {
         if (!isHost) return fail('not_host', 'Solo el anfitrión cambia la configuración');
         if (rec.status !== 'open') return fail('busy', 'Espera a que termine la partida');
         const next = parseSettings(hostSettings(msg.settings, me.guest, rec.settings.name), rec.settings);
-        if (typeof next === 'string') return fail(next, next === 'experimental_p2p_only' ? 'Las reglas experimentales necesitan una partida P2P' : next === 'name_reserved' ? 'Ese nombre de sala no está permitido' : 'Configuración inválida');
+        if (typeof next === 'string') return fail(next, next === 'name_reserved' ? 'Ese nombre de sala no está permitido' : 'Configuración inválida');
         // Experimental rules: every member signed in.
         if (lobbyPhysics(next) !== null && rec.members.some((m) => m.guest)) return fail('guests_present', 'Hay invitados en la sala: deben iniciar sesión o salir');
         if (next.mode !== rec.settings.mode) {
@@ -592,15 +595,10 @@ export class LobbyDO extends DurableObject<Env> {
         if (rec.status !== 'open') return fail('busy', 'La partida ya empezó');
         if (rec.members.some((m) => m.inGame)) return fail('busy', 'Hay jugadores que todavía están en la partida anterior');
         if (rec.members.some((m) => m.awayAt !== undefined)) return fail('member_away', 'Alguien se está reconectando');
-        if (lobbyPhysics(rec.settings) !== null) {
-          if (rec.members.some((m) => m.guest)) return fail('guests_present', 'Hay invitados en la sala: deben iniciar sesión o salir');
-          if (rec.settings.net !== 'p2p' || rec.members.length < 2) return fail('experimental_p2p_only', 'Las reglas experimentales necesitan una partida P2P con al menos 2 jugadores');
-        }
+        // Lobbies are P2P only: a match needs a second human (no lone member's server match any more).
+        if (rec.members.length < 2) return fail('need_players', NEED_PLAYERS_TEXT);
+        if (lobbyPhysics(rec.settings) !== null && rec.members.some((m) => m.guest)) return fail('guests_present', 'Hay invitados en la sala: deben iniciar sesión o salir');
         if (Date.now() < (rec.startNext ?? 0)) return fail('start_cooldown', 'Espera unos segundos antes de volver a iniciar');
-        const length = rec.settings.matchLengthSeconds;
-        if ((rec.settings.net === 'server' || rec.members.length < 2) && rec.members.some((m) => m.guest) && (length === 0 || length > GUEST_SERVER_MAX_SECONDS)) {
-          return fail('guest_length', 'Las partidas en servidor con invitados duran hasta 5 minutos: elige una duración más corta');
-        }
         await this.start(ws);
         return;
       }
@@ -840,11 +838,14 @@ export class LobbyDO extends DurableObject<Env> {
     }
     let res: Response;
     try {
+      // The lobby's own region (not the queue hub): outside SA this /custom cannot see a member's
+      // queued search in the hub, nor the hub this room's locks; the client's leave() before the
+      // room and POST /api/leave's fan-out cover it (MatchmakerDO.ts header, backlog).
       res = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + rec.region)).fetch('https://matchmaker/custom', {
         method: 'POST',
         headers: { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET), 'content-type': 'application/json', 'x-region': rec.region },
         body: JSON.stringify({
-          kind: rec.settings.net,
+          kind: 'p2p',
           mode: rec.settings.mode,
           matchLengthSeconds: rec.settings.matchLengthSeconds,
           // `guest`: the matchmaker and RoomDO refuse experimental rules for a guest too.

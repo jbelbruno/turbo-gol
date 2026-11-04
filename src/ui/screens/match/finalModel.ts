@@ -11,7 +11,7 @@ import type { RankedResultAnswer, RegionId } from '../../../net/account';
 import { TIERS, tierOf, tierProgress } from '../../../net/rating';
 import type { MenuPrefs } from '../../prefs';
 import type { QueuePick } from '../homeModel';
-import { queueNet, type ModeTab } from '../modesModel';
+import type { ModeTab } from '../modesModel';
 
 /** Which kind of match ended: what JUGAR OTRA VEZ repeats. */
 export type FinalKind = 'casual' | 'ranked' | 'ai' | 'lobby';
@@ -105,8 +105,9 @@ export function againAction(kind: FinalKind, prefs: MenuPrefs, reloadWaits = fal
   if (reloadWaits) return kind === 'lobby' ? { kind: 'lobby' } : { kind: 'home' };
   if (kind === 'ai') return { kind: 'restart' };
   if (kind === 'lobby') return { kind: 'lobby' };
-  if (kind === 'ranked') return { kind: 'search', queue: { kind: 'ranked', modes: prefs.rankedModes, region: prefs.region, net: 'server' } };
-  return { kind: 'search', queue: { kind: 'casual', modes: prefs.casualModes, region: prefs.region, net: queueNet(prefs.net) } };
+  if (kind === 'ranked') return { kind: 'search', queue: { kind: 'ranked', modes: prefs.rankedModes, region: prefs.region } };
+  // Casual: its preferred format (the pool takes every format), always on a server.
+  return { kind: 'search', queue: { kind: 'casual', modes: [prefs.casualPrefer], region: prefs.region } };
 }
 
 /** CAMBIAR MODO: MODOS' tab where this kind's format is picked. */

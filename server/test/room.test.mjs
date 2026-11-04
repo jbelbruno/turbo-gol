@@ -30,6 +30,7 @@ registerHooks({
 
 const R = await import('../src/RoomDO.ts');
 const M = await import('../src/MatchmakerDO.ts');
+const Q = await import('../src/queuePlan.ts');
 const E = await import('../src/env.ts');
 
 // ---- RoomDO: start ------------------------------------------------------------------------------
@@ -627,6 +628,9 @@ test('RoomDO: a slot flagged left is refused on upgrade (403 left): after /inter
 // ---- MatchmakerDO on fakes: locks verified against the room, /leave releases ------------------------
 
 class FakeMmStorage extends FakeStorage {
+  async getAlarm() {
+    return this.alarm;
+  }
   async list({ prefix }) {
     const out = new Map();
     for (const [k, v] of this.map) if (k.startsWith(prefix)) out.set(k, v);
@@ -694,13 +698,11 @@ async function makeMatchmaker() {
     return { status: res.status, json: await res.json() };
   };
   const join = (playerId, kind = 'p2p', mode = '1v1') => call('/join', { playerId, name: playerId, mode, kind });
-  /** Two p2p 1v1 joins: the first answers 'waiting', the second forms the room; the first's result is collected by its next join (as the Worker's poll would). */
+  /** A P2P room of a and b, from a lobby start (/custom): the P2P queue is gone, lobby rooms keep their p2p locks. */
   const pair = async (a, b) => {
-    const first = await join(a);
-    assert.equal(first.json.status, 'waiting');
-    const qb = await join(b);
-    const qa = await join(a);
-    return [qa, qb];
+    const r = await call('/custom', { kind: 'p2p', mode: '1v1', members: [{ playerId: a, name: a, team: 0, guest: false }, { playerId: b, name: b, team: 1, guest: false }], matchLengthSeconds: 300 });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    return [{ status: 200, json: r.json.results[a] }, { status: 200, json: r.json.results[b] }];
   };
   return { mm, call, join, pair, presence, leaveInfo, roomNs, matchNs, matchStatus, setTime: (v) => (t = v), time: () => t };
 }
@@ -750,8 +752,9 @@ test('MatchmakerDO: a p2p lock is trusted while fresh, then verified with the ro
   h.setTime(h.time() + 1000);
   r = await h.join('pb');
   assert.equal(r.status, 200);
-  assert.equal(r.json.status, 'matched', 'A was waiting: B joining forms a new room at once');
-  assert.notEqual(r.json.roomId, qa.json.roomId);
+  assert.equal(r.json.status, 'matched', 'A was waiting: B joining forms a Casual match at once');
+  assert.ok(/^[0-9a-f]{64}$/.test(r.json.matchId), 'a MatchDO match (Casual is never P2P)');
+  assert.equal(r.json.humans, 2);
   // Leave both queues / rooms so nothing lingers.
   for (const p of ['pa', 'pb']) await h.call('/leave', { playerId: p });
 });
@@ -792,12 +795,13 @@ test('MatchmakerDO: /leave frees a p2p room lock first (a join right after is no
   r = await h.call('/leave', { playerId: 'pb', matchId: qa.json.roomId });
   assert.deepEqual(r.json, { ok: true, left: false, released: true });
   assert.equal((await h.call('/stats')).json.active, 0);
-  // A lone p2p human after the fill wait gets a server match; that lock is verified with the MatchDO and not released by /leave.
+  // A lone Casual human after 5:00 gets a solo match with bots; that lock is verified with the MatchDO and not released by /leave.
   r = await h.join('pc');
   assert.equal(r.json.status, 'waiting');
-  h.setTime(h.time() + M.P2P_FILL_WAIT + 1);
+  h.setTime(h.time() + Q.SOLO_AFTER_MS);
   r = await h.join('pc');
   assert.equal(r.json.status, 'matched');
+  assert.equal(r.json.humans, 1, 'the solo match');
   assert.equal(r.json.kind, undefined, 'phase 1 shape');
   assert.ok(r.json.matchId);
   r = await h.call('/leave', { playerId: 'pc' });
@@ -810,8 +814,10 @@ test('MatchmakerDO: /leave frees a p2p room lock first (a join right after is no
   assert.equal(h.matchNs.calls.filter((c) => c.path === '/internal/status').length, 1, 'verified with the MatchDO');
   h.matchStatus.ended = true;
   r = await h.join('pc');
-  assert.equal(r.json.status, 'waiting', 'the match ended: freed');
-  await h.call('/leave', { playerId: 'pc' });
+  assert.equal(r.json.status, 'matched', 'the solo match ended within 90 s (never played): freed, and its search goes on past 5:00 into a new one');
+  assert.equal(h.matchNs.calls.filter((c) => c.path === '/internal/create').length, 2);
+  h.matchStatus.ended = false;
+  await h.call('/leave', { playerId: 'pc', matchId: r.json.matchId });
 });
 
 test('leaveReleases: a p2p lock without an id or with its own; a server lock only when the leave names that match', () => {
@@ -827,11 +833,11 @@ test('leaveReleases: a p2p lock without an id or with its own; a server lock onl
   assert.match(M.lockMessage('server'), /api\/leave/);
 });
 
-/** A server (MatchDO) match for `playerId` through the bot fill: join, wait BOT_FILL_MS, join again. */
+/** A server (MatchDO) match for `playerId` alone: join, wait SOLO_AFTER_MS (the solo match with bots), join again. */
 async function serverMatch(h, playerId) {
   let r = await h.join(playerId, 'server');
   assert.equal(r.json.status, 'waiting');
-  h.setTime(h.time() + M.BOT_FILL_MS);
+  h.setTime(h.time() + Q.SOLO_AFTER_MS);
   r = await h.join(playerId, 'server');
   assert.equal(r.json.status, 'matched', JSON.stringify(r.json));
   assert.ok(/^[0-9a-f]{64}$/.test(r.json.matchId));
@@ -867,7 +873,7 @@ test('MatchmakerDO: /leave naming the server match frees that lock first (a p2p 
   assert.equal((await h.call('/stats')).json.active, 0, 'lock gone');
   r = await h.join('ps', 'p2p');
   assert.equal(r.status, 200);
-  assert.equal(r.json.status, 'waiting', 'queued for P2P at once');
+  assert.equal(r.json.status, 'waiting', 'queued again at once');
   // Repeating the leave once the lock is gone: the waiter is dropped, nothing else.
   r = await h.call('/leave', { playerId: 'ps', matchId });
   assert.deepEqual(r.json, { ok: true, left: true, released: false });
@@ -959,67 +965,22 @@ test('MatchmakerDO: a lock freed by the verification also tells the room (/inter
   for (const p of ['pa', 'pb']) await h.call('/leave', { playerId: p });
 });
 
-test('MatchmakerDO: three room tickets left unused -> p2p queue 429 no_show with retryAfterMs (server queues still work), lifted after the block', async () => {
+test('MatchmakerDO: no no-show strikes any more (the P2P queue is gone): a leave or a release naming a no-show records nothing, a join is never refused for it', async () => {
   const h = await makeMatchmaker();
   h.leaveInfo.set('pa', { ok: true, slot: 0, ...NEVER });
-  for (let i = 1; i <= M.NO_SHOW_LIMIT; i++) {
+  for (let i = 1; i <= M.NO_SHOW_LIMIT + 1; i++) {
     const [qa] = await h.pair('pa', 'px' + i);
     assert.equal(qa.json.status, 'matched', `round ${i}: A got its ticket`);
-    const r = await h.call('/leave', { playerId: 'pa' });
-    assert.equal(r.json.released, true);
-    await h.call('/leave', { playerId: 'px' + i }); // the partner had a socket: no strike
-    assert.equal((await h.call('/stats')).json.noShows, 1, 'one player with strikes (the partners have none)');
+    if (i % 2 === 0) assert.equal((await h.call('/release', { matchId: qa.json.roomId, playerIds: ['pa'], closeRoom: false, noShow: ['pa'] })).json.released, 1);
+    else assert.equal((await h.call('/leave', { playerId: 'pa' })).json.released, true);
+    await h.call('/leave', { playerId: 'px' + i });
     h.setTime(h.time() + 1000);
   }
-  let r = await h.join('pa');
-  assert.equal(r.status, 429);
-  assert.equal(r.json.error, 'no_show');
-  assert.ok(r.json.retryAfterMs > M.NO_SHOW_BLOCK_MS - 2000 && r.json.retryAfterMs <= M.NO_SHOW_BLOCK_MS, `retryAfterMs ${r.json.retryAfterMs}`);
-  assert.match(r.json.message, /3 room tickets/);
-  r = await h.join('pa', 'server');
-  assert.equal(r.status, 200, 'a server queue is not refused');
+  const r = await h.join('pa');
+  assert.equal(r.status, 200, `never 429 no_show (${JSON.stringify(r.json)})`);
   assert.equal(r.json.status, 'waiting');
+  assert.equal('noShows' in (await h.call('/stats')).json, false, 'nothing kept');
   await h.call('/leave', { playerId: 'pa' });
-  h.setTime(h.time() + M.NO_SHOW_BLOCK_MS);
-  r = await h.join('pa');
-  assert.equal(r.status, 200, 'the block is over');
-  await h.call('/leave', { playerId: 'pa' });
-});
-
-test('MatchmakerDO: a ticket that never reached the player is not a strike; the room release naming a no-show is one, once per lock', async () => {
-  const h = await makeMatchmaker();
-  h.leaveInfo.set('pa', { ok: true, slot: 0, ...NEVER });
-  // A waits, B forms the room; A's result is never collected (no pending poll) and A leaves (Esc).
-  for (let i = 1; i <= M.NO_SHOW_LIMIT; i++) {
-    assert.equal((await h.join('pa')).json.status, 'waiting');
-    assert.equal((await h.join('py' + i)).json.status, 'matched');
-    assert.equal((await h.call('/leave', { playerId: 'pa' })).json.released, true);
-    await h.call('/leave', { playerId: 'py' + i });
-  }
-  assert.equal((await h.call('/stats')).json.noShows, 0, 'never delivered: no strike');
-  assert.equal((await h.join('pa')).json.status, 'waiting', 'not blocked');
-  await h.call('/leave', { playerId: 'pa' });
-  // Delivered, then the room's start drop names A a no-show (POST /release with noShow): one strike.
-  const [qa] = await h.pair('pa', 'pz');
-  let r = await h.call('/release', { matchId: qa.json.roomId, playerIds: ['pa'], closeRoom: false, noShow: ['pa'] });
-  assert.equal(r.json.released, 1);
-  assert.equal((await h.call('/stats')).json.noShows, 1);
-  r = await h.call('/release', { matchId: qa.json.roomId, playerIds: ['pa'], closeRoom: true, noShow: ['pa'] });
-  assert.equal(r.json.released, 0, 'the cleanup finds no lock: no second strike');
-  await h.call('/leave', { playerId: 'pz' });
-  // Strike 2 through /leave; had the cleanup counted again this would be the third (429).
-  const [qa2] = await h.pair('pa', 'pw');
-  assert.equal(qa2.json.status, 'matched');
-  await h.call('/leave', { playerId: 'pa' });
-  await h.call('/leave', { playerId: 'pw' });
-  r = await h.join('pa');
-  assert.equal(r.status, 200, `two strikes: not blocked yet (${JSON.stringify(r.json)})`);
-  await h.call('/leave', { playerId: 'pa' });
-  const [qa3] = await h.pair('pa', 'pv');
-  assert.equal(qa3.json.status, 'matched');
-  await h.call('/leave', { playerId: 'pa' });
-  await h.call('/leave', { playerId: 'pv' });
-  assert.equal((await h.join('pa')).status, 429, 'the third strike blocks');
 });
 
 // ---- RoomDO: an upgrade waiting for TURN, late tickets, forgiven strikes ------------------------------
@@ -1173,30 +1134,10 @@ test('recordNoShow / forgiveNoShow: one strike per room, the window starts over,
   assert.equal(g.rooms[0], 'x3');
 });
 
-test('MatchmakerDO: /forgive takes back the strike of that room only (idempotent); a forgive that overtakes its strike cancels it', async () => {
+test('MatchmakerDO: /forgive answers ok (forgiven: false) for the rooms that still send it; 400 without its ids', async () => {
   const h = await makeMatchmaker();
-  /** A room of pa and `partner`; the room's start drop names pa a no-show (optionally after its forgive). */
-  const strikeRound = async (partner, forgiveFirst) => {
-    const [qa] = await h.pair('pa', partner);
-    const roomId = qa.json.roomId;
-    if (forgiveFirst) assert.deepEqual((await h.call('/forgive', { matchId: roomId, playerId: 'pa' })).json, { ok: true, forgiven: false }, 'nothing counted yet: remembered');
-    assert.equal((await h.call('/release', { matchId: roomId, playerIds: ['pa'], closeRoom: false, noShow: ['pa'] })).json.released, 1);
-    await h.call('/leave', { playerId: partner });
-    h.setTime(h.time() + 1000);
-    return roomId;
-  };
-  const r1 = await strikeRound('p1', false);
-  assert.equal((await h.call('/stats')).json.noShows, 1, 'struck');
-  assert.deepEqual((await h.call('/forgive', { matchId: 'f'.repeat(64), playerId: 'pa' })).json, { ok: true, forgiven: false }, 'another room: nothing taken back');
-  assert.equal((await h.call('/stats')).json.noShows, 1);
-  assert.deepEqual((await h.call('/forgive', { matchId: r1, playerId: 'pa' })).json, { ok: true, forgiven: true });
-  assert.equal((await h.call('/stats')).json.noShows, 0);
-  assert.deepEqual((await h.call('/forgive', { matchId: r1, playerId: 'pa' })).json, { ok: true, forgiven: false }, 'idempotent');
-  for (let i = 2; i <= 4; i++) await strikeRound('p' + i, true);
-  assert.equal((await h.call('/stats')).json.noShows, 0, 'each strike was cancelled by the forgive that came first');
-  const r = await h.join('pa');
-  assert.equal(r.status, 200, `not blocked (${JSON.stringify(r.json)})`);
-  await h.call('/leave', { playerId: 'pa' });
+  const [qa] = await h.pair('pa', 'pb');
+  assert.deepEqual((await h.call('/forgive', { matchId: qa.json.roomId, playerId: 'pa' })).json, { ok: true, forgiven: false });
   assert.equal((await h.call('/forgive', { playerId: 'pa' })).status, 400);
 });
 
@@ -1268,19 +1209,19 @@ async function makeWorld() {
   const drain = async () => {
     while (pending.length > 0) await Promise.all(pending.splice(0));
   };
-  return { call, upgrade, drain, roomOf, join: (playerId, mode) => call('/join', { playerId, name: playerId, mode, kind: 'p2p' }) };
+  return { call, upgrade, drain, roomOf, join: (playerId, mode) => call('/join', { playerId, name: playerId, mode, kind: 'server' }) };
 }
 
-test('RoomDO + MatchmakerDO: a slow joiner refused after the no-show grace, three rooms in a row, is forgiven each time and never blocked', async () => {
+test('RoomDO + MatchmakerDO: a slow joiner refused after the no-show grace, three lobby rooms in a row: its /forgive is answered and it is never blocked', async () => {
   await withClock(20_000_000, async (clock) => {
     const w = await makeWorld();
     for (let round = 1; round <= M.NO_SHOW_LIMIT; round++) {
-      // 2v2 with three humans: the room forms with a bot after the fill wait (A blue, C blue, B red, bot).
+      // A lobby's 2v2 with three humans: the room has a bot (A blue, C blue, B red, bot).
       const ids = ['pa', 'pb' + round, 'pc' + round];
-      for (const id of ids) assert.equal((await w.join(id, '2v2')).json.status, 'waiting');
-      clock.t += M.P2P_FILL_WAIT;
-      const res = [];
-      for (const id of ids) res.push((await w.join(id, '2v2')).json);
+      const members = [{ playerId: ids[0], name: 'A', team: 0, guest: false }, { playerId: ids[1], name: 'B', team: 1, guest: false }, { playerId: ids[2], name: 'C', team: 0, guest: false }];
+      const started = await w.call('/custom', { kind: 'p2p', mode: '2v2', members, matchLengthSeconds: 300 });
+      assert.equal(started.status, 200, JSON.stringify(started.json));
+      const res = ids.map((id) => started.json.results[id]);
       assert.ok(res.every((r) => r.status === 'matched' && r.kind === 'p2p' && r.roomId === res[0].roomId), `round ${round}: one room for the three`);
       const room = w.roomOf(res[0].roomId).room;
       const t0 = clock.t;
@@ -1292,12 +1233,10 @@ test('RoomDO + MatchmakerDO: a slow joiner refused after the no-show grace, thre
       for (const ws of [b.ws, c.ws]) await room.webSocketMessage(ws, JSON.stringify({ type: 'ready' }));
       assert.equal(b.ws.of('start').length, 1, 'B and C start without A');
       await w.drain();
-      assert.equal((await w.call('/stats')).json.noShows, 1, `round ${round}: the start drop counted A's strike`);
       clock.t += 2500; // A's socket finally gets there
       const a = await w.upgrade(res[0]);
       assert.equal(a.res.status, 403, 'refused: its slot was given up');
       await w.drain();
-      assert.equal((await w.call('/stats')).json.noShows, 0, `round ${round}: forgiven`);
       for (const ws of [b.ws, c.ws]) await room.webSocketClose(ws, 1000, '', true);
       await w.drain();
       clock.t += 1000;
@@ -1467,15 +1406,12 @@ test('RoomDO: a room with experimental rules never names a no-show: not at the s
   });
 });
 
-test('MatchmakerDO: /custom takes rules for a P2P room with >= 2 signed-in humans only (400 experimental_p2p_only / bad_physics, 403 account_required), hands them to the RoomDO and marks its locks', async () => {
+test('MatchmakerDO: /custom takes rules for a P2P room with >= 2 signed-in humans only (400 need_players / bad_physics, 403 account_required), hands them to the RoomDO and marks its locks', async () => {
   const h = await makeMatchmaker();
   const members = [{ playerId: 'pa', name: 'A', team: 0, guest: false }, { playerId: 'pb', name: 'B', team: 1, guest: false }];
-  let r = await h.call('/custom', { kind: 'server', mode: '1v1', members, matchLengthSeconds: 300, physics: RULES });
+  let r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members: members.slice(0, 1), matchLengthSeconds: 300, physics: RULES });
   assert.equal(r.status, 400);
-  assert.equal(r.json.error, 'experimental_p2p_only', 'never a server match');
-  r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members: members.slice(0, 1), matchLengthSeconds: 300, physics: RULES });
-  assert.equal(r.status, 400);
-  assert.equal(r.json.error, 'experimental_p2p_only', 'a lone human never falls back to a MatchDO with rules');
+  assert.equal(r.json.error, 'need_players', 'a lone human never falls back to a MatchDO (with rules or without)');
   r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members, matchLengthSeconds: 300, physics: { ...RULES, values: { gameSpeed: 50 } } });
   assert.equal(r.status, 400);
   assert.equal(r.json.error, 'bad_physics');
@@ -1496,6 +1432,11 @@ test('MatchmakerDO: /custom takes rules for a P2P room with >= 2 signed-in human
   const roomId = r.json.results.pa.roomId;
   assert.equal((await h.mm.ctx.storage.get('active:pa')).exp, true, 'the lock is marked (and persisted)');
   assert.equal((await h.mm.ctx.storage.get('room:' + roomId)).exp, true, 'the capacity entry too');
+  // A lobby that says 'server' (an older page): a P2P room all the same, with its rules.
+  r = await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'pe', name: 'E', team: 0, guest: false }, { playerId: 'pf', name: 'F', team: 1, guest: false }], matchLengthSeconds: 300, physics: RULES });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.results.pe.kind, 'p2p', 'never a server match');
+  assert.equal(h.matchNs.calls.length, 0);
   // A standard lobby's start (guests welcome): physics null, an ordinary room, its seats as before.
   r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members: [{ playerId: 'pc', name: 'C', team: 0, guest: true }, { playerId: 'pd', name: 'D', team: 1 }], matchLengthSeconds: 300, physics: null });
   assert.equal(r.status, 200);
@@ -1533,9 +1474,8 @@ test('MatchmakerDO: a room with experimental rules never counts a no-show strike
     }
     h.setTime(h.time() + 1000);
   }
-  assert.equal((await h.call('/stats')).json.noShows, 0, 'no strike at all');
   const q = await h.join('pa');
-  assert.equal(q.status, 200, 'the p2p queue is not blocked');
+  assert.equal(q.status, 200, 'the queue is not blocked');
   await h.call('/leave', { playerId: 'pa' });
 });
 
@@ -1558,7 +1498,7 @@ test('RoomDO + MatchmakerDO: an experimental lobby start: the rules reach every 
     assert.equal(a.ws.of('start').length, 1, 'A and B start without C');
     assert.equal(a.ws.of('drop').length, 1, "C's car is the team AI from tick 0");
     await w.drain();
-    assert.equal((await w.call('/stats')).json.noShows, 0, 'C never showed up: no strike in an experimental room');
+    assert.equal((await w.join('pc', '1v1')).status, 200, 'C never showed up: nothing refuses its next queue');
   });
 });
 
@@ -1598,18 +1538,20 @@ test('RoomDO: every welcome and peerJoined carry each peer seat\'s car; a car th
   assert.equal(a2.of('room')[0].slots[0].car, 'tero', 'a replacement socket (the others hear no peerJoined for it)');
 });
 
-test('MatchmakerDO: the /join car sits with the seat: a P2P room\'s slots and a server match\'s roster carry it; a junk one is dropped; a rejoin with a new session takes the new car', async () => {
+test('MatchmakerDO: the /join car sits with the seat: a Casual match\'s roster carries it; a junk one is dropped; a rejoin with a new session takes the new car', async () => {
   const h = await makeMatchmaker();
   const join = (playerId, kind, car) => h.call('/join', { playerId, name: playerId, mode: '1v1', kind, ...(car !== undefined ? { car } : {}) });
   assert.equal((await join('pa', 'p2p', 'tero')).json.status, 'waiting');
   assert.equal((await join('pa', 'p2p', 'pampero')).json.status, 'waiting', 'the same waiter, a newer session');
   await join('pb', 'p2p', 'ferrari');
-  const room = h.roomNs.calls.find((c) => c.path === '/internal/create');
-  assert.deepEqual(room.body.slots.map((s) => [s.playerId ?? null, s.car ?? null]), [['pa', 'pampero'], ['pb', null]]);
+  const [first, second] = h.matchNs.calls.filter((c) => c.path === '/internal/create');
+  assert.deepEqual(first.body.roster.map((e) => [e.kind, e.playerId ?? null, e.car ?? null]), [['player', 'pa', 'pampero'], ['bot', null, null], ['player', 'pb', null], ['bot', null, null]], 'two humans: 2v2, a bot each');
+  assert.equal(h.roomNs.calls.filter((c) => c.path === '/internal/create').length, 0, 'never a P2P room');
   await join('sa', 'server', 'condor');
   await join('sb', 'server');
-  const match = h.matchNs.calls.find((c) => c.path === '/internal/create');
-  assert.deepEqual(match.body.roster.map((e) => [e.kind, e.car ?? null]), [['player', 'condor'], ['player', null]]);
+  const match = h.matchNs.calls.filter((c) => c.path === '/internal/create')[1];
+  assert.deepEqual(match.body.roster.map((e) => [e.kind, e.car ?? null]), [['player', 'condor'], ['bot', null], ['player', null], ['bot', null]]);
+  assert.equal(second, undefined);
 });
 
 test('MatchmakerDO /custom: each lobby member\'s car into the room slots and the MatchDO roster (a junk one dropped)', async () => {
@@ -1618,9 +1560,11 @@ test('MatchmakerDO /custom: each lobby member\'s car into the room slots and the
   assert.equal((await h.call('/custom', { kind: 'p2p', mode: '2v2', members, matchLengthSeconds: 300 })).status, 200);
   const room = h.roomNs.calls.filter((c) => c.path === '/internal/create').at(-1);
   assert.deepEqual(room.body.slots.map((s) => [s.kind, s.car ?? null]), [['peer', 'tero'], ['bot', null], ['peer', null], ['bot', null]]);
-  assert.equal((await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'pc', name: 'C', team: 1, guest: false, car: 'carpincho' }], matchLengthSeconds: 300 })).status, 200);
-  const match = h.matchNs.calls.filter((c) => c.path === '/internal/create').at(-1);
-  assert.deepEqual(match.body.roster.map((e) => [e.kind, e.car ?? null]), [['bot', null], ['player', 'carpincho']]);
+  assert.equal((await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'pc', name: 'C', team: 1, guest: false, car: 'carpincho' }], matchLengthSeconds: 300 })).status, 400, 'a lone member: need_players');
+  assert.equal((await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'pc', name: 'C', team: 1, guest: false, car: 'carpincho' }, { playerId: 'pd', name: 'D', team: 0, guest: false }], matchLengthSeconds: 300 })).status, 200);
+  const second = h.roomNs.calls.filter((c) => c.path === '/internal/create').at(-1);
+  assert.deepEqual(second.body.slots.map((e) => [e.kind, e.car ?? null]), [['peer', null], ['peer', 'carpincho']], "a 'server' lobby start is a P2P room");
+  assert.equal(h.matchNs.calls.length, 0);
 });
 
 test('RoomDO + MatchmakerDO: a lobby start with cars: each peer\'s welcome shows every seat\'s car', async () => {

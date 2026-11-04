@@ -1,7 +1,10 @@
 /**
  * OnlineSession: an online match (phase 1, docs/online/PHASE1.md) driven inside the Game's frame
  * loop. States: idle -> queue (matchmaking long-poll) -> connecting (socket open, roster built from
- * the Welcome, waiting for the first snapshot) -> playing -> ended (host whistle) -> idle.
+ * the Welcome, waiting for the first snapshot) -> playing -> ended (host whistle) -> idle. While it
+ * queues, `wait`, `waitAt`, `waitRegion`, `postedAt` and `retrying` are the search's estimate, the
+ * region it counts, its first POST's time and its network state (NetClient lastWait, lastWaitRegion,
+ * queuePostedAt, queueRetrying); `onFound` fires from the queue's answer as it leaves 'queue' for a match.
  *
  * Clock: the local sim runs `lead` ticks ahead of the estimated host tick (ClockSync):
  *   lead = ceil((rtt / 2 + jitter margin) / 8.333 ms) + 1, clamped to [2, 24], corrected by the
@@ -45,6 +48,7 @@ import { assembleInputs, INPUT_MAX_PER_PACKET } from '../net/InputRing';
 import { NetClient, NetError, RECONNECT_TRIES, type MatchAssignment, type NetClientOptions } from '../net/NetClient';
 import { netErrorText } from '../net/netErrorText';
 import { outcomeOf, type Outcome } from '../net/outcome';
+import type { QueueWait } from '../net/queueWait';
 import { RateMeter, newNetStatsView, resetNetStatsView, type NetStatsView } from '../net/NetStats';
 import { RollbackPredictor, type RollbackSim } from '../net/Prediction';
 import { TICK_RATE, isNodeHost, type MatchEvent, type SnapshotPacket, type Welcome } from '../net/protocol';
@@ -227,6 +231,42 @@ export class OnlineSession {
     return this.client.name;
   }
 
+  /**
+   * A search found its match: called as the state leaves 'queue' for 'connecting', from the queue's
+   * answer (a hidden tab runs no frames, so the Game's found cue and tab title come from here).
+   */
+  onFound: (() => void) | null = null;
+
+  /** The running search's last `wait` (src/net/queueWait.ts; null: no waiting answer yet, or an older server). */
+  get wait(): QueueWait | null {
+    return this.state === 'queue' ? this.client.lastWait : null;
+  }
+
+  /** performance.now() (the client's clock) when that `wait` arrived; 0 before the first waiting answer. */
+  get waitAt(): number {
+    return this.state === 'queue' ? this.client.lastWaitAt : 0;
+  }
+
+  /** Waiting answers of the running search so far (the menus' "While you search" opens on the first). */
+  get waitingAnswers(): number {
+    return this.state === 'queue' ? this.client.waitingAnswers : 0;
+  }
+
+  /** The last waiting answer's region: whose region its `searchingHere` counts (the hub's normalized home); null: none said. */
+  get waitRegion(): string | null {
+    return this.state === 'queue' ? this.client.lastWaitRegion : null;
+  }
+
+  /** performance.now() when the running search's first POST left (0: none yet, or no longer queueing): "While you search" opens about 1 s after it. */
+  get postedAt(): number {
+    return this.state === 'queue' ? this.client.queuePostedAt : 0;
+  }
+
+  /** The search's requests fail and are tried again (the network is away). */
+  get retrying(): boolean {
+    return this.state === 'queue' && this.client.queueRetrying;
+  }
+
   /** A match is on screen and taking input (the GameSession view; 'ended' keeps rendering but takes none). */
   get inMatch(): boolean {
     return this.state === 'playing';
@@ -298,6 +338,8 @@ export class OnlineSession {
           this.matchId = m.matchId;
           this.ranked = m.ranked === true || kind === 'ranked';
           this.client.connect(m.wsUrl, m.ticket);
+          // From the queue's answer, not the frame: a hidden tab runs no frames (the cue, the title).
+          this.onFound?.();
         },
         (err: unknown) => {
           if (attempt !== this.attempt) return;

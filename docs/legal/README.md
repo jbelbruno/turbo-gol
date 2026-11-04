@@ -9,20 +9,23 @@ The terms of service and the privacy policy of turbo-gol.com, as the game serves
 | `terms.en.md` | `/terms` | The terms' informative English translation |
 | `privacy.en.md` | `/privacy` | The privacy policy's informative English translation |
 
-**Version `2026-11-04`, in force from 4 November 2026,** approved by the owner on 3 November 2026.
-The Spanish texts are the official ones; the English ones are informative translations. They were
-checked against the code of this release, sentence by sentence, and reviewed independently. They
-are not legal advice, and a lawyer has not reviewed them yet. The code never edits them: the Worker
-renders them as they are.
+**Version `2026-11-04-2`, in force from 4 November 2026,** approved by the owner on 4 November 2026.
+The Spanish texts are the official ones; the English ones are informative translations. Version
+`2026-11-04-2` was checked against the code of the release that ships the new modes (Casual and
+ranked always on servers, lobbies always P2P), sentence by sentence, and reviewed independently.
+They are not legal advice, and a lawyer has not reviewed them yet. The code never edits them: the
+Worker renders them as they are.
 
 **Changing a text** means changing it in both languages, giving it a new version in its header and
 in `TERMS_VERSION`, in the same deploy, and announcing it 30 days ahead when it is an important
-change (Términos 18). Nothing checks that a `[[TOKEN]]` was left in a text: search for `[[` before
-publishing.
+change (Términos 18). Version `2026-11-04-2` skipped that notice once, by the owner's decision: it
+was announced on Discord and in `docs/legal/avisos/2026-11-04-2.md` the day it took effect, and
+every account and guest accepted it again before playing online. Nothing checks that a `[[TOKEN]]`
+was left in a text: search for `[[` before publishing.
 
 ## How they reach the players
 
-The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-11-04`):
+The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-11-04-2`):
 
 - **Empty or unset:** `/terminos`, `/privacidad`, `/terms` and `/privacy` answer 404, as an unknown
   route. `GET /api/config` says `legal.terms: null`, and the game shows no notice, no link and no
@@ -42,7 +45,7 @@ The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-
 The texts are bundled with the Worker (a deploy changes them). Publish a new text and its version
 in the same deploy.
 
-Account deletion has its own switch, `DELETION_OPEN` (`"1"` since this version). Set to `"1"`, PERFIL shows
+Account deletion has its own switch, `DELETION_OPEN` (`"1"` since version `2026-11-04`). Set to `"1"`, PERFIL shows
 BORRAR CUENTA, the sheet that offers to keep an account whose deletion is pending, and the sheet of
 the deletion mail's cancel link (`/account#keep=`). Set it back to `"0"` only when no deletion is
 pending: those sheets close with it, although the server keeps the way back open.

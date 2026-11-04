@@ -325,7 +325,8 @@ configurados ni siquiera se lee KV).
   Un error, 8 s sin respuesta o una respuesta que no es una ubicación válida para esos jugadores
   vuelven a `MatchDO`, y frenan los intentos 60 s. Las partidas en nodos no cuentan para
   `MAX_ACTIVE_ROOMS`; una ranked en un nodo toma el lock ranked con el id del nodo; las salas
-  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11).
+  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11)
+  (hasta 2026-11-04; desde entonces toda partida de Casual cuyo host es SA puede caer en un nodo).
 - [x] **P23. `/api/rejoin` y `/api/leave` para partidas de nodo:** `rejoin` libera el lock si
   la partida no existe, terminó o el jugador no estaba, y lo mantiene si salió (`left`) o el nodo
   no responde; un id de 64 hex que no es nada responde 404 y libera el lock. `leave` le pregunta
@@ -500,10 +501,11 @@ aviso.
 ### TURN
 
 - [ ] **Primero el tope de 900 GB, después las credenciales** (`TURN_KEY_ID` y `TURN_KEY_TOKEN`).
-  Así lo pide `docs/online/PHASE2.md`, y los mismos secretos prenden el TURN del P2P casual en
-  `GET /api/ice`. Cloudflare no tiene tope de gasto: al llegar al tope, dejar de mandar partidas a
-  PCs (van a los servidores del proyecto) y nunca pasar a conexión directa en silencio. Sin
-  credenciales ninguna PC recibe partidas: el autotest tiene que pasar por el relay.
+  Así lo pide `docs/online/PHASE2.md`, y los mismos secretos prenden el TURN del P2P de las salas
+  (desde 2026-11-04 la ruta suelta `GET /api/ice` ya no existe: `server/README.md`). Cloudflare no
+  tiene tope de gasto: al llegar al tope, dejar de mandar partidas a PCs (van a los servidores del
+  proyecto) y nunca pasar a conexión directa en silencio. Sin credenciales ninguna PC recibe
+  partidas: el autotest tiene que pasar por el relay.
 - [ ] **Credenciales que duren lo que la partida.** Hoy duran 600 s (`TURN_TTL_SECONDS` en `server/src/env.ts`), y
   Cloudflare corta la conexión poco después de que vencen. Una partida vive su largo más 600 s de
   tope, contados desde que se crea: la espera de ingreso entra ahí, y las pausas de gol lo estiran
@@ -545,13 +547,14 @@ aviso.
 
 ### Decisiones de producto
 
-- [ ] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
+- [x] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
   (recomendada)" en `src/locales/es.ts`). Las salas P2P nunca pasan por `formMatch`, así que nunca
   llegan a un nodo; solo un jugador que espera solo en la cola P2P termina en el servidor contra
   bots (`server/src/MatchmakerDO.ts:1028-1041`). Las PCs en prueba solo hostean casuales y
   necesitan 20 verificadas para el ranked: sin casuales por servidor, tardarían mucho. Hay que
   decidir si los nodos comunitarios toman casuales, por ejemplo con una opción "servidores de la
-  comunidad".
+  comunidad". **Decidido 2026-11-04:** Casual y Competitivo siempre en servidor, el nodo de São
+  Paulo primero; P2P solo en salas.
 - [ ] **La latencia no entra en la elección del nodo.** Las regiones son continentes y el
   scheduler elige al azar entre los menos cargados. Para la beta, preferir el VPS de São Paulo;
   después, que el cliente mida el ping a los nodos de su región.
@@ -583,7 +586,7 @@ aviso.
 
 - [ ] **Forzar el relay de los jugadores** según lo decidido, con el tope de GB funcionando antes.
   Con los jugadores por relay, el tope de 900 GB alcanza para unas 900 horas de 2v2 por mes en
-  PCs, menos lo que use el P2P casual. Pasar de ahí pide subir el presupuesto de US$ 50.
+  PCs, menos lo que use el P2P de las salas. Pasar de ahí pide subir el presupuesto de US$ 50.
 
 ### Confianza y disponibilidad
 
@@ -654,7 +657,7 @@ aviso.
 ## Forzar TURN: costos y decisión
 
 Cloudflare cobra solo lo que sale de su red hacia quien usa el TURN. Los primeros 1.000 GB por
-mes son gratis, compartidos con el TURN del P2P casual, y después cuesta US$ 0,05 por GB
+mes son gratis, compartidos con el TURN del P2P de las salas, y después cuesta US$ 0,05 por GB
 (developers.cloudflare.com/realtime, páginas de precios y de TURN, 2026).
 
 | Qué se oculta | Qué se cobra | Costo |
@@ -707,8 +710,8 @@ En el navegador, para la etapa 3:
 - [ ] Si TURN falla, no hay partidas en PCs. Nunca conexión directa en silencio.
 
 **Lo que forzar TURN no cubre:** los VPS comunitarios por WebSocket ven la IP de los jugadores, y
-el P2P casual expone las IPs entre jugadores. Si la promesa es "nadie ve tu IP", esos dos caminos
-también tienen que cambiar.
+el P2P de las salas expone las IPs entre jugadores. Si la promesa es "nadie ve tu IP", esos dos
+caminos también tienen que cambiar.
 
 ## Decisiones pendientes del mantenedor
 
@@ -776,6 +779,7 @@ Sin número D: no frenan la etapa 1.
 - **Modo de relay:** la recomendación es ocultar al anfitrión desde la etapa 2 y a los jugadores
   por defecto al abrir. Pasar de unas 900 horas de 2v2 por mes con relay pide subir el
   presupuesto.
-- **Casuales en nodos comunitarios:** sí o no, y cómo se elige.
+- **Casuales en nodos comunitarios:** decidido 2026-11-04 (ver "El casual por defecto es P2P" en
+  Decisiones de producto): Casual siempre en servidor, el nodo primero cuando el host es SA.
 - **Segundo verificador:** cuándo se levanta el de Hetzner.
 - **El primer auto:** cuál es. El precio ya está decidido en 1.500 puntos.

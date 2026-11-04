@@ -18,18 +18,24 @@ licencia SIL Open Font License) para los títulos.
 - **Modos**: partidos contra bots (tres dificultades, IA de equipo), práctica libre y nueve packs de
   entrenamiento (definición, atajadas, aéreos).
 - **Online**:
-  - casual por P2P con rollback sobre WebRTC;
-  - partidas en servidor con predicción;
-  - varias playlists a la vez y elección de región;
-  - salas personalizadas con lista pública, código y contraseña.
+  - salas (públicas o privadas) por P2P con rollback sobre WebRTC;
+  - Casual y Competitivo siempre en servidor, con predicción; mientras esperas, un partido contra
+    bots o entrenamiento en tu navegador, y entras cuando aparece la partida;
+  - Casual mezcla los formatos: con 2 o más personas la partida empieza enseguida y los bots
+    completan, y quien está solo juega online contra bots a los 5 minutos; primero tu región,
+    después todas;
+  - salas: CREAR SALA PÚBLICA o CREAR SALA PRIVADA, lista pública, código y contraseña; una
+    partida necesita 2 personas, y el anfitrión que está solo juega contra bots o entrena hasta que
+    entra alguien.
 - **Cuentas y competitivo**: un correo confirmado con un código y una contraseña (Google / Discord
   opcionales); un correo, una cuenta. Las cuentas que se crearon con usuario lo conservan hasta la
   fecha de corte que anuncie el proyecto. Competitivo da un
   rating por playlist, con partidas de clasificación, rangos, ranking y penalización por abandono.
-  Los invitados pueden jugar todo menos competitivo.
+  Los invitados pueden jugar contra la IA, entrenar y jugar en salas; Casual y Competitivo
+  necesitan una cuenta.
 - **Funciones experimentales** (jugadores con cuenta, Configuración > Experimental): la calidad
   gráfica Súper bajo y presets de física (gravedad, velocidad de la pelota y del auto, boost,
-  saltos, choques...) para la práctica libre y las salas P2P. Nunca cuentan para el rango ni las
+  saltos, choques...) para la práctica libre y las salas. Nunca cuentan para el rango ni las
   estadísticas ([docs/experimental.md](docs/experimental.md), en inglés).
 - **Controles**: teclado + mouse y control a la vez, todo reasignable.
 
