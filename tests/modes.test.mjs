@@ -132,3 +132,11 @@ test("final review: a TV's wait choices name themselves in the buttons' size, CR
   assert.match(wait, /html\[data-shell='tv'\] \.mn-wait-text b \{\s*font-size: var\(--t-heading\);/);
   assert.match(wait, /html\[data-shell='tv'\] \.mn-act-go2 \{\s*font-size: var\(--t-body\);/, '__uiFit flagged it at 15 px');
 });
+
+test("final review: a computer's toasts sit in the hint bar's band, off a screen's last row", async () => {
+  // They covered the Sala's ... and Training's How to play row, and poked past the content's edge.
+  const comp = await srcText('../src/ui/styles/components.css');
+  assert.match(comp, /html\[data-shell='bar'\] \.mn-toasts \{\s*right: calc\(var\(--safe-right\) \+ 3rem\);\s*bottom: calc\(var\(--safe-bottom\) \+ 0\.25rem\);/);
+  const shell = await srcText('../src/ui/styles/shell.css');
+  assert.match(shell, /\.mn-hint \{\s*grid-area: hint;[^}]*height: calc\(2\.5rem \+ var\(--safe-bottom\)\);\s*padding: 0 calc\(3rem \+ var\(--safe-right\)\)/, "the band the toast sits in, and the content's 3rem edge");
+});
