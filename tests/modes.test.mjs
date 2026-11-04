@@ -140,3 +140,23 @@ test("final review: a computer's toasts sit in the hint bar's band, off a screen
   const shell = await srcText('../src/ui/styles/shell.css');
   assert.match(shell, /\.mn-hint \{\s*grid-area: hint;[^}]*height: calc\(2\.5rem \+ var\(--safe-bottom\)\);\s*padding: 0 calc\(3rem \+ var\(--safe-right\)\)/, "the band the toast sits in, and the content's 3rem edge");
 });
+
+test("bots level review: CASUAL's format tiles keep their text under the DIFFICULTY row (a TV hides its label as the rail does; the grid's floor holds two rows at 150 %); the layout check watches them", async () => {
+  // With the label a TV's 1v1 / 2v2 / 3v3 tiles shrank to 55 px at 960 x 540 (111 at 1920 x 1080) and
+  // their names ran 10 px (18) past the tiles' bottom; without it they are 74 px, the text 9 px inside.
+  const css = await srcText('../src/ui/styles/screens/modes.css');
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sels, body]) => ({ sels: sels.replace(/\/\*[\s\S]*?\*\//g, '').split(',').map((s) => s.trim()), body }));
+  const hides = (sel) => rules.some((r) => r.sels.includes(sel) && /display:\s*none;/.test(r.body));
+  assert.ok(hides("html[data-shell='tv'] .mn-modes-bots-label"), "a TV: the seg alone under the tiles (its aria-label keeps the name)");
+  assert.ok(hides("html[data-shell='rail'] .mn-modes-queue > .mn-modes-label"), 'the rail: both labels, as before');
+  // 150 % on a computer: 9rem let 1920 x 1080's tiles shrink to 130 px under 135 of text (1366 x 768: 96 under 100).
+  const floor = rules.find((r) => r.sels.includes('.mn-formats'));
+  assert.match(floor.body, /min-height: 9\.5rem;/);
+  const modes = await srcText('../src/ui/screens/modes.ts');
+  assert.match(modes, /h\('span\.mn-modes-label\.mn-modes-bots-label'/, "the label is the queue's own mn-modes-label (the rail's rule reaches it)");
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\)/, 'the seg keeps the name for a screen reader');
+  // fit.ts' spill check (scripts/ui-fit.mjs) on Casual's tiles: it fails text out of a data-fit-box.
+  assert.match(modes, /for \(const \[, x\] of formatEls\) x\.el\.toggleAttribute\('data-fit-box', tab === 'casual'\);/);
+  const fit = await srcText('../src/ui/fit.ts');
+  assert.match(fit, /querySelectorAll<HTMLElement>\('\[data-fit-box\]'\)/);
+});

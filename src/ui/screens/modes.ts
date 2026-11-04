@@ -350,6 +350,10 @@ export function modesScreen(menu: Menu): Screen {
         const shown = formatsOf(kindOf(tab));
         for (const [f, x] of formatEls) setHidden(x.el, !shown.includes(f));
         setText(formatLabel, t(tab === 'casual' ? 'modes.formatPrefer' : 'modes.format'));
+        // Casual's tiles are a data-fit-box: the layout check (fit.ts spill, scripts/ui-fit.mjs) fails
+        // their text out of the tile (the DIFFICULTY row under them squeezed them on a TV). Not
+        // Competitive's yet: its ANY tile spills at 150 % and on a tablet already (backlog).
+        for (const [, x] of formatEls) x.el.toggleAttribute('data-fit-box', tab === 'casual');
       }
       // Casual's bots level (Competitive has no bots match).
       setHidden(botsLabel, tab !== 'casual');
