@@ -491,6 +491,32 @@ test('tokens: 401 without a session, 403 for a guest, 403 not_trusted for anothe
   assert.equal(pre.headers.get('access-control-allow-headers'), 'authorization, content-type');
 });
 
+test("tokens: the day's 10 per account count only the tokens the object minted; a refusal (a typo, the cap) costs one of 30 tries a minute instead", async () => {
+  const [TYPOS, FLOOD] = ['c1c2c3d4e5f60718', 'd1d2d3d4e5f60718'];
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${TYPOS},${FLOOD}` });
+  let answer = 'bad_name';
+  env.NODES.handler = () =>
+    answer === 'token'
+      ? new RealResponse('{"token":"tgn1_x"}', { headers: { 'content-type': 'application/json' } })
+      : new RealResponse(JSON.stringify({ error: answer }), { status: answer === 'too_many_nodes' ? 409 : 400, headers: { 'content-type': 'application/json' } });
+  const ask = async (who) => (await req(env, 'POST', '/nodes/tokens', { body: '{"region":"SA","name":"de 1"}', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (await accountToken(who, 'Proyecto')) } })).status;
+  for (let i = 0; i < 9; i++) assert.equal(await ask(TYPOS), 400, `typo ${i + 1}`);
+  answer = 'too_many_nodes';
+  assert.equal(await ask(TYPOS), 409);
+  answer = 'token';
+  for (let i = 0; i < 10; i++) assert.equal(await ask(TYPOS), 200, `token ${i + 1}, after ten refusals`);
+  let seen = env.NODES.seen.length;
+  assert.equal(await ask(TYPOS), 429, 'the eleventh token of the day');
+  answer = 'bad_name';
+  assert.equal(await ask(TYPOS), 429, 'and a refusal: the day is spent');
+  assert.equal(env.NODES.seen.length, seen, 'neither reached the object');
+  // Refusals alone: 30 a minute reach the object, the next one does not.
+  for (let i = 0; i < 30; i++) assert.equal(await ask(FLOOD), 400, `try ${i + 1}`);
+  seen = env.NODES.seen.length;
+  assert.equal(await ask(FLOOD), 429, 'the 31st try in a minute');
+  assert.equal(env.NODES.seen.length, seen);
+});
+
 test('mine: an account session, forwarded with the caller’s id, 30 a minute per account; status: public and cached 10 s; both with CORS', async () => {
   const env = makeEnv();
   env.NODES.handler = (r) => new RealResponse(JSON.stringify({ path: new URL(r.url).pathname }), { headers: { 'content-type': 'application/json' } });

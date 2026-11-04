@@ -47,7 +47,8 @@
  *   POST     /nodes/tokens            { region, name?, publicHost?, roles?, matches?, egressCapGB? }, Bearer account
  *                                     session of a NODE_TRUSTED_OPERATORS account -> a one-time registration token
  *                                     and the Linux install line, composed by the object (409 too_many_nodes before
- *                                     any token when the account has its NODE_TRUSTED_MAX_NODES nodes); 413 over 4 KB.
+ *                                     any token when the account has its NODE_TRUSTED_MAX_NODES nodes); 413 over 4 KB;
+ *                                     10 tokens minted a day per account and 30 tries a minute, refused ones included.
  *                                     Like every maintainer route: never a TV's session (403 tv_session), and one
  *                                     whose device proved a credential at level 2 (a typed password: a sign-in or
  *                                     PERFIL's "confirm it's you"; a provider's press is level 1) in the last
@@ -102,8 +103,9 @@
  * tokens, mine, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
  * here are per isolate (index.ts rateLimited), per minute except two: registrations per address
  * per hour and tokens per account per day, the object's own limits, which only the object holds
- * across isolates. Here they keep junk from reaching it: every route that reaches the object has
- * one, per address (an IPv6 address counted by its /64, env.ts limitKey) or per account.
+ * across isolates (a day's tokens are the ones minted: a refused request is a try of the minute's).
+ * Here they keep junk from reaching it: every route that reaches the object has one, per address
+ * (an IPv6 address counted by its /64, env.ts limitKey) or per account.
  *
  * The cron (index.ts scheduled, every 5 minutes) calls nodeHealthCheck: one call to the object,
  * which probes the trusted nodes' /healthz; nothing at all without the node settings.
@@ -135,6 +137,8 @@ export interface NodeRouteContext {
   session: () => Promise<SessionClaims | null>;
   /** limits.ts isolateLimited: true = over `max` in the current window (default one minute), in this isolate. */
   limited: (key: string, max: number, windowMs?: number) => boolean;
+  /** limits.ts isolateSpent: `limited`'s check without its count (a route that counts only what it did, after the answer). */
+  spent: (key: string, max: number) => boolean;
   /** limits.ts limiter: a rule of its table, counted across the location's isolates when the Worker has its binding. */
   limit: Limiter;
   /** CORS headers for this request (index.ts corsHeaders). */
@@ -146,6 +150,8 @@ export interface NodeRouteContext {
 /** The object's own limits (NodeRegistryDO.ts), here per isolate: junk stops before the object. */
 const LIMIT_REGISTER_PER_IP = REGISTER_PER_IP_PER_HOUR;
 const LIMIT_TOKENS_PER_ACCOUNT = TOKENS_PER_ACCOUNT_PER_DAY;
+/** Token requests per account per minute, refused ones included (the day's limit counts only the tokens minted). */
+const LIMIT_TOKEN_TRIES_PER_ACCOUNT = 30;
 const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
 const LIMIT_STATUS_PER_IP = 60;
@@ -305,8 +311,13 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     if (!trustedOperatorIds(env).has(s.sub)) return error(403, 'not_trusted', 'only the project creates node tokens for now');
     const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
     if (fresh instanceof Response) return fresh;
-    if (c.limited('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT, DAY_MS)) return error(429, 'rate_limited');
-    return toRegistry(env, c.request, path, operator(s));
+    // The day's tokens are the ones minted, counted after the object's 200 (its own limit counts only
+    // those too): a refusal (a typo in the panel's form, the cap) makes no token and costs one of the
+    // minute's tries instead, so a few of them never stop the next good request.
+    if (c.spent('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT) || c.limited('ntry:' + s.sub, LIMIT_TOKEN_TRIES_PER_ACCOUNT)) return error(429, 'rate_limited');
+    const res = await toRegistry(env, c.request, path, operator(s));
+    if (res.ok) c.limited('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT, DAY_MS);
+    return res;
   }
   if (method === 'GET' && path === '/nodes/mine') {
     const s = requireAccount({ session: await c.session() });

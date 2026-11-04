@@ -320,7 +320,9 @@ las releases; sin `NODE_TRUSTED_OPERATORS`, nadie crea tokens (403 `not_trusted`
     por cuenta. Un `register` o un `tokens` que declara más de 4 KB recibe 413, y una subida de
     más de 16 MiB también, antes de llegar al DO. Los topes de 5 registros por dirección por hora y
     10 tokens por cuenta por día los lleva el DO, en memoria: un deploy los pone en cero. El
-    Worker los repite por isolate, para que la basura no llegue al DO.
+    Worker los repite por isolate, para que la basura no llegue al DO. Los 10 tokens son los
+    emitidos: un pedido rechazado (un error de tipeo, el tope) cuenta solo entre 30 intentos por
+    minuto.
   - Las rutas de la tienda y de WebRTC, y cualquier otra bajo `/nodes/`, responden 404.
 
 #### [7] servidor: gancho del matchmaker y rejoin/leave (P22-P23): #29
