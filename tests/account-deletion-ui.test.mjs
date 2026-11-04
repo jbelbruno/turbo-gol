@@ -280,4 +280,11 @@ test('the copy, in both languages (Spanish with tú)', () => {
   assert.equal(es['delete.button'], 'BORRAR CUENTA');
   assert.equal(es['delete.keepBtn'], 'CONSERVAR MI CUENTA');
   assert.match(es['delete.receipt'], /^Constancia: /);
+  // Until the deletion the name stays in the public replays, unless it was hidden first (the privacy
+  // policy's 4.5 and 12.2: PERFIL cannot be entered in the 14 days without calling the deletion off).
+  assert.equal(es['delete.note'], 'Tu cuenta se borra en {days} días, con su nombre, su puntaje, sus puntos y sus objetos. Hasta entonces puedes cancelarlo: vuelve a entrar, o usa el enlace del correo si tienes uno. Mientras tanto, tu nombre sigue en las repeticiones públicas, salvo que antes lo ocultes en PERFIL > PRIVACIDAD. Se cierra tu sesión en todos los dispositivos, también en este.');
+  assert.equal(en['delete.note'], 'Your account is deleted in {days} days, with its name, rating, points and items. Until then you can cancel: sign in again, or use the link in the email if you have one. Meanwhile your name stays in the public replays unless you hide it first in PROFILE > PRIVACY. You are signed out on every device, this one too.');
+  // The place it names is PERFIL's own switch, by its section's name in each language.
+  assert.ok(es['delete.note'].includes(`${es['nav.profile']} > ${es['profile.privacy']}`));
+  assert.ok(en['delete.note'].includes(`${en['nav.profile']} > ${en['profile.privacy']}`));
 });

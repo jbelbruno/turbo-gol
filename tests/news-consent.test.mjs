@@ -376,8 +376,18 @@ test('/account#unsub=: no network says so in the sheet and keeps it up (the butt
 test('the copy, as the design quotes it, in both languages (Spanish with tú)', () => {
   assert.equal(es['profile.news'], 'Novedades por correo');
   assert.equal(en['profile.news'], 'News by email');
-  assert.equal(es['profile.newsHelp'], 'Solo noticias de Turbogol, nunca de terceros. Puedes darte de baja cuando quieras.');
-  assert.equal(en['profile.newsHelp'], 'Only Turbogol news, never third parties. Unsubscribe any time.');
+  assert.equal(es['profile.newsHelp'], 'Solo noticias de Turbogol, nunca de terceros. Desde los 16 años. Puedes darte de baja cuando quieras.');
+  assert.equal(en['profile.newsHelp'], 'Only Turbogol news, never third parties. For 16 or older. Unsubscribe any time.');
+  // The news are for 16 or older (the privacy policy's sections 8 and 11: the game never asks the
+  // age, so every switch that asks for them says it): the sign-up's, the confirm step's and PERFIL's.
+  assert.equal(es['auth.signupNews'], 'Quiero recibir novedades de Turbogol por correo (opcional, 16 años o más)');
+  assert.equal(en['auth.signupNews'], 'Send me Turbogol news by email (optional, 16 or older)');
+  assert.equal(es['auth.news'], es['auth.signupNews']);
+  assert.equal(en['auth.news'], en['auth.signupNews']);
+  for (const k of ['auth.signupNews', 'auth.news', 'profile.newsHelp']) {
+    assert.match(es[k], /\b16 años\b/, 'es ' + k);
+    assert.match(en[k], /\b16 or older\b/, 'en ' + k);
+  }
   assert.equal(es['auth.unsubDone'], 'Listo: ya no te enviamos novedades.');
   assert.equal(en['auth.unsubDone'], "Done: we won't send you news anymore.");
   for (const k of ['auth.unsubTitle', 'auth.unsubNote', 'auth.unsubConfirm']) {

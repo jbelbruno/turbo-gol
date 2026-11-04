@@ -127,8 +127,34 @@ test('every row and detail key exists in English and Spanish', () => {
     assert.equal(typeof en[k], 'string', 'en ' + k);
     assert.equal(typeof es[k], 'string', 'es ' + k);
   }
-  assert.equal(es['points.only'], 'Solo se ganan alojando un servidor comunitario. Nunca se venden.', "the owner's words as drawn");
+  assert.equal(es['points.only'], 'Solo se ganan alojando un servidor comunitario. Hoy nadie los gana. Nunca se venden.', "the owner's words as drawn, and what the terms say of today");
   assert.equal(es['garage.missing'], 'Tienes {have} pts: te faltan {missing}');
+});
+
+test('how points are earned, as the terms say it (Términos 11.1 and 12.1.2): only by hosting a community server, and today only the project has servers and nobody can register one, so no text invites a player to host one, and none sets a date', () => {
+  const copy = {
+    'garage.earn': ['ALOJAR UN SERVIDOR DA PUNTOS: AÚN NO ABIERTO', 'HOSTING A SERVER EARNS POINTS: NOT OPEN YET'],
+    'garage.earnSub': ['Cómo funciona · ver la guía', 'How it works · see the guide'],
+    'garage.earnShort': ['Cómo se ganan', 'How they are earned'],
+    'garage.guideTitle': ['Cómo se ganan los puntos de servidor', 'How server points are earned'],
+    'garage.guideText': ['Se ganan solo alojando un servidor comunitario, nunca jugando. Hoy solo el proyecto tiene servidores: aún no puedes registrar uno.', 'Earned only by hosting a community server, never by playing. Today only the project runs servers: you cannot register one yet.'],
+    'points.only': ['Solo se ganan alojando un servidor comunitario. Hoy nadie los gana. Nunca se venden.', 'Earned only by hosting a community server. Nobody earns them yet. Never sold.'],
+    'profile.hostServer': ['Guía de servidores', 'Server guide'],
+  };
+  for (const [k, [want, wantEn]] of Object.entries(copy)) {
+    assert.equal(es[k], want, 'es ' + k);
+    assert.equal(en[k], wantEn, 'en ' + k);
+    // No call to host (Aloja, Pon un servidor, Gana puntos; Host a, Earn points), no machine to host it
+    // on, and nothing that promises when.
+    assert.doesNotMatch(es[k], /\b(?:aloja|pon un servidor|gana puntos|vps|tu pc|próximamente|pronto)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:host a|earn points|vps|your pc|coming soon|soon)\b/i, 'en ' + k);
+  }
+  // The card says it even where its second line is hidden (a short screen, a TV: garage.css).
+  assert.match(es['garage.earn'], /AÚN NO/);
+  assert.match(en['garage.earn'], /NOT OPEN YET/);
+  // The layout keeps its room: the card's title and the links' words about as long as before.
+  assert.ok(es['garage.earn'].length <= 48 && en['garage.earn'].length <= 46);
+  assert.ok(es['profile.hostServer'].length <= 20 && en['profile.hostServer'].length <= 16);
 });
 
 test('one outline per car, on the 72 x 36 grid, the wheels on the ground', () => {

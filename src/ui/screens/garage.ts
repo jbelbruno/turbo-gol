@@ -8,9 +8,10 @@
  *
  * Left: TU AUTO (the car driven, its line, "Gratis para todos" for the free one), PUNTOS DE
  * SERVIDOR (the balance; a guest's 0 and SIGN IN, which opens PERFIL as a detour, Menu.open: Back
- * or a sign-in comes back here; a paused account's --warn line) and GANA PUNTOS ALOJANDO UN SERVIDOR COMUNITARIO (the
- * hosting guide: a new tab with a mouse, a keyboard or a finger; with a controller, a remote or on
- * a TV a sheet with its QR). Right: the tabs AUTOS │ ESTADIOS (`.mn-tabs`: Q / E, LT / RT, CH± /
+ * or a sign-in comes back here; a paused account's --warn line) and GANA PUNTOS, the card that says
+ * how points are earned ("ALOJAR UN SERVIDOR DA PUNTOS: AÚN NO ABIERTO": today only the project
+ * registers a server, Terms 11.1 and 12.1.2; the hosting guide: a new tab with a mouse, a keyboard
+ * or a finger; with a controller, a remote or on a TV a sheet with its QR). Right: the tabs AUTOS │ ESTADIOS (`.mn-tabs`: Q / E, LT / RT, CH± /
  * PgUp / PgDn step them, Menu.stepTabs; focus = selection), the list (a row per car with its
  * outline, components/carRow.ts; or the three stadiums) and the detail card: the car's name and
  * price, its action and why it cannot be had.

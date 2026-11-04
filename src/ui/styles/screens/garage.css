@@ -292,7 +292,7 @@ html.tg-superlow .mn[data-screen='garage'] {
   border-bottom: 3px solid var(--brand);
 }
 
-/* A phone's points line ("0 PTS · Cómo ganar puntos ›"): GANA PUNTOS' and the points card's place. */
+/* A phone's points line ("0 PTS · Cómo se ganan ›"): GANA PUNTOS' and the points card's place. */
 .mn-gar-compact {
   display: none;
   flex: none;

@@ -231,9 +231,9 @@ export default {
   'garage.paused': 'Redeeming paused · check My server in your profile',
   // The lime card: every car's price, then how points are earned; its short form on a phone
   'garage.eachCar': 'EACH CAR · {points} PTS',
-  'garage.earn': 'EARN POINTS BY HOSTING A COMMUNITY SERVER',
-  'garage.earnSub': 'On your PC or a VPS · see the guide',
-  'garage.earnShort': 'How to earn points',
+  'garage.earn': 'HOSTING A SERVER EARNS POINTS: NOT OPEN YET',
+  'garage.earnSub': 'How it works · see the guide',
+  'garage.earnShort': 'How they are earned',
   // A row's state
   'garage.stateEquipped': 'Equipped',
   'garage.stateEquippedFree': 'Equipped · Free',
@@ -272,8 +272,8 @@ export default {
   'garage.equipped': '{car} equipped',
   'garage.loading': 'Loading your points…',
   // How points are earned (GANA PUNTOS, a locked car's REDEEM): the guide and its QR
-  'garage.guideTitle': 'How to earn server points',
-  'garage.guideText': 'Host a community server on your PC or a VPS: every verified match it hosts adds points. Playing never earns them.',
+  'garage.guideTitle': 'How server points are earned',
+  'garage.guideText': 'Earned only by hosting a community server, never by playing. Today only the project runs servers: you cannot register one yet.',
   'garage.guideScan': 'Scan it to open the guide on your phone.',
   'garage.guideOpen': 'OPEN THE GUIDE',
   // ESTADIOS
@@ -282,7 +282,7 @@ export default {
   'garage.stadiumNote': 'Used in your offline matches, in training and behind the menus',
   // Server points everywhere (PUNTOS DE SERVIDOR card, the bar's pill)
   'points.title': 'SERVER POINTS',
-  'points.only': 'Earned only by hosting a community server. Never sold.',
+  'points.only': 'Earned only by hosting a community server. Nobody earns them yet. Never sold.',
   // The bar's pill on GARAJE and PERFIL, after the number
   'points.words': 'server points',
 
@@ -655,11 +655,11 @@ export default {
   'profile.hideReplayNameHelp': 'You show as "Player N" in the replay list and in the replays of your community-server matches, the ones already listed too. A copy someone opened before keeps your name for up to 3 hours.',
   // PROFILE's news consent switch, shown only with a verified email (off unless the player opted in)
   'profile.news': 'News by email',
-  'profile.newsHelp': 'Only Turbogol news, never third parties. Unsubscribe any time.',
+  'profile.newsHelp': 'Only Turbogol news, never third parties. For 16 or older. Unsubscribe any time.',
   'profile.community': 'COMMUNITY',
   // The Discord server speaks English
   'profile.discord': 'Discord (in English)',
-  'profile.hostServer': 'Host a server',
+  'profile.hostServer': 'Server guide',
   'profile.source': 'Source code',
   'profile.about': 'ABOUT',
   // {protocol}: the online protocol's number
@@ -837,7 +837,7 @@ export default {
   'auth.signupNameHint': "Everyone sees it. Don't use your real name.",
   // The first part of the name a new account is offered ('Player4821')
   'auth.signupNameWord': 'Player',
-  'auth.signupNews': 'Send me Turbogol news by email (optional)',
+  'auth.signupNews': 'Send me Turbogol news by email (optional, 16 or older)',
   // {name}: a free name the server suggests, put in the field
   'auth.signupNameTaken': 'That name is taken. Try {name}.',
   'auth.signupNameReserved': 'That name is reserved. Try {name}.',
@@ -988,7 +988,7 @@ export default {
   // The suggested name: this word and four digits (Player4821)
   'auth.nameWord': 'Player',
   // The news switch, off by default
-  'auth.news': 'Send me Turbogol news by email (optional)',
+  'auth.news': 'Send me Turbogol news by email (optional, 16 or older)',
   // The answer "no" to the title's question: it creates the account
   'auth.create': 'NO, CREATE MY ACCOUNT',
   'auth.haveOne': 'YES, I HAVE ONE',
@@ -2139,7 +2139,7 @@ export default {
   'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu',
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
-  'legal.notice': 'By pressing "{button}" you accept the {terms}. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.',
+  'legal.notice': 'By pressing "{button}" you accept the {terms} and that your data is stored in the United States and Brazil. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.',
   'legal.termsLink': 'Terms',
   'legal.privacyLink': 'Privacy policy',
   // The two pages' names (the About sheet, PROFILE's ABOUT)
@@ -2154,7 +2154,7 @@ export default {
   // An account's sheet after the terms changed (or for an account that never accepted them)
   'legal.acceptAndPlay': 'ACCEPT AND PLAY',
   'legal.changedTitle': 'The terms have changed',
-  'legal.changedNote': 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept them.',
+  'legal.changedNote': 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept the Terms of use.',
   'legal.accountNote': 'To play online with your account, accept the Terms of use.',
   'legal.orDelete': 'If you do not accept them, you can delete your account in PROFILE.',
   // A lobby that did not open because the terms' sheet was closed
@@ -2164,7 +2164,7 @@ export default {
   'delete.button': 'DELETE ACCOUNT',
   'delete.title': 'Delete your account',
   // {days} is the grace before the deletion (14)
-  'delete.note': 'Your account is deleted in {days} days, with its name, rating, points and items. Until then you can cancel: sign in again, or use the link in the email if you have one. You are signed out on every device, this one too.',
+  'delete.note': 'Your account is deleted in {days} days, with its name, rating, points and items. Until then you can cancel: sign in again, or use the link in the email if you have one. Meanwhile your name stays in the public replays unless you hide it first in PROFILE > PRIVACY. You are signed out on every device, this one too.',
   'delete.nameLabel': 'Your username',
   // {name} is the account's username, which the player types to confirm
   'delete.typeName': 'To confirm, type your username: {name}',
