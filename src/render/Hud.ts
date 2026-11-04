@@ -544,8 +544,6 @@ export class Hud {
     this.searchStrip.hidden = text === null;
     this.searchStrip.textContent = text ?? '';
     this.searchStrip.classList.toggle('hud-search-warn', warn);
-    // The touch controls' first-match card goes under the strip while it shows (wait.css).
-    this.root.classList.toggle('hud-searching', text !== null);
   }
 
   /** Show / hide the debug readouts (speed, fps, draw calls, GPU time). F3 toggles this. */

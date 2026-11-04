@@ -88,7 +88,7 @@ test('the action zone per tab: search, the searching panel on its own tab, sign 
   assert.equal(M.actionKind({ ...a, tab: 'lobbies' }), 'lobbies');
 });
 
-test("round 2: the panel's '· 1 in {region}' is the answer's region; VS AI's line while searching shows on every layout; the wait's sheet, the HUD strip and the touch card", async () => {
+test("round 2: the panel's '· 1 in {region}' is the answer's region; VS AI's line while searching shows on every layout; the wait's sheet; the HUD strip by the right edge, never over a touch card", async () => {
   const { readFile } = await import('node:fs/promises');
   const src = (p) => readFile(new URL(p, import.meta.url), 'utf8');
   const modes = await src('../src/ui/screens/modes.ts');
@@ -102,12 +102,12 @@ test("round 2: the panel's '· 1 in {region}' is the answer's region; VS AI's li
   const sheet = await src('../src/ui/screens/waitSheet.ts');
   assert.match(sheet, /h\('span\.mn-wait-text', null, h\('b', null, t\(c\.title\)\), h\('small', null, t\(c\.sub\)\)\)/);
   assert.match(sheet, /actions: \[\]/, 'Back and STAY IN THE MENU are the way out');
-  // The HUD strip: bounded by the right edge (never past it), and the touch card moves under it.
+  // The HUD strip: bounded by the right edge (never past it, a notch kept clear).
   const strip = /\.hud-search \{([^}]*)\}/.exec(wait)[1];
   assert.match(strip, /right: calc\(var\(--safe-right\) \+ clamp\(12px, 2\.2vw, 36px\)\);/);
   assert.match(strip, /width: fit-content;/);
   assert.doesNotMatch(strip, /max-width: calc\(100vw/);
-  assert.match(wait, /\.hud-root\.hud-searching ~ \.tc-root \.tc-cards \{\s*top: max\(/);
-  const hud = await src('../src/render/Hud.ts');
-  assert.match(hud, /this\.root\.classList\.toggle\('hud-searching', text !== null\);/);
+  // A first match's touch card up (high in the middle, where the strip runs sideways): the card alone.
+  const game = await src('../src/game/Game.ts');
+  assert.match(game, /const card = this\.touch !== null && this\.touch\.cardsUp;\s*this\.hud\.setSearch\(this\.menuShown \|\| card \? null : h\.text, h\.warn\);/);
 });

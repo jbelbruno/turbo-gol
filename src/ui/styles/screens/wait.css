@@ -1,7 +1,7 @@
 /* Waiting for a match (the modes redesign, November 2026): MODOS' searching panel's estimate and
    its "While you wait: VS BOTS · TRAIN", VS AI's line while searching, SALAS' second button, the
    Sala's line for a lone host, "While you search" (screens/waitSheet.ts), and the strip the match
-   HUD (render/Hud.ts setSearch; the touch card makes room for it) and the training HUD
+   HUD (render/Hud.ts setSearch; none while a touch card is up) and the training HUD
    (render/TrainingHud.ts setSearch) show while the player plays waiting. Colours, font sizes and
    radii as tokens only. */
 
@@ -114,7 +114,7 @@ html[data-shell='rail'] .mn-wait-option {
 }
 
 /* ---- The HUD's strip under the scorebug, and the training panel's line ---- */
-/* Its top under the scorebug, and the touch card's top under it (Hud.ts hud-searching). */
+/* Under the scorebug; hidden while a first match's touch card is up (Game.updateWaitHud). */
 .hud-search {
   position: absolute;
   z-index: var(--z-score);
@@ -140,12 +140,6 @@ html[data-shell='rail'] .mn-wait-option {
 
 .hud-search-warn {
   color: var(--warn);
-}
-
-/* The first match's touch card (input/touch.css .tc-cards, high in the middle) under the strip
-   while it shows: on a phone held sideways both sit at about the same height. */
-.hud-root.hud-searching ~ .tc-root .tc-cards {
-  top: max(calc(var(--safe-top) + clamp(52px, 15vh, 120px)), calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 14px + 36px));
 }
 
 .trn-search {

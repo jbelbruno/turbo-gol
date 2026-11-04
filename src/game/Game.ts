@@ -3015,7 +3015,12 @@ export class Game implements P2PGameHooks {
     if (this.training !== null) {
       this.hud.setSearch(null);
       this.trainingHud?.setSearch(h.text);
-    } else this.hud.setSearch(this.menuShown ? null : h.text, h.warn);
+      return;
+    }
+    // A first match's touch card up (the match held under it): the card alone, high in the middle
+    // where the strip runs on a phone held sideways; the strip is back once it is read.
+    const card = this.touch !== null && this.touch.cardsUp;
+    this.hud.setSearch(this.menuShown || card ? null : h.text, h.warn);
   }
 
   /** Training off without opening the menu (startMatch / an online session take over from here). */
