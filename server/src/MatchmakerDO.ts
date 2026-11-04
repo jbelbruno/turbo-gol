@@ -257,9 +257,10 @@ const RECENT_MAX = 5_000;
  *   'arrivals'           the estimator's ring (queuePlan.ts ArrivalsRow, no id), written with the
  *                        counters, never per request.
  * The counters themselves stay at one write per STATS_FLUSH_MS at most; when the queues empty
- * with counts not written yet, the alarm writes them once the 60 s are up (armIdle), and it also
- * wakes the hub to forget a dropped search at its RECENT_MS (counted as dropped then) and a solo
- * row at its SOLO_UNPLAYED_MS, so nothing stays in storage longer than said.
+ * with counts not written yet (a formation that ends after they emptied included: countFormed),
+ * the alarm writes them once the 60 s are up (armIdle), and it also wakes the hub to forget a
+ * dropped search at its RECENT_MS (counted as dropped then) and a solo row at its
+ * SOLO_UNPLAYED_MS, so nothing stays in storage longer than said.
  */
 const RECENT_PREFIX = 'recent:';
 const SOLO_PREFIX = 'solo:';
@@ -1757,7 +1758,10 @@ export class MatchmakerDO extends DurableObject<Env> {
   /**
    * One formed match in the counters (by its humans' waits at `now`, the pass that planned it, and
    * their regions and local play). The day and the write go by the clock when it formed (this.now():
-   * a node placement can take seconds, past a midnight another event already saw).
+   * a node placement can take seconds, past a midnight another event already saw). A formation
+   * ends after its pass, often with nobody queued any more (its humans left the queues when it
+   * started, so that pass, or the join that started it, armed no idle alarm for these counts): the
+   * idle alarm is armed here, or an eviction before the next request would lose them.
    */
   private countFormed(kind: StatsKind, humans: readonly Waiter[], formed: FormedMatch, now: number): void {
     const at = this.now();
@@ -1770,6 +1774,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       whileLocal: humans.some((h) => h.local !== undefined),
     });
     this.maybeFlushStats(at);
+    if (!this.queued()) this.armIdle(at);
   }
 
   /**

@@ -398,6 +398,23 @@ test('a leave or a release with nobody queued runs no pass: the idle alarm is ar
   assert.deepEqual(reads, [], 'a lobby room\'s release in mm:EU: no pass, so no nodes_on read');
 });
 
+test('a release with nobody queued arms the idle alarm itself: an unplayed solo match\'s search, back in `recent`, is forgotten on time at its 10 min', async () => {
+  const w = await makeHubWorld();
+  const a = pid();
+  await w.join(a);
+  w.advance(Q.SOLO_AFTER_MS);
+  const solo = await w.join(a); // the first formation writes the counters: nothing pending, no alarm
+  noSweep(w);
+  await pause(5);
+  assert.equal(solo.json.humans, 1);
+  assert.equal(w.storage().alarm, null);
+  w.advance(45 * SEC);
+  await w.release(solo.json.matchId, [a]);
+  await pause(5);
+  assert.equal(w.storage().map.get('recent:' + a)?.stale, false, 'back in `recent`');
+  assert.equal(w.storage().alarm, w.time() + Q.RECENT_MS, 'the release armed the alarm for that search\'s 10 min');
+});
+
 test('an explicit quit of a solo match (leave with its id) is a played match: no restore', async () => {
   const w = await makeHubWorld();
   const a = pid();

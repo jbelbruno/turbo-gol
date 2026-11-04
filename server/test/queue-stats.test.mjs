@@ -138,6 +138,96 @@ test('the queues empty with counts not written (a search-then-cancel loop): no w
   assert.deepEqual((await w.daily(1)).days[0].cancelled.casual, 10);
 });
 
+/** No 500 ms sweep in the way (a real timer): the test runs every pass itself. */
+function noSweep(w) {
+  const h = w.hub();
+  if (h.sweepTimer) clearTimeout(h.sweepTimer);
+  h.sweepTimer = null;
+}
+
+/** The hub's armed alarm fired (the clock moved to it), then the hub evicted: the day's row as a new instance reads it. */
+async function alarmThenEvict(w) {
+  w.advance(w.storage().alarm - w.time());
+  await w.hub().alarm();
+  await pause(5);
+  await w.evict();
+  return (await w.daily(1)).days[0];
+}
+
+test('a match that forms after the queues emptied (its pass flushed and armed nothing): the formation arms the idle alarm, and its counts outlive an eviction after it', async () => {
+  // A sweep-formed pair: A (EU) widens at 60 s, 60.5 s after the first write; that sweep writes
+  // B's search, finds the queues empty (A and B are being formed) and arms nothing.
+  {
+    const w = await makeHubWorld();
+    const [a, b] = [pid(), pid()];
+    await w.join(a, { home: 'EU' });
+    await w.hub().sweep(); // the first write: A's search
+    noSweep(w);
+    w.advance(30 * SEC);
+    await w.join(a, { home: 'EU' });
+    await w.join(b);
+    noSweep(w);
+    w.advance(30.5 * SEC);
+    await w.hub().sweep();
+    await pause(10);
+    assert.equal(w.created().length, 1, 'the pair formed on a MatchDO');
+    assert.equal(w.storage().alarm, w.hub().statsFlushedAt + S.STATS_FLUSH_MS, 'armed for the end of the minute');
+    const day = await alarmThenEvict(w);
+    assert.deepEqual([day.formed.casual['2'], day.onCloud, day.crossRegion, day.waits.casual['2m']], [1, 1, 1, 1], 'the pair is counted');
+  }
+  // A sweep-formed solo match at 5:00, 30 s after a write (its local play changed at 4:30).
+  {
+    const w = await makeHubWorld();
+    const a = pid();
+    await w.join(a);
+    await w.hub().sweep();
+    noSweep(w);
+    for (let s = 30; s <= 270; s += 30) {
+      w.advance(30 * SEC);
+      await w.join(a, s === 270 ? { local: 'bots' } : {});
+      await w.hub().sweep(); // the one at 4:30 writes the local start
+      noSweep(w);
+    }
+    w.advance(30.2 * SEC);
+    await w.hub().sweep();
+    await pause(10);
+    assert.equal(w.created().length, 1, 'the solo match formed');
+    assert.equal(w.storage().alarm, w.hub().statsFlushedAt + S.STATS_FLUSH_MS);
+    const day = await alarmThenEvict(w);
+    assert.deepEqual([day.formed.casual['1'], day.formedWhileLocal, day.localStarts.bots], [1, 1, 1]);
+  }
+  // A node pair whose placement is in flight while A's sweep writes B's search and empties the queues.
+  {
+    const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true });
+    const [a, b] = [pid(), pid()];
+    await w.join(a);
+    await w.hub().sweep();
+    noSweep(w);
+    w.advance(30 * SEC);
+    await w.join(a);
+    w.advance(31 * SEC);
+    await w.join(a);
+    noSweep(w);
+    let open;
+    const gate = new Promise((r) => (open = r));
+    w.control.place = async (body) => {
+      await gate;
+      return { placement: placementOf(body), hosts: 1 };
+    };
+    const pairing = w.join(b);
+    await pause(5);
+    w.advance(400);
+    await w.hub().sweep();
+    noSweep(w);
+    open();
+    assert.equal((await pairing).json.node, true);
+    await pause(5);
+    assert.equal(w.storage().alarm, w.hub().statsFlushedAt + S.STATS_FLUSH_MS);
+    const day = await alarmThenEvict(w);
+    assert.deepEqual([day.formed.casual['2'], day.onNode, day.searches.casual], [1, 1, 2]);
+  }
+});
+
 test('a formation whose node placement runs past midnight counts on the day it formed, with no write of the day before again', async () => {
   const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true, now: Date.UTC(2026, 10, 4, 23, 59, 58) });
   let open;
