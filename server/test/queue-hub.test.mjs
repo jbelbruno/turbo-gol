@@ -83,6 +83,26 @@ test('Worker: the next POST of a search long-polls (/poll after /join); a second
   assert.match(ra.json.wsUrl, /^wss:\/\/turbo-gol\.com\/ws\//);
 });
 
+test('Worker: first: true (the first POST of a client\'s search loop) answers at once even for a waiter the hub still holds (a page reloaded mid-search); later POSTs, and a first that is not true, long-poll', async () => {
+  const w = await makeHubWorld();
+  const t = await accountToken(pid());
+  assert.equal((await w.queue(t, { api: 2, mode: '2v2', first: true })).json.status, 'waiting', 'a new search: at once');
+  w.hub().pollTimeoutMs = 30; // the long-polls below answer 'waiting' after 30 ms
+  // The page reloads mid-search: its new loop's first POST finds the old waiter (not fresh).
+  w.advance(5 * SEC);
+  w.mmCalls.length = 0;
+  const reloaded = await w.queue(t, { api: 2, mode: '2v2', first: true });
+  assert.deepEqual([reloaded.status, reloaded.json.status, reloaded.json.wait.waitedMs], [200, 'waiting', 5 * SEC]);
+  assert.deepEqual(w.mmCalls.map((c) => c.path), ['/join'], 'answered at once: no long-poll');
+  assert.equal('first' in reloaded.json || 'fresh' in reloaded.json, false);
+  for (const first of [undefined, false, 'true', 1, {}]) {
+    w.mmCalls.length = 0;
+    const r = await w.queue(t, { api: 2, mode: '2v2', ...(first !== undefined ? { first } : {}) });
+    assert.equal(r.json.status, 'waiting');
+    assert.deepEqual(w.mmCalls.map((c) => c.path), ['/join', '/poll'], JSON.stringify(first) + ': long-polls');
+  }
+});
+
 test('Worker and hub: an unknown kind is 400 bad_kind, and its message names every kind still read (p2p too)', async () => {
   const w = await makeHubWorld();
   const message = "kind must be 'server' | 'ranked' ('p2p', from an older page, is read as 'server')";

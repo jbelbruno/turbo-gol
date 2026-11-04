@@ -4,12 +4,14 @@
  *   POST /api/guest   { turnstileToken? }               -> GuestSession (24 h HS256 session). The name is the
  *                       server's, 'Invitado 4821' from the player id (src/net/guestName.ts); a `name` sent is
  *                       ignored
- *   POST /api/queue   { api: 2, mode | modes, kind?, prefer?, region?, local?, visible? }  Bearer session
+ *   POST /api/queue   { api: 2, mode | modes, kind?, prefer?, region?, local?, visible?, first? }  Bearer session
  *                    -> every public queue is in the queue hub (MatchmakerDO 'mm:SA', env.ts queueHubOf), the
  *                       player's region kept as its `home`. kind: 'server' (Casual, the default; 'p2p' of an
  *                       older caller is read as it) or 'ranked'. The first answer of a search comes at once
- *                       ({ status: 'waiting', waiting, region, wait: QueueWait }, src/net/queueWait.ts); every later
- *                       POST long-polls <= 25 s. Matched: the phase 1 QueueResult (a MatchDO match, wsUrl
+ *                       ({ status: 'waiting', waiting, region, wait: QueueWait }, src/net/queueWait.ts): a new or
+ *                       restored search, or a POST with first: true (the client sends it on the first POST of
+ *                       each search loop: a page reloaded mid-search finds its waiter still queued); every
+ *                       later POST long-polls <= 25 s. Matched: the phase 1 QueueResult (a MatchDO match, wsUrl
  *                       /ws/<matchId>; or, with the nodes on, a match on a community node: node: true, wsUrl the
  *                       node's own wss://) plus mode, host, humans and region (the home). 403 'account_required' for
  *                       a guest session, any kind (Casual and ranked are for accounts); 426 'reload_required' for an
@@ -436,6 +438,8 @@ interface QueueBody {
   region?: unknown;
   local?: unknown;
   visible?: unknown;
+  /** true on the FIRST POST of a client's search loop (a new search, or the one a reloaded page starts again); a boolean, anything else is ignored. */
+  first?: unknown;
   physics?: unknown;
 }
 
@@ -444,7 +448,8 @@ interface QueueBody {
  * for a guest, any kind, any page version: decision 2), the client version (426 for an account's
  * page from before the deploy), the KV flags, the body, the ranked check, and the hub's /join with
  * the player's `home`, `prefer`, `local` and `visible`. A join that made or restored a search
- * (`fresh`) is answered at once; any other waiting join long-polls as before.
+ * (`fresh`), or one whose body says `first: true` (a boolean; anything else is ignored), is
+ * answered at once; any other waiting join long-polls as before.
  */
 async function queue(request: Request, env: Env): Promise<Response> {
   const session = await bearerSession(request, env);
@@ -510,9 +515,12 @@ async function queue(request: Request, env: Env): Promise<Response> {
   });
   if (!res.ok) return new Response(res.body, res);
   let result = (await res.json()) as AnyQueueResult;
-  // The first answer of a search comes at once (the sheet "Mientras buscas" opens on it); every
-  // later POST long-polls up to POLL_TIMEOUT_MS.
-  if (result.status === 'waiting' && !('fresh' in result && result.fresh === true)) {
+  // The first answer of a search comes at once (the sheet "Mientras buscas" opens on it): a join
+  // that made or restored the waiter (`fresh`), or the first POST of the client's loop (`first`:
+  // a page reloaded mid-search finds its old waiter still queued, not fresh, and would wait 25 s).
+  // Every later POST long-polls up to POLL_TIMEOUT_MS.
+  const first = body.first === true;
+  if (result.status === 'waiting' && !('fresh' in result && result.fresh === true) && !first) {
     res = await hub.stub.fetch('https://matchmaker/poll?playerId=' + session.sub, { headers });
     if (!res.ok) return new Response(res.body, res);
     result = (await res.json()) as AnyQueueResult;
