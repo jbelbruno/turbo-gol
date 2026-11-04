@@ -23,9 +23,9 @@ Version 2026-11-05. In force from November 5, 2026. The Spanish text is the offi
 - **We measure visits with Cloudflare Web Analytics,** which, according to Cloudflare, uses no
   cookies. We ask Cloudflare to leave out visitors from the European Union (section 9.4).
 - **Your data is stored outside Argentina:** at Cloudflare (including the United States), on the
-  project's servers that are in service (in Brazil, Germany, Malaysia, South Africa, Australia and
-  the United States) and, for the little that reaches the team or our mailbox, at Discord and
-  Google (section 5).
+  project's servers that are in service (in Brazil, Germany and Malaysia and, for now, in South
+  Africa, Australia and the United States) and, for the little that reaches the team or our
+  mailbox, at Discord and Google (section 5).
 - **You can ask us for a copy of your data, to correct it or to delete it** by writing to
   <mailto:privacy@turbo-gol.com>. We answer within 10 calendar days at most. You can also delete
   your account from PROFILE (section 12).

@@ -24,9 +24,9 @@ Versión 2026-11-05. Vigente desde el 5 de noviembre de 2026. Este texto en espa
 - **Medimos las visitas con Cloudflare Web Analytics,** que según Cloudflare no usa cookies. Le
   pedimos a Cloudflare que deje fuera a los visitantes de la Unión Europea (sección 9.4).
 - **Tus datos se guardan fuera de Argentina:** en Cloudflare (incluido Estados Unidos), en los
-  servidores del proyecto que están en servicio (en Brasil, Alemania, Malasia, Sudáfrica, Australia
-  y Estados Unidos) y, en lo poco que llega al equipo o al correo, en Discord y en Google
-  (sección 5).
+  servidores del proyecto que están en servicio (en Brasil, Alemania y Malasia y, por ahora, en
+  Sudáfrica, Australia y Estados Unidos) y, en lo poco que llega al equipo o al correo, en Discord
+  y en Google (sección 5).
 - **Puedes pedirnos una copia de tus datos, corregirlos o borrarlos** escribiendo a
   <mailto:privacy@turbo-gol.com>. Te respondemos en 10 días corridos como máximo. También puedes
   borrar tu cuenta desde PERFIL (sección 12).

@@ -716,6 +716,10 @@ test(`version ${VERSION_A} of the texts: the six countries, the providers, the v
   assert.ok(ten.includes("Today the only community servers are the project's own, in São Paulo (Brazil), Germany and Malaysia and, for now, also in South Africa, Australia and the United States."));
   assert.ok(tes.includes('Nunca va al servidor del proyecto de otra región, salvo en una emergencia'));
   assert.ok(ten.includes('It never goes to the project server of another region, except in an emergency'));
+  // The policy's summary keeps the temporary three "for now", as 7.6, 4.1, 4.4 and 5 do: the text
+  // stays true when one of them is switched off (the owner's decision of 4 November 2026).
+  assert.ok(pes.includes('en los servidores del proyecto que están en servicio (en Brasil, Alemania y Malasia y, por ahora, en Sudáfrica, Australia y Estados Unidos)'));
+  assert.ok(pen.includes("on the project's servers that are in service (in Brazil, Germany and Malaysia and, for now, in South Africa, Australia and the United States)"));
   // ... and the policy's 4.4 says the same, with the same exception.
   assert.ok(pes.includes('nunca en el servidor del proyecto de otra región, salvo en una emergencia: si apagamos las partidas en servidores de Cloudflare'));
   assert.ok(pen.includes('never on the project server of another region, except in an emergency: if we turn off matches on Cloudflare servers'));
