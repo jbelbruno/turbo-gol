@@ -84,7 +84,7 @@ test('every counter from a day of events: searches (new only), cancelled, droppe
   assert.doesNotMatch(JSON.stringify(day), /[0-9a-f]{16}/, 'no id anywhere');
 });
 
-test('the writes: the first count at the first formation, then at most every 60 s; the rest from memory in /daily-stats; once more when the queues empty', async () => {
+test('the writes: the first count at the first formation, then at most one a minute whatever happens; the rest from memory in /daily-stats', async () => {
   const w = await makeHubWorld();
   const key = 'stats:2026-11-04';
   const stored = () => w.hub().ctx.storage.map.get(key);
@@ -105,15 +105,37 @@ test('the writes: the first count at the first formation, then at most every 60 
   await pause(5);
   assert.equal(stored().formed.casual['2'], 3, '60 s later: written');
   assert.equal(stored().searches.casual, 6);
-  // A last search, cancelled: the sweep that finds the queues empty writes it at once.
-  const last = pid();
-  await w.join(last);
-  await w.leave(last);
+});
+
+test('the queues empty with counts not written (a search-then-cancel loop): no write inside the minute (one per cycle before), the alarm writes them all once the minute is up', async () => {
+  const w = await makeHubWorld();
+  const key = 'stats:2026-11-04';
+  const storage = () => w.storage();
+  await w.join(pid());
+  await w.join(pid()); // the first formation: the first write
   await pause(5);
-  assert.deepEqual([stored().searches.casual, stored().cancelled.casual], [6, 0], 'within 60 s: not written yet');
-  await w.hub().sweep();
+  const firstAt = w.time();
+  assert.equal(storage().writes('stats:').length, 1);
+  for (let i = 0; i < 10; i++) {
+    const p = pid();
+    await w.join(p);
+    await w.leave(p);
+    w.advance(2 * SEC);
+    await w.hub().sweep(); // each cycle's pass finds the queues empty
+  }
   await pause(5);
-  assert.deepEqual([stored().searches.casual, stored().cancelled.casual], [7, 1]);
+  assert.equal(storage().writes('stats:').length, 1, 'no write inside the minute');
+  assert.equal(storage().alarm, firstAt + S.STATS_FLUSH_MS, 'the alarm, armed once for the end of the minute');
+  assert.deepEqual((await w.daily()).days[0].cancelled, { casual: 10, ranked: 0 }, 'read from memory meanwhile');
+  w.advance(firstAt + S.STATS_FLUSH_MS - w.time());
+  await w.hub().alarm();
+  await pause(5);
+  assert.equal(storage().writes('stats:').length, 2, 'one write for the ten cycles');
+  assert.deepEqual([storage().map.get(key).searches.casual, storage().map.get(key).cancelled.casual], [12, 10]);
+  assert.equal(w.hub().alarmAt, null, 'nothing left: no alarm');
+  // Evicted now, nothing is lost: it is all in storage.
+  await w.evict();
+  assert.deepEqual((await w.daily(1)).days[0].cancelled.casual, 10);
 });
 
 test('the 90-day sweep: at the first count after a start, and at the day change (which writes the day before); a day with no search writes nothing', async () => {

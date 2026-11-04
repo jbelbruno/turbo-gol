@@ -102,6 +102,7 @@
  *            hub's, so its release comes back here.
  *   Drops:   a waiter that stops polling (STALE_MS) goes to `recent` for RECENT_MS; a join of the
  *            same player and kind within it continues the old clock (widening and the 5:00 too).
+ *            Kept in storage too ('recent:<playerId>'): the idle hub is evicted long before 10 min.
  *   Counters: anonymous daily totals (queueStats.ts), in this object's storage as 'stats:<day>'.
  * Custom lobbies (/custom) form RoomDO signaling rooms (P2P, 2 humans at least): a random uint32
  * seed (kickoff deal + bot RNG on every peer) and tickets with role 'peer'. The P2P queue of phase
@@ -116,7 +117,10 @@
  * (outgoing fetches do not close the input gate).
  * Everything is in memory except the active-match locks ('active:<playerId>') and the live rooms
  * ('room:<id>', matches and p2p rooms alike), which expire with the match length + a grace period
- * (p2p: the room's hard TTL) and are released by the MatchDO / RoomDO when they shut down.
+ * (p2p: the room's hard TTL) and are released by the MatchDO / RoomDO when they shut down, and the
+ * queue hub's dropped searches, node solo records, arrivals ring and daily counters (RECENT_PREFIX).
+ * The queues themselves are memory: a waiter polls at least every 25 s, so the hub is never idle
+ * (never evicted) while one is queued; one that stops polling is a dropped search.
  *
  * Spend control (DECISIONS.md: at most 20 DO matches at once): the hub creates every MatchDO, so
  * its caps are global: MAX_ACTIVE_ROOMS Durable Object matches (each one simulates) in total, of
@@ -170,7 +174,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
 import { EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, error, flag, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
 import type { GameModeId, LockKind, NodesMode, PublicQueueKind, QueueKind, RoomKind } from './env';
-import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, countArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
+import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
 import type { Arrival, PlanGroup } from './queuePlan';
 import { STATS_FLUSH_MS, STATS_PREFIX, addFormed, dayOf, daysBefore, emptyDay, emptyRow, expiredDay, mergeDays, parseDay, statsDays } from './queueStats';
 import type { LocalPlay, QueueDay, StatsKind } from './queueStats';
@@ -231,6 +235,25 @@ const GUARD_VERIFY_TIMEOUT_MS = 1_500;
 const STALE_MS = 40_000;
 /** At most this many dropped searches are kept in `recent` (the oldest go first). */
 const RECENT_MAX = 5_000;
+/**
+ * The queue hub's own storage, beside 'active:', 'room:' and 'stats:' (the build spec's §1.10,
+ * §2.2, §2.6; review round 2, A1-A2): an idle hub is evicted from memory (production after about
+ * 70-140 s with nobody polling, local workerd after about 10 s), which is the usual case with few
+ * players, so what must outlive that is kept here too:
+ *   'recent:<playerId>'  a dropped search (RecentSearch): one write when it drops, one delete when
+ *                        it is restored, left, or past RECENT_MS (never one per poll);
+ *   'solo:<matchId>'     a NODE solo match's search (SoloInfo) for its first SOLO_UNPLAYED_MS (a
+ *                        MatchDO's is in its 'room:' row already): one write, one delete;
+ *   'arrivals'           the estimator's ring (queuePlan.ts ArrivalsRow, no id), written with the
+ *                        counters, never per request.
+ * The counters themselves stay at one write per STATS_FLUSH_MS at most; when the queues empty
+ * with counts not written yet, the alarm writes them once the 60 s are up (armIdle), and it also
+ * wakes the hub to forget a dropped search at its RECENT_MS (counted as dropped then) and a solo
+ * row at its SOLO_UNPLAYED_MS, so nothing stays in storage longer than said.
+ */
+const RECENT_PREFIX = 'recent:';
+const SOLO_PREFIX = 'solo:';
+const ARRIVALS_KEY = 'arrivals';
 /** Active-match lock lifetime beyond the regulation length (overtime, reconnections). */
 const ACTIVE_GRACE_MS = 10 * 60_000;
 /** Lock / capacity lifetime of a p2p room: the RoomDO's hard TTL (20 min) plus slack; the room releases earlier. */
@@ -394,6 +417,14 @@ function soloOf(v: unknown): SoloInfo | null {
   const s = v as Partial<SoloInfo>;
   if (typeof s.playerId !== 'string' || typeof s.joinedAt !== 'number' || typeof s.at !== 'number') return null;
   return { playerId: s.playerId, joinedAt: s.joinedAt, home: normalizeHome(s.home), at: s.at };
+}
+
+/** A stored 'recent:' row, or null for one of another shape. */
+function recentOf(v: unknown): RecentSearch | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const r = v as Partial<RecentSearch>;
+  if (typeof r.joinedAt !== 'number' || typeof r.until !== 'number' || (r.kind !== 'server' && r.kind !== 'ranked')) return null;
+  return { joinedAt: r.joinedAt, kind: r.kind, home: normalizeHome(r.home), until: r.until, stale: r.stale === true };
 }
 
 function roomEntryOf(v: unknown): RoomEntry | null {
@@ -860,12 +891,21 @@ export class MatchmakerDO extends DurableObject<Env> {
   private readonly casual: Waiter[] = [];
   /** Ranked: one queue per playlist, in join order (a waiter sits in each playlist it searches). */
   private readonly ranked = new Map<GameModeId, Waiter[]>();
-  /** Dropped searches by playerId (RECENT_MS): a join of the same kind continues the clock. Memory only. */
+  /**
+   * Dropped searches by playerId (RECENT_MS): a join of the same kind continues the clock. Each
+   * one is also a 'recent:<playerId>' row (loaded at start, so this map is the whole set), in
+   * `until` order.
+   */
   private readonly recent = new Map<string, RecentSearch>();
-  /** New searches of the last hour (the estimator's arrival rate; no id). Memory only. */
+  /** New searches of the last hour (the estimator's arrival rate; no id), and whether the 'arrivals' row is behind it. */
   private readonly arrivals: Arrival[] = [];
-  /** Solo matches by match id (MatchDO ones also in RoomEntry.solo, node ones in memory only). */
+  private arrivalsDirty = false;
+  /** Solo matches by match id (MatchDO ones also in RoomEntry.solo, node ones in a 'solo:<matchId>' row: soloRows). */
   private readonly solos = new Map<string, SoloInfo>();
+  private readonly soloRows = new Set<string>();
+  /** The alarm this object armed (armAlarm): null none, undefined not known since it started; the calls in order. */
+  private alarmAt: number | null | undefined = undefined;
+  private alarmChain: Promise<void> = Promise.resolve();
   /** MatchDO creations in flight, counted by the caps until issue() registers them (serverFull). */
   private creatingRooms = 0;
   private creatingSolo = 0;
@@ -926,6 +966,26 @@ export class MatchmakerDO extends DurableObject<Env> {
       }
       const region = await ctx.storage.get<string>('region');
       if (region) this.region = region;
+      // The queue hub's state that outlives an eviction (RECENT_PREFIX). An expired 'recent:' row
+      // is left to pruneRecent, which counts a stale one as dropped and deletes it.
+      const back: Array<[string, RecentSearch]> = [];
+      for (const [k, v] of await ctx.storage.list<unknown>({ prefix: RECENT_PREFIX })) {
+        const r = recentOf(v);
+        if (r !== null) back.push([k.slice(RECENT_PREFIX.length), r]);
+        else void ctx.storage.delete(k);
+      }
+      back.sort((a, b) => a[1].until - b[1].until);
+      for (const [id, r] of back) this.recent.set(id, r);
+      for (const [k, v] of await ctx.storage.list<unknown>({ prefix: SOLO_PREFIX })) {
+        const s = soloOf(v);
+        const id = k.slice(SOLO_PREFIX.length);
+        if (s === null) void ctx.storage.delete(k);
+        else {
+          this.solos.set(id, s);
+          this.soloRows.add(id);
+        }
+      }
+      this.arrivals.push(...decodeArrivals(await ctx.storage.get<unknown>(ARRIVALS_KEY)));
     });
   }
 
@@ -966,13 +1026,29 @@ export class MatchmakerDO extends DurableObject<Env> {
     const n = cur !== undefined && cur.day === day ? cur.n : 0;
     if (n >= TURN_PER_PLAYER_PER_DAY) return json({ ok: false });
     await this.ctx.storage.put(key, { day, n: n + 1 });
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + GUARD_SWEEP_MS);
+    this.armAlarm(now + GUARD_SWEEP_MS);
+    await this.alarmChain;
     return json({ ok: true });
   }
 
-  /** The sweep (armed by a guard hold or a TURN quota row): expired holds and past days' TURN counts leave storage. */
+  /**
+   * The alarm. The queue hub's idle work (armIdle: nobody queued, so no sweep runs): a dropped
+   * search past RECENT_MS goes (counted as dropped when it was a stale waiter's), a node solo row
+   * past SOLO_UNPLAYED_MS goes, the counters not written yet are written (STATS_FLUSH_MS after the
+   * last write at most, never sooner). Then the sweep of a guard hold or a TURN quota row: expired
+   * holds and past days' TURN counts leave storage. It arms itself again for whatever is left.
+   */
   override async alarm(): Promise<void> {
+    this.alarmAt = null;
     const now = this.now();
+    try {
+      this.pruneRecent(now);
+      this.pruneSolos(now);
+      this.maybeFlushStats(now);
+      await this.statsChain;
+    } catch (e) {
+      console.error('matchmaker: idle work failed', e);
+    }
     const day = Math.floor(now / 86_400_000);
     let live = 0;
     for (const [k, v] of await this.ctx.storage.list<{ day: number; n: number }>({ prefix: 'turn:' })) {
@@ -988,7 +1064,46 @@ export class MatchmakerDO extends DurableObject<Env> {
         if (keep.length !== v.length) await this.ctx.storage.put(k, keep);
       }
     }
-    if (live > 0) await this.ctx.storage.setAlarm(now + GUARD_SWEEP_MS);
+    if (live > 0) this.armAlarm(now + GUARD_SWEEP_MS);
+    if (!this.queued()) this.armIdle(now);
+    await this.alarmChain;
+  }
+
+  /**
+   * The alarm at `at` unless one is armed already at that time or sooner (one alarm per object:
+   * the earliest need wins, and alarm() arms the next one). In order (alarmChain); never throws.
+   */
+  private armAlarm(at: number): void {
+    this.alarmChain = this.alarmChain
+      .then(async () => {
+        if (this.alarmAt === undefined) this.alarmAt = await this.ctx.storage.getAlarm();
+        if (this.alarmAt !== null && this.alarmAt <= at) return;
+        await this.ctx.storage.setAlarm(at);
+        this.alarmAt = at;
+      })
+      .catch((e) => console.error('matchmaker: alarm failed', e));
+  }
+
+  /**
+   * Nobody is queued (no sweep runs): the alarm for the earliest of the idle work (alarm()): the
+   * counters not written yet, once STATS_FLUSH_MS has passed since the last write; the next dropped
+   * search to forget (RECENT_MS); the next node solo row to forget (SOLO_UNPLAYED_MS). Nothing
+   * pending: no alarm.
+   */
+  private armIdle(now: number): void {
+    let at = Infinity;
+    if (this.statsPending()) at = Math.max(now, this.statsFlushedAt + STATS_FLUSH_MS);
+    for (const e of this.recent.values()) at = Math.min(at, e.until);
+    for (const id of this.soloRows) {
+      const s = this.solos.get(id);
+      if (s !== undefined) at = Math.min(at, s.at + SOLO_UNPLAYED_MS);
+    }
+    if (Number.isFinite(at)) this.armAlarm(at);
+  }
+
+  /** Somebody is in a public queue (the sweep then runs every SWEEP_MS). */
+  private queued(): boolean {
+    return this.casual.length > 0 || [...this.ranked.values()].some((q) => q.length > 0);
   }
 
   // ---- handlers ---------------------------------------------------------------------------
@@ -1097,9 +1212,10 @@ export class MatchmakerDO extends DurableObject<Env> {
     } else {
       // A search dropped less than RECENT_MS ago (a locked phone, a network drop, a solo match
       // nobody played) continues: its clock, its widening and its 5:00 go on, and it is not a new search.
+      // The map holds every 'recent:' row (loaded at start): a hub evicted meanwhile still has it.
       const back = this.recent.get(playerId);
       const restored = back !== undefined && back.kind === kind && back.until > now;
-      if (back !== undefined && restored) this.recent.delete(playerId);
+      if (back !== undefined && restored) this.forgetRecent(playerId);
       const joinedAt = restored ? back.joinedAt : now;
       waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}) };
       if (!restored) {
@@ -1128,28 +1244,40 @@ export class MatchmakerDO extends DurableObject<Env> {
     else w.local = local;
   }
 
-  /** One new search for the estimator (at most ARRIVALS_MAX, none older than ARRIVALS_WINDOW_MS). */
+  /** One new search for the estimator (at most ARRIVALS_MAX, none older than ARRIVALS_WINDOW_MS); the row follows with the counters. */
   private arrive(a: Arrival): void {
     this.arrivals.push(a);
     while (this.arrivals.length > ARRIVALS_MAX || (this.arrivals.length > 0 && a.at - this.arrivals[0].at > ARRIVALS_WINDOW_MS)) this.arrivals.shift();
+    this.arrivalsDirty = true;
   }
 
-  /** Keep a dropped search (`recent`, RECENT_MS; at most RECENT_MAX, the oldest go first). */
+  /** Keep a dropped search (`recent` and its row, RECENT_MS; at most RECENT_MAX, the oldest go first). One write. */
   private remember(playerId: string, s: Omit<RecentSearch, 'until'>, now: number): void {
     this.recent.delete(playerId);
-    this.recent.set(playerId, { ...s, until: now + RECENT_MS });
+    const entry: RecentSearch = { ...s, until: now + RECENT_MS };
+    this.recent.set(playerId, entry);
+    void this.ctx.storage.put(RECENT_PREFIX + playerId, entry);
     while (this.recent.size > RECENT_MAX) {
       const [oldest, e] = this.recent.entries().next().value as [string, RecentSearch];
-      this.recent.delete(oldest);
+      this.forgetRecent(oldest);
       if (e.stale) this.stat(now).dropped[statsKindOf(e.kind)]++;
     }
   }
 
-  /** The dropped searches past RECENT_MS go; a stale waiter's that never came back is counted as dropped. */
+  /** A dropped search is over (restored, left, or past RECENT_MS): out of `recent` and of storage. */
+  private forgetRecent(playerId: string): void {
+    if (this.recent.delete(playerId)) void this.ctx.storage.delete(RECENT_PREFIX + playerId);
+  }
+
+  /**
+   * The dropped searches past RECENT_MS go; a stale waiter's that never came back is counted as
+   * dropped (also when the hub was evicted meanwhile: the row brought it back at start, and the
+   * alarm wakes the hub at its RECENT_MS).
+   */
   private pruneRecent(now: number): void {
     for (const [id, e] of this.recent) {
       if (e.until > now) continue;
-      this.recent.delete(id);
+      this.forgetRecent(id);
       if (e.stale) this.stat(now).dropped[statsKindOf(e.kind)]++;
     }
   }
@@ -1163,18 +1291,34 @@ export class MatchmakerDO extends DurableObject<Env> {
   private soloUnplayed(matchId: string, now: number): void {
     const s = this.solos.get(matchId);
     if (s === undefined) return;
-    this.solos.delete(matchId);
+    this.forgetSolo(matchId);
     if (now - s.at >= SOLO_UNPLAYED_MS || this.findWaiter(s.playerId) !== null || this.forming.has(s.playerId)) return;
     this.remember(s.playerId, { joinedAt: s.joinedAt, kind: 'server', home: s.home, stale: false }, now);
   }
 
   /**
-   * A new solo match (soloUnplayed reads it). Only the first SOLO_UNPLAYED_MS of one matter, so the
-   * older entries go when a new one comes (a node match's never gets a MatchDO's room expiry).
+   * A new solo match (soloUnplayed reads it). A node match's is also written ('solo:<matchId>',
+   * `row`: a MatchDO's is in its 'room:' row), so an eviction before its release keeps it. Only
+   * the first SOLO_UNPLAYED_MS of one matter (pruneSolos).
    */
-  private rememberSolo(matchId: string, s: SoloInfo, now: number): void {
-    for (const [id, x] of this.solos) if (now - x.at >= SOLO_UNPLAYED_MS) this.solos.delete(id);
+  private rememberSolo(matchId: string, s: SoloInfo, now: number, row: boolean): void {
+    this.pruneSolos(now);
     this.solos.set(matchId, s);
+    if (row) {
+      this.soloRows.add(matchId);
+      void this.ctx.storage.put(SOLO_PREFIX + matchId, s);
+    }
+  }
+
+  /** The solo matches past SOLO_UNPLAYED_MS can no longer be unplayed: forgotten (a node one's row too). */
+  private pruneSolos(now: number): void {
+    for (const [id, s] of this.solos) if (now - s.at >= SOLO_UNPLAYED_MS) this.forgetSolo(id);
+  }
+
+  /** Out of `solos`, and its 'solo:' row deleted when it has one. */
+  private forgetSolo(matchId: string): void {
+    this.solos.delete(matchId);
+    if (this.soloRows.delete(matchId)) void this.ctx.storage.delete(SOLO_PREFIX + matchId);
   }
 
   /** 503 do_disabled for a server / ranked join with no node to wait for (join): its waiter, if any, is dropped. */
@@ -1257,12 +1401,14 @@ export class MatchmakerDO extends DurableObject<Env> {
     // An explicit leave is no drop: its search is not continued by a later join.
     const back = this.recent.get(playerId);
     if (back !== undefined) {
-      this.recent.delete(playerId);
+      this.forgetRecent(playerId);
       if (back.stale && !left) this.stat(now).cancelled[statsKindOf(back.kind)]++;
     }
     const act = this.active.get(playerId);
     const named = typeof body.matchId === 'string' ? body.matchId : null;
     const released = act !== undefined && (await this.leaveLock(playerId, act, named, body.connected === false, now));
+    // The pass that sees the queues empty arms the idle alarm (the counters of this leave).
+    this.scheduleSweep();
     return json({ ok: true, left, released });
   }
 
@@ -1274,7 +1420,7 @@ export class MatchmakerDO extends DurableObject<Env> {
   private async leaveLock(playerId: string, act: ActiveMatch, named: string | null, neverConnected: boolean, now: number): Promise<boolean> {
     if (act.until <= now || !leaveReleases(roomKindOf(act), act.matchId, named)) return false;
     // An explicit quit of a solo match: the player was there, so it was played (no `recent` restore).
-    if (named !== null) this.solos.delete(act.matchId);
+    if (named !== null) this.forgetSolo(act.matchId);
     if (act.kind === 'node') {
       const released = await this.nodeLeave(act.matchId, playerId, neverConnected);
       if (released) await this.forget(playerId, act);
@@ -1457,6 +1603,8 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (closeRoom && this.rooms.delete(matchId)) await this.ctx.storage.delete('room:' + matchId);
     // A solo match over this soon was never played: its human's search continues (soloUnplayed).
     this.soloUnplayed(matchId, now);
+    // A pass over the queues: with nobody queued it arms the idle alarm (that search's RECENT_MS).
+    this.scheduleSweep();
     return json({ ok: true, released: n });
   }
 
@@ -1511,23 +1659,46 @@ export class MatchmakerDO extends DurableObject<Env> {
         this.statsSweptFor = date;
         this.sweepStats(date);
       }
-      if (cur !== null) this.statsFlushedAt = now;
+      if (cur !== null) {
+        this.statsFlushedAt = now;
+        this.writeArrivals(now);
+      }
     }
     return this.statsDelta as QueueDay;
   }
 
-  /** Write the counters not written yet when STATS_FLUSH_MS passed since the last write (`force`: whatever the time). */
-  private maybeFlushStats(now: number, force = false): void {
+  /** Counts (or arrivals) not written yet. */
+  private statsPending(): boolean {
+    return (this.statsDelta !== null && !emptyRow(this.statsDelta)) || this.arrivalsDirty;
+  }
+
+  /**
+   * Write the counters not written yet (and the arrivals row) when STATS_FLUSH_MS passed since the
+   * last write: at most one write a minute, whatever happens (a search-then-cancel loop included).
+   * What is left when the queues empty is written by the alarm once the minute is up (armIdle).
+   */
+  private maybeFlushStats(now: number): void {
+    if (!this.statsPending()) return;
     const cur = this.statsDelta;
-    if (cur === null || emptyRow(cur)) return;
-    if (cur.date !== dayOf(now)) {
+    if (cur !== null && cur.date !== dayOf(now)) {
       this.stat(now); // the day change writes it
       return;
     }
-    if (!force && now - this.statsFlushedAt < STATS_FLUSH_MS) return;
+    if (now - this.statsFlushedAt < STATS_FLUSH_MS) return;
     this.statsFlushedAt = now;
-    this.statsDelta = emptyDay(cur.date);
-    this.writeStats(cur);
+    if (cur !== null && !emptyRow(cur)) {
+      this.statsDelta = emptyDay(cur.date);
+      this.writeStats(cur);
+    }
+    this.writeArrivals(now);
+  }
+
+  /** The estimator's ring as its row (ArrivalsRow), when it changed since the last one. */
+  private writeArrivals(now: number): void {
+    if (!this.arrivalsDirty) return;
+    this.arrivalsDirty = false;
+    const row = encodeArrivals(this.arrivals, now);
+    this.statsChain = this.statsChain.then(() => this.ctx.storage.put(ARRIVALS_KEY, row)).catch((e) => console.error('matchmaker: arrivals write failed', e));
   }
 
   /** Add `delta` to its day's stored row (one write after the other: a read-modify-write each). */
@@ -1915,7 +2086,8 @@ export class MatchmakerDO extends DurableObject<Env> {
       if (kept.length === 0) await this.ctx.storage.delete(storeKey);
       else {
         await this.ctx.storage.put(storeKey, kept);
-        if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now + GUARD_SWEEP_MS);
+        this.armAlarm(now + GUARD_SWEEP_MS);
+        await this.alarmChain;
       }
     }
     return json(answer);
@@ -1964,7 +2136,7 @@ export class MatchmakerDO extends DurableObject<Env> {
         if (e.kind === kind) n++;
       } else {
         this.rooms.delete(id);
-        this.solos.delete(id);
+        this.forgetSolo(id);
         void this.ctx.storage.delete('room:' + id);
       }
     }
@@ -1990,15 +2162,17 @@ export class MatchmakerDO extends DurableObject<Env> {
     const now = this.now();
     await this.readNodes(now);
     this.pruneRecent(now);
+    this.pruneSolos(now);
     // Not awaited: a slow node placement must not hold up the other formations. Each pass moves its
     // humans to `forming` before its first await; a failure requeues them and schedules a sweep.
     void this.formCasual(now);
     void this.formRankedAll(now);
     for (const [id, m] of this.matched) if (m.until <= now) this.matched.delete(id);
-    const pending = this.casual.length > 0 || [...this.ranked.values()].some((q) => q.length > 0);
-    // The counters: every STATS_FLUSH_MS while somebody searches, and once more when the queues empty.
-    this.maybeFlushStats(now, !pending);
-    if (pending) this.scheduleSweep();
+    // The counters: at most every STATS_FLUSH_MS. With nobody queued no sweep follows: the alarm
+    // writes what is left once the minute is up, and forgets the dropped searches on time.
+    this.maybeFlushStats(now);
+    if (this.queued()) this.scheduleSweep();
+    else this.armIdle(now);
   }
 
   /** Back into every list it searched (a failed formation), by its join time so it keeps its place. */
@@ -2166,7 +2340,7 @@ export class MatchmakerDO extends DurableObject<Env> {
         // The node never hears of cars (placeOnNode): its welcome has none, so the result carries them by slot.
         const carOf = new Map(humans.map((h) => [h.playerId, h.car]));
         const cars = carsBySlot(MODES[mode] * 2, placed.tickets.map((t) => ({ slot: t.slot, car: carOf.get(t.playerId) })));
-        if (solo) this.rememberSolo(placed.matchId, { ...solo, at: now }, now);
+        if (solo) this.rememberSolo(placed.matchId, { ...solo, at: now }, now, true);
         await this.issue(
           humans,
           placed.tickets.map((t) => ({ slot: t.slot, team: t.team, name: names.get(t.playerId) ?? '', playerId: t.playerId })),
@@ -2209,7 +2383,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       if (!res.ok) throw new Error(`MatchDO create -> ${res.status} ${await res.text()}`);
       if (opts.ranked) await this.rankedLock(matchId, humans, until);
       const soloInfo: SoloInfo | undefined = solo ? { ...solo, at: now } : undefined;
-      if (soloInfo) this.rememberSolo(matchId, soloInfo, now);
+      if (soloInfo) this.rememberSolo(matchId, soloInfo, now, false);
       await this.issue(
         humans,
         roster.filter((e) => e.kind === 'player'),

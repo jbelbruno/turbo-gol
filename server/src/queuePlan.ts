@@ -10,6 +10,7 @@
  *                 region of the one who waited longest)
  *   locationHintOf the Durable Object location hint of a host region
  *   estimateWait  the rough time to a match that a waiting answer shows (QueueWait)
+ *   encodeArrivals / decodeArrivals  the estimator's arrivals ring as one compact storage row
  *
  * Nothing here reads a clock, storage or the network: every input is an argument.
  */
@@ -236,4 +237,43 @@ export function estimateWait(input: WaitInput): QueueWait {
   const t = widened ? time(kAll, input.arrivalsAll) : Math.min(time(kHere, input.arrivalsHere), widenInMs + time(kAll, input.arrivalsAll));
   if (!Number.isFinite(t) || t > RANKED_ESTIMATE_MAX_MS) return { ...base, widened, widenInMs, estimateMs: null, estimateKind: 'none' };
   return { ...base, widened, widenInMs, estimateMs: roundEstimate(t), estimateKind: 'humans' };
+}
+
+/** The six homes in a fixed order: an arrival's home is stored as its index (encodeArrivals). */
+const HOMES: readonly RegionId[] = ['SA', 'NA', 'EU', 'AS', 'OC', 'AF'];
+
+/**
+ * The arrivals ring as one storage row (the hub writes it with the daily counters, never per
+ * request, so the estimate survives an eviction): `t0` the first kept arrival in whole seconds,
+ * then one triple per arrival, oldest first: seconds after t0, kind (0 casual, 1 ranked), home
+ * (an index of HOMES). Only the last ARRIVALS_WINDOW_MS before `now`, at most ARRIVALS_MAX (the
+ * newest). No id: the same three fields as the ring itself. Pure.
+ */
+export interface ArrivalsRow {
+  v: 1;
+  t0: number;
+  a: number[];
+}
+
+/** The ring as an ArrivalsRow at `now` (see above). Pure. */
+export function encodeArrivals(list: readonly Arrival[], now: number): ArrivalsRow {
+  const kept = list.filter((x) => now - x.at <= ARRIVALS_WINDOW_MS && x.at <= now).slice(-ARRIVALS_MAX);
+  const t0 = kept.length > 0 ? Math.floor(kept[0].at / 1000) : 0;
+  const a: number[] = [];
+  for (const x of kept) a.push(Math.floor(x.at / 1000) - t0, x.kind === 'ranked' ? 1 : 0, Math.max(0, HOMES.indexOf(x.home)));
+  return { v: 1, t0, a };
+}
+
+/** A stored ArrivalsRow back as the ring (oldest first, at most ARRIVALS_MAX); anything of another shape reads as none. Pure. */
+export function decodeArrivals(v: unknown): Arrival[] {
+  if (typeof v !== 'object' || v === null) return [];
+  const row = v as Partial<ArrivalsRow>;
+  if (row.v !== 1 || typeof row.t0 !== 'number' || !Number.isFinite(row.t0) || !Array.isArray(row.a) || row.a.length % 3 !== 0) return [];
+  const out: Arrival[] = [];
+  for (let i = 0; i < row.a.length; i += 3) {
+    const [dt, k, h] = [row.a[i], row.a[i + 1], row.a[i + 2]];
+    if (typeof dt !== 'number' || !Number.isFinite(dt) || (k !== 0 && k !== 1) || typeof h !== 'number' || HOMES[h] === undefined) continue;
+    out.push({ at: (row.t0 + dt) * 1000, kind: k === 1 ? 'ranked' : 'casual', home: HOMES[h] });
+  }
+  return out.slice(-ARRIVALS_MAX);
 }

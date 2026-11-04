@@ -251,6 +251,98 @@ test('a solo match released 45 s after forming (nobody played it: a locked phone
   assert.deepEqual([fresh.json.status, fresh.json.wait.waitedMs], ['waiting', 0]);
 });
 
+// ---- the hub's eviction (review round 2, A1-A2): a quiet hub leaves memory, its searches do not ----------
+
+test('a dropped search outlives the hub\'s eviction: 150 s of silence (the hub evicted), the next join restores its clock; one write per drop and per restore, none per poll', async () => {
+  const w = await makeHubWorld();
+  const a = pid();
+  const t0 = w.time();
+  await w.join(a);
+  await hold(w, [[a, {}]], 2 * MIN); // polls: no 'recent:' write
+  assert.equal(w.storage().writes('recent:').length, 0, 'never one per poll');
+  const lastPost = w.time();
+  w.advance(41 * SEC);
+  await w.hub().sweep(); // the phone is locked: its pass drops A
+  assert.deepEqual(w.storage().map.get('recent:' + a), { joinedAt: t0, kind: 'server', home: 'SA', until: w.time() + Q.RECENT_MS, stale: true });
+  await w.evict(); // nobody polls: the idle hub leaves memory
+  w.advance(lastPost + 150 * SEC - w.time());
+  const back = await w.join(a);
+  assert.deepEqual([back.json.status, back.json.wait.waitedMs, back.json.wait.widened], ['waiting', 2 * MIN + 150 * SEC, true], 'the clock went on');
+  assert.deepEqual(w.storage().writes('recent:'), [['put', 'recent:' + a], ['delete', 'recent:' + a]], 'one write when it dropped, one when it came back');
+  await w.hub().sweep();
+  const day = (await w.daily(1)).days[0];
+  assert.deepEqual([day.searches.casual, day.dropped.casual], [1, 0], 'no new search, no drop');
+  // Past 5:00 since its first join, visible: the solo match on its next POST.
+  w.advance(Q.SOLO_AFTER_MS - (w.time() - t0));
+  assert.equal((await w.join(a)).json.humans, 1);
+});
+
+test('an unplayed solo match outlives the evictions (MatchDO and node): released 45 s after it formed to an evicted hub, 150 s of silence, the next join gets a new solo match at once', async () => {
+  for (const nodes of [false, true]) {
+    const label = nodes ? 'node' : 'MatchDO';
+    const w = await makeHubWorld(nodes ? { flags: { nodes_on: '1' }, nodes: true } : {});
+    const a = pid();
+    await w.join(a);
+    w.advance(Q.SOLO_AFTER_MS);
+    const first = await w.join(a);
+    assert.deepEqual([first.json.humans, first.json.node === true], [1, nodes], label);
+    if (nodes) assert.ok(w.storage().map.has('solo:' + first.json.matchId), 'a node solo match\'s record is written');
+    await w.evict(); // the phone locked: nobody polls
+    w.advance(45 * SEC);
+    // The MatchDO's unused alarm (or the node's outcome) releases it: that request wakes a new hub.
+    await w.release(first.json.matchId, [a]);
+    assert.equal(w.storage().map.has('solo:' + first.json.matchId), false, label + ': its record is done');
+    assert.equal(w.storage().map.get('recent:' + a)?.stale, false, label + ': the search is back in `recent`, not a drop');
+    await w.evict();
+    w.advance(150 * SEC);
+    const again = await w.join(a);
+    assert.deepEqual([again.json.status, again.json.humans], ['matched', 1], label + ': a new solo match at once');
+    assert.notEqual(again.json.matchId, first.json.matchId);
+  }
+});
+
+test('a dropped search that expires while the hub is evicted: the alarm wakes it at its 10 min, forgets it and counts one drop (written: nothing stays past 10 min)', async () => {
+  const w = await makeHubWorld();
+  const a = pid();
+  await w.join(a);
+  w.advance(41 * SEC);
+  await w.hub().sweep(); // drops A; the counters are written (the first write) and the queues are empty
+  await pause(5);
+  assert.equal(w.storage().alarm, w.time() + Q.RECENT_MS, 'the idle hub arms its alarm at that search\'s 10 min');
+  await w.evict();
+  w.advance(Q.RECENT_MS);
+  await w.hub().alarm();
+  await pause(5);
+  assert.equal(w.storage().map.has('recent:' + a), false, 'forgotten at 10 min');
+  assert.equal(w.storage().map.get('stats:2026-11-04').dropped.casual, 1, 'counted and written');
+  assert.equal(w.hub().alarmAt, null, 'nothing left: no alarm');
+  await w.evict();
+  await w.hub().alarm();
+  await pause(5);
+  assert.equal((await w.daily(1)).days[0].dropped.casual, 1, 'counted once');
+});
+
+test('the estimate outlives an eviction: the arrivals ring is one row written with the counters (no id); 30 searches in the hour still read "humans ~2 min" after it', async () => {
+  const w = await makeHubWorld();
+  for (let i = 0; i < 30; i++) {
+    const p = pid();
+    await w.join(p);
+    await w.leave(p);
+    w.advance(SEC);
+  }
+  const writesBefore = w.storage().writes('arrivals').length;
+  assert.equal(writesBefore, 0, 'never per request');
+  await w.hub().sweep(); // the first write of the counters, the ring with them
+  await pause(5);
+  assert.equal(w.storage().writes('arrivals').length, 1);
+  const row = w.storage().map.get('arrivals');
+  assert.equal(row.a.length, 30 * 3);
+  assert.doesNotMatch(JSON.stringify(row), /[0-9a-f]{16}/, 'no id');
+  await w.evict();
+  const b = await w.join(pid());
+  assert.deepEqual([b.json.wait.estimateKind, b.json.wait.estimateMs], ['humans', 2 * MIN], '30 others in the hour: one every 2 min');
+});
+
 test('an explicit quit of a solo match (leave with its id) is a played match: no restore', async () => {
   const w = await makeHubWorld();
   const a = pid();

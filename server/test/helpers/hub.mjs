@@ -7,6 +7,7 @@
 //   const w = await makeHubWorld({ flags?, nodes?, rooms? })
 //   w.join(id, { home?, prefer?, visible?, local?, kind?, mode?, modes? })  -> the hub's /join answer
 //   w.hub()                                                                 -> the 'mm:SA' instance
+//   w.storage(), w.evict()                                                  -> its FakeStorage; a new instance on it
 //   w.queue(token, body), w.post(path, body, token)                         -> through the Worker
 //   w.advance(ms), w.time()                                                 -> the hub's clock
 import { registerHooks } from 'node:module';
@@ -59,15 +60,23 @@ export class FakeStorage {
   constructor() {
     this.map = new Map();
     this.alarm = null;
+    /** Every write, in order: ['put' | 'delete', key]. */
+    this.ops = [];
   }
   async get(k) {
     return structuredClone(this.map.get(k));
   }
   async put(k, v) {
+    this.ops.push(['put', k]);
     this.map.set(k, structuredClone(v));
   }
   async delete(k) {
+    this.ops.push(['delete', k]);
     return this.map.delete(k);
+  }
+  /** The writes of keys starting with `prefix`. */
+  writes(prefix) {
+    return this.ops.filter(([, k]) => k.startsWith(prefix));
   }
   async list({ prefix }) {
     const out = new Map();
@@ -148,7 +157,15 @@ export async function makeHubWorld({ flags = {}, nodes = false, rooms = 0, solos
   const room = fakeNs();
   const accounts = fakeNs((path) => (path === '/ranked-check' ? (ranked ?? { banUntil: 0, active: null, ratings: { '1v1': { mu: 25, sigma: 8 }, '2v2': { mu: 25, sigma: 8 }, '3v3': { mu: 25, sigma: 8 } } }) : { ok: true }));
   const objs = new Map();
+  const storages = new Map();
   const mmCalls = [];
+  /** A MatchmakerDO for `name` on `storage` (its constructor's load done), on the world's clock. */
+  const construct = async (storage) => {
+    const mm = new M.MatchmakerDO({ storage, blockConcurrencyWhile: (fn) => fn() }, env);
+    await pause(0);
+    mm.now = () => t;
+    return mm;
+  };
   const control = nodes ? fakeNodes() : null;
   const env = {
     JWT_SECRET: SECRET,
@@ -170,10 +187,8 @@ export async function makeHubWorld({ flags = {}, nodes = false, rooms = 0, solos
             const storage = new FakeStorage();
             if (name === 'mm:SA') for (let i = 0; i < rooms; i++) storage.map.set('room:' + hex64(), { until: t + 3_600_000, kind: 'server', host: 'SA' });
             if (name === 'mm:SA') for (let i = 0; i < solos; i++) storage.map.set('room:solo' + i, { until: t + 3_600_000, kind: 'server', host: 'SA', solo: { playerId: 'seed' + i, joinedAt: t - 400_000, home: 'SA', at: t - 200_000 } });
-            const mm = new M.MatchmakerDO({ storage, blockConcurrencyWhile: (fn) => fn() }, env);
-            await pause(0);
-            mm.now = () => t;
-            objs.set(name, mm);
+            storages.set(name, storage);
+            objs.set(name, await construct(storage));
           }
           return objs.get(name).fetch(req);
         },
@@ -202,6 +217,20 @@ export async function makeHubWorld({ flags = {}, nodes = false, rooms = 0, solos
     advance: (ms) => (t += ms),
     time: () => t,
     hub: () => objs.get('mm:SA'),
+    /** The hub's storage (FakeStorage: map, ops, writes(prefix), alarm). */
+    storage: (region = 'SA') => storages.get('mm:' + region),
+    /**
+     * The hub evicted from memory (an idle Durable Object: production after ~70-140 s, local
+     * workerd after ~10 s): a new instance on the same storage; the old one's sweep timer stops.
+     */
+    evict: async (region = 'SA') => {
+      const name = 'mm:' + region;
+      const old = objs.get(name);
+      if (old && old.sweepTimer) clearTimeout(old.sweepTimer);
+      if (old) old.sweepTimer = null;
+      objs.set(name, await construct(storages.get(name)));
+      return objs.get(name);
+    },
     /** The hub's /join as the Worker sends it (home, prefer, visible; kind 'server' by default). */
     join: (playerId, o = {}) => call('/join', { playerId, name: o.name ?? 'P-' + playerId.slice(0, 4), modes: o.modes ?? [o.mode ?? '2v2'], kind: o.kind ?? 'server', home: o.home ?? 'SA', ...(o.prefer ? { prefer: o.prefer } : {}), visible: o.visible !== false, ...(o.local ? { local: o.local } : {}), ...(o.kind === 'ranked' ? { ratings: o.ratings ?? { [o.mode ?? '2v2']: { mu: o.mu ?? 25, sigma: 8 } } } : {}), ...(o.extra ?? {}) }),
     leave: (playerId, matchId) => call('/leave', { playerId, ...(matchId ? { matchId } : {}) }),

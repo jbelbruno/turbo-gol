@@ -164,6 +164,13 @@ function nodeSettings(nodes) {
 class FakeStorage {
   constructor() {
     this.map = new Map();
+    this.alarm = null;
+  }
+  async getAlarm() {
+    return this.alarm;
+  }
+  async setAlarm(t) {
+    this.alarm = t;
   }
   async get(k) {
     return this.map.get(k);

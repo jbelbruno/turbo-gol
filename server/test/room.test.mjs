@@ -628,6 +628,9 @@ test('RoomDO: a slot flagged left is refused on upgrade (403 left): after /inter
 // ---- MatchmakerDO on fakes: locks verified against the room, /leave releases ------------------------
 
 class FakeMmStorage extends FakeStorage {
+  async getAlarm() {
+    return this.alarm;
+  }
   async list({ prefix }) {
     const out = new Map();
     for (const [k, v] of this.map) if (k.startsWith(prefix)) out.set(k, v);

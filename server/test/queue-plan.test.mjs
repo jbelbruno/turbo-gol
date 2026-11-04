@@ -23,6 +23,7 @@ registerHooks({
 const Q = await import('../src/queuePlan.ts');
 const M = await import('../src/MatchmakerDO.ts');
 const { QUEUE_HUB, queueHubOf, publicQueueKind, hasClientApi } = await import('../src/env.ts');
+const A = await import('../../src/net/account.ts');
 
 const MIN = 60_000;
 const NOW = 10_000_000;
@@ -174,6 +175,34 @@ test('estimateWait: a waiter held by a cap (busy) gets no estimate (none, null),
   assert.deepEqual([due.estimateKind, due.estimateMs, due.botsInMs], ['none', null, 0], 'a solo match held by the solo cap: no estimate either');
   const r = ranked({ arrivalsHere: 20, arrivalsAll: 20, missingHere: 0, missingAll: 0, busy: true });
   assert.deepEqual([r.estimateKind, r.estimateMs, r.busy, r.botsInMs], ['none', null, true, undefined]);
+});
+
+test('encodeArrivals / decodeArrivals: one compact row (whole seconds, kind, home index, no id), the last hour, at most 2,000', () => {
+  const homes = ['SA', 'NA', 'EU', 'AS', 'OC', 'AF'];
+  assert.deepEqual(homes, A.REGIONS.map((r) => r.id), 'the index order is the REGIONS order');
+  const list = [
+    { at: NOW - 61 * MIN, kind: 'casual', home: 'SA' }, // out of the hour: dropped
+    { at: NOW - 30 * MIN + 400, kind: 'casual', home: 'EU' },
+    { at: NOW - 10_000, kind: 'ranked', home: 'AF' },
+    { at: NOW, kind: 'casual', home: 'SA' },
+  ];
+  const row = Q.encodeArrivals(list, NOW);
+  assert.deepEqual(Object.keys(row), ['v', 't0', 'a']);
+  assert.equal(row.a.length, 9, 'three triples');
+  assert.deepEqual(row.a.slice(0, 3), [0, 0, 2]);
+  assert.doesNotMatch(JSON.stringify(row), /playerId|[0-9a-f]{16}/);
+  const back = Q.decodeArrivals(structuredClone(row));
+  assert.deepEqual(back.map((x) => [x.kind, x.home]), [['casual', 'EU'], ['ranked', 'AF'], ['casual', 'SA']]);
+  assert.deepEqual(back.map((x) => x.at), list.slice(1).map((x) => Math.floor(x.at / 1000) * 1000), 'whole seconds');
+  assert.deepEqual(Q.countArrivals(back, 'casual', 'SA', NOW, null), Q.countArrivals(list, 'casual', 'SA', NOW, null), 'the estimator reads the same');
+  // At most ARRIVALS_MAX, the newest; a stored row of another shape reads as none.
+  const many = Array.from({ length: Q.ARRIVALS_MAX + 50 }, (_, i) => ({ at: NOW - (Q.ARRIVALS_MAX + 50 - i) * 1000, kind: 'casual', home: 'NA' }));
+  const big = Q.encodeArrivals(many, NOW);
+  assert.equal(big.a.length, Q.ARRIVALS_MAX * 3);
+  assert.ok(JSON.stringify(big).length < 32_000, 'well under a storage value: ' + JSON.stringify(big).length + ' B');
+  assert.equal(Q.decodeArrivals(big)[0].at, many[50].at);
+  for (const junk of [null, 7, {}, { v: 2, t0: 1, a: [] }, { v: 1, t0: 1, a: [1, 2] }]) assert.deepEqual(Q.decodeArrivals(junk), [], JSON.stringify(junk));
+  assert.deepEqual(Q.decodeArrivals({ v: 1, t0: 100, a: [1, 0, 0, 2, 5, 0, 3, 1, 9] }), [{ at: 101_000, kind: 'casual', home: 'SA' }], 'a bad triple is skipped');
 });
 
 const ranked = (o) => Q.estimateWait({ kind: 'ranked', waitedMs: 0, searching: 1, searchingHere: 1, arrivalsHere: 0, arrivalsAll: 0, missingHere: 1, missingAll: 1, busy: false, ...o });
