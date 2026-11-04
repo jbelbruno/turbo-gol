@@ -2188,8 +2188,8 @@ export default {
   'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu',
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
-  // Its consent covers what it names: storage in the United States and Brazil (the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)
-  'legal.notice': 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.',
+  // Its consent covers what it names: storage in the United States, Brazil, Germany, Malaysia, South Africa and Australia (the Cloudflare and project servers' countries; the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)
+  'legal.notice': 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.',
   'legal.termsLink': 'Terms',
   'legal.privacyLink': 'Privacy policy',
   // The two pages' names (the About sheet, PROFILE's ABOUT)

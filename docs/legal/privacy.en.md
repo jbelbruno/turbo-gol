@@ -1,6 +1,6 @@
 # Turbogol Privacy Policy
 
-Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
+Version 2026-11-05. In force from November 5, 2026. The Spanish text is the official one; this English translation is informative.
 
 ---
 
@@ -23,8 +23,9 @@ Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the of
 - **We measure visits with Cloudflare Web Analytics,** which, according to Cloudflare, uses no
   cookies. We ask Cloudflare to leave out visitors from the European Union (section 9.4).
 - **Your data is stored outside Argentina:** at Cloudflare (including the United States), on the
-  project's server in Brazil and, for the little that reaches the team or our mailbox, at Discord
-  and Google (section 5).
+  project's servers that are in service (in Brazil, Germany, Malaysia, South Africa, Australia and
+  the United States) and, for the little that reaches the team or our mailbox, at Discord and
+  Google (section 5).
 - **You can ask us for a copy of your data, to correct it or to delete it** by writing to
   <mailto:privacy@turbo-gol.com>. We answer within 10 calendar days at most. You can also delete
   your account from PROFILE (section 12).
@@ -71,8 +72,8 @@ Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the of
 | **You play a match** | Your name, your car, your team and your controls (each key or movement). In a lobby match (P2P), your IP address | Play the match. Show the result |
 | **You play COMPETITIVE** | Your rating, your matches, wins and losses, your best rating, your abandoned matches and your queue blocks | Match you with evenly matched opponents. The leaderboard. The sanctions for abandoning |
 | **You use a custom lobby** | The lobby's code, its title, its password (we keep only a hash), the members (their session identifier, their name, their car and their team), who the host removed and each player's failed password attempts. If you create it and your connection uses IPv6, your network's prefix. When you create it you choose public or private. Lobbies are played P2P | Run the lobby. Limit how many lobbies one network and one session open |
-| **You search for a match (CASUAL or COMPETITIVE)** | While you search, in the server's memory: your account identifier, your name, your car, how many days old your account is, in COMPETITIVE your rating, your region, the formats you search and the one you prefer, since when you are searching, when your last request came in, whether you are playing bots or training, whether the game is in view and whether your match is waiting for room on the servers. If the search drops, or if nobody plays the bots match you got (for example, because the phone locked; this, once per search), the server keeps for 10 minutes your account identifier, since when you were searching, the queue, your region and which of the two happened, so that your search goes on with its clock when you are back. For that, the server notes next to the bots match your account identifier, since when you were searching, your region and when it started: 90 seconds if it is played on a community server, or as long as it lasts if it is played on a Cloudflare one. To estimate the wait, the server keeps when each search of the last hour started, in which queue and from which region, without your account, your name or your IP (at most 2,000; a cancelled search leaves it). We also count per day, without your account, your name or your IP, how many searches start and end, how many matches form and with how many people, how long people waited (in ranges) and how often people play bots or train while waiting; those totals are kept 90 days | Form your match and estimate the wait. Learn whether the wait works and improve it |
-| **You play on a community server** | Your name, your player identifier (the same in all your matches), your team, your controls and your IP address, which whoever operates the server sees. Afterwards, the match replay and, unpublished, which account (or guest session) took each seat. If the host is not the project, to compute their points we also note how long you played and, if you have an account, how many days old your account is. The replay, the seats and those notes are kept for 30 days. Today those servers are only the project's own (section 4.4) | Play the match. Check that the result is clean. Publish the replay. Compute the host's points, when the host is not the project |
+| **You search for a match (CASUAL or COMPETITIVE)** | While you search, in the server's memory: your account identifier, your name, your car, how many days old your account is, in COMPETITIVE your rating, your region, the formats you search and the one you prefer, in CASUAL the bots' difficulty you chose for your bots match, since when you are searching, when your last request came in, whether you are playing bots or training, whether the game is in view and whether your match is waiting for room on the servers. If the search drops, or if nobody plays the bots match you got (for example, because the phone locked; this, once per search), the server keeps for 10 minutes your account identifier, since when you were searching, the queue, your region and which of the two happened, so that your search goes on with its clock when you are back. For that, the server notes next to the bots match your account identifier, since when you were searching, your region and when it started: 90 seconds if it is played on a community server, or as long as it lasts if it is played on a Cloudflare one. To estimate the wait, the server keeps when each search of the last hour started, in which queue and from which region, without your account, your name or your IP (at most 2,000; a cancelled search leaves it). We also count per day, without your account, your name or your IP, how many searches start and end, how many matches form and with how many people, how long people waited (in ranges) and how often people play bots or train while waiting; those totals are kept 90 days | Form your match and estimate the wait. Learn whether the wait works and improve it |
+| **You play on a community server** | Your name, your player identifier (the same in all your matches), your team, your controls and your IP address, which whoever operates the server sees. A COMPETITIVE match is also simulated again, to verify it, on a project server that may be in another country (section 4.4): that server receives the replay, with your name, your player identifier, your team and your controls, not your IP. Afterwards, the match replay and, unpublished, which account (or guest session) took each seat. If the host is not the project, to compute their points we also note how long you played and, if you have an account, how many days old your account is. The replay, the seats and those notes are kept for 30 days. In addition, the team keeps for 30 days, in an internal history of the servers that is not published, each finished match (the server, the times, the result and its verification) with each player's name and player identifier: if you hide your name in public replays, the team does not see it there either. Today those servers are only the project's own (section 4.4) | Play the match. Check that the result is clean. Publish the replay. Compute the host's points, when the host is not the project. Let the team review how each server and each match works |
 | **You mark a replay as a favorite (a star) or look at "My replays"** | Your account's identifier next to the match's, never your name. You can mark up to 500 replays. How many accounts marked each match is public; which ones is not | Show the most starred matches and your list of matches. They are deleted when the replay turns 30 days old, even if you delete your account before then |
 | **You connect a TV with your phone** | The TV's code. The TV's approximate country, city, network and internet provider name. The TV's IP address (for IPv6, only the network prefix), while the code is valid. Your phone's IP is only compared with the TV's; if you enter the wrong code, it is kept for 15 minutes, to stop failed attempts. All in memory | Let your phone show you which TV you are about to connect and whether it is on your same network, so nobody tricks you with someone else's code. Stop failed attempts |
 | **You change your options** | Your experimental physics presets (with their names), your training records, the experimental features switch, your car, "Hide my name in public replays" and "News by email" | So your options follow you to any device |
@@ -175,7 +176,8 @@ receives the network error reports (section 9.4).
 | Provider | Country | What it does | What data it sees |
 |---|---|---|---|
 | **Cloudflare, Inc.** | United States, with a network all over the world | See the list below | Everything we store, the IP address of each request and the emails we send you |
-| **Hostinger** | Brazil | The machine that runs the project's server in São Paulo | Your IP address and the match, when you play on that server |
+| **Hostinger** | Brazil, Germany and Malaysia | The machines that run the project's servers in São Paulo, Germany and Malaysia | Your IP address and the match, when you play on one of those servers. The replays of the COMPETITIVE matches that those servers simulate again to verify them, from any project server (without your IP) |
+| **Google Cloud** | South Africa, Australia and the United States | For now, the machines that run the project's servers in those countries | Your IP address and the match, when you play on one of those servers |
 | **Google** | United States | The mailbox where we read and answer what you write to privacy@turbo-gol.com. Cloudflare forwards it | Your message and your email |
 | **Discord, Inc.** | United States | The internal channel where the team receives technical alerts | See the list below. Never the email or the IP of anyone who plays. The address of a community server may appear, and it may be an IP |
 
@@ -196,8 +198,8 @@ receives the network error reports (section 9.4).
 
 **What reaches the team's channel on Discord:** the hosts' usernames, their servers and each one's
 address, the country of each sign-in by the team to its maintenance account, the identifier of an
-account the team gives an item to or takes an item from, the identifier of a host's account that
-was deleted, match identifiers and the reason the team writes when it takes down a replay or
+account the team gives an item to, takes an item from or looks up the points of, the identifier of
+a host's account that was deleted, match identifiers and the reason the team writes when it takes down a replay or
 blocks a server. That reason may name a player.
 
 Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocessors/>.
@@ -245,26 +247,42 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
 
 ### 4.4 Community servers and their hosts
 
-- Some matches are played on community servers ("nodes"). **Today the only one is the project's
-  own, in São Paulo (Brazil),** on a Hostinger machine. When it can take them,
-  it gets the CASUAL and COMPETITIVE matches whose players are mostly from South America (on a tie,
-  the region of whoever waited longest decides), and also the CASUAL bots matches of whoever
-  searches from South America and waited 5 minutes with no rivals. If it cannot, they are played on
-  Cloudflare servers. If in an emergency we turn off matches on Cloudflare servers, it gets every
-  CASUAL and COMPETITIVE match, from any region, and they wait until it has room (Terms 7.6).
-  Lobby matches do not go through it. **Nobody outside the project can register a server yet.**
-  Even if the game talks about hosting servers, today you cannot register one.
+- Some matches are played on community servers ("nodes"). **Today they are only the project's
+  own:** in São Paulo (Brazil), Germany and Malaysia, on Hostinger machines, and, for now, in South
+  Africa, Australia and the United States, on Google Cloud machines. Each one serves a region:
+  South America, Europe, Asia, Africa, Oceania and North America, in that order. The ones in
+  service are listed at turbo-gol.com/nodes/status. When it can take them, each one gets the
+  CASUAL and COMPETITIVE matches whose players are mostly from its region (on a tie, the region of
+  whoever waited longest decides), and also the CASUAL bots matches of whoever searches from its
+  region and waited 5 minutes with no rivals. If it cannot, or if that region has no project
+  server in service, they are played on Cloudflare servers, never on the project server of another
+  region. If in an emergency we turn off matches on Cloudflare servers, each match goes to the
+  project server of its region and, if that one cannot take it, to the one in São Paulo, and waits
+  until one of them has room (Terms 7.6). Lobby matches do not go through them. **Nobody outside
+  the project can register a server yet.** Even if the game talks about hosting servers, today you
+  cannot register one.
+- **Verification, also in another country.** Each COMPETITIVE match on a community server is
+  simulated again on a project server that verifies matches: today, those in Brazil, Germany and
+  Malaysia. It may be another one than the one that hosted it, in another country: a match played
+  in Brazil may be verified in Germany or in Malaysia, and one from South Africa, Australia or the
+  United States on any of the three. That server receives the replay, with each player's name,
+  player identifier, team and controls, but not their IP. CASUAL matches on a project server are
+  not verified, and the servers in South Africa, Australia and the United States never verify
+  matches.
 - **When the network opens to other people** (we will announce it), whoever operates a server will
   see your name, your player identifier (the same in all your matches), your controls, what happens
   in the match and your IP address. The conditions for hosts (section 12 of the Terms) forbid them
   to keep or use that data for anything else.
 - **About hosts** we keep their username, each server's data (name, region, public address, which
   may be an IP, capacity, version, machine data and how many matches it verified, lost or failed),
-  the IP addresses their servers connect from (30 days) and their points. A server stays in our
-  records even if it is shut down. Today that applies only to the project's account.
-- **It is public,** for anyone who asks for it at turbo-gol.com/nodes/status: the host's username
-  next to their servers, and the points of the last 30 days of the 50 hosts who earned the most.
-  If the host does not choose a name for their server, the server's name carries their username.
+  the IP addresses their servers connect from (30 days), a history of their servers and of their
+  matches (30 days, section 6) and their points. A server stays in our records even if it is shut
+  down or we retire it. Today that applies only to the project's account.
+- **It is public,** for anyone who asks for it at turbo-gol.com/nodes/status: each server in
+  service (on probation or active), with who runs it, and the points of the last 30 days of the 50
+  hosts who earned the most (section 4.5). A project account is shown with its username; any other
+  host as "Anfitrión" (Spanish for "host") and a number, never with their username. If the host
+  does not choose a name for their server, the server is called by its region and a number.
 
 ### 4.5 The public
 
@@ -275,7 +293,7 @@ Anyone, without an account, can see:
 | **The leaderboard** of each mode | The top 100 with at least 5 matches in the season: username, rating, rank, matches and wins. Suspended accounts and accounts that asked for deletion do not appear | While you have an account | Today there is no option to hide your name on the leaderboard. Only those who play COMPETITIVE and are in the top 100 of a mode appear. If you ask for your account to be deleted, you stop appearing in less than a minute |
 | **The public lobby list** | The lobby's title, the name of its current host, its code, the mode, the region, how many players it has, whether it has a password and, if it has them, its experimental rules | While the lobby is open | Create your lobby with CREATE PRIVATE LOBBY, or make it private in SETTINGS |
 | **Public replays** | COMPETITIVE and CASUAL matches on community servers: what is seen of the match and what is seen of you (below). Never your identifier or your IP | 30 days | "Hide my name in public replays" (below) |
-| **The community server list** | Each server's name, its host's username, the region, the status, whether it is connected, how many matches it has in progress, the capacity, the measured lag, the version, whether it is a project server, whether it hosts or verifies matches and which connections it accepts. Separately, the points of the last 30 days of the 50 hosts who earned the most | No time limit: a server stays on the list, offline, even if it is shut down. If the host deletes their account, the server stays on the list as blocked, with their username. Today there are only project servers | It only concerns hosts |
+| **The community server list** | For each server in service (on probation or active): its name, who runs it (a project account, with its username; any other host, as "Anfitrión" and a number), the region, the status, whether it is connected, how many matches it has in progress, the capacity, the measured lag, the version and whether it is compatible with the game's current version, whether it is a project server, whether it hosts or verifies matches and which connections it accepts. Separately, the points of the last 30 days of the 50 hosts who earned the most, under that same name | While the server is on probation or active: it stays on the list, offline, even if it is shut down. A pending, suspended, blocked or retired server does not appear, nor does one of a host who deleted their account. Today there are only project servers | It only concerns hosts. A host that is not the project never appears with their username |
 
 - **What is seen of the match:** the mode, the region, the result, the length, whether it was
   COMPETITIVE, whether a verifier re-simulated it, the game version, the rounded hour, how many
@@ -292,9 +310,9 @@ Anyone, without an account, can see:
 - Your name stays in public replays until the account is deleted, after 14 days (or sooner, if
   you ask us to delete it without waiting), unless you turn on "Hide my name in public replays"
   beforehand. When the account is deleted, your name is also hidden in replays that were already
-  published; in those published before the date this policy comes into force it may stay visible
-  until they expire, at the latest 30 days after that date. If you want it not to show while you wait for the deletion, turn it on in PROFILE > PRIVACY
-  before you ask for it.
+  published; in those published before November 4, 2026 it may stay visible until they expire, at
+  the latest 30 days after that date. If you want it not to show while you wait for the deletion,
+  turn it on in PROFILE > PRIVACY before you ask for it.
 - We ask search engines not to index replays. But someone can copy what is public while it shows,
   and we cannot undo that.
 
@@ -317,16 +335,20 @@ We give data to an authority only when the law requires us to, with a formal req
 |---|---|---|
 | **The United States and Cloudflare's network** | Everything we store at Cloudflare. Cloudflare decides in which data center each thing runs and is stored. In October 2026 the match servers were measured in Miami and in Atlanta. For a CASUAL or COMPETITIVE match we ask Cloudflare to run it near the region of most of its players (Terms 7.6), and Cloudflare decides. Replays are stored in Cloudflare storage that has no region in South America. Each request goes through the Cloudflare data center nearest to you | Hosting the game |
 | **The United States (Cloudflare, on its own account)** | The Turnstile signals | Improving its bot detection |
-| **Brazil** | Your IP and the match, on the project's server in São Paulo | Playing with low lag in South America (in an emergency, any CASUAL or COMPETITIVE match: section 4.4) |
+| **Brazil** | Your IP and the match, on the project's server in São Paulo. The replays of the COMPETITIVE matches that this server simulates again, from any project server (without your IP) | Playing with low lag in South America (in an emergency, also matches from other regions: section 4.4). Verifying COMPETITIVE matches |
+| **Germany** | Your IP and the match, on the project's server in Germany. The replays of the COMPETITIVE matches that this server simulates again, from any project server (without your IP) | Playing with low lag in Europe. Verifying COMPETITIVE matches |
+| **Malaysia** | Your IP and the match, on the project's server in Malaysia. The replays of the COMPETITIVE matches that this server simulates again, from any project server (without your IP) | Playing with low lag in Asia. Verifying COMPETITIVE matches |
+| **South Africa, Australia and the United States (Google Cloud)** | For now, your IP and the match, on the project's servers in those countries | Playing with low lag in Africa, in Oceania and in North America |
 | **The United States (Discord and Google)** | That you signed in to Turbogol. We do not send them game data | Your sign-in |
 | **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures and to what it does with servers, host accounts and replays |
 | **The United States (Google)** | What you write to us | Reading and answering your requests |
 | **Each player's country** | Your IP, in lobby matches (P2P) | The direct connection |
 | **Each host's country** | Your IP and the match, once third-party servers open | Playing the match |
 
-**For Argentina:** neither the United States nor Brazil is on the AAIP's list of countries with
-adequate protection (Disposición DNPDP 60-E/2016 [Provision 60-E/2016 of the National Directorate
-for Personal Data Protection], with Resolución AAIP 34/2019 [AAIP Resolution 34/2019]). That is
+**For Argentina:** the United States, Brazil, Malaysia, South Africa and Australia are not on the
+AAIP's list of countries with adequate protection (Disposición DNPDP 60-E/2016 [Provision 60-E/2016
+of the National Directorate for Personal Data Protection], with Resolución AAIP 34/2019 [AAIP
+Resolution 34/2019]). That is
 why we ask for your express consent for your data to be stored and processed in the countries in
 this table: the notice above the button you accept the Terms with says so, and pressing that
 button gives it (Decreto 1558/2001, art. 12). Without that consent you cannot play online, because
@@ -336,8 +358,9 @@ addition, Cloudflare's data processing agreement governs what Cloudflare process
 **For the European Union and the United Kingdom:** Argentina has an adequacy decision of the
 European Commission (Decision 2003/490/EC), which the United Kingdom keeps. Cloudflare is in the
 EU-U.S. Data Privacy Framework and its agreement includes standard contractual clauses. Brazil has
-had EU adequacy since January 2026. You can ask us for a copy of these safeguards at
-<mailto:privacy@turbo-gol.com>.
+had EU adequacy since January 2026. Germany is a member state of the European Union. Malaysia,
+South Africa and Australia have no adequacy decision of the European Commission. You can ask us
+for a copy of these safeguards at <mailto:privacy@turbo-gol.com>.
 
 **For Brazil:** the transfers rest on their being necessary for the contract (LGPD,
 art. 33 IX).
@@ -390,7 +413,8 @@ art. 33 IX).
 |---|---|
 | Points of each match for the host (with each player's time) | 30 days. They are kept only when the host is not the project. The notes against repeated matches to farm points, 24 hours |
 | The record of how many points each host earned (if the account is deleted, they can no longer be used) | No time limit, also after the account is deleted. Today only the project has servers |
-| Each community server's entry | No time limit, also after the account is deleted: the server stays blocked and stays on the public list, with the host's username |
+| Each community server's entry (with its host's username) | No time limit, also after the account is deleted (the server stays blocked) or after we retire it. A blocked or retired server leaves the public list |
+| The servers' internal history: what happened to each server, each finished match (with each player's name and player identifier) and the team's alert lines (they may carry account identifiers, like the alerts of section 4.1). Only the team sees it | 30 days. Of the alert lines, the last 2,000 at most. A name its player hid in public replays is not shown, and when an account is deleted its name and its identifier leave the history's matches |
 | IP addresses community servers connect from | 30 days |
 
 **Logs and copies**
@@ -400,6 +424,8 @@ art. 33 IX).
 | Cloudflare's technical logs | 7 days |
 | Cloudflare's email sending log (to whom, when and whether it arrived) | Up to 30 days, also after the account is deleted |
 | Logs of the São Paulo machine (they may contain IP addresses) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
+| Logs of the machines in Germany and Malaysia, at Hostinger (they may contain IP addresses) | [[RETENCION_HOSTINGER_DE_MY]] |
+| Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses) | [[RETENCION_GOOGLE_CLOUD]] |
 | Turnstile signals that Cloudflare uses on its own account | Set by Cloudflare. Its addendum gives no period |
 | Network error reports and Cloudflare Web Analytics | Set by Cloudflare |
 | Technical alerts to the team on Discord | 90 days |
@@ -486,8 +512,8 @@ The game takes these decisions on its own, without a person:
   start as a guest or sign in. If that happens to you, write to us.
 
 Matchmaking also uses your rating (in COMPETITIVE), your region and how long you have been
-searching to choose whom you play with and in which region the match is played (Terms 7.1, 7.3
-and 7.6). The rules are in the source code. **You can ask us to explain the logic of these
+searching to choose whom you play with and in which region and on which server the match is
+played (Terms 7.1, 7.3 and 7.6). The rules are in the source code. **You can ask us to explain the logic of these
 decisions to you, and for a person to review a sanction** (Terms, section 9), by writing to
 <mailto:privacy@turbo-gol.com>.
 
@@ -581,7 +607,7 @@ None of ours can be read by the page's code: they only travel to our server.
 | "This browser signed in as…" (`turbogol.account`): your name and your account identifier | Know who signed in on this browser | When you sign out, or when your session stops being valid |
 | Your experimental features and physics presets (`turbogol.experimental.v1.` and your account identifier) | Use them offline | They stay after you sign out |
 | Your training records (`turbogol.training.v1` as a guest, and a copy for each account you used on this browser, with its identifier) | Show them to you | The guest ones, when you clear the site's data. An account's copy stays after you sign out |
-| Your options: language, graphics, controls, region, mode, the format you prefer in CASUAL, what you do while you search, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
+| Your options: language, graphics, controls, region, mode, the format and the bots' difficulty you prefer in CASUAL, what you do while you search, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
 | The graphics level that failed on this graphics card (with the card's name) | Not use it again | After 30 days, or when you clear the site's data |
 
 ### 9.3 Tab storage (deleted when you close the tab)
@@ -746,14 +772,19 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
     stars you gave, with your account's identifier and never your name; and the host point records
     of those matches, also with the identifier and without your name: up to
     30 days;
-  - the technical logs (7 days);
+  - the matches of the servers' internal history: your name and your identifier leave it when the
+    account is deleted, and the match stays, without them, for up to 30 days;
+  - the team's alert lines that carry your account's identifier (up to 30 days in the internal
+    history and 90 days on Discord, section 6);
+  - Cloudflare's technical logs (7 days) and those of the machines of the project's servers
+    (section 6);
   - the email sending log (up to 30 days);
   - Cloudflare's backups (up to 30 days).
 - **If you were a host:** today only the project has servers, so this does not yet affect any
   player. When it opens to other people: the record of how many points your servers earned (which
-  you can no longer use) and your servers' entries remain, and the servers stay
-  blocked. Your username stays on the public
-  server list and, for up to 30 days, in the hosts' table.
+  you can no longer use) and your servers' entries, with your username, remain, and the servers
+  stay blocked and leave the public server list. Your points may stay in the hosts' table for up to
+  30 days, as "Anfitrión" and a number, never with your username.
 - **In the browsers where you signed in, this one too:** the "known browser" cookie (up to
   180 days, with your account's identifier), "Continue as…" with your username, your training
   records (a copy with your account's identifier) and, if you used experimental features, their
@@ -806,10 +837,11 @@ delete your account.
 
 ## 14. Changes to this policy
 
-- If we change something important, we publish a notice at least 30 days ahead, on our Discord
-  server and in the project's repository
-  (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), as the Terms of use say
-  (section 18). The notice says what changes and why. Today there is no notice inside the game or
+- If we change something important, we publish a notice at least 7 days ahead: in Spanish, the
+  official text, in the project's repository
+  (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), and its English translation
+  on our Discord server, as the Terms of use say (section 18.2). The notice says what changes and
+  why. Today there is no notice inside the game or
   by email. Changes required by law or by security may apply sooner (Terms, section
   18.4).
 - When the change takes effect, the game shows you the links to both texts and asks you to accept
@@ -855,6 +887,7 @@ For anyone who wants to know what lies behind the plain words of this policy.
 |---|---|
 | Cloudflare's hosting | Cloudflare Workers, Durable Objects, KV and cache |
 | Where replays are stored | Cloudflare R2 |
+| The servers' internal history | Tables of the nodes' Durable Object (NodeRegistryDO), at Cloudflare |
 | The game's emails | Cloudflare Email Service, from `no-reply@turbo-gol.com` |
 | The emails you write to us | Cloudflare Email Routing, which forwards privacy@turbo-gol.com to a Google mailbox, in the United States |
 | Connecting lobby matches (P2P) | WebRTC, with Cloudflare's STUN |

@@ -1,6 +1,6 @@
 # Términos de uso de Turbogol
 
-Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
+Versión 2026-11-05. Vigente desde el 5 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
 
 ---
 
@@ -25,9 +25,9 @@ Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en es
   no puedes registrar uno. Los puntos no valen dinero.
 - El código es libre (AGPL-3.0). Estos términos regulan el servicio en turbo-gol.com, no lo que
   la licencia te deja hacer con el código.
-- Si cambiamos algo importante, te avisamos al menos 30 días antes (publicamos el aviso en nuestro
-  servidor de Discord y en el repositorio del proyecto) y, cuando el cambio empiece a valer, te
-  pedimos que lo aceptes antes de tu próxima partida en línea.
+- Si cambiamos algo importante, te avisamos al menos 7 días antes (publicamos el aviso en el
+  repositorio del proyecto y su traducción al inglés en nuestro servidor de Discord) y, cuando el
+  cambio empiece a valer, te pedimos que lo aceptes antes de tu próxima partida en línea.
 - Turbogol se ofrece gratis y tal como está. En todo lo que la ley permite, no respondemos por
   cortes, por fallas que te hagan perder puntos, objetos o estadísticas, ni por lo que hagan otros
   jugadores. Siempre respondemos por lo que la ley no deja limitar, como el dolo, la culpa grave y
@@ -187,10 +187,10 @@ otros jugadores, **no puedes:**
    y la partida puede jugarse entonces en su región (sección 7.6). Apenas se encuentran 2 o más
    personas, la partida empieza y los bots completan los lugares libres; el formato depende de
    cuántas sean. Si en 5 minutos no llega nadie, juegas en un servidor contra bots, en el formato
-   que elegiste, cuando tienes el juego a la vista (si no, apenas vuelvas al juego). Si los
-   servidores están llenos, la partida, con gente o con bots, espera hasta que haya lugar. Mientras
-   esperas puedes jugar contra bots o entrenar en tu navegador: cuando aparece tu partida entras al
-   instante y ese partido local se pierde. CASUAL no cuenta para el puntaje.
+   y con la dificultad que elegiste, cuando tienes el juego a la vista (si no, apenas vuelvas al
+   juego). Si los servidores están llenos, la partida, con gente o con bots, espera hasta que haya
+   lugar. Mientras esperas puedes jugar contra bots o entrenar en tu navegador: cuando aparece tu
+   partida entras al instante y ese partido local se pierde. CASUAL no cuenta para el puntaje.
 2. **Las salas se juegan P2P:** tu dispositivo se conecta directo con el de los otros jugadores de
    la sala, también con personas que no conoces. Para armar esa conexión, cada dispositivo recibe
    la dirección IP pública de los demás. Con una IP se puede saber, más o menos, en qué ciudad estás
@@ -203,9 +203,10 @@ otros jugadores, **no puedes:**
    nombre de usuario en una clasificación pública. Hoy no hay una opción para ocultar tu nombre en
    ella. Si pides el borrado de tu cuenta, dejas de aparecer en ella enseguida.
 4. **Salas personalizadas.** Quien crea una sala es el anfitrión de la sala (puede pasarle el rol a
-   otro miembro): elige el modo y las reglas, y el título si tiene cuenta; puede ponerle contraseña
-   y puede sacar a un jugador. Al crear una sala eliges si es pública (CREAR SALA PÚBLICA) o
-   privada (CREAR SALA PRIVADA), y el anfitrión de la sala puede cambiarlo. Las salas siempre se
+   otro miembro): elige el modo, las reglas y la dificultad de los bots, y el título si tiene
+   cuenta; puede ponerle contraseña y puede sacar a un jugador. Al crear una sala eliges si es
+   pública (CREAR SALA PÚBLICA) o privada (CREAR SALA PRIVADA), y el anfitrión de la sala puede
+   cambiarlo. Las salas siempre se
    juegan P2P (sección 7.2) y una partida necesita al menos 2 jugadores. Una sala pública aparece
    en una lista que cualquiera puede ver, con su título, el nombre de su anfitrión actual, su
    código, el modo, la región, cuántos jugadores tiene, si tiene contraseña y, si las tiene, sus
@@ -214,15 +215,17 @@ otros jugadores, **no puedes:**
 5. **Funciones y reglas experimentales.** Son para cuentas, pueden cambiar o desaparecer y **no
    cuentan para nada**: ni puntaje, ni estadísticas, ni récords.
 6. **Servidores.** Las partidas por servidor se juegan en servidores de Cloudflare o en servidores
-   de la comunidad (sección 12). Hoy el único servidor de la comunidad es el del proyecto, en São
-   Paulo, y solo el proyecto puede registrar servidores. Una partida de CASUAL o COMPETITIVO se
-   juega en la región de la mayoría de sus jugadores (si empatan, la de quien esperó más): con
-   mayoría de Sudamérica va al servidor del proyecto en São Paulo cuando tiene lugar; si no, y para
-   las demás regiones, a un servidor de Cloudflare: le pedimos que lo ponga cerca de esa región,
-   pero el lugar lo decide Cloudflare. Si en una emergencia apagamos las partidas en servidores de
-   Cloudflare, toda partida de CASUAL o COMPETITIVO se juega en el servidor del proyecto en São
-   Paulo, sea de la región que sea, y espera hasta que tenga lugar (o, si ese servidor tampoco está
-   disponible, no se puede buscar partida).
+   de la comunidad (sección 12). Hoy los únicos servidores de la comunidad son los del proyecto, en
+   São Paulo (Brasil), Alemania y Malasia y, por ahora, también en Sudáfrica, Australia y Estados
+   Unidos. Solo el proyecto puede registrar servidores. Los que están en servicio aparecen, con su
+   región, en turbo-gol.com/nodes/status (sección 12.4). Una partida de CASUAL o COMPETITIVO se
+   juega en la región de la mayoría de sus jugadores (si empatan, la de quien esperó más). Si esa
+   región tiene un servidor del proyecto en servicio y con lugar, la partida va ahí; si no, va a un
+   servidor de Cloudflare: le pedimos que lo ponga cerca de esa región, pero el lugar lo decide
+   Cloudflare. Nunca va al servidor del proyecto de otra región, salvo en una emergencia: si
+   apagamos las partidas en servidores de Cloudflare, la partida va al servidor del proyecto de su
+   región y, si ese no puede tomarla, al de São Paulo, y espera hasta que alguno tenga lugar (o, si
+   los servidores del proyecto tampoco están disponibles, no se puede buscar partida).
 
 ## 8. COMPETITIVO: abandonos y verificación
 
@@ -275,10 +278,10 @@ otros jugadores, **no puedes:**
 ## 10. Repeticiones públicas
 
 1. Las partidas que se juegan en servidores de la comunidad se graban enteras, con los controles de
-   cada jugador, para que se puedan volver a ver: las de COMPETITIVO y las de CASUAL. Desde esta
-   versión, toda partida de CASUAL con mayoría de jugadores de Sudamérica se juega ahí cuando hay
-   lugar (sección 7.6), así que también se graba. Las partidas de salas (que son P2P) y las de
-   servidores de Cloudflare no se graban.
+   cada jugador, para que se puedan volver a ver: las de COMPETITIVO y las de CASUAL. Toda partida
+   de CASUAL se juega ahí cuando la región de la mayoría de sus jugadores tiene un servidor del
+   proyecto en servicio y con lugar (sección 7.6), así que también se graba. Las partidas de salas
+   (que son P2P) y las de servidores de Cloudflare no se graban.
 2. Cualquiera, sin cuenta, puede verlas en turbo-gol.com, de 1 a 2 horas después de la partida y
    **durante 30 días**. Una partida anulada no se publica. Pedimos a los buscadores que no las
    indexen, pero quien ve una repetición puede copiarla, y eso no lo podemos deshacer.
@@ -286,9 +289,10 @@ otros jugadores, **no puedes:**
    PERFIL > PRIVACIDAD > «Ocultar mi nombre en repeticiones públicas»: en tu lugar se ve «Jugador
    N», también en las partidas que ya estaban publicadas. Una copia que ya se abrió puede seguir
    mostrando tu nombre hasta 3 horas. Los invitados se ven como «Invitado NNNN». Cuando se
-   borra tu cuenta, tu nombre deja de verse en las repeticiones (en las publicadas antes de la fecha
-   de vigencia de estos términos puede seguir hasta que vencen, a más tardar 30 días después); mientras el borrado espera, se
-   sigue viendo si no lo ocultaste antes (Política de privacidad, sección 12).
+   borra tu cuenta, tu nombre deja de verse en las repeticiones (en las publicadas antes del 4 de
+   noviembre de 2026 puede seguir hasta que vencen, a más tardar 30 días después de esa fecha);
+   mientras el borrado espera, se sigue viendo si no lo ocultaste antes (Política de privacidad,
+   sección 12).
 4. Si quieres que saquemos una repetición, escríbenos a <mailto:privacy@turbo-gol.com>.
 5. Si tienes cuenta, puedes marcar una repetición como favorita y ver tus partidas en «Mis
    repeticiones». De cada repetición se muestra cuántas cuentas la marcaron como favorita, no
@@ -312,8 +316,8 @@ otros jugadores, **no puedes:**
    conserva quien ya lo tiene.
 7. **Podemos cambiar** el catálogo, los precios y las reglas para ganar puntos solo por un motivo
    concreto: la seguridad, una trampa o un abuso, los costos o el equilibrio del juego. Si un
-   cambio te quita algo que ya tienes, te avisamos al menos 30 días antes, como dice la sección
-   18.2, salvo que corrija un error o una trampa.
+   cambio te quita algo que ya tienes, te avisamos al menos 30 días antes, con un aviso como el de
+   la sección 18.2, salvo que corrija un error o una trampa.
 8. **Pierdes los puntos y los objetos** si borras tu cuenta, si la cerramos por romper estos
    términos o si Turbogol deja de funcionar. Como no valen dinero, no hay devolución. De los puntos
    de anfitrión solo queda, sin que puedas usarlo, el registro del total que ganaron tus servidores
@@ -326,7 +330,7 @@ otros jugadores, **no puedes:**
 1. Un **anfitrión** es una persona que pone su computadora o un servidor alquilado para que se jueguen
    partidas de Turbogol. Su programa es un **servidor de la comunidad** (un «nodo»). No es lo mismo
    que el anfitrión de una sala (sección 7.4).
-2. **Hoy solo el proyecto tiene servidores:** el de São Paulo. Nadie más puede registrar uno, así
+2. **Hoy solo el proyecto tiene servidores:** los de la sección 7.6. Nadie más puede registrar uno, así
    que las reglas de esta sección todavía no se aplican a nadie fuera del proyecto. Aunque el juego
    hable de alojar servidores, hoy no puedes registrar uno. Cuando abramos la red a otras personas,
    lo anunciaremos y estas reglas valdrán desde ese día. Podemos abrirla primero a personas
@@ -377,16 +381,21 @@ personas, para ser anfitrión necesitas:
 
 ### 12.4 Qué es público y qué guardamos de ti
 
-1. **Es público,** para cualquiera que lo pida en turbo-gol.com/nodes/status: tu nombre de usuario
-   como anfitrión y, de cada servidor, su nombre, región, estado, si está conectado, cuántas
-   partidas tiene en curso, capacidad, retraso medido, versión, si es un servidor del proyecto, si
-   aloja o verifica partidas y qué conexiones acepta. También los puntos de los últimos 30 días de
-   los 50 anfitriones que más sumaron, en una tabla de anfitriones. Si no eliges un nombre para tu
-   servidor, su nombre lleva tu nombre de usuario.
+1. **Es público,** para cualquiera que lo pida en turbo-gol.com/nodes/status, de cada servidor en
+   servicio (en prueba o activo): su nombre, quién lo opera, su región, su estado, si está
+   conectado, cuántas partidas tiene en curso, su capacidad, el retraso medido, su versión y si es
+   compatible con la versión actual del juego, si es un servidor del proyecto, si aloja o verifica
+   partidas y qué conexiones acepta. Un servidor pendiente, suspendido, bloqueado o retirado no
+   aparece. También los puntos de los últimos 30 días de los 50 anfitriones que más sumaron, en
+   una tabla de anfitriones. En la lista y en la tabla, una cuenta del proyecto se ve con su nombre
+   de usuario, y cualquier otro anfitrión, como «Anfitrión» y un número, nunca con su nombre de
+   usuario. Si no eliges un nombre para tu servidor, se llama con su región y un número (por
+   ejemplo, «sa-node-3»).
 2. **La dirección de tu servidor puede ser tu IP.** Los jugadores que se conectan la ven.
 3. **Guardamos:** los datos de cada servidor (también los de la máquina y cuántas partidas verificó,
-   perdió o falló), las direcciones IP desde las que entra (30 días) y tus puntos. Un servidor se
-   queda en nuestros registros aunque se apague. La Política de privacidad dice por cuánto tiempo.
+   perdió o falló), las direcciones IP desde las que entra (30 días), un historial del servidor y
+   de sus partidas (30 días) y tus puntos. Un servidor se queda en nuestros registros aunque se
+   apague o lo retiremos. La Política de privacidad dice por cuánto tiempo.
 
 ### 12.5 Puntos
 
@@ -407,10 +416,10 @@ personas, para ser anfitrión necesitas:
 2. **Podemos suspender o bloquear tus servidores** si rompes estas reglas o si ponen en riesgo a
    los jugadores. Te decimos el motivo y puedes pedir una revisión (sección 9).
 3. **Puedes dejar de ser anfitrión cuando quieras:** apaga y desinstala el programa. Tu servidor
-   sigue en la lista pública, sin conexión, con tu nombre de usuario. Si borras tu cuenta, tus
-   servidores quedan bloqueados en cuanto se borra (a los 14 días de pedirlo, o antes si nos lo
-   pides); siguen en la lista, bloqueados, con tu nombre de usuario, y hasta 30 días tu nombre sigue
-   en la tabla de anfitriones.
+   sigue en la lista pública, sin conexión, hasta que lo retiremos, lo suspendamos o lo bloqueemos.
+   Si borras tu cuenta, tus servidores quedan bloqueados en cuanto se borra (a los 14 días de
+   pedirlo, o antes si nos lo pides) y salen de la lista pública; tus puntos pueden seguir hasta
+   30 días en la tabla de anfitriones, como «Anfitrión» y un número.
 4. **No eres empleado ni proveedor nuestro.** No te pagamos: solo hay puntos.
 5. **Respondes por tu máquina** y por lo que pase si no cumples estas reglas. Alojar un servidor es
    tu decisión: los costos y los riesgos de tu máquina, tu conexión, tu proveedor y los otros
@@ -472,13 +481,13 @@ personas, para ser anfitrión necesitas:
    esté siempre disponible (sección 16).
 2. **Podemos cambiar el juego** (agregar o sacar funciones, o apagar una parte un tiempo) por
    seguridad, por una ley, por costos o para mejorarlo. Si un cambio te quita algo que ya tienes,
-   te avisamos al menos 30 días antes, como dice la sección 18.2, salvo que corrija un error o una
-   trampa.
-3. **Si cerramos Turbogol,** te avisamos al menos 30 días antes, como dice la sección 18.2, salvo
-   fuerza mayor o una orden de una autoridad. Los datos se tratan como dice la Política de
+   te avisamos al menos 30 días antes, con un aviso como el de la sección 18.2, salvo que corrija
+   un error o una trampa.
+3. **Si cerramos Turbogol,** te avisamos al menos 30 días antes, con un aviso como el de la sección
+   18.2, salvo fuerza mayor o una orden de una autoridad. Los datos se tratan como dice la Política de
    privacidad (sección 13). El código sigue disponible según su licencia.
-4. **Si Turbogol pasa a otra persona u organización,** te avisamos al menos 30 días antes, como
-   dice la sección 18.2, con su nombre y su contacto (Política de privacidad, sección 13). Puedes
+4. **Si Turbogol pasa a otra persona u organización,** te avisamos al menos 30 días antes, con un
+   aviso como el de la sección 18.2, con su nombre y su contacto (Política de privacidad, sección 13). Puedes
    borrar tu cuenta antes del cambio.
 5. **Cuida tu salud.** La sobreexposición es perjudicial para la salud: haz pausas. El juego tiene
    luces y movimientos rápidos. Si tú o alguien de tu familia tuvo convulsiones o epilepsia,
@@ -492,7 +501,7 @@ personas, para ser anfitrión necesitas:
    - cortes, demoras, errores o pérdidas de partidas, resultados, puntaje, estadísticas, puntos u
      objetos que vengan de fallas técnicas, del mantenimiento, de ataques, de fallas de internet o
      de tu dispositivo, o de fallas de los servicios que usamos (por ejemplo, Cloudflare,
-     Hostinger, Discord o Google), si hicimos lo razonable para evitarlos (sección 15.1);
+     Hostinger, Google Cloud, Discord o Google), si hicimos lo razonable para evitarlos (sección 15.1);
    - lo que hagan otros jugadores o terceras personas: lo que escriben o publican, lo que hagan con
      tu dirección IP en una partida de sala (sección 7.2) y las copias que hagan de lo que es
      público, como las repeticiones (sección 10.2);
@@ -518,8 +527,8 @@ personas, para ser anfitrión necesitas:
    debemos responder, y por los daños a tu vida, tu cuerpo o tu salud. Valen siempre los derechos
    que te dan las normas de protección del consumidor y de los datos personales, también las de tu
    país (sección 19.1). Esta sección tampoco cambia lo que te prometemos en otras partes de estos
-   términos y de la Política de privacidad, como los avisos de 30 días (secciones 11.7, 15 y
-   18.2), que tus puntos no vencen (sección 11.6) y la seguridad de tus datos (Política de
+   términos y de la Política de privacidad, como los avisos de 30 días (secciones 11.7 y 15) y el
+   de 7 días (sección 18.2), que tus puntos no vencen (sección 11.6) y la seguridad de tus datos (Política de
    privacidad, sección 10). Si una parte de esta sección no vale para ti, el resto sigue valiendo.
 
 ## 17. Cómo termina esto
@@ -538,10 +547,11 @@ personas, para ser anfitrión necesitas:
 1. **Solo los cambiamos por un motivo concreto:** una ley o una orden de una autoridad, la
    seguridad del juego o de los jugadores, una función que se agrega o se va, o un abuso que hay
    que frenar.
-2. **Si el cambio es importante, te avisamos al menos 30 días antes.** Publicamos el aviso, en
-   español, con el texto nuevo y la fecha desde la que vale, en nuestro servidor de Discord y en el
-   repositorio del proyecto (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>). El
-   aviso dice qué cambia y por qué. Hoy no hay un aviso dentro del juego ni por correo: el juego te
+2. **Si el cambio es importante, te avisamos al menos 7 días antes.** Publicamos el aviso, con el
+   texto nuevo y la fecha desde la que vale, en el repositorio del proyecto
+   (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), en español, que es el texto
+   oficial, y su traducción al inglés en nuestro servidor de Discord, que es en inglés. El aviso
+   dice qué cambia y por qué. Hoy no hay un aviso dentro del juego ni por correo: el juego te
    muestra la versión nueva recién cuando empieza a valer (sección 18.3).
 3. **Cuando el cambio empieza a valer, te pedimos que lo aceptes** la próxima vez que quieras jugar
    en línea, con tu cuenta o como invitado. Hasta que lo aceptes no puedes jugar en línea. Lo mismo

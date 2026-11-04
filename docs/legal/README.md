@@ -9,19 +9,23 @@ The terms of service and the privacy policy of turbo-gol.com, as the game serves
 | `terms.en.md` | `/terms` | The terms' informative English translation |
 | `privacy.en.md` | `/privacy` | The privacy policy's informative English translation |
 
-**Version `2026-11-04-2`, in force from 4 November 2026,** approved by the owner on 4 November 2026.
-The Spanish texts are the official ones; the English ones are informative translations. Version
-`2026-11-04-2` was checked against the code of the release that ships the new modes (Casual and
-ranked always on servers, lobbies always P2P), sentence by sentence, and reviewed independently.
-They are not legal advice, and a lawyer has not reviewed them yet. The code never edits them: the
-Worker renders them as they are.
+**Version `2026-11-05`, in force from 5 November 2026, the day of its deploy,** approved by the
+owner before its merge. The Spanish texts are the official ones; the English ones are informative
+translations. Version `2026-11-05` was checked, sentence by sentence, against the code of the
+regional placement (PR #103), the nodes panel's server side (PR #104), the public list of servers
+(`feat/nodes-public-list`), the maintainers' history of the servers (`feat/nodes-history`) and the
+bots' level (PRs #107 and #108). It names the project's servers in Brazil, Germany and Malaysia
+(Hostinger) and, for now, in South Africa, Australia and the United States (Google Cloud). They are
+not legal advice, and a lawyer has not reviewed them yet. The code never edits them: the Worker
+renders them as they are.
 
 **Changing a text** means changing it in both languages, giving it a new version in its header and
-in `TERMS_VERSION`, in the same deploy, and announcing it 30 days ahead when it is an important
-change (Términos 18). Version `2026-11-04-2` skipped that notice once, by the owner's decision: it
-was announced the day it took effect, in the repository (in Spanish, the official text) and on
-Discord (in English only, below), and every account and guest accepted it again before playing
-online. Nothing checks that a `[[TOKEN]]` was left in a text: search for `[[` before publishing.
+in `TERMS_VERSION`, in the same deploy, and announcing it 7 days ahead when it is an important
+change (Términos 18.2; it said 30 days before version `2026-11-05`). Versions `2026-11-04-2` and
+`2026-11-05` skipped that notice, by the owner's decisions of 4 November 2026: each was announced
+the day it took effect, in the repository (in Spanish, the official text) and on Discord (in
+English, below), and every account and guest accepted it again before playing online. Nothing
+checks that a `[[TOKEN]]` was left in a text: search for `[[` before publishing.
 
 ## The notices of a change
 
@@ -31,19 +35,21 @@ Every notice of a change (Términos 18.2) is two files in `avisos/`, named after
 |---|---|
 | `avisos/2026-11-04-2.md` | The notice of version `2026-11-04-2` (4 November 2026), in Spanish: the official text |
 | `avisos/2026-11-04-2.en.md` | Its English translation: the text posted on Discord |
+| `avisos/2026-11-05.md` | The notice of version `2026-11-05` (5 November 2026), in Spanish: the official text |
+| `avisos/2026-11-05.en.md` | Its English translation: the text posted on Discord |
 
 **Discord in English, the official text in the repository.** The Discord server is English-only,
 so the post on Discord is the English translation, `<version>.en.md`, and only that. The official
 notice is the Spanish file in the repository, `<version>.md`, as the Spanish texts are the official
 ones.
 
-Términos 18.2 still says "Publicamos el aviso, en español, [...] en nuestro servidor de Discord y en
-el repositorio" (`terms.en.md`: "in Spanish"). It will be amended in the next version of the
-texts, by the owner's decision of 4 November 2026, and not before: changing it is changing a text
-(above). The notice of 4 November 2026 (version `2026-11-04-2`) was posted on Discord in English
-only, by that decision.
+Términos 18.2 says so since version `2026-11-05`: the notice goes, with the new text and the date
+from which it applies, to the repository, in Spanish, which is the official text, and its English
+translation to the Discord server. Before that version, 18.2 said "en español" for both places;
+the notice of 4 November 2026 (version `2026-11-04-2`) was posted on Discord in English only, by
+the owner's decision of that day.
 
-On the day the notice is posted (30 days ahead, or the deploy day when a change skips that):
+On the day the notice is posted (7 days ahead, or the deploy day when a change skips that):
 
 1. Write `avisos/<version>.md`, the official notice in Spanish, and `avisos/<version>.en.md`, its
    English translation. Both have an H1, a short preface, then `## Mensaje 1` and `## Mensaje 2`
@@ -64,7 +70,7 @@ On the day the notice is posted (30 days ahead, or the deploy day when a change 
 
 ## How they reach the players
 
-The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-11-04-2`):
+The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-11-05`):
 
 - **Empty or unset:** `/terminos`, `/privacidad`, `/terms` and `/privacy` answer 404, as an unknown
   route. `GET /api/config` says `legal.terms: null`, and the game shows no notice, no link and no

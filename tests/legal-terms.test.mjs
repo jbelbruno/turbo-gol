@@ -292,7 +292,7 @@ test('the guest sheet: nothing while unpublished; else "Before you play", the no
     assert.equal(menu.spec.title, 'Before you play');
     const notice = menu.sheet.all().find((e) => e.className.includes('mn-legal-notice'));
     assert.equal(notice.getAttribute('data-terms'), 'v2');
-    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the Privacy policy.');
+    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the Privacy policy.');
     assert.deepEqual(links(notice), [['/terms', 'Terms'], ['/privacy', 'Privacy policy']]);
     assert.ok(notice.all().filter((e) => e.tagName === 'A').every((a) => a.target === '_blank' && a.rel === 'noopener' && a.getAttribute('data-nav') === ''), 'a new tab, reachable with the arrows');
     const play = button(menu, 'PLAY AS GUEST');
@@ -356,7 +356,7 @@ test('the re-accept sheet: an account whose /api/me terms is the version in forc
     await settle();
     assert.equal(menu.spec.title, 'The terms have changed');
     assert.ok(menu.sheet.textContent.includes(en['legal.changedNote'] + ' ' + en['legal.orDelete']));
-    assert.ok(menu.sheet.textContent.includes('By pressing "ACCEPT AND PLAY" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is.'));
+    assert.ok(menu.sheet.textContent.includes('By pressing "ACCEPT AND PLAY" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is.'));
     fail = new AC.AccountError('Los términos cambiaron', 409, 'terms_changed');
     button(menu, 'ACCEPT AND PLAY').click();
     await settle();
@@ -396,7 +396,7 @@ test('the notice above CREATE ACCOUNT (PERFIL\'s sign-up and the mailed link\'s 
     await settle();
     assert.equal(lit.el.hidden, false);
     assert.equal(lit.version(), 'v2');
-    assert.ok(lit.el.textContent.startsWith('By pressing "CREATE ACCOUNT" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is.'));
+    assert.ok(lit.el.textContent.startsWith('By pressing "CREATE ACCOUNT" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is.'));
     assert.deepEqual(links(lit.el), [['/terms', 'Terms'], ['/privacy', 'Privacy policy']]);
     // On a TV a link stays in this tab.
     document.documentElement.classList.add('tg-tv');
@@ -492,9 +492,23 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
   for (const k of keys) assert.equal(typeof es[k], 'string', k);
   // The notice is also the express consent to the transfers the privacy policy's section 5 relies on
   // (Argentina: Decreto 1558/2001, art. 12): the press accepts that the data is kept in the United
-  // States and Brazil, so both countries are named in the sentence the button's label is in.
-  assert.equal(es['legal.notice'], 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos y Brasil. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en las salas, que se juegan P2P, los demás jugadores pueden ver tu IP. Lee la {privacy}.');
-  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.');
+  // States (Cloudflare) and in the countries of the project's servers (Brazil, Germany and Malaysia;
+  // for now South Africa, Australia and the United States too), so every one of them is named in the
+  // sentence the button's label is in.
+  assert.equal(es['legal.notice'],'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos, Brasil, Alemania, Malasia, Sudáfrica y Australia. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en las salas, que se juegan P2P, los demás jugadores pueden ver tu IP. Lee la {privacy}.');
+  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.');
+  // ... and section 5 of the privacy policy names no country of a project server the notice leaves
+  // out: each row of its table that hosts the project's servers is a country the notice names.
+  for (const [file, notice, rows] of [
+    ['privacidad.es.md', es['legal.notice'], ['Brasil', 'Alemania', 'Malasia', 'Sudáfrica, Australia y Estados Unidos (Google Cloud)']],
+    ['privacy.en.md', en['legal.notice'], ['Brazil', 'Germany', 'Malaysia', 'South Africa, Australia and the United States (Google Cloud)']],
+  ]) {
+    const policy = readFileSync(new URL(`../docs/legal/${file}`, import.meta.url), 'utf8');
+    const s5 = policy.slice(policy.search(/^## 5\. /m), policy.search(/^## 6\. /m));
+    const hosted = s5.split('\n').filter((l) => /^\| \*\*/.test(l) && /servidor(?:es)? del proyecto|project's servers?/.test(l)).map((l) => /^\| \*\*([^*]+)\*\*/.exec(l)[1]);
+    assert.deepEqual(hosted, rows, `${file}: section 5's rows of the project's servers`);
+    for (const country of rows.flatMap((r) => r.replace(/ \(Google Cloud\)$/, '').split(/, | y | and (?:the )?/))) assert.ok(notice.includes(country), `${file}: the notice names ${country}`);
+  }
   // After a change, the account accepts the Terms of use (the privacy policy is informed, not accepted).
   assert.equal(es['legal.changedNote'], 'Hay una versión nueva de los Términos de uso y de la Política de privacidad. Para seguir jugando online con tu cuenta, acepta los Términos de uso.');
   assert.equal(en['legal.changedNote'], 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept the Terms of use.');
@@ -587,22 +601,34 @@ test('every notice in docs/legal/avisos has its English translation, and both pa
   }
 });
 
-test('docs/legal/README.md says where a notice goes (Discord in English, the official Spanish text in the repository), who posts it and how, and, while Términos 18.2 still says "en español", that the next version amends it and that the 2026-11-04-2 notice was posted in English only', () => {
+test('docs/legal/README.md says where a notice goes (Discord in English, the official Spanish text in the repository), who posts it and how, and lists every notice; Términos 18.2 says the same since version 2026-11-05, with 7 days of notice, in both languages, and so do the summary, 16.5 and the policy\'s section 14', () => {
   const readme = readFileSync(new URL('../docs/legal/README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
   assert.ok(readme.includes('**Discord in English, the official text in the repository.** The Discord server is English-only, so the post on Discord is the English translation, `<version>.en.md`, and only that. The official notice is the Spanish file in the repository, `<version>.md`'));
-  assert.ok(readme.includes('| `avisos/2026-11-04-2.en.md` | Its English translation: the text posted on Discord |'));
   assert.ok(readme.toLowerCase().includes(NOTICE_POSTED_EN.toLowerCase()), 'who posts it and how, as the prefaces say');
   assert.doesNotMatch(readme, NOTICE_POSTED_OTHER);
-  // 18.2 is changed by a new version of the texts, not by this README: until then, it says why the
-  // notices do not do what 18.2 says. Both languages of 18.2 say the same.
-  const legal = (f) => readFileSync(new URL(`../docs/legal/${f}`, import.meta.url), 'utf8').replace(/\s+/g, ' ');
-  const inSpanish = legal('terminos.es.md').includes('Publicamos el aviso, en español, con el texto nuevo');
-  assert.equal(legal('terms.en.md').includes('We post the notice, in Spanish, with the new text'), inSpanish, 'terminos.es.md and terms.en.md, 18.2');
-  if (inSpanish) {
-    assert.ok(readme.includes('Términos 18.2 still says "Publicamos el aviso, en español, [...] en nuestro servidor de Discord y en el repositorio"'));
-    assert.ok(readme.includes("It will be amended in the next version of the texts, by the owner's decision of 4 November 2026"));
-    assert.ok(readme.includes('The notice of 4 November 2026 (version `2026-11-04-2`) was posted on Discord in English only, by that decision.'));
+  // Every notice in avisos/ has its two rows in the README's table.
+  for (const f of readdirSync(AVISOS).filter((x) => x.endsWith('.en.md'))) {
+    assert.ok(readme.includes(`| \`avisos/${f}\` | Its English translation: the text posted on Discord |`), f);
+    assert.ok(readme.includes(`| \`avisos/${f.replace(/\.en\.md$/, '.md')}\` | The notice of version \``), f);
   }
+  assert.ok(readme.includes('announcing it 7 days ahead when it is an important change (Términos 18.2'));
+  assert.ok(readme.includes('On the day the notice is posted (7 days ahead, or the deploy day when a change skips that):'));
+  // The owner's decision of 4 November 2026: 18.2 says what the notices do (Spanish, the official
+  // text, in the repository; its English translation on Discord), and 7 days instead of 30.
+  const legal = (f) => readFileSync(new URL(`../docs/legal/${f}`, import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  const es = legal('terminos.es.md');
+  const en = legal('terms.en.md');
+  assert.ok(es.includes('2. **Si el cambio es importante, te avisamos al menos 7 días antes.** Publicamos el aviso, con el texto nuevo y la fecha desde la que vale, en el repositorio del proyecto (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), en español, que es el texto oficial, y su traducción al inglés en nuestro servidor de Discord, que es en inglés.'));
+  assert.ok(en.includes('2. **If the change is important, we tell you at least 7 days ahead.** We post the notice, with the new text and the date from which it applies, in the project\'s repository (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), in Spanish, which is the official text, and its English translation on our Discord server, which is in English.'));
+  assert.ok(es.includes('- Si cambiamos algo importante, te avisamos al menos 7 días antes (publicamos el aviso en el repositorio del proyecto y su traducción al inglés en nuestro servidor de Discord)'), 'the summary');
+  assert.ok(en.includes('- If we change something important, we tell you at least 7 days ahead (we post the notice in the project\'s repository, and its English translation on our Discord server)'), 'the summary');
+  assert.ok(es.includes('como los avisos de 30 días (secciones 11.7 y 15) y el de 7 días (sección 18.2)'), '16.5');
+  assert.ok(en.includes('such as the 30-day notices (sections 11.7 and 15) and the 7-day one (section 18.2)'), '16.5');
+  // 18.2's period is 7 days wherever a text restates it; the other 30-day notices (points, closing,
+  // a new owner) only borrow 18.2's way of posting it.
+  for (const t of [es, en]) assert.doesNotMatch(t, /en español, con el texto nuevo|in Spanish, with the new text|30 días \(secciones 11\.7, 15 y 18\.2\)|sections 11\.7, 15 and 18\.2|30 días antes, como dice la sección 18\.2|30 days ahead, as section 18\.2 says/);
+  assert.ok(legal('privacidad.es.md').includes('- Si cambiamos algo importante, publicamos un aviso al menos 7 días antes: en español, el texto oficial, en el repositorio del proyecto'), 'the policy, 14');
+  assert.ok(legal('privacy.en.md').includes('- If we change something important, we publish a notice at least 7 days ahead: in Spanish, the official text, in the project\'s repository'), 'the policy, 14');
 });
 
 test("the deploy day's notice (docs/legal/avisos/2026-11-04-2.md, the official text) and its English translation (2026-11-04-2.en.md, the text the Discord server shows)", () => {
@@ -646,4 +672,69 @@ test("the deploy day's notice (docs/legal/avisos/2026-11-04-2.md, the official t
   // The full texts, last; in English, after saying which ones are official.
   assert.match(es[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
   assert.match(en[1], /\nThe Spanish texts are the official ones; the English translations are informative\. Full texts: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+});
+
+// Version 2026-11-05 (the owner's decisions of 4 November 2026): the project's servers in six
+// countries, verification across countries, the public list of PR 3, and 18.2 at 7 days, in force
+// on its deploy day. If that day moves, the version moves with it (the PR lists every string).
+const VERSION_A = '2026-11-05';
+test(`the notice of version ${VERSION_A} (the official text) and its English translation (the Discord post): the countries, the cross-country verification, the list, the 7 days, the same-day effect and the apology`, () => {
+  const es = noticeMessages(`${VERSION_A}.md`, 'Mensaje');
+  const en = noticeMessages(`${VERSION_A}.en.md`, 'Message');
+  assert.ok(es[0].startsWith(`**Servidores del proyecto en seis países, y cambian los Términos (versión ${VERSION_A})**\n`), 'the title is its first line, in bold');
+  assert.ok(en[0].startsWith(`**Project servers in six countries, and the Terms are changing (version ${VERSION_A})**\n`), 'the title is its first line, in bold');
+  // The six countries with their regions, the temporary three said to be for now, and where the list is.
+  assert.match(es[0], /Brasil \(Sudamérica\), Alemania \(Europa\), Malasia \(Asia\) y, por ahora, Sudáfrica \(África\), Australia \(Oceanía\) y Estados Unidos \(Norteamérica\)\./);
+  assert.match(en[0], /Brazil \(South America\), Germany \(Europe\), Malaysia \(Asia\) and, for now, South Africa \(Africa\), Australia \(Oceania\) and the United States \(North America\)\./);
+  for (const m of [es[0], en[0]]) assert.ok(m.includes('<https://turbo-gol.com/nodes/status>'), 'the list of the servers in service');
+  // What the code does: the verifiers are the three Hostinger servers, any of them for any match
+  // (nodes/control-plane/scheduler.ts pickVerifier: no region filter), and they get the replay, not the IP.
+  assert.match(es[0], /\*\*Una partida de COMPETITIVO puede verificarse en otro país,\*\* en el servidor de Brasil, Alemania o Malasia\. El verificador recibe la repetición \(tu nombre, tu identificador, tu equipo y tus controles\), no tu IP\./);
+  assert.match(en[0], /\*\*A COMPETITIVE match may be verified in another country,\*\* on the server in Brazil, Germany or Malaysia\. The verifier receives the replay \(your name, your identifier, your team and your controls\), not your IP\./);
+  // The public list as feat/nodes-public-list builds it (publicList.ts).
+  assert.ok(es[0].includes('se ve como «Anfitrión» y un número'));
+  assert.ok(en[0].includes('shows as "Anfitrión" and a number'));
+  // Message 2: the 7 days, the same-day effect, the apology again, then the full texts.
+  assert.ok(es[1].includes('Esta versión acorta el aviso de los cambios importantes de 30 a 7 días (Términos, sección 18.2)'));
+  assert.ok(es[1].includes('sin esos 7 días de aviso: te pedimos disculpas otra vez.'));
+  assert.ok(en[1].includes('This version shortens the notice of important changes from 30 to 7 days (Terms, section 18.2)'));
+  assert.ok(en[1].includes('without those 7 days of notice: we apologize again.'));
+  assert.match(es[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  assert.match(en[1], /\nThe Spanish texts are the official ones; the English translations are informative\. Full texts: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  // The prefaces say it took effect the day it was posted, by the owner's decision.
+  assert.ok(noticePreface(`${VERSION_A}.md`).includes('publicado en este repositorio el 5 de noviembre de 2026, el mismo día en que empieza a valer'));
+  assert.ok(noticePreface(`${VERSION_A}.en.md`).includes('this is the text posted there on 5 November 2026, the day the version takes effect'));
+});
+
+test(`version ${VERSION_A} of the texts: the six countries, the providers, the verification across countries, the public list of PR 3 and the history, in both languages; never a city of the new machines`, () => {
+  const read = (f) => readFileSync(new URL(`../docs/legal/${f}`, import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  const [tes, ten, pes, pen] = ['terminos.es.md', 'terms.en.md', 'privacidad.es.md', 'privacy.en.md'].map(read);
+  // Terms 7.6: the six servers, the in-service list, the region's own server or Cloudflare, never
+  // another region's but in an emergency (MatchmakerDO formMatch, PR #103).
+  assert.ok(tes.includes('Hoy los únicos servidores de la comunidad son los del proyecto, en São Paulo (Brasil), Alemania y Malasia y, por ahora, también en Sudáfrica, Australia y Estados Unidos.'));
+  assert.ok(ten.includes("Today the only community servers are the project's own, in São Paulo (Brazil), Germany and Malaysia and, for now, also in South Africa, Australia and the United States."));
+  assert.ok(tes.includes('Nunca va al servidor del proyecto de otra región, salvo en una emergencia'));
+  assert.ok(ten.includes('It never goes to the project server of another region, except in an emergency'));
+  // Terms 12.4.1 and the policy's 4.5: the list of PR 3 (only probation or active, "Anfitrión" and a
+  // number for any host that is not the project, compatible, the unnamed node's region and number).
+  for (const t of [tes, pes]) assert.ok(t.includes('«Anfitrión» y un número'));
+  for (const t of [ten, pen]) assert.ok(t.includes('"Anfitrión"'));
+  assert.ok(tes.includes('Un servidor pendiente, suspendido, bloqueado o retirado no aparece.'));
+  assert.ok(ten.includes('A pending, suspended, blocked or retired server does not appear.'));
+  assert.ok(tes.includes('si es compatible con la versión actual del juego') && ten.includes("whether it is compatible with the game's current version"));
+  assert.ok(tes.includes('se llama con su región y un número (por ejemplo, «sa-node-3»)') && ten.includes('it is called by its region and a number (for example, "sa-node-3")'));
+  for (const t of [tes, ten, pes, pen]) assert.doesNotMatch(t, /su nombre lleva tu nombre de usuario|its name includes your username|lleva su nombre de usuario|carries their username/, 'the old default name');
+  // The providers and the countries (policy 4.1 and 5), the verification across countries (4.4).
+  assert.ok(pes.includes('| **Hostinger** | Brasil, Alemania y Malasia |') && pes.includes('| **Google Cloud** | Sudáfrica, Australia y Estados Unidos |'));
+  assert.ok(pen.includes('| **Hostinger** | Brazil, Germany and Malaysia |') && pen.includes('| **Google Cloud** | South Africa, Australia and the United States |'));
+  assert.ok(pes.includes('los servidores de Sudáfrica, Australia y Estados Unidos nunca verifican partidas'));
+  assert.ok(pen.includes('the servers in South Africa, Australia and the United States never verify matches'));
+  // The history (feat/nodes-history: HISTORY_DAYS 30, ALERT_RING_MAX 2000).
+  assert.ok(pes.includes('30 días. De las líneas de aviso, las últimas 2.000 como mucho.'));
+  assert.ok(pen.includes('30 days. Of the alert lines, the last 2,000 at most.'));
+  // The bots' level a player picks for the 5:00 match (PR #108) in the search's row.
+  assert.ok(pes.includes('en CASUAL la dificultad de los bots que elegiste para tu partida contra bots'));
+  assert.ok(pen.includes("in CASUAL the bots' difficulty you chose for your bots match"));
+  // Only the country of the machines outside São Paulo (and never a site the node's name suggests).
+  for (const t of [tes, ten, pes, pen]) assert.doesNotMatch(t, /frankfurt|kuala|johannesburg|joburg|sydney|melbourne|ashburn|virginia|iowa|oregon|council bluffs/i);
 });

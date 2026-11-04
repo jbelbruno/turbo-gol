@@ -1,6 +1,6 @@
 # Turbogol Terms of Use
 
-Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
+Version 2026-11-05. In force from November 5, 2026. The Spanish text is the official one; this English translation is informative.
 
 ---
 
@@ -25,9 +25,9 @@ Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the of
   one. Points are worth no money.
 - The code is free software (AGPL-3.0). These terms govern the service at turbo-gol.com, not what
   the license lets you do with the code.
-- If we change something important, we tell you at least 30 days ahead (we post the notice on our
-  Discord server and in the project's repository) and, when the change takes effect, we ask you to
-  accept it before your next online match.
+- If we change something important, we tell you at least 7 days ahead (we post the notice in the
+  project's repository, and its English translation on our Discord server) and, when the change
+  takes effect, we ask you to accept it before your next online match.
 - Turbogol is offered free of charge and as is. As far as the law allows, we are not liable for
   outages, for failures that make you lose points, items or stats, or for what other players do.
   We are always liable for what the law does not allow to be limited, such as intent, gross
@@ -185,10 +185,10 @@ cannot:**
    soon as you start, and the match may then be played in their region (section 7.6). As soon as 2
    or more people find each other, the match starts and bots fill the free seats; the format
    depends on how many they are. If nobody comes within 5 minutes, you play bots on a server, in
-   the format you picked, once the game is in view (otherwise, as soon as you are back in the
-   game). If the servers are full, the match, with people or with bots, waits until there is room.
-   While you wait you can play bots or train in your browser: when your match is found you join it
-   at once and that local match is lost. CASUAL never counts for the rating.
+   the format and at the difficulty you picked, once the game is in view (otherwise, as soon as
+   you are back in the game). If the servers are full, the match, with people or with bots, waits
+   until there is room. While you wait you can play bots or train in your browser: when your match
+   is found you join it at once and that local match is lost. CASUAL never counts for the rating.
 2. **Lobbies are played P2P:** your device connects directly to the devices of the other players
    in the lobby, including people you do not know. To set up that connection, each device receives
    the public IP address of the others. From an IP it is possible to tell, roughly, which city you
@@ -201,9 +201,10 @@ cannot:**
    their username on a public leaderboard. Today there is no option to hide your name on it. If you
    ask for your account to be deleted, you stop appearing on it right away.
 4. **Custom lobbies.** Whoever creates a lobby is the lobby host (they can hand the role to another
-   member): they choose the mode and the rules, and the title if they have an account; they can set
-   a password and they can remove a player. When you create a lobby you choose whether it is
-   public (CREATE PUBLIC LOBBY) or private (CREATE PRIVATE LOBBY), and the lobby host can change
+   member): they choose the mode, the rules and the bots' difficulty, and the title if they have an
+   account; they can set a password and they can remove a player. When you create a lobby you
+   choose whether it is public (CREATE PUBLIC LOBBY) or private (CREATE PRIVATE LOBBY), and the
+   lobby host can change
    it. Lobbies are always played P2P (section 7.2) and a match needs at least 2 players. A public
    lobby appears in a list that anyone can see, with its title, the name of its current host, its
    code, the mode, the region, how many players it has, whether it has a password and, if it has
@@ -212,15 +213,17 @@ cannot:**
 5. **Experimental features and rules.** They are for accounts, they may change or disappear and
    **they count for nothing**: no rating, no stats, no records.
 6. **Servers.** Server matches are played on Cloudflare servers or on community servers (section
-   12). Today the only community server is the project's, in São Paulo, and only the project can
-   register servers. A CASUAL or COMPETITIVE match is played in the region of most of its players
-   (on a tie, the region of whoever waited longest): with a South American majority it goes to the
-   project's server in São Paulo when it has room; otherwise, and for the other regions, to a
-   Cloudflare server: we ask Cloudflare to place it near that region, but Cloudflare decides
-   where. If in an emergency we turn off matches on Cloudflare servers, every CASUAL or
-   COMPETITIVE match is played on the project's server in São Paulo, whatever its region, and
-   waits until it has room (or, if that server is not available either, you cannot search for a
-   match).
+   12). Today the only community servers are the project's own, in São Paulo (Brazil), Germany and
+   Malaysia and, for now, also in South Africa, Australia and the United States. Only the project
+   can register servers. The ones in service are listed, with their region, at
+   turbo-gol.com/nodes/status (section 12.4). A CASUAL or COMPETITIVE match is played in the region
+   of most of its players (on a tie, the region of whoever waited longest). If that region has a
+   project server in service with room, the match goes there; otherwise, it goes to a Cloudflare
+   server: we ask Cloudflare to place it near that region, but Cloudflare decides where. It never
+   goes to the project server of another region, except in an emergency: if we turn off matches on
+   Cloudflare servers, the match goes to the project server of its region and, if that one cannot
+   take it, to the one in São Paulo, and waits until one of them has room (or, if the project's
+   servers are not available either, you cannot search for a match).
 
 ## 8. COMPETITIVE: abandons and verification
 
@@ -271,9 +274,9 @@ cannot:**
 ## 10. Public replays
 
 1. Matches played on community servers are recorded in full, with each player's controls, so that
-   they can be watched again: COMPETITIVE ones and CASUAL ones. Since this version, every CASUAL
-   match with a South American majority is played there when there is room (section 7.6), so it is
-   recorded too. Lobby matches (which are P2P) and matches on Cloudflare servers are not
+   they can be watched again: COMPETITIVE ones and CASUAL ones. Every CASUAL match is played there
+   when the region of most of its players has a project server in service with room (section 7.6),
+   so it is recorded too. Lobby matches (which are P2P) and matches on Cloudflare servers are not
    recorded.
 2. Anyone, without an account, can watch them at turbo-gol.com, from 1 to 2 hours after the match
    and **for 30 days**. A voided match is not published. We ask search engines not to index
@@ -282,9 +285,9 @@ cannot:**
    PROFILE > PRIVACY > "Hide my name in public replays": "Player N" is shown in your place, also in
    the matches that were already published. A copy that was already opened may keep showing your
    name for up to 3 hours. Guests are shown as "Guest NNNN". When your account is deleted, your
-   name stops being shown in the replays (in those published before the date these terms came into
-   force, it may remain until they expire, at most 30 days after that date); while the deletion is pending, it is still
-   shown if you did not hide it before (Privacy Policy, section 12).
+   name stops being shown in the replays (in those published before November 4, 2026, it may
+   remain until they expire, at most 30 days after that date); while the deletion is pending, it
+   is still shown if you did not hide it before (Privacy Policy, section 12).
 4. If you want us to take a replay down, write to us at <mailto:privacy@turbo-gol.com>.
 5. If you have an account, you can star a replay and see your matches in "My replays". For each
    replay we show how many accounts starred it, not which ones.
@@ -307,8 +310,8 @@ cannot:**
    catalog, whoever already has it keeps it.
 7. **We may change** the catalog, the prices and the rules for earning points only for a concrete
    reason: security, a cheat or an abuse, costs or the game's balance. If a change takes away
-   something you already have, we tell you at least 30 days ahead, as section 18.2 says, unless it
-   fixes a bug or a cheat.
+   something you already have, we tell you at least 30 days ahead, with a notice like the one in
+   section 18.2, unless it fixes a bug or a cheat.
 8. **You lose your points and items** if you delete your account, if we close it for breaking these
    terms or if Turbogol stops running. Since they are worth no money, there is no refund. Of the
    host points, the only thing left, which you cannot use, is the record of the total your servers
@@ -321,7 +324,7 @@ cannot:**
 1. A **host** is a person who puts up their computer or a rented server so that Turbogol matches
    can be played on it. Their program is a **community server** (a "node"). This is not the same as
    the host of a lobby (section 7.4).
-2. **Today only the project has servers:** the one in São Paulo. Nobody else can register one, so
+2. **Today only the project has servers:** those in section 7.6. Nobody else can register one, so
    the rules in this section do not yet apply to anyone outside the project. Even if the game talks
    about hosting servers, today you cannot register one. When we open the network to other people,
    we will announce it and these rules will apply from that day. We may open it first to invited
@@ -372,16 +375,21 @@ people, to be a host you need to:
 
 ### 12.4 What is public and what we keep about you
 
-1. **It is public,** for anyone who asks for it at turbo-gol.com/nodes/status: your username as a
-   host and, for each server, its name, region, status, whether it is connected, how many matches
-   it has in progress, capacity, measured latency, version, whether it is a project server, whether
-   it hosts or verifies matches and which connections it accepts. Also, in a hosts' table, the
-   points that the 50 top-earning hosts earned in the last 30 days. If you do not choose a name for
-   your server, its name includes your username.
+1. **It is public,** for anyone who asks for it at turbo-gol.com/nodes/status, for each server in
+   service (on probation or active): its name, who runs it, its region, its status, whether it is
+   connected, how many matches it has in progress, its capacity, its measured latency, its version
+   and whether it is compatible with the game's current version, whether it is a project server,
+   whether it hosts or verifies matches and which connections it accepts. A pending, suspended,
+   blocked or retired server does not appear. Also, in a hosts' table, the points that the 50
+   top-earning hosts earned in the last 30 days. In the list and in the table, a project account is
+   shown with its username, and any other host as "Anfitrión" (Spanish for "host") and a number,
+   never with their username. If you do not choose a name for your server, it is called by its
+   region and a number (for example, "sa-node-3").
 2. **Your server's address may be your IP.** The players who connect see it.
 3. **We keep:** each server's data (including the machine's data and how many matches it verified,
-   lost or failed), the IP addresses it connects from (30 days) and your points. A server stays in
-   our records even if it is shut down. The Privacy Policy says for how long.
+   lost or failed), the IP addresses it connects from (30 days), a history of the server and of its
+   matches (30 days) and your points. A server stays in our records even if it is shut down or we
+   retire it. The Privacy Policy says for how long.
 
 ### 12.5 Points
 
@@ -401,10 +409,10 @@ people, to be a host you need to:
 2. **We may suspend or block your servers** if you break these rules or if they put players at
    risk. We tell you the reason and you can ask for a review (section 9).
 3. **You can stop being a host whenever you want:** shut down and uninstall the program. Your
-   server stays in the public list, offline, with your username. If you delete your account, your
-   servers are blocked as soon as it is deleted (14 days after you ask, or sooner if you ask us);
-   they stay in the list, blocked, with your username, and your name stays in the hosts' table for
-   up to 30 days.
+   server stays in the public list, offline, until we retire, suspend or block it. If you delete
+   your account, your servers are blocked as soon as it is deleted (14 days after you ask, or
+   sooner if you ask us) and leave the public list; your points may stay in the hosts' table for
+   up to 30 days, as "Anfitrión" and a number.
 4. **You are not our employee or our supplier.** We do not pay you: there are only points.
 5. **You are responsible for your machine** and for what happens if you do not follow these rules.
    Hosting a server is your decision: the costs and risks of your machine, your connection, your
@@ -465,13 +473,13 @@ people, to be a host you need to:
    always available (section 16).
 2. **We may change the game** (add or remove features, or switch a part off for a while) for
    security, because of a law, for costs or to improve it. If a change takes away something you
-   already have, we tell you at least 30 days ahead, as section 18.2 says, unless it fixes a bug or
-   a cheat.
-3. **If we close Turbogol,** we tell you at least 30 days ahead, as section 18.2 says, except in
-   case of force majeure or an order from an authority. The data is handled as the Privacy Policy
+   already have, we tell you at least 30 days ahead, with a notice like the one in section 18.2,
+   unless it fixes a bug or a cheat.
+3. **If we close Turbogol,** we tell you at least 30 days ahead, with a notice like the one in
+   section 18.2, except in case of force majeure or an order from an authority. The data is handled as the Privacy Policy
    says (section 13). The code stays available under its license.
-4. **If Turbogol passes to another person or organization,** we tell you at least 30 days ahead, as
-   section 18.2 says, with their name and their contact details (Privacy Policy, section 13). You
+4. **If Turbogol passes to another person or organization,** we tell you at least 30 days ahead,
+   with a notice like the one in section 18.2, with their name and their contact details (Privacy Policy, section 13). You
    can delete your account before the change.
 5. **Look after your health.** Overexposure is harmful to your health: take breaks. The game has
    flashing lights and fast movement. If you or someone in your family has had seizures or
@@ -484,8 +492,8 @@ people, to be a host you need to:
    allows, we are not liable for:**
    - outages, delays, bugs or losses of matches, results, rating, stats, points or items that come
      from technical failures, maintenance, attacks, failures of the internet or of your device, or
-     failures of the services we use (for example, Cloudflare, Hostinger, Discord or Google), if we
-     did what was reasonable to avoid them (section 15.1);
+     failures of the services we use (for example, Cloudflare, Hostinger, Google Cloud, Discord or
+     Google), if we did what was reasonable to avoid them (section 15.1);
    - what other players or third parties do: what they write or post, what they do with your IP
      address in a lobby match (section 7.2) and the copies they make of what is public, such as
      replays (section 10.2);
@@ -509,8 +517,8 @@ people, to be a host you need to:
    intentionally or through gross negligence, and for harm to your life, body or health. The rights
    that consumer protection and personal data laws give you always apply, including those of your
    country (section 19.1). Nor does this section change what we promise you elsewhere in these
-   terms and in the Privacy Policy, such as the 30-day notices (sections 11.7, 15 and 18.2), that
-   your points do not expire (section 11.6) and the security of your data (Privacy Policy, section
+   terms and in the Privacy Policy, such as the 30-day notices (sections 11.7 and 15) and the 7-day
+   one (section 18.2), that your points do not expire (section 11.6) and the security of your data (Privacy Policy, section
    10). If part of this section does not apply to you, the rest still does.
 
 ## 17. How this ends
@@ -529,9 +537,10 @@ people, to be a host you need to:
 1. **We only change them for a concrete reason:** a law or an order from an authority, the security
    of the game or of the players, a feature that is added or removed, or an abuse that has to be
    stopped.
-2. **If the change is important, we tell you at least 30 days ahead.** We post the notice, in
-   Spanish, with the new text and the date from which it applies, on our Discord server and in the
-   project's repository (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>). The
+2. **If the change is important, we tell you at least 7 days ahead.** We post the notice, with the
+   new text and the date from which it applies, in the project's repository
+   (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), in Spanish, which is the
+   official text, and its English translation on our Discord server, which is in English. The
    notice says what changes and why. Today there is no notice inside the game or by email: the game
    shows you the new version only once it takes effect (section 18.3).
 3. **When the change takes effect, we ask you to accept it** the next time you want to play online,
