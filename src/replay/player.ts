@@ -47,7 +47,8 @@ import {
 import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
-import { fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
+import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
+import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
 import { clockText, el } from './list';
 
@@ -526,13 +527,20 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     dragging = false;
     seekTo(Number(seek.value));
   });
+  /** The Esc press that will close the menu on its release (performance.now; -1 none): full screen with Esc locked. */
+  let escArmedAt = -1;
   window.addEventListener('keydown', (e) => {
     // Alt + ← is the browser's Back, Ctrl / Cmd + a digit its tabs.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     // Esc pauses and opens the menu (and closes it again); with the menu open nothing else answers.
+    // A held key's repeats do nothing; in the game's full screen with Esc locked the close waits
+    // for the release, as a held Esc is the browser's way out (src/game/pauseKeys.ts).
     if (e.code === 'Escape') {
       e.preventDefault();
-      setMenu(!menuOpen);
+      const act = escMenuAction(menuOpen, e.repeat, escLocked());
+      if (act === 'open') setMenu(true);
+      else if (act === 'close') setMenu(false);
+      else if (act === 'arm') escArmedAt = performance.now();
       return;
     }
     if (menuOpen) return;
@@ -553,6 +561,15 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     } else if (/^Digit[0-9]$/.test(e.code)) {
       setCam(Number(e.code.slice(5)));
     }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code !== 'Escape' || escArmedAt < 0) return;
+    const held = performance.now() - escArmedAt;
+    escArmedAt = -1;
+    if (escArmStep(held, escLocked(), menuOpen) === 'resume') setMenu(false);
+  });
+  window.addEventListener('blur', () => {
+    escArmedAt = -1;
   });
 
   /** The final whistle's banner (kept until a seek). */

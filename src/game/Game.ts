@@ -197,7 +197,7 @@ import { BotTeam } from '../ai/Team';
 import { Audio, type AudioState } from '../audio/Audio';
 import { Input } from '../input/Input';
 import { TouchControls, autoFullscreen, hasTouchScreen, installHintDue, noteInstallHintShown } from '../input/TouchControls';
-import { PageFullscreen } from '../ui/fullscreen';
+import { PageFullscreen, escLocked } from '../ui/fullscreen';
 import type { PitchEntry } from '../ui/fullscreenModel';
 import { t } from '../i18n';
 import type { Outcome } from '../net/outcome';
@@ -317,7 +317,7 @@ import { GAME_NAME, STORAGE_PREFIX } from '../brand';
 import { BackGuard } from '../ui/backGuard';
 import { systemBack } from '../ui/backModel';
 import { applyUiSettings, installDevice, motionReduced, type DeviceTracker } from '../ui/device';
-import { pauseKeyAction, pauseResumeKeys } from './pauseKeys';
+import { escArmStep, pauseKeyAction, pauseResumeKeys } from './pauseKeys';
 import { CARD_FIRST_MATCHES, ControlsCardPlan, controlsCardRows, localCardSeen, type ControlsCardContent } from '../render/controlsCard';
 import type { Device } from '../input/bindings';
 import { kbmCustomised, usesMouseButton } from '../input/bindings';
@@ -887,6 +887,8 @@ export class Game implements P2PGameHooks {
   private sbClockOvertime = false;
   /** Loop time at which losing the pointer lock paused the game (see UNLOCK_PAUSE_WINDOW). */
   private unlockPausedAt = -1e9;
+  /** An Esc press from the pause, with Esc locked in full screen, waits for its release to resume (processActions, pauseKeys.ts escArmStep). */
+  private escResumeArmed = false;
 
   private raf = 0;
   private running = false;
@@ -4317,6 +4319,11 @@ export class Game implements P2PGameHooks {
     const a = input.actions;
     const pa = input.padActions;
     const hud = this.hud;
+    // The Esc let go this frame (ms held; -1 none) and the resume an earlier Esc armed: read every
+    // frame, so an arm never outlives the pause branch below (Ajustes, the menus).
+    const escUp = input.takeEscRelease();
+    const escArmed = this.escResumeArmed;
+    this.escResumeArmed = false;
 
     if (this.settingsCapturing) {
       // A rebind capture owns every device: the press that ends it must not act on anything else.
@@ -4365,9 +4372,13 @@ export class Game implements P2PGameHooks {
       // (src/game/pauseKeys.ts; only QUIT leaves). A keyboard pause edge right after the
       // pointer-lock release already paused us is that same Escape (dropped); a pad Start
       // (pa.pause) never is. The pause menu's own edges: arrows / WASD / D-pad / stick move the
-      // focus, Enter / A activate, pad X opens the settings.
+      // focus, Enter / A activate, pad X opens the settings. In the game's own full screen with Esc
+      // locked, a held Esc is the browser's way out: from the pause, the Esc press only arms the
+      // resume, which its release makes if it was short (a pad's Start or B in the same frame acts
+      // at once). Mid-match Esc pauses on the press.
       const dropPause = !pa.pause && this.time - this.unlockPausedAt <= UNLOCK_PAUSE_WINDOW;
-      const pk = pauseKeyAction(a.pause, a.back, this.paused, dropPause);
+      const escOnRelease = a.escape && !pa.pause && !pa.back && escLocked();
+      const pk = pauseKeyAction(a.pause, a.back, this.paused, dropPause, escOnRelease);
       if (pk === 'toggle') this.setPaused(!this.paused);
       else if (pk === 'resume') {
         // Pad B is boost too: held on past the resume it would boost at once.
@@ -4376,6 +4387,12 @@ export class Game implements P2PGameHooks {
           this.resumeFromMenu();
         }
       } else if (pk === 'menu') this.pauseMenuActions();
+      if (pk === 'arm' || escArmed) {
+        // A tap's press and release can come in one frame: armed and let go at once.
+        const step = escArmStep(escUp, escLocked(), this.paused);
+        if (step === 'wait') this.escResumeArmed = true;
+        else if (step === 'resume') this.resumeFromMenu();
+      }
       if (a.toggleBallCam) {
         this.chase.toggle();
         hud.setCameraMode(this.chase.ballCam);

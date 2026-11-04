@@ -10,6 +10,8 @@
  *   held one leaves; Android's tap also locks landscape. It must run inside an input event's own
  *   listener or a click / key handler (the user activation), and it consumes that activation:
  *   whatever else the same press needs (the pointer lock, the clipboard) asks first.
+ * - `escLocked()`: that Esc lock holds now, so a press that resumes or closes waits for its release
+ *   (the hold that leaves full screen begins with a keydown the page gets).
  * - `PageFullscreen`, the Game's: `enter` as the pitch takes the screen (Game.hideMenus), the
  *   window listeners of an armed request (keydown, pointerdown, pointerup, click: the BUBBLE phase,
  *   so the canvas has asked for the pointer lock first; measured in Edge, full screen first breaks
@@ -67,6 +69,8 @@ function activationNow(): boolean | null {
 
 /** The game's own full screen is on (requestPageFullscreen's): only that one is left by the setting. */
 let own = false;
+/** The Esc lock (navigator.keyboard) resolved for the game's own full screen: Esc reaches the page. */
+let escLock = false;
 /** Settings > Game's "Full screen when playing" (PageFullscreen.setEnabled): Android's tap reads it. */
 let allowed = true;
 /** A request on its way: a second press in the same gesture (no userActivation API) waits for it. */
@@ -78,10 +82,22 @@ export function fullscreenAllowed(): boolean {
   return allowed;
 }
 
+/**
+ * Esc reaches the page in the game's own full screen (the keyboard lock resolved, full screen still
+ * on). There a short Esc is the game's and a held one the browser's way out (Chromium leaves after
+ * about 1.5 s of it, with the first keydown already delivered), so whatever an Esc press resumes or
+ * closes acts on its release instead (src/game/pauseKeys.ts escArmStep): the pause and the replay
+ * viewer's menu. Pausing stays on the press.
+ */
+export function escLocked(): boolean {
+  return own && escLock && document.fullscreenElement != null;
+}
+
 /** Full screen left, however: the Esc lock goes with it (a later F11 keeps the browser's Esc) and so does `own`. */
 function onFullscreenChange(): void {
   if (document.fullscreenElement != null) return;
   own = false;
+  escLock = false;
   keyboard()?.unlock?.();
 }
 
@@ -110,7 +126,11 @@ export function requestPageFullscreen(opts: { landscape?: boolean } = {}): Promi
       () => {
         own = true;
         const kb = keyboard();
-        if (lockKeys && kb !== undefined && typeof kb.lock === 'function') kb.lock(['Escape']).catch(noop);
+        if (lockKeys && kb !== undefined && typeof kb.lock === 'function') {
+          kb.lock(['Escape']).then(() => {
+            escLock = own;
+          }, noop);
+        }
         const orientation: ScreenOrientation | undefined = screen.orientation;
         if (opts.landscape === true && orientation !== undefined && typeof orientation.lock === 'function') orientation.lock('landscape').catch(noop);
         return true;

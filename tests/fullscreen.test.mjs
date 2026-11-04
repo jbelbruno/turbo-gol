@@ -209,6 +209,21 @@ test('fullscreen.ts: Esc is locked only once full screen is on, and unlocked whe
   assert.match(body(fsSrc, 'setEnabled'), /allowed = on;[\s\S]*!own[\s\S]*this\.exiting = true;[\s\S]*document\.exitFullscreen\(\)/, 'off leaves only the game\'s own full screen');
 });
 
+test('Esc locked: a short Esc resumes the pause and closes the replay viewer\'s menu on its release (pauseKeys.ts)', () => {
+  assert.match(body(fsSrc, 'escLocked'), /^\s*return own && escLock && document\.fullscreenElement != null;\s*$/);
+  assert.match(body(fsSrc, 'requestPageFullscreen'), /\.lock\(\['Escape'\]\)\.then\(\(\) => \{\s*escLock = own;\s*\}, noop\)/, 'locked once the lock resolved');
+  assert.match(body(fsSrc, 'onFullscreenChange'), /escLock = false;/);
+  const pa = body(game, 'processActions');
+  assert.ok(pa.indexOf('const escUp = input.takeEscRelease();') >= 0 && pa.indexOf('const escUp = input.takeEscRelease();') < pa.indexOf('if (this.settingsCapturing)'), 'read every frame, before the branches');
+  assert.match(pa, /const escArmed = this\.escResumeArmed;\s*this\.escResumeArmed = false;/);
+  assert.match(pa, /const escOnRelease = a\.escape && !pa\.pause && !pa\.back && escLocked\(\);\s*const pk = pauseKeyAction\(a\.pause, a\.back, this\.paused, dropPause, escOnRelease\);/);
+  assert.match(pa, /if \(pk === 'arm' \|\| escArmed\) \{[\s\S]*?const step = escArmStep\(escUp, escLocked\(\), this\.paused\);\s*if \(step === 'wait'\) this\.escResumeArmed = true;\s*else if \(step === 'resume'\) this\.resumeFromMenu\(\);/);
+  const player = read('src/replay/player.ts');
+  assert.match(player, /const act = escMenuAction\(menuOpen, e\.repeat, escLocked\(\)\);/);
+  assert.doesNotMatch(player, /setMenu\(!menuOpen\)/, 'no toggle on every keydown (the repeats flipped it)');
+  assert.match(player, /window\.addEventListener\('keyup', \(e\) => \{[\s\S]{0,200}escArmStep\(held, escLocked\(\), menuOpen\) === 'resume'\) setMenu\(false\);/);
+});
+
 test('Game.ts: the three entries to the pitch, the menus keep full screen, a match paused when it goes', () => {
   assert.match(body(game, 'hideMenus'), /^\s*this\.fullscreen\?\.enter\(entry\);/, 'first, while the press still carries its activation');
   assert.equal(game.match(/this\.hideMenus\(/g).length, 3);
