@@ -117,7 +117,7 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `MATCH_LENGTH_SECONDS` | var | regulation length (180) |
 | `REGION_OVERRIDE` | var | force one matchmaking region for everything: the queue hub, every player's home and every lobby's matchmaker (empty = the hub is `SA`, a player's region is the menu's pick, else `request.cf.continent`, `dev` locally) |
 | `TURN_KEY_ID`, `TURN_KEY_TOKEN` | secrets, optional (both or none) | a Cloudflare Realtime TURN key: the room welcome then appends 10-minute TURN credentials minted per request (`POST .../turn/keys/{id}/credentials/generate-ice-servers`, `{ ttl: 600 }`); unset = STUN only (`stun.cloudflare.com:3478`) |
-| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, hosted in SA whatever their region: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
+| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, one of their host region first and then one of SA: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
 | `NODES`, `NODE_REPLAYS`, `NODE_RELEASES` | Durable Object, R2, R2 | community nodes: the NodeRegistryDO, the replays the nodes upload, the signed releases and `channel.json` (see "Community nodes") |
 | `NODE_CONTROL_PRIVATE_KEY` | secret, optional | the Ed25519 key (PKCS#8, `npm run keys` in `nodes/`) that signs the players' node tickets; without it no match goes to a node |
 | `NODE_CONTROL_PUBLIC_KEY` | var | its public half, handed to every node at registration; a pair that does not match places nothing (ALERT) |
@@ -173,10 +173,12 @@ Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms kee
   waited 60 s (the oldest waiter is served first). Alone after 5 min with the tab visible: a match
   with bots in its preferred format.
 * Ranked: accounts, humans only, MMR windows as before, own region first, every region after 120 s.
-* The host region is the majority's (a tie: the longest wait's). SA with the nodes on: a community
-  node first, else a MatchDO; every MatchDO is created with its host region's location hint
-  (SA 'sam', NA 'enam', EU 'weur', AS 'apac', OC 'oc', AF 'afr'). A home that is not one of the
-  six regions counts as SA.
+* The host region is the majority's (a tie: the longest wait's). With the nodes on: a community
+  node of the host region first (never one of another region), else a MatchDO; every MatchDO is
+  created with its host region's location hint (SA 'sam', NA 'enam', EU 'weur', AS 'apac', OC
+  'oc', AF 'afr'). A home that is not one of the six regions counts as SA. The host region is
+  also what a ranked match reports (`ranked_matches.region`), on a MatchDO or a node; a MatchDO's
+  release still goes to the hub.
 * Capacity, global in the hub: 20 MatchDO in total (5 kept for ranked; at most 5 solo bots
   matches); at a cap the group waits (`wait.busy`), no 503. Node matches do not count.
 * Waiting answers carry `wait` (src/net/queueWait.ts): searching counts, the estimate, the 5:00
@@ -211,9 +213,11 @@ Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms kee
   day. Production's idle eviction (70-140 s) comes after the alarm, which is at most 60 s after the
   last write.
 * `do_disabled` with the nodes on for a player: the hub never answers 503 and never creates a
-  MatchDO; every group the nodes are on for is hosted SA, node only, and waits busy until a node
-  takes it (also through the minute of no-hosts back-off). A group whose nodes were turned off while
-  it waited waits busy too, until the Worker's 503 ends each search at its next POST.
+  MatchDO; every group the nodes are on for goes to a node only: one of its host region first, then
+  one of SA (straight to SA while its region is in its minute of no-hosts back-off; the match is then
+  hosted SA, `host: 'SA'`), and with neither it waits busy until a node takes it. A group whose nodes
+  were turned off while it waited waits busy too, until the Worker's 503 ends each search at its
+  next POST.
 * Lobbies: always P2P (a `'server'` setting is read as P2P), at least 2 members to start; create
   and join without `api: 2` get 426 `reload_required` (a page from before 2026-11-04 shows it as its
   new-version sheet with RELOAD, in the server's Spanish text: it has no key of its own for it).
@@ -368,12 +372,17 @@ routes under `wrangler dev`, put a development pair in `.dev.vars` (both halves:
 value overrides the committed var).
 
 Matches reach the nodes through the matchmaker, behind the KV flag `nodes_on` (absent: off). When
-the nodes are on for every human of a Casual or ranked match whose host region is SA, the match is
-offered to a node first; when none takes it, or the control plane fails or
-does not answer within 8 s, the match goes to a MatchDO as before (after a failure, or when the
-region has no host online, the matchmaker stops asking for a minute, and meanwhile the region
-counts as without the nodes: at the cap the group waits (`wait.busy`) and, with `do_disabled`,
-it waits busy for a node, never a 503 from the hub). Lobby matches (P2P) never go to a node.
+the nodes are on for every human of a Casual or ranked match, the match is offered first to a node
+of its host region (the control plane picks among that region's nodes only, never another
+region's: the latency); when none takes it, or the control plane fails or
+does not answer within 8 s, the match goes to a MatchDO near that region as before (after a
+failure, or when the region has no host online, the matchmaker stops asking that region for a
+minute, and meanwhile the region counts as without the nodes: at the cap the group waits
+(`wait.busy`) and, with `do_disabled`, it asks SA's nodes, or waits busy for a node, never a 503
+from the hub). A region without nodes (NA, OC and AF today) costs one placement asked a minute,
+answered `hosts: 0`. A node match's `/release` always goes to the queue hub (`mm:SA`, or
+`REGION_OVERRIDE` locally), which formed it and holds its locks; its ranked result names its host
+region (`ranked_matches.region`). Lobby matches (P2P) never go to a node.
 `nodes_on` and `vm_disabled` are read through KV's 60 s edge cache, so a change takes up to about
 two minutes to reach every matchmaker:
 
@@ -459,7 +468,7 @@ lands within a minute or two.
 | Flag | What it stops | What goes on |
 |---|---|---|
 | `matchmaking_off` | `POST /api/queue` and `POST /api/lobbies`: 503 `matchmaking_off` (no new match, room or lobby) | matches and lobbies already open, sign-in, the menus |
-| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group is hosted SA (node only) whatever its majority's region, and waits busy until a node takes it | node matches; sockets already open |
+| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group asks a node of its host region, then one of SA (node only), and waits busy until a node takes it | node matches; sockets already open |
 | `vm_disabled` | no new match goes to a community node, whatever `nodes_on` says | the control plane and the nodes' sockets; matches already on a node |
 | `replays_off` | the public replays only: `GET /nodes/replays` and `GET /nodes/replays/<id>/view` answer 404, their edge-cached copies too (read once per isolate every 30 s), the object never asked | the nodes, the verifiers' signed replay routes, everything else |
 | `nodes_off` | every `/nodes/*` route that would reach the NodeRegistryDO: registration, the control socket's upgrade, replay uploads and downloads, tokens, `/nodes/mine`, `/nodes/status`, the replay list and view, the maintainers' routes (503 `nodes_off`, the object never asked), and the cron's health check. Set `vm_disabled` with it: sockets already open stay, and the matchmaker still reaches the object directly | the node releases and the installers (edge-cached), the shop aliases (AccountsDO) |

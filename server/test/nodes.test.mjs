@@ -235,20 +235,31 @@ const REASON = 'verification_failed:' + 'x'.repeat(40);
 const RANKED_VOID = { kind: 'void', matchId: MID, nodeId: 'n1', ranked: true, reason: REASON, players: IDS, noShows: [C] };
 
 const parsed = (calls) => calls.map((c) => ({ ...c, body: JSON.parse(c.body) }));
-const release = (region = 'SA') => ({ matchId: MID, target: 'mm:' + region, path: '/release', body: { matchId: MID, playerIds: IDS } });
+/** The /release of IDS: always to the queue hub (it formed the match and holds its locks), whatever the match's region. */
+const release = () => ({ matchId: MID, target: O.HUB_TARGET, path: '/release', body: { matchId: MID, playerIds: IDS } });
 
-test("outcomeCalls: a rated match goes to /ranked-result with MatchDO's body, then frees the locks in its region", () => {
+test("outcomeCalls: a rated match goes to /ranked-result with MatchDO's body, then frees the locks in the queue hub", () => {
+  assert.equal(O.HUB_TARGET, 'hub');
   const { nodeId: _, kind: __, ...body } = RATED;
   assert.deepEqual(parsed(O.outcomeCalls(RATED, assign(), IDS)), [{ matchId: MID, target: 'accounts', path: '/ranked-result', body }, release()]);
 });
 
-test("outcomeCalls: a ranked void goes to /ranked-cancel with the assignment's playlist and region, its noShows and a reason AccountsDO keeps whole", () => {
+test("outcomeCalls: a ranked void goes to /ranked-cancel with the assignment's playlist and region, its noShows and a reason AccountsDO keeps whole; the release still goes to the hub", () => {
   const calls = parsed(O.outcomeCalls(RANKED_VOID, assign({ mode: '3v3', region: 'NA' }), IDS));
   assert.deepEqual(calls, [
     { matchId: MID, target: 'accounts', path: '/ranked-cancel', body: { matchId: MID, playlist: '3v3', region: 'NA', players: IDS, noShows: [C], reason: REASON.slice(0, 32) } },
-    release('NA'),
+    release(),
   ]);
   assert.equal(calls[0].body.reason.length, 32);
+});
+
+test('outcomeCalls: a match hosted outside SA (EU) reports its host region and is released in the queue hub', () => {
+  const eu = parsed(O.outcomeCalls({ ...RATED, region: 'EU' }, assign({ region: 'EU' }), IDS));
+  assert.deepEqual([eu[0].path, eu[0].body.region], ['/ranked-result', 'EU'], 'ranked_matches.region: the host region');
+  assert.deepEqual(eu[1], release());
+  const cancelled = parsed(O.outcomeCalls(RANKED_VOID, assign({ region: 'EU' }), IDS));
+  assert.deepEqual([cancelled[0].path, cancelled[0].body.region], ['/ranked-cancel', 'EU']);
+  assert.deepEqual(cancelled[1], release());
 });
 
 test('outcomeCalls: a casual match records nothing, void or not; it only frees the locks', () => {
@@ -323,6 +334,21 @@ test('deliverCall: a 2xx is done; each call reaches its object with the internal
     ],
   );
   assert.deepEqual(lines, []);
+});
+
+test('deliverCall: the hub target is the queue hub as the env names it (mm:SA, or REGION_OVERRIDE); a row written before it, mm:SA, still reaches the hub', async () => {
+  const rel = O.outcomeCalls(RATED, assign({ region: 'EU' }), IDS).at(-1);
+  assert.equal(rel.target, O.HUB_TARGET);
+  const prod = deliveryEnv(ok);
+  assert.equal(await O.deliverCall({ ...prod.env, REGION_OVERRIDE: '' }, rel, (l) => assert.fail(l)), 'done');
+  const dev = deliveryEnv(ok);
+  assert.equal(await O.deliverCall({ ...dev.env, REGION_OVERRIDE: 'LOCAL' }, rel, (l) => assert.fail(l)), 'done');
+  const old = deliveryEnv(ok);
+  assert.equal(await O.deliverCall(old.env, { ...rel, target: 'mm:SA' }, (l) => assert.fail(l)), 'done');
+  assert.deepEqual(
+    [prod, dev, old].map((d) => d.calls.map((c) => [c.name, c.url, c.body])),
+    [[['mm:SA', 'https://matchmaker/release', rel.body]], [['mm:LOCAL', 'https://matchmaker/release', rel.body]], [['mm:SA', 'https://matchmaker/release', rel.body]]],
+  );
 });
 
 test('deliverCall: an answer below 500 that is not a 2xx is done too, with one ALERT line that carries the body', async () => {

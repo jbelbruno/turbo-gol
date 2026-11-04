@@ -13,16 +13,27 @@
  * match a community node earned points for (MatchEntry.ledger) credits its operator's account, and
  * a failed verification (MatchEntry.freeze) freezes it, in the same transaction that settles the
  * match. A project node never earns and never freezes: the control plane sets neither for it.
+ *
+ * The region a ranked match reports (ranked_matches.region) is the assignment's: the host region
+ * the matchmaker asked the control plane for, which is where the match is hosted (SA when
+ * do_disabled sent it to a node of SA), the same meaning a MatchDO's report has. Its locks are
+ * not there but in the queue hub, whatever that region: the /release goes to HUB_TARGET.
  */
 import type { MatchEntry, MatchOutcome } from '../../nodes/control-plane/controlPlane';
 import type { MatchAssignment } from '../../nodes/shared/controlProtocol';
 import type { HostCredit } from './accountStore';
 import { INTERNAL_HEADER, internalSecret } from './auth';
-import { withTimeout } from './env';
+import { queueHubOf, withTimeout } from './env';
 import type { Env } from './env';
 
-/** The target of AccountsDO calls (its one object is 'accounts-v1'); a matchmaker's is its object name, 'mm:<region>'. */
+/** The target of AccountsDO calls (its one object is 'accounts-v1'); a matchmaker's is HUB_TARGET or its object name, 'mm:<region>'. */
 export const ACCOUNTS_TARGET = 'accounts';
+/**
+ * The queue hub's matchmaker, named only at delivery ('mm:' + queueHubOf(env): REGION_OVERRIDE in
+ * development and the tests): it formed every node match and holds its locks and its solo row.
+ * A row written before it names 'mm:<region>', which for a node match was always 'mm:SA'.
+ */
+export const HUB_TARGET = 'hub';
 /** A target that has not answered in this long is tried again later: one stuck object must not hold up the outbox. */
 export const DELIVERY_TIMEOUT_MS = 10_000;
 /** AccountsDO keeps this much of a cancel's reason. */
@@ -31,7 +42,7 @@ const REASON_MAX = 32;
 /** One POST of an outcome: an outbox row. */
 export interface OutcomeCall {
   matchId: string;
-  /** ACCOUNTS_TARGET, or 'mm:<region>' (that region's MatchmakerDO). */
+  /** ACCOUNTS_TARGET, HUB_TARGET (the queue hub's MatchmakerDO), or 'mm:<region>' (that region's: a row from before HUB_TARGET). */
   target: string;
   path: '/ranked-result' | '/ranked-cancel' | '/host-credit' | '/host-freeze' | '/release';
   /** The JSON body, as the outbox stores it and as it is sent. */
@@ -44,8 +55,8 @@ export interface OutcomeCall {
  * assignment (a void outcome carries neither): its noShows get an abandon, nobody is rated. A
  * casual match, void or not, has nothing to record. `rewards` (the settled MatchEntry's ledger and
  * freeze, and when it settled): its points to /host-credit, its freeze to /host-freeze. Every match
- * then frees its players' locks in the matchmaker of its region, so they can queue again.
- * `playerIds`: the match's humans.
+ * then frees its players' locks in the queue hub (HUB_TARGET, never the region's own matchmaker),
+ * so they can queue again. `playerIds`: the match's humans.
  */
 export function outcomeCalls(o: MatchOutcome, assign: MatchAssignment, playerIds: readonly string[], rewards: Partial<Pick<MatchEntry, 'ledger' | 'freeze' | 'doneAt'>> = {}): OutcomeCall[] {
   const matchId = o.matchId;
@@ -68,7 +79,7 @@ export function outcomeCalls(o: MatchOutcome, assign: MatchAssignment, playerIds
     const body = { userId: f.operatorId, reason: f.reason, at: rewards.doneAt ?? 0 };
     calls.push({ matchId, target: ACCOUNTS_TARGET, path: '/host-freeze', body: JSON.stringify(body) });
   }
-  calls.push({ matchId, target: 'mm:' + assign.region, path: '/release', body: JSON.stringify({ matchId, playerIds }) });
+  calls.push({ matchId, target: HUB_TARGET, path: '/release', body: JSON.stringify({ matchId, playerIds }) });
   return calls;
 }
 
@@ -86,18 +97,20 @@ function oneLine(s: string, max: number): string {
  * header signed with an older JWT_SECRET), so it would refuse every retry too, and a row retried
  * forever would keep the NodeRegistryDO's alarm running for nothing. The line carries the body, so
  * a maintainer can apply the result by hand. A 5xx, a network error or no answer within
- * `timeoutMs` is retried: the target is down, being deployed or stuck.
+ * `timeoutMs` is retried: the target is down, being deployed or stuck. HUB_TARGET is the queue
+ * hub's object as this env names it.
  */
 export async function deliverCall(
-  env: Pick<Env, 'ACCOUNTS' | 'MATCHMAKER' | 'JWT_SECRET'>,
+  env: Pick<Env, 'ACCOUNTS' | 'MATCHMAKER' | 'JWT_SECRET' | 'REGION_OVERRIDE'>,
   call: OutcomeCall,
   log: (msg: string) => void = (msg) => console.log(msg),
   timeoutMs: number = DELIVERY_TIMEOUT_MS,
 ): Promise<Delivery> {
-  const where = `match ${call.matchId.slice(0, 8)}, ${call.target}`;
+  const target = call.target === HUB_TARGET ? 'mm:' + queueHubOf(env) : call.target;
+  const where = `match ${call.matchId.slice(0, 8)}, ${target}`;
   const dropped = (status: string, why: string) => log(`ALERT outbox ${call.path} ${status} (${where}), dropped: ${why}; body ${oneLine(call.body, 600)}`);
-  const accounts = call.target === ACCOUNTS_TARGET;
-  if (!accounts && !call.target.startsWith('mm:')) {
+  const accounts = target === ACCOUNTS_TARGET;
+  if (!accounts && !target.startsWith('mm:')) {
     dropped('-', 'unknown target');
     return 'done';
   }
@@ -105,7 +118,7 @@ export async function deliverCall(
   let res: Response;
   try {
     const ns = accounts ? env.ACCOUNTS : env.MATCHMAKER;
-    const stub = ns.get(ns.idFromName(accounts ? 'accounts-v1' : call.target));
+    const stub = ns.get(ns.idFromName(accounts ? 'accounts-v1' : target));
     const headers = { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET), 'content-type': 'application/json' };
     sent = stub.fetch(`https://${accounts ? 'accounts' : 'matchmaker'}${call.path}`, { method: 'POST', headers, body: call.body });
     res = await withTimeout(sent, timeoutMs);

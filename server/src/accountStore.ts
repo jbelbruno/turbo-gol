@@ -23,7 +23,9 @@
  *                    family that is no longer its live one comes back only from a copy: the family is
  *                    revoked (rotate 'reused'), except within REFRESH_RACE_MS of its rotation (two tabs).
  *   ratings          (user, playlist, season) -> mu, sigma, games, wins, losses, peak
- *   ranked_matches   one row per reported / cancelled ranked match (idempotency + results)
+ *   ranked_matches   one row per reported / cancelled ranked match (idempotency + results); its
+ *                    region is the host region, where the match was hosted (its humans' majority,
+ *                    or SA when do_disabled sent it to a node of SA), on a MatchDO or a node alike
  *   ranked_players   per player of a ranked match: before / after, outcome, ban started
  *   abandons, bans   ranked abandon history (24 h window) and the queue ban it causes
  *   ranked_locks     a player's live ranked match (one at a time across every region matchmaker)
@@ -1030,6 +1032,8 @@ export class AccountStore {
       peak_mmr INTEGER NOT NULL DEFAULT 0, last_played INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, playlist, season))`);
     s.exec('CREATE INDEX IF NOT EXISTS ratings_board ON ratings(playlist, season, mu)');
+    // region: the host region (MatchDO's record host, a node match's assignment region). A MatchDO
+    // row written before November 2026's regional placement may name the queue hub instead.
     s.exec(`CREATE TABLE IF NOT EXISTS ranked_matches (
       match_id TEXT PRIMARY KEY, playlist TEXT NOT NULL, region TEXT NOT NULL, status TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '', blue INTEGER NOT NULL DEFAULT 0, red INTEGER NOT NULL DEFAULT 0,
