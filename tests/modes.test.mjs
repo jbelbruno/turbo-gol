@@ -87,3 +87,27 @@ test('the action zone per tab: search, the searching panel on its own tab, sign 
   assert.equal(M.actionKind({ ...a, tab: 'ai', searching: 'casual' }), 'play');
   assert.equal(M.actionKind({ ...a, tab: 'lobbies' }), 'lobbies');
 });
+
+test("round 2: the panel's '· 1 in {region}' is the answer's region; VS AI's line while searching shows on every layout; the wait's sheet, the HUD strip and the touch card", async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = (p) => readFile(new URL(p, import.meta.url), 'utf8');
+  const modes = await src('../src/ui/screens/modes.ts');
+  assert.match(modes, /const here = answerRegion\(v\.waitRegion\);\s*if \(wl\.people !== null\) setText\(sPeople, peopleText\(wl\.people, here !== null \? regionName\(here\) : null\)\);/, "the hub's home, never the client's region");
+  assert.match(modes, /line\.classList\.toggle\('mn-act-line-wait', s === 'play' && running !== null\);/);
+  const wait = await src('../src/ui/styles/screens/wait.css');
+  assert.match(wait, /html\[data-shell='rail'\] \.mn-act-line\.mn-act-line-wait:not\(\[hidden\]\),\s*html\[data-shell='tv'\] \.mn-act-line\.mn-act-line-wait:not\(\[hidden\]\) \{\s*display: block;/, 'the rail and a TV hide the other lines (modes.css)');
+  // "While you search": its lines in sentence case (not the buttons' capitals), no room for absent actions.
+  assert.match(wait, /\.mn-wait-text small \{[^}]*text-transform: none;/);
+  assert.match(wait, /\.mn-sheet-wait \.mn-sheet-actions \{\s*display: none;/);
+  const sheet = await src('../src/ui/screens/waitSheet.ts');
+  assert.match(sheet, /h\('span\.mn-wait-text', null, h\('b', null, t\(c\.title\)\), h\('small', null, t\(c\.sub\)\)\)/);
+  assert.match(sheet, /actions: \[\]/, 'Back and STAY IN THE MENU are the way out');
+  // The HUD strip: bounded by the right edge (never past it), and the touch card moves under it.
+  const strip = /\.hud-search \{([^}]*)\}/.exec(wait)[1];
+  assert.match(strip, /right: calc\(var\(--safe-right\) \+ clamp\(12px, 2\.2vw, 36px\)\);/);
+  assert.match(strip, /width: fit-content;/);
+  assert.doesNotMatch(strip, /max-width: calc\(100vw/);
+  assert.match(wait, /\.hud-root\.hud-searching ~ \.tc-root \.tc-cards \{\s*top: max\(/);
+  const hud = await src('../src/render/Hud.ts');
+  assert.match(hud, /this\.root\.classList\.toggle\('hud-searching', text !== null\);/);
+});

@@ -57,7 +57,7 @@ import { createAndShare } from './lobby';
 import { spacedCode } from './lobbyModel';
 import { FORMATS, MODE_TABS, actionKind, botsCountdown, botsSegments, formatOf, formatsOf, isModeTab, modesOf, stepTab } from './modesModel';
 import type { ActionKind, Format, ModeTab } from './modesModel';
-import { waitLines } from './searchModel';
+import { answerRegion, waitLines } from './searchModel';
 import { estimateText, overrideText, peopleText, reachText } from './searchText';
 import { dropDetour, keepDetour } from './accountLinksModel';
 
@@ -410,7 +410,9 @@ export function modesScreen(menu: Menu): Screen {
       const wl = waitLines({ kind, since: v.since, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, retrying: v.retrying === true, times: menu.cfg?.queue ?? null }, now);
       setText(sEstimate, estimateText(wl.estimate));
       setHidden(sPeople, wl.people === null);
-      if (wl.people !== null) setText(sPeople, peopleText(wl.people, regionText(v.region)));
+      // "· 1 in South America": the region the answer counts (the hub's home), never the client's guess.
+      const here = answerRegion(v.waitRegion);
+      if (wl.people !== null) setText(sPeople, peopleText(wl.people, here !== null ? regionName(here) : null));
       setText(sReach, reachText(wl.reach));
       const warn = overrideText(wl.override);
       setHidden(sWarn, warn === null);
@@ -465,6 +467,9 @@ export function modesScreen(menu: Menu): Screen {
       setText(summary, sum);
       setText(line, lineText);
       setHidden(line, lineText === '');
+      // VS AI's PLAY while a search runs: its line says the match has no time limit on every layout
+      // (the rail and a TV hide the zone's other lines).
+      line.classList.toggle('mn-act-line-wait', s === 'play' && running !== null);
       setText(goLabel, label);
       if (go2.hidden === second) {
         // Its focus goes back to the primary, never to the page's body.

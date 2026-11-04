@@ -1,8 +1,9 @@
 /* Waiting for a match (the modes redesign, November 2026): MODOS' searching panel's estimate and
-   its "While you wait: VS BOTS · TRAIN", SALAS' second button, the Sala's line for a lone host,
-   "While you search" (screens/waitSheet.ts), and the strip the match HUD (render/Hud.ts setSearch)
-   and the training HUD (render/TrainingHud.ts setSearch) show while the player plays waiting.
-   Colours, font sizes and radii as tokens only. */
+   its "While you wait: VS BOTS · TRAIN", VS AI's line while searching, SALAS' second button, the
+   Sala's line for a lone host, "While you search" (screens/waitSheet.ts), and the strip the match
+   HUD (render/Hud.ts setSearch; the touch card makes room for it) and the training HUD
+   (render/TrainingHud.ts setSearch) show while the player plays waiting. Colours, font sizes and
+   radii as tokens only. */
 
 /* ---- MODOS' searching panel ---- */
 .mn-act-est {
@@ -55,6 +56,13 @@ html[data-shell='tv'] .mn-act-est {
   display: none;
 }
 
+/* VS AI's PLAY while a search runs: its line (the match has no time limit) on every layout, the
+   sideways phone's rail and a TV too, which hide the zone's other lines (modes.css). */
+html[data-shell='rail'] .mn-act-line.mn-act-line-wait:not([hidden]),
+html[data-shell='tv'] .mn-act-line.mn-act-line-wait:not([hidden]) {
+  display: block;
+}
+
 /* ---- "While you search" ---- */
 .mn-wait-option .mn-icon {
   flex: none;
@@ -62,13 +70,59 @@ html[data-shell='tv'] .mn-act-est {
   height: 1.5rem;
 }
 
+/* Each choice: its name in the buttons' capitals, its line under it in sentence case. */
+.mn-wait-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.mn-wait-text small {
+  font-family: var(--font-body);
+  font-size: var(--t-small);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-2);
+}
+
+/* No actions under the choices (Back and STAY IN THE MENU are the way out): no room for them. */
+.mn-sheet-wait .mn-sheet-actions {
+  display: none;
+}
+
+/* A phone held sideways: the three choices fit the sheet without a scroll. */
+html[data-shell='rail'] .mn-sheet-wait {
+  padding-top: 1rem;
+  padding-bottom: calc(1rem + var(--safe-bottom));
+}
+
+html[data-shell='rail'] .mn-sheet-wait .mn-sheet-title {
+  margin-bottom: 0.25rem;
+}
+
+html[data-shell='rail'] .mn-wait-list {
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+html[data-shell='rail'] .mn-wait-option {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 /* ---- The HUD's strip under the scorebug, and the training panel's line ---- */
+/* Its top under the scorebug, and the touch card's top under it (Hud.ts hud-searching). */
 .hud-search {
   position: absolute;
   z-index: var(--z-score);
   top: calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 14px);
   left: calc(var(--safe-left) + clamp(12px, 2.2vw, 36px));
-  max-width: calc(100vw - 32px);
+  /* Bounded by the right edge (a long line wraps): never past it on a narrow screen. */
+  right: calc(var(--safe-right) + clamp(12px, 2.2vw, 36px));
+  width: fit-content;
   padding: 4px 12px;
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
@@ -86,6 +140,12 @@ html[data-shell='tv'] .mn-act-est {
 
 .hud-search-warn {
   color: var(--warn);
+}
+
+/* The first match's touch card (input/touch.css .tc-cards, high in the middle) under the strip
+   while it shows: on a phone held sideways both sit at about the same height. */
+.hud-root.hud-searching ~ .tc-root .tc-cards {
+  top: max(calc(var(--safe-top) + clamp(52px, 15vh, 120px)), calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 14px + 36px));
 }
 
 .trn-search {
