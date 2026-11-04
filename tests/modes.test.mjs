@@ -111,3 +111,32 @@ test("round 2: the panel's '· 1 in {region}' is the answer's region; VS AI's li
   const game = await src('../src/game/Game.ts');
   assert.match(game, /const card = this\.touch !== null && this\.touch\.cardsUp;\s*this\.hud\.setSearch\(this\.menuShown \|\| card \? null : h\.text, h\.warn\);/);
 });
+
+const srcText = async (p) => (await import('node:fs/promises')).readFile(new URL(p, import.meta.url), 'utf8');
+
+test("final review: a finger's pause without the search strip over PAUSE, and with room for QUIT's three lines", async () => {
+  const wait = await srcText('../src/ui/styles/screens/wait.css');
+  // Phone held sideways: the strip [18,63]-[467,90] hid the top of the plate's PAUSE [362,77]-[450,120].
+  assert.match(wait, /\.tg-touch \.hud-pausing \.hud-search \{\s*display: none;/);
+  // QUIT · the search goes on · hold to quit: 59 px of lines in a 56 px button; 76 px, the two above it 20 px up.
+  assert.match(wait, /\.tg-touch \.hud-pause-menu\.hud-pause-menu-tall > \.hud-pause-quit \{\s*height: 76px;/);
+  assert.match(wait, /\.tg-touch \.hud-pause-menu\.hud-pause-menu-tall > :nth-last-child\(2\):not\(\.hud-pause-primary\):not\(\.hud-pause-row\) \{\s*bottom: calc\(var\(--safe-bottom\) \+ 112px\);/);
+  assert.match(wait, /\.tg-touch \.hud-pause-menu\.hud-pause-menu-tall > :nth-last-child\(3\):not\(\.hud-pause-primary\):not\(\.hud-pause-row\) \{\s*bottom: calc\(var\(--safe-bottom\) \+ 180px\);/, "RESUME keeps BOOST's place");
+  const hud = await srcText('../src/render/Hud.ts');
+  assert.match(hud, /menu\.classList\.toggle\('hud-pause-menu-tall', entries\.some\(\(e\) => e\.kind === 'quit' && e\.hold === true && \(e\.sub\?\.\(\) \?\? null\) !== null\)\);/, 'only a held QUIT with its own line');
+});
+
+test("final review: a TV's wait choices name themselves in the buttons' size, CREATE PRIVATE LOBBY in the type scale", async () => {
+  const wait = await srcText('../src/ui/styles/screens/wait.css');
+  // A TV: CONTRA BOTS 15 px under its 36 px line; now the buttons' --t-heading (40 px there).
+  assert.match(wait, /html\[data-shell='tv'\] \.mn-wait-text b \{\s*font-size: var\(--t-heading\);/);
+  assert.match(wait, /html\[data-shell='tv'\] \.mn-act-go2 \{\s*font-size: var\(--t-body\);/, '__uiFit flagged it at 15 px');
+});
+
+test("final review: a computer's toasts sit in the hint bar's band, off a screen's last row", async () => {
+  // They covered the Sala's ... and Training's How to play row, and poked past the content's edge.
+  const comp = await srcText('../src/ui/styles/components.css');
+  assert.match(comp, /html\[data-shell='bar'\] \.mn-toasts \{\s*right: calc\(var\(--safe-right\) \+ 3rem\);\s*bottom: calc\(var\(--safe-bottom\) \+ 0\.25rem\);/);
+  const shell = await srcText('../src/ui/styles/shell.css');
+  assert.match(shell, /\.mn-hint \{\s*grid-area: hint;[^}]*height: calc\(2\.5rem \+ var\(--safe-bottom\)\);\s*padding: 0 calc\(3rem \+ var\(--safe-right\)\)/, "the band the toast sits in, and the content's 3rem edge");
+});

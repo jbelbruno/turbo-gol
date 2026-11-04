@@ -68,7 +68,7 @@ import { h, setChildren } from './dom';
 import { FocusMemory, FocusNav, heldOver, isEditable, isEditing, navKey, setEditing } from './nav';
 import { installKeyboardInset } from './keyboard';
 import type { NavDir, NavZone } from './nav';
-import { finePointer, resetPageZoom, tapGuarded } from './device';
+import { finePointer, resetPageZoom, tapGuardSince, tapGuarded } from './device';
 import { keypadBox, keypadSpec, keypadWrite } from './components/keypad';
 import { channelStep } from './channelKeys';
 import type { KeypadView } from './components/keypad';
@@ -447,7 +447,9 @@ export class Menu {
   /** performance.now() when the rail and the top bar last changed shape (a stacked screen came or went: ‹ and the crumbs). */
   private chromeMovedAt = -Infinity;
   private chromeStacked = false;
-  /** The last finger / pen down and up (performance.now()), for the tap guard. */
+  /** performance.now() when the menus last came up from hidden (over a match): no finger down before it presses anything. */
+  private shownAt = -Infinity;
+  /** The last finger / pen down (anywhere: the HUD's too) and up (performance.now()), for the tap guard. */
   private touchDownAt = -Infinity;
   private touchUpAt = -Infinity;
   /**
@@ -736,6 +738,7 @@ export class Menu {
     this.firstShow = false;
     if (ui !== null && this.factories.has(ui)) screenId = ui; // #ui=<screen>: scripts/ui-fit.mjs
     if (screenId !== undefined) this.open(screenId, true);
+    if (!this.visibleNow) this.shownAt = performance.now();
     this.root.hidden = false;
     this.root.parentElement?.classList.add('mn-open'); // menu.css hides the in-game HUD behind it
     this.visibleNow = true;
@@ -1200,17 +1203,22 @@ export class Menu {
    * next screen has under it; a modal that came up under a finger). The bars stay put across a
    * mount, so a second tap on them is meant, but for the rail and the top bar when a stacked
    * screen came or went (their ‹ and crumbs moved the items: a double tap on a rail item would
-   * press the one that slid under the finger). Trusted pointer clicks only: Enter / Space and the
-   * controller's A (FocusNav.accept: el.click()) always go through.
+   * press the one that slid under the finger). Nor is a tap whose finger went down before the
+   * menus came up over a match (device.ts tapGuardSince: QUIT held in the pause, lifted over the
+   * rail's info button), so a finger is noted anywhere on the page, the HUD included. Trusted
+   * pointer clicks only: Enter / Space and the controller's A (FocusNav.accept: el.click()) always
+   * go through.
    */
   private installTapGuard(): void {
     const finger = (e: Event): boolean => {
       const p = (e as PointerEvent).pointerType;
       return p === 'touch' || p === 'pen';
     };
-    this.root.addEventListener('pointerdown', (e) => {
-      this.pressing = true;
+    window.addEventListener('pointerdown', (e) => {
       if (finger(e)) this.touchDownAt = performance.now();
+    }, true);
+    this.root.addEventListener('pointerdown', () => {
+      this.pressing = true;
     }, true);
     for (const type of ['pointerup', 'pointercancel']) {
       window.addEventListener(type, () => {
@@ -1227,7 +1235,7 @@ export class Menu {
         if (!e.isTrusted || (e as MouseEvent).detail === 0) return; // a key's or FocusNav's click
         const target = e.target;
         const bar = target instanceof Element ? target.closest('.mn-rail, .mn-tabbar, .mn-top') : null;
-        const since = bar === null ? this.mountedAt : bar.classList.contains('mn-tabbar') ? -Infinity : this.chromeMovedAt;
+        const since = tapGuardSince(bar === null ? null : bar.classList.contains('mn-tabbar') ? 'tabbar' : 'chrome', { mountedAt: this.mountedAt, chromeMovedAt: this.chromeMovedAt, shownAt: this.shownAt });
         const p = (e as PointerEvent).pointerType;
         // Older engines' clicks are plain MouseEvents: a finger's when one just lifted.
         const byFinger = p === 'touch' || p === 'pen' || (p === undefined && performance.now() - this.touchUpAt < 800);

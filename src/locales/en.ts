@@ -215,6 +215,7 @@ export default {
   // The card over Inicio's tiles after a guest's offline match (VER SALAS, CREAR CUENTA, close)
   'home.nextTitle': 'Now, with people?',
   'home.nextLine': 'Join a public lobby, or make an account to play Casual.',
+  'home.nextLineTv': 'Sign in with your phone to join lobbies and play Casual.',
   'home.nextRooms': 'SEE LOBBIES',
   'home.nextAccount': 'CREATE ACCOUNT',
   'home.nextClose': 'Close',

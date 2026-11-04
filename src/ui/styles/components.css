@@ -602,6 +602,14 @@ html[data-shell='rail'] .mn-toasts {
   bottom: calc(var(--safe-bottom) + 0.75rem);
 }
 
+/* A computer: in the hint bar's band, its right edge on the content's, over the footer's links for
+   its few seconds rather than over a screen's last row (the Sala's START and its ..., Training's
+   How to play: they end above the stage's bottom padding, which the toast does not reach). */
+html[data-shell='bar'] .mn-toasts {
+  right: calc(var(--safe-right) + 3rem);
+  bottom: calc(var(--safe-bottom) + 0.25rem);
+}
+
 html[data-shell='tabs'] .mn-toasts {
   right: 1rem;
   bottom: calc(var(--safe-bottom) + 6.5rem);

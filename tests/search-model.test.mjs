@@ -140,6 +140,22 @@ test("the clock from the server once it said so: the answer's waitedMs counted b
   assert.equal(S.searchStart(1000, wait({ waitedMs: 0 }), 200_000), 200_000);
 });
 
+test('final review: no clock before the first POST (the terms sheet, the sign-in up), then from that POST until the answer says the server\'s', () => {
+  // JUGAR AHORA at 1_000; the terms sheet stays up 25 s: no POST has left, so 0:00 and the full 5:00.
+  const since = S.searchStart(1000, null, 0, 0, 26_000);
+  assert.equal(since, 26_000, 'the clock waits for the POST');
+  const l = S.waitLines(view({ since, wait: null }), 26_000);
+  assert.equal(l.elapsedMs, 0, '0:00, not 0:25');
+  assert.equal(l.bots.left, 300_000, 'Bots in 5:00 at most, not 4:35');
+  assert.deepEqual(l.estimate, { kind: 'bots', ms: 300_000 });
+  // ACCEPT AND PLAY at 26_000: the first POST leaves at 26_050; its round trip counts from there.
+  assert.equal(S.searchStart(1000, null, 0, 26_050, 27_000), 26_050);
+  // Its answer (waitedMs 30, at 26_100): the server's start, the same moment (no jump back to 0:00).
+  assert.equal(S.searchStart(1000, wait({ waitedMs: 30 }), 26_100, 26_050, 27_000), 26_070);
+  // Without a `now` (no search queueing): the local start, as before.
+  assert.equal(S.searchStart(1000, null, 0, 0), 1000);
+});
+
 test("'· 1 in South America' names the answer's region (the hub's normalized home), never the client's guess; an unknown one names none", () => {
   assert.equal(S.answerRegion('EU'), 'EU');
   assert.equal(S.answerRegion('SA'), 'SA');

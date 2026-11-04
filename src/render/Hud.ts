@@ -985,6 +985,9 @@ export class Hud {
       }
       buttons.push(b);
     }
+    // A held QUIT with its own line (the search goes on, ranked's abandon): three lines, a taller
+    // button on a finger's dock (styles/screens/wait.css).
+    menu.classList.toggle('hud-pause-menu-tall', entries.some((e) => e.kind === 'quit' && e.hold === true && (e.sub?.() ?? null) !== null));
     // The focus starts on the first entry (RESUME), as before; a finger's pause focuses nothing (no ring).
     if (buttons.length > 0 && !touchMode()) this.pauseNav.focus(buttons[0]);
   }

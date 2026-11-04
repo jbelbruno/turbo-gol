@@ -4,7 +4,7 @@
  * (all five), Inicio's hero (the clock and the estimate), the HUD strip while the player plays
  * waiting (src/game/Game.ts: the clock and the estimate, or the override).
  *
- *   1. the clock, local, from the search's start;
+ *   1. the clock, local, from the search's start (its first POST: searchStart);
  *   2. the estimate: "Match in ~2 min" (another player is expected first), "Bots in 3:37 at most"
  *      (Casual's online bots match comes first), "No estimate yet";
  *   3. the people: "Only you for now", "3 people searching" (+ " · 1 in South America" when they differ);
@@ -32,11 +32,16 @@ export const WAIT_SHEET_AFTER_MS = 1_000;
 
 /**
  * When the search started, for every clock that shows it: the server's (an answer's `waitedMs`,
- * counted back from when it arrived) once there is one, else the local start. After a restored or
- * restarted search (a reload, a long drop) the clock and the 5:00 box then never disagree. Pure.
+ * counted back from when it arrived) once there is one, else when its first POST left (`postedAt`,
+ * NetClient.queuePostedAt), else `now`: before that POST (the terms sheet or the sign-in still up)
+ * the clock and the 5:00 box stand at 0:00 and 5:00 rather than count a wait the server has not
+ * started. After a restored or restarted search (a reload, a long drop) the clock and the 5:00 box
+ * then never disagree. `now` left out: the local start. Pure.
  */
-export function searchStart(localSince: number, wait: QueueWait | null, waitAt: number): number {
-  return wait !== null ? waitAt - wait.waitedMs : localSince;
+export function searchStart(localSince: number, wait: QueueWait | null, waitAt: number, postedAt = 0, now = localSince): number {
+  if (wait !== null) return waitAt - wait.waitedMs;
+  if (postedAt > 0) return postedAt;
+  return Math.max(localSince, now);
 }
 
 /** The region a waiting answer counts `searchingHere` in (the hub's normalized home), when it is one of ours. Pure. */
