@@ -7,11 +7,11 @@
 // the leave fan-out. Run from server/: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { M, Q, accountToken, guestToken, hex64, makeHubWorld, pause, pid } from './helpers/hub.mjs';
+import { M, Q, accountToken, guestToken, hex64, makeHubWorld, pause, pid, placementOf } from './helpers/hub.mjs';
 
 const SEC = 1_000;
 const MIN = 60_000;
-const { outcomeCalls } = await import('../src/nodeOutcome.ts');
+const { HUB_TARGET, outcomeCalls } = await import('../src/nodeOutcome.ts');
 
 /**
  * Let `ms` pass while the waiters in `polls` ([id, joinOptions]) keep searching: each POSTs every
@@ -716,9 +716,9 @@ test('A11: the long-poll\'s timer forms a due 5:00 solo match before it answers 
 
 // ---- where it runs (§1.8) -------------------------------------------------------------------------------
 
-test('a node first only for a match hosted SA; an EU-hosted one goes to a MatchDO near Europe; the releases reach the hub', async () => {
+test('a node of the host region first: SA to the SA node; EU with no node there (hosts 0) to a MatchDO near Europe, with one to the EU node; the releases reach the hub', async () => {
   const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true });
-  const [s1, s2, e1, e2] = [pid(), pid(), pid(), pid()];
+  const [s1, s2, e1, e2, e3, e4] = [pid(), pid(), pid(), pid(), pid(), pid()];
   await w.join(s1);
   const sa = await w.join(s2);
   assert.deepEqual([sa.json.node, sa.json.host], [true, 'SA']);
@@ -727,14 +727,21 @@ test('a node first only for a match hosted SA; an EU-hosted one goes to a MatchD
   await w.join(e1, { home: 'EU' });
   const eu = await w.join(e2, { home: 'EU' });
   assert.deepEqual([eu.json.node, eu.json.host], [undefined, 'EU']);
-  assert.equal(w.control.of('/internal/place').length, 1, 'never a node for EU');
+  assert.deepEqual(w.control.of('/internal/place').map((c) => c.body.region), ['SA', 'EU'], 'EU asked its own region: no node there');
   assert.deepEqual(w.created()[0].opts, { locationHint: 'weur' });
-  // The MatchDO releases to 'mm:' + its region (the hub's), a node match to 'mm:' + its assignment's region.
-  assert.equal(w.created()[0].body.region, 'SA');
-  const calls = outcomeCalls({ kind: 'void', ranked: false, reason: 'x', players: [], noShows: [] }, { region: place.region, mode: '2v2' }, [s1, s2]);
-  assert.equal(calls.at(-1).target, 'mm:SA');
+  // The MatchDO releases to 'mm:' + its region (the hub's) and reports its host; a node match's release goes to the hub whatever its region.
+  assert.deepEqual([w.created()[0].body.region, w.created()[0].body.host], ['SA', 'EU']);
+  const calls = outcomeCalls({ kind: 'void', ranked: false, reason: 'x', players: [], noShows: [] }, { region: 'EU', mode: '2v2' }, [s1, s2]);
+  assert.equal(calls.at(-1).target, HUB_TARGET);
   assert.deepEqual((await w.release(sa.json.matchId, [s1, s2])).json, { ok: true, released: 2 });
   assert.equal((await w.stats()).nodeLocks, 0);
+  // An EU node comes online; once EU's minute of back-off is over the next EU pair goes to it.
+  w.control.place = (body) => ({ placement: placementOf(body), hosts: 1 });
+  w.advance(M.NO_HOSTS_BACKOFF_MS);
+  await w.join(e3, { home: 'EU' });
+  const eu2 = await w.join(e4, { home: 'EU' });
+  assert.deepEqual([eu2.json.node, eu2.json.host], [true, 'EU']);
+  assert.equal(w.control.of('/internal/place').at(-1).body.region, 'EU');
 });
 
 // ---- ranked (§1.7) -----------------------------------------------------------------------------------

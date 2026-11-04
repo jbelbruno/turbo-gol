@@ -643,6 +643,11 @@ All notable changes to Turbogol are documented here. The format follows
   solid tiles over it; every other menu keeps the solid page.
 - Language moved to PROFILE (until Settings has it), and says before you pick that the game
   reloads for a few seconds.
+- Regional placement: a Casual or Competitive match asks first for a community node of its host
+  region (its players' majority), never one of another region, and goes to a server near that
+  region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
+  of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
+  A node match's release goes to the one queue, and a ranked result always names the host region.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,

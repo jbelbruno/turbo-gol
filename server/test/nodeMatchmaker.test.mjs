@@ -1,6 +1,7 @@
 // Matches on community nodes, the Worker's side, without workerd: the matchmaker's node hook
-// (server/src/MatchmakerDO.ts behind nodes_on: placement, the fallbacks to a MatchDO, the room cap,
-// do_disabled, the ranked lock, node locks verified and quit through the control plane, and what
+// (server/src/MatchmakerDO.ts behind nodes_on: placement on a node of the host region, the fallbacks
+// to a MatchDO, the room cap, do_disabled (the host region's node, then SA's), the ranked lock, the
+// release of a node match in the queue hub, node locks verified and quit through the control plane, and what
 // polls, leaves and the sweep do while a placement is in flight) and the
 // Worker's /api/queue, /api/rejoin and /api/leave around them (server/src/index.ts). The
 // NodeRegistryDO is a fake answering its internal routes (server/src/nodeApi.ts); FLAGS, MATCH,
@@ -579,14 +580,118 @@ test('no node free: a MatchDO; hosts 0 also stops asking for a minute, a busy no
   assert.equal(created(h).length, 4);
 });
 
-test('a match hosted outside SA never asks for a placement: its MatchDO is created with its region\'s hint', async () => {
+// ---- regional placement: a node of the host region first ------------------------------------------
+
+const EU = { home: 'EU' };
+
+/** The control plane with a node in `regions` only: a placement elsewhere finds hosts 0. */
+function nodesIn(h, ...regions) {
+  h.nodes.place = (body) => (regions.includes(body.region) ? { body: { placement: placementOf(body), hosts: 1 } } : { body: { placement: null, hosts: 0 } });
+}
+
+test('a match hosted outside SA asks a node of its own region: two EU accounts in a canary get the EU node (host EU), also with the global cap full', async () => {
+  for (const rooms of [0, M.MAX_ACTIVE_ROOMS]) {
+    const h = await makeMm({ flags: { nodes_on: `${A},${B}` }, rooms });
+    nodesIn(h, 'EU');
+    assert.equal((await h.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+    const r = await h.join(B, 'server', '1v1', EU);
+    assert.deepEqual([r.json.status, r.json.node, r.json.host], ['matched', true, 'EU'], 'rooms ' + rooms);
+    assert.deepEqual(h.nodes.of('/internal/place').map((c) => c.body.region), ['EU'], 'asked once, for EU only');
+    assert.equal(created(h).length, 0, 'no MatchDO');
+    assert.equal((await h.stats()).nodeLocks, 2);
+  }
+});
+
+test('a ranked match hosted outside SA: the EU node too, with EU in the placement (the region its result names)', async () => {
+  const h = await makeMm({ rooms: M.MAX_ACTIVE_ROOMS });
+  nodesIn(h, 'EU');
+  assert.equal((await h.join(A, 'ranked', '1v1', EU)).json.status, 'waiting');
+  const r = await h.join(B, 'ranked', '1v1', EU);
+  assert.deepEqual([r.json.status, r.json.node, r.json.ranked, r.json.host], ['matched', true, true, 'EU']);
+  const place = h.nodes.of('/internal/place');
+  assert.deepEqual(place.map((c) => [c.body.region, c.body.ranked]), [['EU', true]]);
+  assert.deepEqual(h.accounts.calls.filter((c) => c.path === '/ranked-lock').map((c) => c.body.region), ['SA'], 'the ranked lock names the hub, where the match is locked');
+});
+
+test('no EU node (hosts 0): the EU match goes to a MatchDO near EU, its region the hub\'s, its host EU; EU is not asked again for a minute, SA still is', async () => {
   const h = await makeMm();
-  assert.equal((await h.join(A, 'server', '1v1', { home: 'EU' })).json.status, 'waiting');
-  const r = await h.join(B, 'server', '1v1', { home: 'EU' });
+  nodesIn(h, 'SA');
+  assert.equal((await h.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+  const r = await h.join(B, 'server', '1v1', EU);
   assert.deepEqual([r.json.status, r.json.node, r.json.host], ['matched', undefined, 'EU']);
-  assert.equal(h.nodes.calls.length, 0);
+  assert.deepEqual(h.nodes.of('/internal/place').map((c) => c.body.region), ['EU']);
   assert.deepEqual(created(h)[0].opts, { locationHint: 'weur' });
-  assert.equal(created(h)[0].body.region, 'SA', 'its release comes back to the hub');
+  assert.deepEqual([created(h)[0].body.region, created(h)[0].body.host], ['SA', 'EU'], 'its release comes back to the hub; its ranked result would name EU');
+  await h.call('/release', { matchId: r.json.matchId, playerIds: [A, B] });
+  // Within the minute: EU forms without asking, SA's pair still asks (the back-off is per region).
+  h.setTime(h.time() + M.NO_HOSTS_BACKOFF_MS - 1);
+  assert.equal((await h.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+  const again = await h.join(B, 'server', '1v1', EU);
+  assert.deepEqual([again.json.node, again.json.host], [undefined, 'EU']);
+  assert.equal(h.nodes.of('/internal/place').length, 1, 'EU not asked within its minute');
+  assert.equal(await pairOnNode(h, C, 'c0ffee00c0ffee00'), true, 'an SA pair still goes to the SA node');
+  assert.deepEqual(h.nodes.of('/internal/place').map((c) => c.body.region), ['EU', 'SA']);
+  await h.call('/release', { matchId: again.json.matchId, playerIds: [A, B] });
+  h.setTime(h.time() + 1);
+  nodesIn(h, 'SA', 'EU');
+  assert.equal((await h.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+  assert.deepEqual([(await h.join(B, 'server', '1v1', EU)).json.node], [true], 'a minute later EU is asked again');
+});
+
+test('NA, OC and AF (no node there today): one placement asked a minute, hosts 0, then MatchDOs with their own hints', async () => {
+  for (const [home, hint] of [['NA', 'enam'], ['OC', 'oc'], ['AF', 'afr']]) {
+    const h = await makeMm();
+    nodesIn(h, 'SA');
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await h.join(A, 'server', '1v1', { home })).json.status, 'waiting');
+      const r = await h.join(B, 'server', '1v1', { home });
+      assert.deepEqual([r.json.node, r.json.host], [undefined, home], home);
+      await h.call('/release', { matchId: r.json.matchId, playerIds: [A, B] });
+      h.setTime(h.time() + 10_000);
+    }
+    assert.deepEqual(h.nodes.of('/internal/place').map((c) => c.body.region), [home], home + ': asked once in the minute');
+    assert.deepEqual(created(h).map((c) => c.opts.locationHint), [hint, hint, hint]);
+  }
+});
+
+test('a ranked MatchDO hosted EU: the create body carries host EU (its result and cancel name EU) and the hub as its region (its release)', async () => {
+  const h = await makeMm({ flags: {} });
+  assert.equal((await h.join(A, 'ranked', '1v1', EU)).json.status, 'waiting');
+  const r = await h.join(B, 'ranked', '1v1', EU);
+  assert.deepEqual([r.json.status, r.json.ranked, r.json.host], ['matched', true, 'EU']);
+  assert.deepEqual([created(h)[0].body.region, created(h)[0].body.host, created(h)[0].body.ranked], ['SA', 'EU', true]);
+  const sa = await makeMm({ flags: {} });
+  const [qa] = await sa.pair(A, B, 'ranked');
+  assert.deepEqual([qa.json.host, created(sa)[0].body.region, created(sa)[0].body.host], ['SA', 'SA', 'SA'], 'SA as before');
+});
+
+test('the release of an EU node match reaches the queue hub through the outbox and frees its locks and its solo row', async () => {
+  const O = await import('../src/nodeOutcome.ts');
+  const h = await makeMm();
+  nodesIn(h, 'EU');
+  // A lone EU waiter after 5:00: its solo match on the EU node (a 'solo:' row in the hub).
+  assert.equal((await h.join(C, 'server', '1v1', EU)).json.status, 'waiting');
+  h.setTime(h.time() + Q.SOLO_AFTER_MS);
+  const r = await h.join(C, 'server', '1v1', { ...EU, prefer: '1v1' });
+  assert.deepEqual([r.json.status, r.json.node, r.json.host, r.json.humans], ['matched', true, 'EU', 1]);
+  const place = h.nodes.of('/internal/place')[0].body;
+  assert.equal(place.region, 'EU');
+  const soloKey = 'solo:' + r.json.matchId;
+  assert.equal(h.mm.ctx.storage.map.has(soloKey), true, 'its solo row');
+  assert.equal((await h.stats()).nodeLocks, 1);
+  // The node match settles: the NodeRegistryDO's outbox delivers its /release (outcomeCalls -> deliverCall).
+  const assign = { matchId: r.json.matchId, mode: place.mode, region: 'EU', ranked: false, roster: [{ slot: 0, team: 0, kind: 'player', name: 'P-fedc', playerId: C }], matchLengthSeconds: 300, kickoffSeed: 1, botDifficulty: 'medium', createdAt: h.time() };
+  const calls = O.outcomeCalls({ kind: 'unrated', matchId: r.json.matchId, nodeId: 'node-eu', blue: 1, red: 0, verified: true }, assign, [C]);
+  assert.deepEqual(calls.map((c) => [c.target, c.path]), [[O.HUB_TARGET, '/release']]);
+  const reached = [];
+  const MATCHMAKER = { idFromName: (n) => n, get: (name) => ({ fetch: (url, init) => (reached.push(name), h.mm.fetch(new Request(url, init))) }) };
+  assert.equal(await O.deliverCall({ JWT_SECRET: SECRET, REGION_OVERRIDE: '', ACCOUNTS: {}, MATCHMAKER }, calls[0], (l) => assert.fail(l)), 'done');
+  assert.deepEqual(reached, ['mm:SA'], 'the hub, never mm:EU');
+  assert.equal((await h.stats()).nodeLocks, 0, 'the lock is free');
+  assert.equal(h.mm.ctx.storage.map.has(soloKey), false, 'the solo row is gone');
+  // Released at once, so never played: the hub read its solo row, and the search goes on with its clock.
+  const next = await h.join(C, 'server', '1v1', { ...EU, prefer: '1v1' });
+  assert.deepEqual([next.json.status, next.json.node, next.json.host], ['matched', true, 'EU'], 'a new solo match at once, on the EU node');
 });
 
 // ---- the room cap and do_disabled (D9) ----------------------------------------------------------------
@@ -672,14 +777,6 @@ test('do_disabled with the nodes on, where no node can host (hosts 0): the group
   assert.deepEqual([polled.json.status, polled.json.node], ['matched', true], 'the first long-poll got the match too');
   assert.equal(created(h).length, 0);
 
-  // Waiters of another region: with do_disabled their match is hosted SA (node only), never a MatchDO.
-  const eu = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
-  assert.equal((await eu.join(A, 'server', '1v1', { home: 'EU' })).json.status, 'waiting');
-  const reu = await eu.join(B, 'server', '1v1', { home: 'EU' });
-  assert.deepEqual([reu.json.node, reu.json.host], [true, 'SA']);
-  assert.equal(eu.nodes.of('/internal/place')[0].body.region, 'SA');
-  assert.equal(created(eu).length, 0);
-
   // At the cap without do_disabled: once no node can host, newcomers wait (no 503) and the
   // waiters wait for a free room without asking again.
   const full = await makeMm({ rooms: M.MAX_ACTIVE_ROOMS });
@@ -693,6 +790,50 @@ test('do_disabled with the nodes on, where no node can host (hosts 0): the group
   assert.equal((await full.join(A)).json.wait.busy, true);
   assert.equal(full.nodes.of('/internal/place').length, 1);
   assert.equal(full.flags.reads.filter((n) => n === 'do_disabled').length, fullReads, 'no formation tried at the cap');
+});
+
+test('do_disabled outside SA: a node of the host region first, then one of SA (host SA), never a MatchDO; with neither the group waits busy', async () => {
+  const flags = { nodes_on: '1', do_disabled: '1' };
+  const off = { ...EU, doDisabled: true }; // as the Worker sends it
+  // An EU node free: the EU node.
+  const both = await makeMm({ flags });
+  nodesIn(both, 'EU', 'SA');
+  assert.equal((await both.join(A, 'server', '1v1', off)).json.status, 'waiting');
+  const r1 = await both.join(B, 'server', '1v1', off);
+  assert.deepEqual([r1.json.node, r1.json.host], [true, 'EU']);
+  assert.deepEqual(both.nodes.of('/internal/place').map((c) => c.body.region), ['EU']);
+
+  // No EU node (hosts 0): SA's, the result's host SA; within EU's minute SA is asked straight away.
+  const sa = await makeMm({ flags });
+  nodesIn(sa, 'SA');
+  assert.equal((await sa.join(A, 'server', '1v1', off)).json.status, 'waiting');
+  const r2 = await sa.join(B, 'server', '1v1', off);
+  assert.deepEqual([r2.json.node, r2.json.host], [true, 'SA']);
+  assert.deepEqual(sa.nodes.of('/internal/place').map((c) => c.body.region), ['EU', 'SA']);
+  await sa.call('/release', { matchId: r2.json.matchId, playerIds: [A, B] });
+  sa.setTime(sa.time() + 6_000);
+  assert.equal((await sa.join(A, 'server', '1v1', off)).json.status, 'waiting');
+  assert.deepEqual([(await sa.join(B, 'server', '1v1', off)).json.host], ['SA']);
+  assert.deepEqual(sa.nodes.of('/internal/place').map((c) => c.body.region), ['EU', 'SA', 'SA'], 'EU backs off: SA at once');
+  // A ranked EU group the same way: placed in SA, so its result names SA (the assignment's region).
+  for (const id of [C, 'c0ffee00c0ffee00']) await sa.join(id, 'ranked', '1v1', off);
+  const ranked = sa.nodes.of('/internal/place').at(-1).body;
+  assert.deepEqual([ranked.region, ranked.ranked], ['SA', true]);
+  assert.equal(created(sa).length, 0);
+
+  // Neither: the group waits busy, no MatchDO, and nothing is refused.
+  const none = await makeMm({ flags });
+  nodesIn(none);
+  assert.equal((await none.join(A, 'server', '1v1', off)).json.status, 'waiting');
+  const r3 = await none.join(B, 'server', '1v1', off);
+  assert.deepEqual([r3.status, r3.json.status, r3.json.wait.busy], [200, 'waiting', true]);
+  assert.deepEqual(none.nodes.of('/internal/place').map((c) => c.body.region), ['EU', 'SA']);
+  none.setTime(none.time() + 6_000);
+  const r4 = await none.join(A, 'server', '1v1', off);
+  assert.deepEqual([r4.json.status, r4.json.wait.busy], ['waiting', true]);
+  assert.equal(none.nodes.of('/internal/place').length, 2, 'both regions back off for their minute');
+  assert.equal(created(none).length, 0, 'never a MatchDO');
+  assert.equal((await none.stats()).queues.casual, 2);
 });
 
 test('do_disabled, and the owner turns the nodes off while groups wait for one: still no MatchDO (Casual and ranked); they wait busy until the Worker\'s own 503 ends each search', async () => {
@@ -990,6 +1131,9 @@ test('a slow node placement does not hold up the other formations: a pair of ano
   const h = await makeMm();
   const gate = deferred();
   holdPlace(h, gate);
+  const held = h.nodes.place;
+  // SA's placement is held open; EU has no node (hosts 0 at once): a MatchDO near EU.
+  h.nodes.place = (body) => (body.region === 'SA' ? held(body) : { body: { placement: null, hosts: 0 } });
   assert.equal((await h.join(A)).json.status, 'waiting');
   const formingAB = h.join(B); // hosted SA: its placement is held open
   await formingOf(h, 2);
