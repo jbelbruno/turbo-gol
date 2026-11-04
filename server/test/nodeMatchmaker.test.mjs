@@ -836,6 +836,60 @@ test('do_disabled outside SA: a node of the host region first, then one of SA (h
   assert.equal((await none.stats()).queues.casual, 2);
 });
 
+test("the bots' level goes with every regional placement: an EU node (pooled and solo), a MatchDO near EU when it has none, SA's node under do_disabled (both asks, one bot_level read); ranked carries none anywhere", async () => {
+  const asked = (h) => h.nodes.of('/internal/place').map((c) => [c.body.region, c.body.botDifficulty]);
+  const levelReads = (h) => h.flags.reads.filter((n) => n === 'bot_level').length;
+  // Pooled on the EU node: the flag's level.
+  const eu = await makeMm({ flags: { nodes_on: '1', bot_level: 'medium' } });
+  nodesIn(eu, 'EU');
+  assert.equal((await eu.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+  assert.deepEqual([(await eu.join(B, 'server', '1v1', EU)).json.node], [true]);
+  assert.deepEqual(asked(eu), [['EU', 'medium']]);
+  // The 5:00 solo match on the EU node: the default, hard.
+  const solo = await makeMm();
+  nodesIn(solo, 'EU');
+  assert.equal((await solo.join(C, 'server', '1v1', EU)).json.status, 'waiting');
+  solo.setTime(solo.time() + Q.SOLO_AFTER_MS);
+  const s = await solo.join(C, 'server', '1v1', EU);
+  assert.deepEqual([s.json.node, s.json.host, s.json.humans], [true, 'EU', 1]);
+  assert.deepEqual(asked(solo), [['EU', 'hard']]);
+  // No EU node (hosts 0): the MatchDO near EU plays the level the placement was asked with, read once.
+  const md = await makeMm({ flags: { nodes_on: '1', bot_level: 'easy' } });
+  nodesIn(md, 'SA');
+  assert.equal((await md.join(A, 'server', '1v1', EU)).json.status, 'waiting');
+  assert.deepEqual([(await md.join(B, 'server', '1v1', EU)).json.host], ['EU']);
+  assert.deepEqual(asked(md), [['EU', 'easy']]);
+  assert.deepEqual([created(md)[0].opts.locationHint, created(md)[0].body.host, created(md)[0].body.botDifficulty], ['weur', 'EU', 'easy']);
+  assert.equal(levelReads(md), 1, 'one read per formation');
+  // do_disabled and no EU node: SA's node, both asks with the level, still one read.
+  const off = { ...EU, doDisabled: true };
+  const sa = await makeMm({ flags: { nodes_on: '1', do_disabled: '1', bot_level: 'medium' } });
+  nodesIn(sa, 'SA');
+  assert.equal((await sa.join(A, 'server', '1v1', off)).json.status, 'waiting');
+  const r = await sa.join(B, 'server', '1v1', off);
+  assert.deepEqual([r.json.node, r.json.host], [true, 'SA']);
+  assert.deepEqual(asked(sa), [['EU', 'medium'], ['SA', 'medium']]);
+  assert.equal(levelReads(sa), 1);
+  // Ranked: no level on the EU node, on SA's under do_disabled or on a MatchDO near EU; the flag is never read.
+  const rankedEu = await makeMm({ flags: { nodes_on: '1', bot_level: 'easy' } });
+  nodesIn(rankedEu, 'EU');
+  assert.equal((await rankedEu.join(A, 'ranked', '1v1', EU)).json.status, 'waiting');
+  assert.deepEqual([(await rankedEu.join(B, 'ranked', '1v1', EU)).json.host], ['EU']);
+  const rankedSa = await makeMm({ flags: { nodes_on: '1', do_disabled: '1', bot_level: 'easy' } });
+  nodesIn(rankedSa, 'SA');
+  assert.equal((await rankedSa.join(A, 'ranked', '1v1', off)).json.status, 'waiting');
+  assert.deepEqual([(await rankedSa.join(B, 'ranked', '1v1', off)).json.host], ['SA']);
+  for (const h of [rankedEu, rankedSa]) {
+    assert.ok(h.nodes.of('/internal/place').every((c) => c.body.ranked === true && !('botDifficulty' in c.body)));
+    assert.equal(levelReads(h), 0, 'not even read');
+  }
+  assert.deepEqual([asked(rankedEu).map((a) => a[0]), asked(rankedSa).map((a) => a[0])], [['EU'], ['EU', 'SA']]);
+  const rankedMd = await makeMm({ flags: { bot_level: 'easy' } });
+  assert.equal((await rankedMd.join(A, 'ranked', '1v1', EU)).json.status, 'waiting');
+  assert.deepEqual([(await rankedMd.join(B, 'ranked', '1v1', EU)).json.host], ['EU']);
+  assert.deepEqual([created(rankedMd)[0].body.host, created(rankedMd)[0].body.ranked, 'botDifficulty' in created(rankedMd)[0].body], ['EU', true, false]);
+});
+
 test('do_disabled, and the owner turns the nodes off while groups wait for one: still no MatchDO (Casual and ranked); they wait busy until the Worker\'s own 503 ends each search', async () => {
   const D = 'd4c3b2a1f6e50718';
   const h = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
