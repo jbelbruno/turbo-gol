@@ -331,7 +331,7 @@ test('Worker: POST /api/lobbies hands the directory the session and the address,
       new Request(ORIGIN + '/api/lobbies', {
         method: 'POST',
         headers: { 'CF-Connecting-IP': '2001:db8::7', Origin: ORIGIN, authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: '2v2', visibility: 'private', net: 'p2p', matchLengthSeconds: 300 }),
+        body: JSON.stringify({ api: 2, mode: '2v2', visibility: 'private', net: 'p2p', matchLengthSeconds: 300 }),
       }),
       env,
     );
@@ -347,8 +347,9 @@ test('Worker: POST /api/lobbies hands the directory the session and the address,
 // ---- rt-m1: INICIAR is throttled per lobby --------------------------------------------------------
 
 test('LobbyDO: a host repeating INICIAR against a refusing matchmaker reaches it a handful of times a minute (3, 6, 12, 24, 30 s back-off), not once per frame', async () => {
-  const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'server', matchLengthSeconds: 300 });
+  const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'p2p', matchLengthSeconds: 300 });
   const host = await h.upgrade('host1');
+  await h.join('bea'); // a start needs two members (need_players)
   let busy = true;
   const realGet = h.mm.ns.get;
   h.mm.ns.get = (id) => ({
@@ -496,25 +497,25 @@ test('LobbyDO: a new password needs 4 characters (create 400 short_password, set
   assert.equal((await h.admit('bea', { password: 'x' })).status, 200);
 });
 
-// ---- rt-3 / cost-6: a guest's server lobby match is 5 minutes at most ------------------------------
+// ---- the modes redesign: lobbies are P2P only, 2 members to start (guest_length is dormant) ---------
 
-test("LobbyDO: a server start with a guest in the lobby and 600 s or unlimited answers guest_length without reaching the matchmaker; 300 s goes; P2P with two humans keeps any length", async () => {
-  for (const len of [600, 0]) {
-    const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'server', matchLengthSeconds: len });
+test("LobbyDO: a lone member's start answers need_players without reaching the matchmaker, whatever the length; a 'server' lobby plays P2P; two members start with any length", async () => {
+  for (const [net, len] of [['server', 600], ['server', 0], ['p2p', 300]]) {
+    const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net, matchLengthSeconds: len });
     const host = await h.upgrade('host1');
+    assert.equal(host.last().settings.net, 'p2p', 'a server pick is read as P2P');
     await h.send(host, { t: 'start' });
-    assert.equal(host.of('error').at(-1).code, 'guest_length', `length ${len}`);
+    assert.deepEqual([host.of('error').at(-1).code, host.of('error').at(-1).message], ['need_players', 'Hace falta otro jugador para iniciar'], `${net} ${len}`);
     assert.equal(h.customs(), 0);
   }
-  const ok = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'server', matchLengthSeconds: 300 });
-  const host = await ok.upgrade('host1');
-  await ok.send(host, { t: 'start' });
-  assert.equal(ok.customs(), 1);
-  const p2p = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'p2p', matchLengthSeconds: 0 });
-  const h2 = await p2p.upgrade('host1');
-  await p2p.join('bea');
-  await p2p.send(h2, { t: 'start' });
-  assert.equal(p2p.customs(), 1, 'a P2P room runs on the players: any length');
+  for (const len of [600, 0]) {
+    const p2p = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'private', net: 'server', matchLengthSeconds: len });
+    const h2 = await p2p.upgrade('host1');
+    await p2p.join('bea');
+    await p2p.send(h2, { t: 'start' });
+    assert.equal(p2p.customs(), 1, 'a P2P room runs on the players: any length, guests too');
+    assert.equal(p2p.mm.calls.find((c) => c.path === '/custom').body.kind, 'p2p');
+  }
 });
 
 // ---- regressions of the limits above (fix/lobby-directory) ----------------------------------------

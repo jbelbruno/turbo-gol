@@ -822,6 +822,7 @@ export default {
   'error.lobby.short_password': 'La contraseña tiene que tener entre 4 y 32 caracteres',
   'error.lobby.password_locked': 'Demasiados intentos con la contraseña de esta sala, espera unos minutos',
   'error.lobby.password_attempts': 'Alguien está probando contraseñas en tu sala: las entradas con contraseña quedan en pausa unos minutos',
+  'error.lobby.need_players': 'Hace falta otro jugador para iniciar',
   'error.queue.rate_limited': 'Demasiados intentos, espera un minuto',
   'error.queue.account_required': 'Inicia sesión para jugar Casual y Competitivo',
   'error.queue.ranked_ban': 'Competitivo bloqueado por abandonar partidas: {time}',
