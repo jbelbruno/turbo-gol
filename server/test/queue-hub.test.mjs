@@ -405,6 +405,103 @@ test('at most 5 solo MatchDO matches: a 6th lone 5:00 waiter waits busy and ente
   assert.equal((await w.stats()).soloRooms, 5);
 });
 
+// ---- the passes (review round 2: A5, A6, A7, A11) ---------------------------------------------------------
+
+/** No sweep in the way (it runs on a 500 ms real timer): the test drives every pass itself. */
+function noSweep(w) {
+  const h = w.hub();
+  if (h.sweepTimer) clearTimeout(h.sweepTimer);
+  h.sweepTimer = null;
+}
+
+/** MatchDO creates fail once (`fail`), or wait for `gate`. */
+function matchCreates(w, { fail = false, gate = null } = {}) {
+  const real = w.env.MATCH;
+  let failing = fail;
+  w.env.MATCH = {
+    ...real,
+    get: (id, opts) => {
+      const stub = real.get(id, opts);
+      return {
+        fetch: async (url, init) => {
+          if (new URL(url).pathname === '/internal/create') {
+            if (failing) {
+              failing = false;
+              return new Response('boom', { status: 500 });
+            }
+            if (gate) await gate;
+          }
+          return stub.fetch(url, init);
+        },
+      };
+    },
+  };
+}
+
+test('A6: a waiter in its back-off (its formation just failed) holds nobody back: a fresh SA pair forms at once beside it', async () => {
+  const w = await makeHubWorld();
+  matchCreates(w, { fail: true });
+  const old = pid();
+  await w.join(old, { home: 'EU' });
+  w.advance(Q.SOLO_AFTER_MS);
+  const r = await w.join(old, { home: 'EU' }); // its solo match's create fails: a 5 s back-off
+  assert.deepEqual([r.json.status, w.created().length], ['waiting', 0]);
+  const [s1, s2] = [pid(), pid()];
+  await w.join(s1);
+  const pair = await w.join(s2);
+  assert.deepEqual([pair.json.status, pair.json.humans, pair.json.host], ['matched', 2, 'SA'], 'the widened waiter in its back-off no longer takes them into its group');
+  w.advance(5 * SEC);
+  assert.equal((await w.join(old, { home: 'EU' })).json.humans, 1, 'its back-off over: its solo match');
+});
+
+test('A7: a join waits for its own formation only: a pass that starts another group\'s formation answers at once', async () => {
+  const w = await makeHubWorld({ rooms: M.MAX_ACTIVE_ROOMS - M.RANKED_RESERVED_ROOMS });
+  const [a, b] = [pid(), pid()];
+  await w.join(a);
+  assert.equal((await w.join(b)).json.wait.busy, true, 'held by the cap');
+  let open;
+  matchCreates(w, { gate: new Promise((r) => (open = r)) });
+  const room = [...w.storage().map.keys()].find((k) => k.startsWith('room:')).slice('room:'.length);
+  await w.release(room, []); // a slot frees: the next pass forms A and B (their MatchDO create waits)
+  noSweep(w);
+  const c = await Promise.race([w.join(pid(), { home: 'EU' }), pause(300).then(() => 'late')]);
+  assert.notEqual(c, 'late', 'C\'s first answer does not wait for A and B\'s match');
+  assert.deepEqual([c.json.status, c.json.wait.waitedMs], ['waiting', 0]);
+  const pollA = w.call('/poll?playerId=' + a); // A's long-poll waits on its formation
+  open();
+  assert.deepEqual([(await pollA).json.status, (await w.join(b)).json.status], ['matched', 'matched']);
+});
+
+test('A5: a ranked pair held by the cap after a formation (no node free, no MatchDO slot) reads busy through its back-off, not busy-then-not', async () => {
+  const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true, rooms: M.MAX_ACTIVE_ROOMS });
+  w.control.place = () => ({ placement: null, hosts: 1 }); // a node, none free now
+  const ro = { kind: 'ranked', mode: '1v1' };
+  const [a, b] = [pid(), pid()];
+  await w.join(a, ro);
+  const rb = await w.join(b, ro);
+  assert.deepEqual([rb.json.status, rb.json.wait.busy, rb.json.wait.estimateKind], ['waiting', true, 'none']);
+  for (const step of [1, 2, 1.5]) {
+    w.advance(step * SEC);
+    for (const id of [a, b]) assert.equal((await w.join(id, ro)).json.wait.busy, true, `${id === a ? 'A' : 'B'} still busy in its back-off`);
+  }
+  assert.equal(w.control.of('/internal/place').length, 1, 'not asked again within the back-off');
+});
+
+test('A11: the long-poll\'s timer forms a due 5:00 solo match before it answers (no "waiting" with botsInMs 0 just before the match)', async () => {
+  const w = await makeHubWorld();
+  const a = pid();
+  await w.join(a);
+  w.hub().pollTimeoutMs = 50;
+  w.advance(Q.SOLO_AFTER_MS - 1);
+  assert.equal((await w.join(a)).json.status, 'waiting');
+  const polling = w.call('/poll?playerId=' + a);
+  await pause(10);
+  noSweep(w); // the sweep would form it too: this test is about the poll's own timer
+  w.advance(1); // the 5:00 is due while the long-poll waits
+  const r = await polling;
+  assert.deepEqual([r.json.status, r.json.humans], ['matched', 1]);
+});
+
 // ---- where it runs (§1.8) -------------------------------------------------------------------------------
 
 test('a node first only for a match hosted SA; an EU-hosted one goes to a MatchDO near Europe; the releases reach the hub', async () => {

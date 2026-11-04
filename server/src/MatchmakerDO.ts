@@ -945,6 +945,8 @@ export class MatchmakerDO extends DurableObject<Env> {
   now: () => number = () => Date.now();
   /** How long a call to the NodeRegistryDO may take (tests shorten it). */
   nodeTimeoutMs = NODE_CALL_TIMEOUT_MS;
+  /** How long a /poll waits before it answers 'waiting' (tests shorten it). */
+  pollTimeoutMs = POLL_TIMEOUT_MS;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1226,8 +1228,9 @@ export class MatchmakerDO extends DurableObject<Env> {
       this.insertWaiter(waiter);
       fresh = true;
     }
-    if (kind === 'ranked') await this.formRankedAll(now);
-    else await this.formCasual(now);
+    // The pass waits for this player's own formation only (other groups' node placements run on).
+    if (kind === 'ranked') await this.formRankedAll(now, playerId);
+    else await this.formCasual(now, playerId);
     const r = this.matched.get(playerId);
     if (r) return this.deliver(playerId, r);
     // That formation may have just found no node here (hosts 0): refused now, not after a poll.
@@ -1359,14 +1362,32 @@ export class MatchmakerDO extends DurableObject<Env> {
         clearTimeout(timer);
         resolve(json(r));
       };
+      // Before it answers 'waiting', a pass for this waiter: its 5:00 solo match may be due since the
+      // last sweep (botsInMs 0 in a 'waiting' answer, then the match on the next POST). Formed, its
+      // result has answered already (issue resolves every pending poll).
       const timer = setTimeout(() => {
-        const i = waiter.resolvers.indexOf(finish);
-        if (i >= 0) waiter.resolvers.splice(i, 1);
-        waiter.lastSeen = Date.now();
-        finish(this.waitingResult(waiter));
-      }, POLL_TIMEOUT_MS);
+        void this.passBefore(waiter).finally(() => {
+          if (done) return;
+          const i = waiter.resolvers.indexOf(finish);
+          if (i >= 0) waiter.resolvers.splice(i, 1);
+          waiter.lastSeen = this.now();
+          finish(this.waitingResult(waiter));
+        });
+      }, this.pollTimeoutMs);
       waiter.resolvers.push(finish);
     });
+  }
+
+  /** A queued waiter's own pass (poll): its formation, if one starts now, awaited; never throws. */
+  private async passBefore(w: Waiter): Promise<void> {
+    if (this.findWaiter(w.playerId) !== w) return; // being formed, or gone: nothing to start
+    try {
+      const now = this.now();
+      await this.readNodes(now);
+      await (w.kind === 'ranked' ? this.formRankedAll(now, w.playerId) : this.formCasual(now, w.playerId));
+    } catch (e) {
+      console.error('matchmaker: poll pass failed', e);
+    }
   }
 
   /**
@@ -2197,25 +2218,23 @@ export class MatchmakerDO extends DurableObject<Env> {
 
   /**
    * One Casual pass (§1.4, queuePlan.ts planCasual): the stale waiters go, then every group of the
-   * plan forms that the caps allow. A group at a cap (or in its back-off after a failed formation)
-   * stays queued, its waiters `busy`; it is not tried again in this pass. Host SA with the nodes on
-   * for every human goes to a node first (no cap for that); anything else needs a MatchDO slot.
-   * The formations run side by side; the pass (and so a join) waits for them all.
+   * plan forms that the caps allow. A waiter in its back-off after a failed formation (noRoomUntil)
+   * is left out of the plan, so it never holds the others back, and keeps its `busy`. A group at a
+   * cap stays queued, its waiters `busy`; it is not tried again in this pass. Host SA with the nodes
+   * on for every human goes to a node first (no cap for that); anything else needs a MatchDO slot.
+   * The formations run side by side and on their own: the promise answered is the formation of
+   * `joiner`'s group (a join waits for its own match, never another group's node placement), or
+   * none.
    */
-  private async formCasual(now: number): Promise<void> {
+  private formCasual(now: number, joiner: string | null = null): Promise<void> {
     this.dropStale(this.casual, now);
-    if (this.casual.length === 0) return;
-    const plan = planCasual(this.casual, now);
+    if (this.casual.length === 0) return Promise.resolve();
+    const ready = (w: Waiter): boolean => (w.noRoomUntil ?? 0) <= now;
+    const plan = planCasual(this.casual.filter(ready), now);
     const planned = new Set<Waiter>();
-    const tasks: Promise<void>[] = [];
+    let mine: Promise<void> | null = null;
     for (const g of plan) {
       for (const h of g.humans) planned.add(h);
-      if (g.humans.some((h) => (h.noRoomUntil ?? 0) > now)) {
-        // In its back-off after a failed formation: busy when that was a cap (the whole group reads it).
-        const busy = g.humans.some((h) => h.busy);
-        for (const h of g.humans) h.busy = busy;
-        continue;
-      }
       const ids = g.humans.map((h) => h.playerId);
       const host = hostRegion(g.humans);
       const nodeFirst = host === QUEUE_HUB && this.nodesHere(ids, now);
@@ -2223,10 +2242,17 @@ export class MatchmakerDO extends DurableObject<Env> {
         for (const h of g.humans) h.busy = true;
         continue;
       }
-      tasks.push(this.formCasualGroup(g, host, now));
+      const task = this.formCasualGroup(g, host, now);
+      if (joiner !== null && ids.includes(joiner)) mine = task;
+      else void task.catch((e) => console.error('matchmaker: casual formation failed', e));
     }
-    for (const w of this.casual) if (!planned.has(w)) w.busy = false;
-    await Promise.all(tasks);
+    // A waiter in its back-off holds nobody back (left out above), but the group it would form
+    // with the waiters left over is held all the same when a cap holds it (busy): they read busy.
+    const left = this.casual.filter((w) => !planned.has(w));
+    const held = new Set<Waiter>();
+    for (const g of planCasual(left, now)) if (g.humans.some((h) => !ready(h) && h.busy)) for (const h of g.humans) held.add(h);
+    for (const w of left) if (ready(w)) w.busy = held.has(w);
+    return mine ?? Promise.resolve();
   }
 
   /** Form one planned Casual group (formCasual): out of the pool, formMatch, back on a failure. */
@@ -2251,32 +2277,45 @@ export class MatchmakerDO extends DurableObject<Env> {
     for (const h of humans) if (this.cancels.has(h.playerId)) await this.withdraw(h, formed?.matchId ?? null, now);
   }
 
-  /** Every ranked playlist's pass (formRanked); `busy` is worked out again by them. */
-  private async formRankedAll(now: number): Promise<void> {
-    for (const w of this.rankedWaiters()) w.busy = false;
-    await Promise.all(MODE_IDS.map((m) => this.formRanked(m, now)));
+  /**
+   * Every ranked playlist's pass (formRanked); `busy` is worked out again by them, except for a
+   * waiter in its back-off after a failed formation (noRoomUntil: left out of the candidates, it
+   * keeps its `busy`, so a capped group does not read busy, then not, then busy again). As
+   * formCasual: the formations run on their own, the promise answered is `joiner`'s, or none.
+   */
+  private formRankedAll(now: number, joiner: string | null = null): Promise<void> {
+    for (const w of this.rankedWaiters()) if ((w.noRoomUntil ?? 0) <= now) w.busy = false;
+    let mine: Promise<void> | null = null;
+    for (const m of MODE_IDS) {
+      const started = this.formRanked(m, now);
+      if (started === null) continue;
+      if (joiner !== null && started.ids.includes(joiner)) mine = started.task;
+      else void started.task.catch((e) => console.error('matchmaker: ranked formation failed', e));
+    }
+    return mine ?? Promise.resolve();
   }
 
   /**
    * One ranked playlist's pass: the stale waiters go, then a full roster of humans whose MMRs fit
    * each other's (growing) windows, never bots: own region first, any region among the waiters of
-   * RANKED_WIDEN_MS (pickRegionalRankedGroup), in balanced teams. At the cap it waits (busy).
+   * RANKED_WIDEN_MS (pickRegionalRankedGroup), in balanced teams. At the cap it waits (busy). The
+   * group (out of the queues, `forming`) and its formation, or null when none forms now.
    */
-  private async formRanked(mode: GameModeId, now: number): Promise<void> {
+  private formRanked(mode: GameModeId, now: number): { ids: string[]; task: Promise<void> } | null {
     const q = this.rankedQueue(mode);
     this.dropStale(q, now);
-    if (q.length === 0) return;
+    if (q.length === 0) return null;
     const perTeam = MODES[mode];
     const need = perTeam * 2;
     const cands = q.filter((w) => (w.noRoomUntil ?? 0) <= now).map((w) => ({ w, playerId: w.playerId, joinedAt: w.joinedAt, home: w.home, mu: w.ratings?.[mode]?.mu ?? 25 }));
     const group = pickRegionalRankedGroup(cands, need, now);
-    if (group === null) return;
+    if (group === null) return null;
     const humans = group.map((g) => g.w);
     const ids = humans.map((h) => h.playerId);
     const host = hostRegion(humans);
     if (!(host === QUEUE_HUB && this.nodesHere(ids, now)) && this.serverFull(now, 'server', true, false)) {
       for (const h of humans) h.busy = true;
-      return;
+      return null;
     }
     const [blue, red] = balanceTeams(group, perTeam);
     const teams: [Waiter[], Waiter[]] = [blue.map((i) => group[i].w), red.map((i) => group[i].w)];
@@ -2284,6 +2323,12 @@ export class MatchmakerDO extends DurableObject<Env> {
       this.removeWaiter(h);
       this.forming.set(h.playerId, h);
     }
+    return { ids, task: this.formRankedGroup(mode, humans, teams, host, now) };
+  }
+
+  /** Form one ranked group (formRanked): formMatch, back to the queues on a failure. */
+  private async formRankedGroup(mode: GameModeId, humans: Waiter[], teams: [Waiter[], Waiter[]], host: RegionId, now: number): Promise<void> {
+    const ids = humans.map((h) => h.playerId);
     let formed: FormedMatch | null = null;
     try {
       const hosted = host !== QUEUE_HUB && this.nodesFor(ids) && (await flag(this.env, 'do_disabled')) ? QUEUE_HUB : host;
