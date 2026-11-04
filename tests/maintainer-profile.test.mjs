@@ -62,6 +62,10 @@ test('DESVINCULAR on the project account: refused at once when its password and 
   assert.equal(P.unlinkKeepsMaintainer(me({ password: false, verifiedEmail: false, waysIn: 3 })), false, 'no password to keep');
   const view = PROFILE.slice(PROFILE.indexOf('const accountView = '), PROFILE.indexOf('/** ACERCA DE, under either view. */'));
   assert.match(view, /unlinkKeepsMaintainer\(me\) \? unlinkDialog\(p\) : menu\.toast\(t\('error\.account\.maintainer_two_ways'\), 'error'\)/);
+  // Shown for any account by /api/me's waysIn, as unlink counts (a password of before beside an
+  // address is no way in: Google filled in on such an account offers no DESVINCULAR).
+  assert.match(view, /const ways = me\?\.waysIn \?\? me\?\.providers\.length \?\? 0;/);
+  assert.match(view, /ways > 1 \? secondary\(t\('profile\.unlink'/);
 });
 
 test('PERFIL shows CUENTA DEL PROYECTO only with /api/me\'s maintainer, first in its column, never on a TV; with no CSS of its own (the node tile and its state lines)', () => {
