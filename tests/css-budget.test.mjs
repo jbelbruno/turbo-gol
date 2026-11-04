@@ -261,10 +261,13 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // areas per layout, the "next" card), the TV guest's phone tile area (tiles.css) and the waiting
 // screens (screens/wait.css: MODOS' estimate and "While you wait", SALAS' second button, the Sala's
 // lone-host line, "While you search", the HUD's and the training panel's search strip): 166,895 B
-// (before 164,239 B), the cap that plus about 0.6 KB.
+// (before 164,239 B), the cap that plus about 0.6 KB. Its review round 2 adds the search hero's
+// estimate on a TV (home.css), VS AI's line while searching on a phone held sideways and a TV, the
+// sentence-case lines and the sideways sizes of "While you search", and the strip's right bound
+// (wait.css): 167,626 B (before 166,895 B), the cap that plus about 0.6 KB.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 167_495;
+const CSS_BUDGET = 168_226;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;
