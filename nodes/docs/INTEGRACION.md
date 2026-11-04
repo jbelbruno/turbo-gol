@@ -237,8 +237,10 @@ new NetClient({ ...opciones, webSocketFactory: nodeAwareSocketFactory() })
 ## 6. Operación
 
 - Alertas cuando una verificación falla: hoy queda en el log como `ALERT`. Conviene un webhook.
-- Endpoints de administración: `setStatus` y `drain` están (`/nodes/admin/status`, `drain`), y
-  la tienda tiene `/nodes/admin/grant`, `revoke` y `unfreeze`. El catálogo es código
+- Endpoints de administración: `setStatus` y `drain` están (`/nodes/admin/status`, `drain`), con
+  `retire` para sacar un nodo de los libros, `tokens/revoke`, y las lecturas del panel
+  (`overview`, `wallet`, `frozen`; `server/README.md`). La tienda tiene `/nodes/admin/grant`,
+  `revoke` y `unfreeze`, con un motivo opcional en la línea de auditoría. El catálogo es código
   (`src/game/cosmetics.ts` y `control-plane/shop.ts`). Un drenaje no tiene vuelta atrás (`node/runtime.ts:570-575`): el nodo solo vuelve a tomar
   partidas cuando se reinicia.
 - Releases: `.github/workflows/node-release.yml`, con un tag `node-vX.Y.Z` en un commit de

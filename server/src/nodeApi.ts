@@ -65,6 +65,13 @@ export const OPERATORS_ROUTE = '/internal/operators';
 /** POST { userId }: a purged account's nodes are banned (AccountsDO's alarm, best effort, tried again until answered). */
 export const OPERATOR_DELETED_ROUTE = '/internal/operator-deleted';
 
+/**
+ * POST { what } with x-operator-id / x-operator-name: a maintainer's read that the Worker answered
+ * itself (account-stats, queue-stats), audited in the object's one window for every read
+ * (NodeRegistryDO readAudit, READ_AUDIT_WINDOW_MS). Sent after the answer.
+ */
+export const READ_AUDIT_ROUTE = '/internal/read-audit';
+
 /** POST /internal/place: a match the matchmaker formed (its humans, fixed teams, length). */
 export type PlaceBody = PlaceRequest;
 

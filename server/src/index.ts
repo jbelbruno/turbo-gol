@@ -101,7 +101,7 @@ import type { Env } from './env';
 import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
-import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
+import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
 import type { LimitName } from './limits';
 import type { RankedCheck } from './accountStore';
 import { normalizeCode } from './LobbyDirectoryDO';
@@ -881,6 +881,7 @@ export default {
         ip: clientIp(request),
         session: () => (env.JWT_SECRET ? bearerSession(request, env) : Promise.resolve(null)),
         limited: (key, max, windowMs) => isolateLimited(key, max, Date.now(), windowMs),
+        spent: (key, max) => isolateSpent(key, max, Date.now()),
         limit: limiter(env),
         cors: corsHeaders(request, env),
         // Absent where the caller passes no context (the tests): nothing then outlives the answer.

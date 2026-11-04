@@ -106,6 +106,12 @@
     // match ever goes to a node. NODE_TRUSTED_OPERATORS is a secret too (README, "Community nodes").
     "NODE_CONTROL_PUBLIC_KEY": "MNSk5UH2jV-V35J_ZvfgW3JVyUvXCcgMgHAbvCzFJcI",
     "NODES_PUBLIC_BASE": "https://turbo-gol.com",
+    // How many nodes each NODE_TRUSTED_OPERATORS account may have, each with full trust (it verifies
+    // ranked matches, its own included): 2 to 8 in code, 2 when unset. 6: the project's machines in
+    // Brazil, Germany and Malaysia, and three more for a month in South Africa, Australia and North
+    // America (the owner's choice, 2026-11-04). They fill it exactly: a retired or banned node takes
+    // no slot, so a replacement registers once the node it replaces is retired.
+    "NODE_TRUSTED_MAX_NODES": "6",
     // Mail (docs/online/MAIL.md). MAIL_FROM: the sender on the verified sending domain.
     // MAIL_LINK_ORIGIN: the origin of every link in a mail (a loopback host uses its own).
     // EMAIL_DAILY_CAP: the day's mail across all lanes; set it to 80 % of the account's Email

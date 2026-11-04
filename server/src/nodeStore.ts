@@ -499,4 +499,12 @@ export class NodeStore implements RegistryStore, MatchStore {
   outboxSize(): number {
     return Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM outbox').toArray()[0]?.n ?? 0);
   }
+
+  /** The undelivered calls by path (/host-credit, /host-freeze, /release, ...): how many, and when the oldest was written. */
+  outboxByPath(): Array<{ path: string; rows: number; oldestAt: number }> {
+    return this.sql
+      .exec<{ path: string; n: number; oldest: number }>('SELECT path, COUNT(*) AS n, MIN(created_at) AS oldest FROM outbox GROUP BY path ORDER BY path')
+      .toArray()
+      .map((r) => ({ path: r.path, rows: Number(r.n), oldestAt: Number(r.oldest) }));
+  }
 }
