@@ -87,9 +87,15 @@ export interface HeroView {
   /** Searching: the clock under the title. */
   clock: string | null;
   sub: HeroSub;
+  /**
+   * Searching: the estimate after the queue ("Con bots en 3:37 como máximo"), a ticking text that
+   * setEst writes in place (never a rebuild: the busy stripe's sweep runs on). It never steps aside:
+   * a TV's queue gives way before it. Undefined / null: none.
+   */
+  est?: string | null;
   /** A TV without a controller: the slot is the message (aria-describedby). */
   needPad: boolean;
-  /** The button's name: the title and the subtitle (never the clock). */
+  /** The button's name: the title and the subtitle (never the clock, never the estimate). */
   label: string;
 }
 
@@ -99,6 +105,8 @@ export interface HeroTile {
   readonly main: HTMLButtonElement;
   set(v: HeroView): void;
   setClock(text: string): void;
+  /** The search's estimate, in place (HeroView.est). */
+  setEst(text: string): void;
 }
 
 /**
@@ -119,6 +127,7 @@ export function heroTile(o: { lines: boolean; oneLine: boolean; press: () => voi
   const x = h('button.mn-hero-x', { type: 'button', 'data-nav': true, 'data-key': 'hero-x', 'aria-label': t('nav.cancelSearch'), onclick: () => o.cancel() }, icon('close'), h('span', lastGive, t('lang.cancel')));
   const el = h('div.mn-hero', { 'data-nav-row': true }, main);
   let clock: HTMLElement | null = null;
+  let est: HTMLElement | null = null;
   const set = (v: HeroView): void => {
     const busy = v.kind === 'search';
     el.className = `mn-hero mn-hero-${v.kind}${busy ? ' mn-hero-busy' : ''}${v.needPad ? ' mn-hero-needpad' : ''}`;
@@ -127,16 +136,29 @@ export function heroTile(o: { lines: boolean; oneLine: boolean; press: () => voi
     clock = v.clock !== null ? h('span.mn-hero-clock', null, v.clock) : null;
     // A TV's (fit.ts, never under its floor): the region steps aside (data-fit-alt), the formats go
     // under the kind ("Competitivo" over "1v1 · 2v2 · 3v3": 1), then ✕'s label and room (2).
+    // Searching, the estimate stays: the queue and its dot give way first (1), and the estimate has
+    // no short form, so its text is written in place (setEst) without a fit's cached full text.
     const fit = o.oneLine ? { 'data-fit': '16', 'data-fit-scope': '.mn-hero' } : null;
     const gone = o.oneLine ? { 'data-fit-alt': '' } : null;
+    const estimate = v.est ?? null;
+    const before = estimate !== null && o.oneLine ? { 'data-fit-give': '1' } : null;
+    est = estimate !== null ? h('span.mn-hero-region.mn-hero-est', null, estimate) : null;
     const queue = (q: string): HTMLElement => {
-      const i = o.oneLine ? q.indexOf(HERO_SEP) : -1;
-      return i <= 0 ? h('span.mn-hero-queue', null, q) : h('span.mn-hero-queue', null, q.slice(0, i), h('span.mn-hero-split', { 'data-fit-give': '1' }, HERO_SEP), h('span.mn-hero-formats', null, q.slice(i + HERO_SEP.length)));
+      const i = o.oneLine && estimate === null ? q.indexOf(HERO_SEP) : -1;
+      return i <= 0 ? h('span.mn-hero-queue', before, q) : h('span.mn-hero-queue', null, q.slice(0, i), h('span.mn-hero-split', { 'data-fit-give': '1' }, HERO_SEP), h('span.mn-hero-formats', null, q.slice(i + HERO_SEP.length)));
     };
     const sub =
       typeof v.sub === 'string'
         ? h('span.mn-hero-sub', fit, v.sub)
-        : h('span.mn-hero-sub', fit, queue(v.sub.queue), v.sub.region !== null ? h('span.mn-hero-dot', gone, v.sub.dot) : null, v.sub.region !== null ? h('span.mn-hero-region', gone, v.sub.region) : null);
+        : h(
+            'span.mn-hero-sub',
+            fit,
+            queue(v.sub.queue),
+            v.sub.region !== null ? h('span.mn-hero-dot', gone, v.sub.dot) : null,
+            v.sub.region !== null ? h('span.mn-hero-region', gone, v.sub.region) : null,
+            est !== null ? h('span.mn-hero-dot.mn-hero-est-dot', before, v.sub.dot) : null,
+            est,
+          );
     setChildren(
       main,
       lines,
@@ -163,7 +185,10 @@ export function heroTile(o: { lines: boolean; oneLine: boolean; press: () => voi
   const setClock = (text: string): void => {
     if (clock !== null && clock.textContent !== text) clock.textContent = text;
   };
-  return { el, main, set, setClock };
+  const setEst = (text: string): void => {
+    if (est !== null && est.textContent !== text) est.textContent = text;
+  };
+  return { el, main, set, setClock, setEst };
 }
 
 export interface ModeTileSpec {
@@ -180,20 +205,23 @@ export interface ModeTileSpec {
   open: () => void;
 }
 
-/** A mode tile: icon and slot on top, the title and its subtitles, the arrow circle (a PC's, on focus or hover). */
-export function modeTile(s: ModeTileSpec): { el: HTMLButtonElement; setSlot(node: HTMLElement | null): void } {
+/**
+ * A mode tile: icon and slot on top, the title and its subtitles, the arrow circle (a PC's, on
+ * focus or hover). setSub swaps both subtitles (new spans: the fit caches a full text), as a TV
+ * guest's locked SALAS says how to open it.
+ */
+export function modeTile(s: ModeTileSpec): { el: HTMLButtonElement; setSlot(node: HTMLElement | null): void; setSub(sub: string, short: string): void } {
   const top = h('span.mn-tile-top', { 'data-fit': '12' }, icon(s.icon, 'mn-mtile-icon'), s.slot);
+  const subOf = (sub: string, short: string): HTMLElement => h('span.mn-mtile-sub', { 'data-fit': '14', 'data-fit-alt': short }, sub);
+  const shortOf = (short: string): HTMLElement => h('span.mn-mtile-short', null, short);
+  let subEl = subOf(s.sub, s.short);
+  let shortEl = shortOf(s.short);
+  let subKey = s.sub + '\n' + s.short;
   const el = h(
     `button.mn-mtile.${s.cls}` as 'button',
     { type: 'button', 'data-nav': true, 'data-key': s.key, 'data-fit-box': true, onclick: () => s.open() },
     top,
-    h(
-      'span.mn-mtile-text',
-      null,
-      fitTitle('mn-mtile-title', s.title, 20),
-      h('span.mn-mtile-sub', { 'data-fit': '14', 'data-fit-alt': s.short }, s.sub),
-      h('span.mn-mtile-short', null, s.short),
-    ),
+    h('span.mn-mtile-text', null, fitTitle('mn-mtile-title', s.title, 20), subEl, shortEl),
     h('span.mn-mtile-go', { 'aria-hidden': 'true' }, icon('arrow')),
   );
   const setSlot = (node: HTMLElement | null): void => {
@@ -201,5 +229,16 @@ export function modeTile(s: ModeTileSpec): { el: HTMLButtonElement; setSlot(node
     if (old !== null) old.remove();
     if (node !== null) top.appendChild(node);
   };
-  return { el, setSlot };
+  const setSub = (sub: string, short: string): void => {
+    const key = sub + '\n' + short;
+    if (key === subKey) return;
+    subKey = key;
+    const nextSub = subOf(sub, short);
+    const nextShort = shortOf(short);
+    subEl.replaceWith(nextSub);
+    shortEl.replaceWith(nextShort);
+    subEl = nextSub;
+    shortEl = nextShort;
+  };
+  return { el, setSlot, setSub };
 }

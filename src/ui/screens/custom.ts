@@ -9,7 +9,9 @@
  * connection to pick, none to show.
  *
  * A TV guest whose anti-bot check is not ready (homeModel.ts roomsLocked: a remote may not pass one
- * that asks) gets SIGN IN WITH YOUR PHONE instead of a join (the code tile, a row's press).
+ * that asks) gets the phone's sign-in instead of a join: JOIN WITH CODE shows a lock, its press and a
+ * row's open the sign-in, and the empty list offers nothing (MODOS' action zone says SIGN IN WITH
+ * YOUR PHONE, once).
  *
  * Experimental rules (Settings > Experimental presets, src/game/physicsRules.ts): a signed-in host
  * with the switch on picks them in the settings ("Rules (experimental)": Standard, the built-ins,
@@ -124,22 +126,16 @@ const ROW_STATE: Record<RowState, 'lobby.rowOpen' | 'lobby.rowInMatch' | 'lobby.
 export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; tick: (now: number) => void } {
   const list = h('div.mn-lobbies');
   const status = h('p.mn-lobbies-status', { hidden: true });
-  // A TV guest whose check is not ready: the phone's sign-in instead of the code (its line says so).
-  const joinText = h('span.mn-lobby-join-text');
+  // A TV guest whose check is not ready: JOIN WITH CODE locked, its press the phone's sign-in (the
+  // action zone's SIGN IN WITH YOUR PHONE says it once; the empty list says nothing more).
+  const joinTile = h('button.mn-lobby-join', { type: 'button', 'data-nav': true, 'data-key': 'lobby-join-code', onclick: () => (tvRoomsLocked(menu) ? menu.tvSignIn() : openCodeEntry(menu)) });
   let joinLocked: boolean | null = null;
   const drawJoin = (): void => {
     const locked = tvRoomsLocked(menu);
     if (locked === joinLocked) return;
     joinLocked = locked;
-    setChildren(joinText, h('b', null, t(locked ? 'tvsign.tile' : 'lobby.joinCode')), h('small', null, t(locked ? 'modes.lobbiesTvLocked' : 'lobby.joinCodeSub')));
+    setChildren(joinTile, icon('code'), h('span.mn-lobby-join-text', null, h('b', null, t('lobby.joinCode')), h('small', null, t(locked ? 'modes.lobbiesTvLocked' : 'lobby.joinCodeSub'))), icon(locked ? 'lock' : 'next'));
   };
-  const joinTile = h(
-    'button.mn-lobby-join',
-    { type: 'button', 'data-nav': true, 'data-key': 'lobby-join-code', onclick: () => (tvRoomsLocked(menu) ? menu.tvSignIn() : openCodeEntry(menu)) },
-    icon('code'),
-    joinText,
-    icon('next'),
-  );
   drawJoin();
   const region = picker('lobbies-region', 'globe', t('common.region'), () => menu.openRegionSheet());
   let refreshAt = 0;
@@ -168,16 +164,10 @@ export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; t
       h('span.mn-lobby-state', null, slot(t(ROW_STATE[st]), { ink: st === 'open' })),
     );
   };
-  // The public list spans every region (the player's own first): no region in the empty line.
+  // The public list spans every region (the player's own first): no region in the empty line. A TV
+  // guest whose check is not ready: the line alone (the action zone's button is the way in).
   const empty = (): HTMLElement =>
-    h(
-      'div.mn-lobbies-empty',
-      null,
-      h('p', null, t('lobby.empty')),
-      tvRoomsLocked(menu)
-        ? secondary(t('tvsign.tile'), () => menu.tvSignIn(), { 'data-key': 'lobby-create-public' })
-        : secondary(t('lobby.createPublic'), () => void createAndShare(menu, 'public'), { 'data-key': 'lobby-create-public' }),
-    );
+    h('div.mn-lobbies-empty', null, h('p', null, t('lobby.empty')), tvRoomsLocked(menu) ? null : secondary(t('lobby.createPublic'), () => void createAndShare(menu, 'public'), { 'data-key': 'lobby-create-public' }));
   const load = async (): Promise<void> => {
     if (loading) return;
     loading = true;

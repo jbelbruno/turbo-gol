@@ -246,3 +246,48 @@ test("a TV's subtitle never goes under the floor: its region steps aside, the fo
   const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
   assert.match(css, /\.mn-hero-split\[data-fit-gone\] \+ \.mn-hero-formats \{\s*display: block;/);
 });
+
+test('the DOM in the drawn order: the hero first on a PC, a TV and upright, last on a phone held sideways (drawn at the right), the tiles around it in the role\'s order', async () => {
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: false, heroLast: false }), ['hero', 'ai', 'friends', 'casual', 'ranked']);
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: false, heroLast: true }), ['ai', 'friends', 'casual', 'ranked', 'hero'], "sideways: 'ai friends hero' / 'casual ranked hero'");
+  assert.deepEqual(M.homeDomOrder({ guest: false, tv: false, heroLast: true }), ['casual', 'friends', 'ai', 'ranked', 'hero']);
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: true, heroLast: false }), ['hero', 'ai', 'tvsign', 'friends', 'casual']);
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /const heroLast = html\.dataset\.shell === 'rail';/, 'the sideways shell, read on every render (the phone turns)');
+  assert.match(home, /tilesBox\.appendChild\(id === 'hero' \? hero\.el : tileEls\[id\]\);/);
+  assert.match(home, /const key = `\$\{g \? 'guest' : 'account'\}\|\$\{heroLast\}`;/);
+});
+
+test("searching, the hero's estimate ticks in place: only its kind is in the hero's key (no rebuild, the busy stripe sweeps on), its text through setEst", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /estKind = lines2\.override \?\? lines2\.estimate\.kind;/);
+  assert.match(home, /sub = \{ queue, dot, region: null \};\s*subText = queue;/, 'no ticking text in the subtitle the key reads');
+  assert.match(home, /key: \[kind, title, subText, estKind, tag\?\.text \?\? '', pad\]\.join\('\|'\)/);
+  assert.match(home, /if \(view\.est != null && view\.est !== estText\) \{[^}]*hero\.setEst\(view\.est\);/);
+  const tile = await readFile(new URL('../src/ui/components/tile.ts', import.meta.url), 'utf8');
+  assert.match(tile, /const setEst = \(text: string\): void => \{\s*if \(est !== null && est\.textContent !== text\) est\.textContent = text;/);
+  // No short form on it (a fit would cache its old text), and on a TV the queue gives way first, never the estimate.
+  assert.match(tile, /est = estimate !== null \? h\('span\.mn-hero-region\.mn-hero-est', null, estimate\) : null;/);
+  assert.match(tile, /const before = estimate !== null && o\.oneLine \? \{ 'data-fit-give': '1' \} : null;/);
+  const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /html\[data-shell='tv'\] \.mn-hero-busy \.mn-hero-region/, "a TV's searching hero shows its estimate");
+  assert.match(css, /\.mn-hero-est \{\s*font-variant-numeric: tabular-nums;/);
+});
+
+test("a TV guest's locked SALAS: the lock in the slot and 'Inicia sesión con el teléfono' as its line; MODOS › SALAS says SIGN IN WITH YOUR PHONE once (its action)", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /friends\.setSlot\(rooms \? slot\('', \{ icon: 'lock' \}\) : slot\(t\('home\.lobbiesSlot'\), \{ drop: true \}\)\);/);
+  assert.match(home, /if \(rooms\) friends\.setSub\(t\('modes\.lobbiesTvLocked'\), t\('modes\.lobbiesTvLocked'\)\);\s*else friends\.setSub\(t\('modes\.friendsSub'\), t\(tv \? 'modes\.friendsSubTv' : 'modes\.friendsSubShort'\)\);/);
+  const custom = await readFile(new URL('../src/ui/screens/custom.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(custom, /t\('tvsign\.tile'\)/, 'neither the code tile nor the empty list repeats it');
+  assert.match(custom, /h\('b', null, t\('lobby\.joinCode'\)\)/);
+  assert.match(custom, /icon\(locked \? 'lock' : 'next'\)/);
+  const modes = await readFile(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /label = code !== null \? t\('lobby\.backTo', \{ code: spacedCode\(code\) \}\) : t\(tvLocked \? 'tvsign\.tile' : 'lobby\.createPublic'\);/, 'the one place');
+  assert.equal(es['modes.lobbiesTvLocked'], 'Inicia sesión con el teléfono');
+});
+
+test("▲ from the hero reaches the 'next' card drawn over the tiles (the spatial pick would pass it for the plate)", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /onNavTo\(hero\.main, 'up', \(\) => \(nextBox\.hidden \? null : nextBox\.querySelector<HTMLElement>\('\[data-nav\]'\)\)\);/);
+});

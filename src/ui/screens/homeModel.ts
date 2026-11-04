@@ -122,6 +122,17 @@ export function tileOrder(r: { guest: boolean; tv: boolean }): HomeTile[] {
 }
 
 /**
+ * The tiles box's children in the DOM's order, the drawn one (Tab, a screen reader; the pad's
+ * arrows are spatial either way): the hero first where it is drawn first (at the left on a PC and
+ * a TV, on top upright), last on a phone held sideways (`heroLast`: the rail, where it stands at
+ * the right, by the thumb), the role's tiles in their order around it. Pure.
+ */
+export function homeDomOrder(r: { guest: boolean; tv: boolean; heroLast: boolean }): Array<HomeTile | 'hero'> {
+  const tiles = tileOrder(r);
+  return r.heroLast ? [...tiles, 'hero'] : ['hero', ...tiles];
+}
+
+/**
  * A TV guest's rooms wait for the anti-bot check (its remote may not pass one that asks): locked
  * until a guest session exists or a quiet check passed (NetClient.antiBotReady). Every other
  * player's rooms are open. Pure.

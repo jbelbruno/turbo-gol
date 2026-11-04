@@ -11,11 +11,13 @@
  * warmed again every 4 minutes while Inicio is up) and CASUAL locked. `data-role` on the tiles and
  * html.tg-tv pick the grid template that draws them in that order (styles/screens/home.css); the
  * DOM follows the same order (Tab, a screen reader). The hero at the left on a PC and a TV, at the
- * right on a phone held sideways (the thumb), on top upright.
+ * right on a phone held sideways (the thumb; last in the DOM there too: homeModel.ts homeDomOrder),
+ * on top upright. A TV guest's locked SALAS shows the lock in its slot and "Sign in with your
+ * phone" as its line.
  *
  * After a guest's match against the AI reached its FINAL, a card over the tiles offers the next
  * step once per page (homeModel.ts nextCard): SEE LOBBIES and CREATE ACCOUNT (a TV: SIGN IN WITH
- * YOUR PHONE), and a close.
+ * YOUR PHONE), and a close; ▲ from the hero goes to it.
  *
  * The hero follows the player (homeModel.ts heroState): RELOAD NOW after a refused version, back
  * to your match (PR 12), back to the lobby, the running search (its clock, the estimate and ✕
@@ -25,7 +27,9 @@
  * so does "How will you play?" on a new PC. A search started here opens "While you search" on its
  * first answer (Menu.startSearch `sheet`). The hero renders on a change only (the tick builds a key:
  * 4 Hz, 1 Hz on super low; the Menu ticks it at once when a search starts or ends), its clock on a
- * new second, its name for a screen reader on a state change, never with the clock. The plate and
+ * new second and its ticking estimate in place (never a rebuild: the busy stripe sweeps on; a TV
+ * keeps the estimate, its queue gives way first), its name for a screen reader on a state change,
+ * never with the clock. The plate and
  * the locks follow the account on their own keys; the profile is fetched as the screen shows (the
  * plate's rank, the ban, the chip's rank), and once more when a session restored after that.
  *
@@ -46,11 +50,12 @@ import { icon } from '../components/icons';
 import { plate as createPlate } from '../components/plate';
 import { rankBadge, tierById } from '../badges';
 import { carName, playerName, regionName, tierName } from '../names';
-import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, nextCard, plateRank, queueParts, roomsLocked, subParts, tileOrder } from './homeModel';
+import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, homeDomOrder, nextCard, plateRank, queueParts, roomsLocked, subParts } from './homeModel';
 import type { HeroInput, HeroKind, HeroState, HomeTile, QueuePick } from './homeModel';
 import { waitLines } from './searchModel';
 import { estimateText } from './searchText';
 import { openProfileTab } from './profile';
+import { onNavTo } from '../nav';
 
 const UI_FIT = import.meta.env.DEV || import.meta.env.VITE_UI_FIT === '1';
 
@@ -102,11 +107,15 @@ export function homeScreen(menu: Menu): Screen {
   const tilesBox = h('div.mn-tiles', null, hero.el);
   // "Now, with people?" after a guest's offline match (once per page).
   const nextBox = h('div.mn-home-next', { hidden: true, 'data-nav-row': true });
+  // ▲ from the hero: that card, drawn right over the tiles (the hero's row) when it shows; the
+  // spatial pick would pass it for the plate over the hero's left part (its buttons sit at the right).
+  onNavTo(hero.main, 'up', () => (nextBox.hidden ? null : nextBox.querySelector<HTMLElement>('[data-nav]')));
   const el = h('section.mn-home', { 'data-tablero': true }, h('div.mn-home-top', { 'data-nav-row': true }, plate.el, pills), nextBox, tilesBox);
 
   let state: HeroState = { kind: 'play', queue: heroQueue(menu.prefs, false, false) };
   let heroKey = '';
   let clockText = '';
+  let estText = '';
   let plateKey = '';
   let lockKey = '';
   let roleKey = '';
@@ -148,7 +157,7 @@ export function homeScreen(menu: Menu): Screen {
     };
   };
 
-  /** What the hero shows for state `s` (plan PR 5's table); `key` changes with any text but the clock. */
+  /** What the hero shows for state `s` (plan PR 5's table); `key` changes with any text but the clock and the estimate's (est: its kind only). */
   const heroView = (s: HeroState, needPad: boolean, now: number): HeroView & { key: string } => {
     const padSlot: HeroView['slot'] = { text: t('tv.needPad'), icon: 'pad' };
     const dot = tv ? HERO_SEP_TV : HERO_SEP;
@@ -165,6 +174,9 @@ export function homeScreen(menu: Menu): Screen {
     /** The screen reader's name when it differs from the subtitle (a ticking estimate is never part of it). */
     let label: string | null = null;
     let clockNow: string | null = null;
+    /** Searching: the estimate's text (in place) and its kind (in the key). */
+    let est: string | null = null;
+    let estKind = '';
     const kind: HeroKind = s.kind;
     switch (s.kind) {
       case 'play': {
@@ -187,17 +199,20 @@ export function homeScreen(menu: Menu): Screen {
         break;
       }
       case 'search': {
-        // BUSCANDO, the clock, then the queue and the estimate ("Casual · Con bots en 3:37 como máximo").
+        // BUSCANDO, the clock, then the queue and the estimate ("Casual · Con bots en 3:37 como
+        // máximo"). The estimate ticks: written in place (est), only its kind is in the key, so the
+        // hero is not rebuilt (nor its busy stripe restarted) every second.
         const v = host.searchView();
         const lines2 = waitLines({ kind: s.search.kind, since: s.search.since, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, retrying: v.retrying === true, times: menu.cfg?.queue ?? null }, now);
         const queue = queueParts(s.search.kind, s.search.kind === 'ranked' ? s.search.modes : [], null, names).queue;
-        const second = lines2.override === 'retrying' ? t('search.retrying') : lines2.override === 'busy' ? t('search.busy') : estimateText(lines2.estimate);
+        est = lines2.override === 'retrying' ? t('search.retrying') : lines2.override === 'busy' ? t('search.busy') : estimateText(lines2.estimate);
+        estKind = lines2.override ?? lines2.estimate.kind;
         icon_ = 'search';
         tag = needPad ? padSlot : null;
         title = t('home.searching');
         clockNow = clock(now - s.search.since);
-        sub = { queue, dot, region: second };
-        subText = queue + dot + second;
+        sub = { queue, dot, region: null };
+        subText = queue;
         label = title + '. ' + queue;
         break;
       }
@@ -233,7 +248,7 @@ export function homeScreen(menu: Menu): Screen {
       }
     }
     const pad = tag !== null && needPad;
-    return { kind, icon: icon_, slot: tag, title, clock: clockNow, sub, needPad: pad, label: label ?? title + '. ' + subText, key: [kind, title, subText, tag?.text ?? '', pad].join('|') };
+    return { kind, icon: icon_, slot: tag, title, clock: clockNow, sub, est, needPad: pad, label: label ?? title + '. ' + subText, key: [kind, title, subText, estKind, tag?.text ?? '', pad].join('|') };
   };
 
   /** The plate, on a change of who and which rank (true when it was written). */
@@ -266,7 +281,8 @@ export function homeScreen(menu: Menu): Screen {
   /**
    * The tiles' slots by role: COMPETITIVO's lock (a guest's "Sign in", a banned player's lock
    * alone, the time left as its description), CASUAL's for a guest (its formats for an account),
-   * SALAS' PÚBLICAS or a TV guest's phone lock. True when a slot was rebuilt.
+   * SALAS' PÚBLICAS, or a TV guest's lock with "Sign in with your phone" as its line. True when a
+   * slot was rebuilt.
    */
   const renderLocks = (): boolean => {
     const left = acc.signedIn ? banLeft() : 0;
@@ -284,21 +300,30 @@ export function homeScreen(menu: Menu): Screen {
     lockKey = key;
     ranked.setSlot(rankedKey === 'guest' ? signInLock() : rankedKey === 'ban' ? slot('', { icon: 'lock' }) : null);
     casual.setSlot(g ? signInLock() : slot(PLAYLISTS.join(HERO_SEP), { drop: true }));
-    friends.setSlot(rooms ? slot(t('modes.lobbiesTvLocked'), { icon: 'lock', body: true, drop: true }) : slot(t('home.lobbiesSlot'), { drop: true }));
+    // A TV guest's locked rooms: the lock in the slot, and how to open them as the tile's line (a
+    // slot's text would give way to the title on a TV: the lock alone told nothing).
+    friends.setSlot(rooms ? slot('', { icon: 'lock' }) : slot(t('home.lobbiesSlot'), { drop: true }));
+    if (rooms) friends.setSub(t('modes.lobbiesTvLocked'), t('modes.lobbiesTvLocked'));
+    else friends.setSub(t('modes.friendsSub'), t(tv ? 'modes.friendsSubTv' : 'modes.friendsSubShort'));
     return true;
   };
 
-  /** The tiles in the role's order (the DOM's, for Tab and a screen reader; the grid template draws the same). True when they moved. */
+  /**
+   * The tiles in the role's order and the hero where it is drawn (homeModel.ts homeDomOrder: the
+   * DOM's, for Tab and a screen reader; the grid template draws the same, the hero last on a phone
+   * held sideways, which can turn while Inicio is up). True when they moved.
+   */
   const renderRole = (): boolean => {
     const g = guest();
-    const key = g ? 'guest' : 'account';
+    const heroLast = html.dataset.shell === 'rail';
+    const key = `${g ? 'guest' : 'account'}|${heroLast}`;
     if (key === roleKey) return false;
     roleKey = key;
-    tilesBox.dataset.role = key;
-    const order = tileOrder({ guest: g, tv });
+    tilesBox.dataset.role = g ? 'guest' : 'account';
+    const order = homeDomOrder({ guest: g, tv, heroLast });
     const had = tilesBox.contains(document.activeElement);
     for (const id of Object.keys(tileEls) as HomeTile[]) if (!order.includes(id)) tileEls[id].remove();
-    for (const id of order) tilesBox.appendChild(tileEls[id]);
+    for (const id of order) tilesBox.appendChild(id === 'hero' ? hero.el : tileEls[id]);
     if (had && !tilesBox.contains(document.activeElement)) menu.refocus();
     return true;
   };
@@ -355,11 +380,20 @@ export function homeScreen(menu: Menu): Screen {
     if (view.key !== heroKey) {
       heroKey = view.key;
       clockText = view.clock ?? '';
+      estText = view.est ?? '';
       hero.set(view);
       changed = true;
-    } else if (view.clock !== null && view.clock !== clockText) {
-      clockText = view.clock;
-      hero.setClock(view.clock);
+    } else {
+      if (view.clock !== null && view.clock !== clockText) {
+        clockText = view.clock;
+        hero.setClock(view.clock);
+      }
+      // The estimate ticks in place; a text of another length is fitted again (its digits keep their width).
+      if (view.est != null && view.est !== estText) {
+        if (view.est.length !== estText.length) changed = true;
+        estText = view.est;
+        hero.setEst(view.est);
+      }
     }
     // A session restored after the screen showed: its profile once (the plate's rank, the ban).
     if (acc.signedIn && acc.me === null && fetchedFor !== (acc.account?.name ?? '?')) fetchMe();
@@ -425,7 +459,7 @@ export function homeScreen(menu: Menu): Screen {
     el,
     pillSlot: pills,
     show: () => {
-      heroKey = clockText = plateKey = lockKey = nextKey = '';
+      heroKey = clockText = estText = plateKey = lockKey = nextKey = '';
       fetchMe();
       warmAt = performance.now();
       menu.host.prewarmAntiBot?.(); // a guest's first room rarely waits for the anti-bot check (a TV guest's rooms open with it)
