@@ -224,6 +224,17 @@ test('Esc locked: a short Esc resumes the pause and closes the replay viewer\'s 
   assert.match(player, /window\.addEventListener\('keyup', \(e\) => \{[\s\S]{0,200}escArmStep\(held, escLocked\(\), menuOpen\) === 'resume'\) setMenu\(false\);/);
 });
 
+test('Esc locked: the menus\' Esc Back comes on a short release, so the hold that leaves full screen goes back no screen', () => {
+  const menu = read('src/ui/Menu.ts');
+  const onKey = body(menu, 'onKey');
+  assert.match(onKey, /case 'Escape': \{\s*e\.preventDefault\(\);[\s\S]*?const act = escBackAction\(e\.repeat, escLocked\(\)\);\s*if \(act === 'back'\) this\.backOrLeave\(\);\s*else if \(act === 'arm'\) this\.escArmedAt = performance\.now\(\);\s*return;/);
+  assert.match(menu, /window\.addEventListener\('keyup', \(e\) => this\.onKeyUp\(e\)\);/);
+  const up = body(menu, 'onKeyUp');
+  assert.match(up, /this\.keysDown\.delete\(e\.code\);/, 'the keys the menus had are still forgotten');
+  assert.match(up, /escArmStep\(held, escLocked\(\), this\.visibleNow && !this\.root\.hidden\) === 'resume'\) this\.backOrLeave\(\);/);
+  assert.match(body(menu, 'hide'), /this\.escArmedAt = -1;/, 'into the match: the armed Back goes');
+});
+
 test('Game.ts: the three entries to the pitch, the menus keep full screen, a match paused when it goes', () => {
   assert.match(body(game, 'hideMenus'), /^\s*this\.fullscreen\?\.enter\(entry\);/, 'first, while the press still carries its activation');
   assert.equal(game.match(/this\.hideMenus\(/g).length, 3);

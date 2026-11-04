@@ -11,7 +11,8 @@ All notable changes to Turbogol are documented here. The format follows
   starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
   tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
   Esc is still the pause (from the pause it resumes when you let it go) and holding Esc leaves full
-  screen without resuming the match; a player who leaves is not taken back until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
+  screen without resuming the match or going back a screen in the menus; a player who leaves is not
+  taken back until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
   screen when playing" (on by default), turns it off, and Android's tap to full screen with it; the
   row is not listed on an iPhone, an iPad or a TV. The replay viewer has a Full screen button and
   the F key.

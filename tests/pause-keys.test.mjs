@@ -19,7 +19,7 @@ registerHooks({
   },
 });
 
-const { pauseKeyAction, pauseResumeKeys, escArmStep, escMenuAction, ESC_RELEASE_MAX_MS } = await import('../src/game/pauseKeys.ts');
+const { pauseKeyAction, pauseResumeKeys, escArmStep, escMenuAction, escBackAction, ESC_RELEASE_MAX_MS } = await import('../src/game/pauseKeys.ts');
 const { t } = await import('../src/i18n.ts');
 const es = (await import('../src/locales/es.ts')).default;
 const { Input } = await import('../src/input/Input.ts');
@@ -84,6 +84,17 @@ test('the replay viewer\'s menu: Esc opens it on the press, closes it on the rel
   assert.equal(escMenuAction(true, false, false), 'close', 'not locked: on the press');
   assert.equal(escMenuAction(true, false, true), 'arm');
   for (const open of [false, true]) for (const locked of [false, true]) assert.equal(escMenuAction(open, true, locked), null, 'a held key\'s repeat');
+});
+
+test('the menus\' Esc: a Back on the press, on a short release when locked (the hold that leaves asks no "Leave?"), none on a repeat', () => {
+  assert.equal(escBackAction(false, false), 'back', 'not locked: on the press as before');
+  assert.equal(escBackAction(false, true), 'arm');
+  assert.equal(escBackAction(true, false), null);
+  assert.equal(escBackAction(true, true), null);
+  // The release (Menu.onKeyUp): a short press goes back; the hold that took full screen away does not.
+  assert.equal(escArmStep(150, true, true), 'resume');
+  assert.equal(escArmStep(2600, false, true), 'drop', 'held until full screen went');
+  assert.equal(escArmStep(150, true, false), 'drop', 'the menus went (a match started)');
 });
 
 class KeyTarget extends EventTarget {

@@ -64,6 +64,16 @@ export function escMenuAction(menuOpen: boolean, repeat: boolean, escLocked: boo
 }
 
 /**
+ * The menus' Esc (src/ui/Menu.ts), on a keydown: 'back' at once, 'arm' the Back on this Esc's
+ * release (Esc locked: the hold that leaves full screen must not go back a screen, nor ask "Leave
+ * Turbogol?" on Inicio), or null for a held key's repeat.
+ */
+export function escBackAction(repeat: boolean, escLocked: boolean): 'back' | 'arm' | null {
+  if (repeat) return null;
+  return escLocked ? 'arm' : 'back';
+}
+
+/**
  * The resume keys for the pause menu's key line: the pause bindings and the fixed back keys that
  * resume too (Esc, pad B; Backspace as well, left out of the line), each once: 'Esc / Start / B'.
  * An unbound label ('—') is skipped.

@@ -86,8 +86,8 @@ export function fullscreenAllowed(): boolean {
  * Esc reaches the page in the game's own full screen (the keyboard lock resolved, full screen still
  * on). There a short Esc is the game's and a held one the browser's way out (Chromium leaves after
  * about 1.5 s of it, with the first keydown already delivered), so whatever an Esc press resumes or
- * closes acts on its release instead (src/game/pauseKeys.ts escArmStep): the pause and the replay
- * viewer's menu. Pausing stays on the press.
+ * closes acts on its release instead (src/game/pauseKeys.ts escArmStep): the pause, the replay
+ * viewer's menu, the menus' Back. Pausing stays on the press.
  */
 export function escLocked(): boolean {
   return own && escLock && document.fullscreenElement != null;
