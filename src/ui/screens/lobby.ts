@@ -376,16 +376,19 @@ export function lobbyScreen(menu: Menu): Screen {
       h('u', null, t(kind === 'bots' ? 'search.waitBots' : 'search.waitTraining')),
     );
   const waitRow = h('div.mn-act-wait.mn-sala-wait', { 'data-nav-row': true, hidden: true }, h('span.mn-act-wait-label', null, t('lobby.waitLine')), playBtn('bots'), playBtn('training'));
+  // The three in one foot, fixed at the bottom of the stage (lobby.css): when the Sala scrolls (a
+  // phone held sideways or upright, a TV), the teams go under it and the lines stay in sight.
+  const foot = h('div.mn-sala-foot', null, need, bar, waitRow);
   const el = h(
     'section.mn-sala',
     { 'data-tablero': true },
     h('div.mn-sala-head', null, h('div.mn-sala-title', null, name, info, rulesLine), h('div.mn-sala-codebox', { 'data-nav-row': true }, code, share)),
     status,
     teams,
-    need,
-    bar,
-    waitRow,
+    foot,
   );
+  // Its height for the teams' rows (lobby.css scroll-margin): a row the arrows focus scrolls in above it, not under it.
+  const footSize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => el.style.setProperty('--mn-sala-foot', `${foot.offsetHeight}px`)) : null;
   let shown = false;
 
   const state = (): LobbyState | null => lobby.state;
@@ -651,6 +654,7 @@ export function lobbyScreen(menu: Menu): Screen {
         });
       }
       shown = true;
+      footSize?.observe(foot);
       if (lobby.me?.inGame) lobby.back(); // back from the lobby's match
       render();
       if (freshLobby) {
@@ -660,6 +664,7 @@ export function lobbyScreen(menu: Menu): Screen {
     },
     hide: () => {
       shown = false;
+      footSize?.disconnect();
     },
     // A search started or ended elsewhere (the pill's ✕, a failure): VS BOTS · TRAIN follow it.
     tick: () => {

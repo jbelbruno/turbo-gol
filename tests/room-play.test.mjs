@@ -2,8 +2,9 @@
 // §3.8, §5.4): VS BOTS · TRAIN start only for a lone host with nothing else on; someone coming in
 // brings the Sala back with "{name} joined your lobby"; the lobby gone goes to the menus; a running
 // search hides the buttons (and the Game never runs both); a lobby socket reconnecting does not end
-// it (on a real LobbyClient over fake sockets); every way out puts the timed match back. The Game's
-// and the Sala's wiring is pinned in their sources (Game.ts cannot load under node).
+// it (on a real LobbyClient over fake sockets); every way out puts the timed match back; the Sala's
+// sticky foot keeps the lines in sight on a short screen. The Game's and the Sala's wiring is
+// pinned in their sources (Game.ts cannot load under node).
 //   node --test tests/room-play.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -262,6 +263,29 @@ test("the pause: RESUME, SETTINGS, BACK TO THE LOBBY (QUIT's place; free play ke
   assert.match(lobby, /onclick: \(\) => menu\.beforeMatch\(\(\) => roomPlay\?\.start\(kind\)\)/);
   assert.match(lobby, /h\('span\.mn-act-wait-label', null, t\('lobby\.waitLine'\)\), playBtn\('bots'\), playBtn\('training'\)\);/);
   assert.match(lobby, /t\(kind === 'bots' \? 'search\.waitBots' : 'search\.waitTraining'\)/);
+});
+
+/** Every innermost rule of a stylesheet, comments out: [{ selector, body }]. */
+const cssBlocks = (text) => [...text.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim().replace(/\s+/g, ' '), body: m[2] }));
+
+test("the Sala's foot: the need line, the bar and VS BOTS · TRAIN stay in sight on a short screen (a phone held sideways), the teams scroll under them", async () => {
+  // One foot holds the three, last in the Sala: nothing sits after it, below the fold.
+  const lobby = await src('src/ui/screens/lobby.ts');
+  assert.match(lobby, /const foot = h\('div\.mn-sala-foot', null, need, bar, waitRow\);/);
+  assert.match(lobby, /\n {4}teams,\n {4}foot,\n {2}\);/);
+  // The foot is the sticky one (the bar alone sticking left the lines under it or after it).
+  const css = cssBlocks(await src('src/ui/styles/screens/lobby.css'));
+  const foot = css.find((b) => b.selector === '.mn-sala-foot');
+  assert.ok(foot, '.mn-sala-foot');
+  assert.match(foot.body, /position:\s*sticky;/);
+  assert.match(foot.body, /bottom:\s*0;/);
+  assert.match(foot.body, /background:\s*var\(--surface-0\);/, 'opaque: the teams go under it');
+  for (const b of css.filter((x) => x.selector.includes('.mn-sala-bar'))) assert.doesNotMatch(b.body, /sticky/, b.selector);
+  // A row the arrows focus (a TV) scrolls in above the foot, not under it: the foot's height on the Sala while it shows.
+  assert.match(css.find((b) => b.selector === '.mn-sala-teams [data-nav]')?.body ?? '', /scroll-margin-bottom:\s*calc\(var\(--mn-sala-foot, 0px\) \+ 1rem\);/);
+  assert.match(lobby, /new ResizeObserver\(\(\) => el\.style\.setProperty\('--mn-sala-foot', `\$\{foot\.offsetHeight\}px`\)\)/);
+  assert.match(lobby, /shown = true;\s*footSize\?\.observe\(foot\);/);
+  assert.match(lobby, /shown = false;\s*footSize\?\.disconnect\(\);/);
 });
 
 test('every way out puts the timed match back: back to the Sala, the menus, a session, a new match, the lobby\'s match', async () => {
