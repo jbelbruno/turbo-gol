@@ -352,7 +352,8 @@ test('nodes_on absent: a Casual match is a MatchDO, the node registry is never a
   assert.equal(h.nodes.calls.length, 0, 'no call to the NodeRegistryDO');
   const st = await h.stats();
   assert.deepEqual([st.rooms, st.active, st.nodeLocks], [1, 2, 0]);
-  assert.deepEqual([...new Set(h.flags.reads)].sort(), ['nodes_on', 'vm_disabled']);
+  // do_disabled is read before the MatchDO is created (a group let in for the nodes may outlive them: no MatchDO under it).
+  assert.deepEqual([...new Set(h.flags.reads)].sort(), ['do_disabled', 'nodes_on', 'vm_disabled']);
   // A server lock verified with its MatchDO, never with the registry.
   h.setTime(h.time() + M.LOCK_VERIFY_AFTER_MS);
   const r = await h.join(A);
@@ -667,6 +668,31 @@ test('do_disabled with the nodes on, where no node can host (hosts 0): the group
   assert.equal((await full.join(A)).json.wait.busy, true);
   assert.equal(full.nodes.of('/internal/place').length, 1);
   assert.equal(full.flags.reads.filter((n) => n === 'do_disabled').length, fullReads, 'no formation tried at the cap');
+});
+
+test('do_disabled, and the owner turns the nodes off while groups wait for one: still no MatchDO (Casual and ranked); they wait busy until the Worker\'s own 503 ends each search', async () => {
+  const D = 'd4c3b2a1f6e50718';
+  const h = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
+  h.nodes.place = () => ({ body: { placement: null, hosts: 0 } });
+  await h.join(A);
+  assert.equal((await h.join(B)).json.wait.busy, true, 'no node can host: busy');
+  await h.join(C, 'ranked');
+  assert.equal((await h.join(D, 'ranked')).json.wait.busy, true);
+  delete h.flags.values.nodes_on;
+  h.flags.values.vm_disabled = '1';
+  // No POST in between (their long-polls are open): the hub reads the nodes again, the back-off is over.
+  h.setTime(h.time() + M.NODES_MODE_TTL_MS + 1_000);
+  if (h.mm.sweepTimer) clearTimeout(h.mm.sweepTimer);
+  h.mm.sweepTimer = null;
+  await h.mm.sweep();
+  await pause(10);
+  assert.equal(created(h).length, 0, 'never a MatchDO under do_disabled');
+  const st = await h.stats();
+  assert.deepEqual([st.queues.casual, st.queues['1v1:ranked'], st.forming], [2, 2, 0], 'all four still queued');
+  // A join that still reached the hub (the Worker now answers these players 503 first) finds the group waiting, busy.
+  h.setTime(h.time() + 6_000);
+  const again = await h.join(A);
+  assert.deepEqual([again.json.status, again.json.wait.busy, created(h).length], ['waiting', true, 0]);
 });
 
 test('a group that finds no node and no MatchDO (the cap) backs off: no placement asked again within RETRY_AFTER_MS (busy meanwhile); hosts 0 stops asking for a minute', async () => {

@@ -2393,9 +2393,10 @@ export class MatchmakerDO extends DurableObject<Env> {
    * one account plays one ranked match across every region). Hosted SA with the nodes on for every
    * human: on a community node when one takes it (placeOnNode). Otherwise a MatchDO created with the
    * host region's location hint, its slot checked against the global caps and reserved at once (no
-   * await in between: concurrent formations never pass a cap together); NoRoom when the nodes were
-   * asked and the Worker's own servers are off (do_disabled), when a cap is reached, or when one of
-   * the humans left meanwhile. The results carry the hub's extras (mode, host, humans).
+   * await in between: concurrent formations never pass a cap together); NoRoom when the Worker's
+   * own servers are off (do_disabled: never a MatchDO, whether the nodes were asked or are not on
+   * for the group), when a cap is reached, or when one of the humans left meanwhile. The results
+   * carry the hub's extras (mode, host, humans).
    */
   private async formMatch(mode: GameModeId, humans: readonly HumanEntry[], now: number, opts: FormOptions = {}): Promise<FormedMatch> {
     // A MatchDO and a community node run the standard physics only (/custom never sends rules here).
@@ -2432,6 +2433,13 @@ export class MatchmakerDO extends DurableObject<Env> {
       if (await flag(env, 'do_disabled')) throw new NoRoom('do_disabled');
       // One of them left while the node was asked (leave): no MatchDO with it, the others wait on.
       if (humans.some((h) => this.cancels.has(h.playerId))) throw new NoRoom('left');
+    } else if (nodesConfigured(env) && (await flag(env, 'do_disabled'))) {
+      // D9 (§1.8: no MatchDO under do_disabled) for a group the nodes are not on for: the Worker
+      // let its humans in while they were (their search goes on in the hub), and the owner turned
+      // the nodes off since, or narrowed nodes_on. It waits, busy; the Worker's own 503 ends each
+      // search at its next POST. Without the nodes configured nobody is let in under do_disabled,
+      // and the hub reads no flag.
+      throw new NoRoom('do_disabled');
     }
     // The global caps: checked and the slot reserved in one synchronous step.
     if (this.serverFull(now, 'server', opts.ranked === true, humans.every((h) => h.guest === true), solo !== undefined)) throw new NoRoom('capacity');
