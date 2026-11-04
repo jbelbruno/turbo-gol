@@ -243,6 +243,11 @@ new NetClient({ ...opciones, webSocketFactory: nodeAwareSocketFactory() })
   `revoke` y `unfreeze`, con un motivo opcional en la línea de auditoría. El catálogo es código
   (`src/game/cosmetics.ts` y `control-plane/shop.ts`). Un drenaje no tiene vuelta atrás (`node/runtime.ts:570-575`): el nodo solo vuelve a tomar
   partidas cuando se reinicia.
+- Historial del panel (30 días, en el SQLite del DO): los eventos de cada nodo, que `Registry` y
+  `ControlPlane` mandan por el *sink* `events` (como el log); cada partida resuelta, anuladas
+  incluidas, en la misma transacción que la resuelve; y las líneas `ALERT`. Se leen con
+  `/nodes/admin/events`, `history`, `alerts` y `matches`; `replay` baja el TGR1 crudo (siempre
+  auditado), y `match/void` y `match/verify` actúan sobre una partida sin resolver.
 - Releases: `.github/workflows/node-release.yml`, con un tag `node-vX.Y.Z` en un commit de
   `main`: arma la release sin firmar, la firma en el entorno `releases` y la sube a R2 desde el
   entorno `releases-r2`; la firma y la subida esperan la aprobación del mantenedor (P14 y M6 de

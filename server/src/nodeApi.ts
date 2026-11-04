@@ -62,8 +62,18 @@ export const NODE_ROUTES = {
 /** GET: the node operators' account ids, for the owner's account counts only (nodeRoutes.ts accountStats -> AccountsDO). */
 export const OPERATORS_ROUTE = '/internal/operators';
 
-/** POST { userId }: a purged account's nodes are banned (AccountsDO's alarm, best effort, tried again until answered). */
+/**
+ * POST { userId }: a purged account's nodes are banned, and its name and id leave the maintainers'
+ * history (AccountsDO's alarm, best effort, tried again until answered; every purged account, a
+ * player's too).
+ */
 export const OPERATOR_DELETED_ROUTE = '/internal/operator-deleted';
+
+/**
+ * AccountsDO's POST /replay-hidden takes this many ids and as many names at most (a page of the
+ * public replays: 31 rows of 8 seats); the NodeRegistryDO asks in batches of it.
+ */
+export const REPLAY_HIDDEN_MAX = 256;
 
 /**
  * POST { what } with x-operator-id / x-operator-name: a maintainer's read that the Worker answered

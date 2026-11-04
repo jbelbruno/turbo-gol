@@ -71,6 +71,13 @@
  *   POST     /nodes/admin/delist      { matchId, reason? }: a match out of the public replays (its row and its R2
  *                                     object), then its view purged here (Cache API) and, with CF_ZONE_ID and
  *                                     CF_PURGE_TOKEN, in every location (purgeEverywhere)
+ *   GET      /nodes/admin/events      the maintainers' history (NodeRegistryDO, nodeStore.ts, 30 days): ?node=&before=
+ *   GET      /nodes/admin/history     the node events; ?node=&match=&before=<at>.<matchId> the settled matches (void
+ *   GET      /nodes/admin/alerts      ones too: verdicts, verifiers, strikes; a name its player hides left out);
+ *   GET      /nodes/admin/matches     ?before= the ALERT lines; the unsettled matches; ?matchId= one match's raw
+ *   GET      /nodes/admin/replay      replay (TGR1, application/octet-stream, an ALERT every time, 404 once
+ *   POST     /nodes/admin/match/void  delisted or pruned); { matchId, reason, strike? }: an unsettled match void
+ *   POST     /nodes/admin/match/verify  (no strike unless asked); { matchId }: its queued verification now
  *     The maintainer gate, in this order, for every one of them (and for tokens, account-stats and
  *     queue-stats): 413 over 4 KB; requirePrimary (401, 403 account_required, 403 tv_session); 403
  *     not_trusted; requireFresh(2, MAINTAINER_FRESH_S) (403 reauth_required { level: 2 }); the limit;
@@ -183,6 +190,13 @@ const ADMIN_ROUTES: Readonly<Record<string, 'GET' | 'POST'>> = {
   overview: 'GET',
   wallet: 'GET',
   frozen: 'GET',
+  events: 'GET',
+  history: 'GET',
+  alerts: 'GET',
+  matches: 'GET',
+  replay: 'GET',
+  'match/void': 'POST',
+  'match/verify': 'POST',
   status: 'POST',
   drain: 'POST',
   update: 'POST',

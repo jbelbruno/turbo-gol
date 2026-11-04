@@ -625,6 +625,61 @@ test('the panel routes (overview, wallet, frozen, retire, tokens/revoke): the ma
   assert.equal(env.NODES.seen.length, routes.length);
 });
 
+/** A fourth project account: the history routes below spend its limits, not the others'. */
+const HISTORIAN = 'c2b2c3d4e5f60718';
+
+test('the history routes (events, history, alerts, matches, replay, match/void, match/verify): the maintainer gate in order (413, 401, account_required, tv_session, not_trusted, reauth_required), then forwarded with the operator headers and a read’s query; the raw replay passes through as bytes, no-store; no CORS', async () => {
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${HISTORIAN}` });
+  env.NODES.handler = (r) => {
+    const u = new URL(r.url);
+    if (u.pathname === '/nodes/admin/replay') return new RealResponse(new Uint8Array([0x54, 0x47, 0x52, 0x31]), { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' } });
+    return new RealResponse(JSON.stringify({ path: u.pathname, search: u.search, method: r.method }), { headers: { 'content-type': 'application/json' } });
+  };
+  const now = () => Math.floor(Date.now() / 1000);
+  const token = (sub, extra = {}) => signJwt(SECRET, { sub, name: 'Proyecto', iat: now(), exp: now() + 3600, acct: 1, aat: now(), aal: 2, ...extra });
+  const routes = [
+    ['GET', 'events?node=abababababababab&before=12'],
+    ['GET', 'history?before=1.' + 'a'.repeat(64)],
+    ['GET', 'alerts'],
+    ['GET', 'matches'],
+    ['POST', 'match/void'],
+    ['POST', 'match/verify'],
+  ];
+  const ask = (m, w, auth, headers = {}) => req(env, m, '/nodes/admin/' + w, { body: m === 'POST' ? JSON.stringify({ matchId: 'a'.repeat(64), reason: 'x' }) : undefined, headers: { ...(auth ? { authorization: 'Bearer ' + auth } : {}), ...headers } });
+  const guest = (await createSession(SECRET, HISTORIAN, 'Proyecto')).token;
+  const refusals = [
+    [null, 401, 'unauthorized'],
+    [guest, 403, 'account_required'],
+    [await token(HISTORIAN, { tv: 1 }), 403, 'tv_session'],
+    [await accountToken(PLAYER, 'Jugador'), 403, 'not_trusted'],
+    [await token(HISTORIAN, { aat: now() - 16 * 60 }), 403, 'reauth_required'],
+    [await token(HISTORIAN, { aal: 1 }), 403, 'reauth_required'],
+  ];
+  for (const [m, w] of [...routes, ['GET', 'replay?matchId=' + 'a'.repeat(64)]]) {
+    for (const [auth, status, code] of refusals) {
+      const res = await ask(m, w, auth);
+      const body = await jsonOf(res);
+      assert.deepEqual([res.status, body.error], [status, code], `${m} ${w}: ${code}`);
+      if (code === 'reauth_required') assert.equal(body.level, 2);
+    }
+    assert.equal((await ask(m, w, await token(HISTORIAN), { 'content-length': '4097' })).status, 413, `${w}: 413 first`);
+  }
+  assert.equal(env.NODES.seen.length, 0, 'nothing refused reached the object');
+  const auth = await token(HISTORIAN);
+  for (const [m, w] of routes) {
+    const res = await ask(m, w, auth, { 'x-operator-id': PLAYER });
+    const [path, query] = w.split('?');
+    assert.deepEqual([res.status, await jsonOf(res)], [200, { path: '/nodes/admin/' + path, search: query ? '?' + query : '', method: m }], w);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+    assert.equal(env.NODES.seen.at(-1).headers['x-operator-id'], HISTORIAN);
+  }
+  const raw = await ask('GET', 'replay?matchId=' + 'a'.repeat(64), auth);
+  assert.deepEqual([raw.status, raw.headers.get('content-type'), raw.headers.get('cache-control'), raw.headers.get('access-control-allow-origin')], [200, 'application/octet-stream', 'no-store', null]);
+  assert.deepEqual(new Uint8Array(await raw.arrayBuffer()), new Uint8Array([0x54, 0x47, 0x52, 0x31]));
+  for (const [m, w] of [['POST', 'events'], ['POST', 'replay'], ['GET', 'match/void'], ['GET', 'match/verify'], ['POST', 'match'], ['GET', 'match/void/x']]) assert.equal((await ask(m, w, auth)).status, 404, `${m} ${w}`);
+  assert.equal(env.NODES.seen.length, routes.length + 1);
+});
+
 test('the cron: one call to the object, with the internal header; never a throw; nothing at all without the node settings', async () => {
   const run = async (env) => {
     const waits = [];

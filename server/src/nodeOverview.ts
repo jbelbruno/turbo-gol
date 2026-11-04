@@ -57,6 +57,8 @@ export function adminNodeView(cp: ControlPlane, n: NodeRecord, open: ReadonlyMap
     operator: { id: n.operatorId, name: n.operatorName },
     createdAt: n.createdAt,
     lastSeen: n.lastSeen > 0 ? n.lastSeen : null,
+    // When it was last heard as of its last online / offline transition: what a restart still knows (lastSeen is memory only).
+    seenAt: n.seenAt ?? null,
     draining: n.draining,
     egressCapGB: n.egressCapGB,
     cpuLoad: n.cpuLoad,
@@ -197,6 +199,8 @@ export interface OverviewInput {
   outbox: Array<{ path: string; rows: number; oldestAt: number }>;
   flags: ReadonlyMap<string, string | null>;
   webhook: boolean;
+  /** The voids of the last 24 h by node and reason (the history, NodeStore.voidsSince); none before it existed. */
+  voids?: Array<{ nodeId: string; reason: string; count: number }>;
 }
 
 /** GET /nodes/admin/overview. */
@@ -235,5 +239,7 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     flags: flagViews(i.flags),
     alerts: { webhook: i.webhook },
     warnings: warningsOf(nodes, i.channel, i.webhook),
+    // node_offline, empty, unverified, a strike's lost:*...: which node's matches went void, and why.
+    voids24h: (i.voids ?? []).map((v) => ({ ...v, name: nodes.find((n) => n.nodeId === v.nodeId)?.name ?? null })),
   };
 }
