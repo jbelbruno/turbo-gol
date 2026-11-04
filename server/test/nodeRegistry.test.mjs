@@ -2342,3 +2342,32 @@ test('the open matches: what the control plane holds and has not settled, newest
   const after = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
   assert.deepEqual(after.json.matches.map((m) => m.matchId), [second]);
 });
+
+test('a player purged while their match is held: the open matches show their seat blank, and the seat the settle writes later has neither name nor id; the purged id goes after HISTORY_DAYS', async () => {
+  const { h, env, ws } = await watched();
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+  const asked = [];
+  env.ACCOUNTS.answer = (name, path, body) => (path === '/replay-hidden' ? (asked.push(...body.ids), json200({ ids: body.ids.filter((x) => x === A), names: [] })) : json200({ ok: true }));
+  // AccountsDO tells the purge once, while the match is still being played.
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: A } })).status, 200);
+  const open = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual(open.json.matches[0].seats.map((s) => [s.slot, s.bot, s.name, s.id, s.hidden]), [
+    [0, false, null, null, false],
+    [1, false, 'P1', B, false],
+  ]);
+  assert.deepEqual(asked, [B], 'a purged id is not even asked about');
+  assert.deepEqual(h.obj.cp.matches.get(placement.matchId).assign.roster.find((e) => e.slot === 0).playerId, A, 'the roster keeps it: the outcome is delivered with it');
+  // It settles afterwards: the row is written with the seat blank, never with the id and the name.
+  await send(h, ws, { t: 'report', id: 'r1', report: { kind: 'lost', matchId: placement.matchId, reason: 'tick_error' } });
+  assert.deepEqual(rows(h, 'node_match_players').map((r) => [r.slot, r.player_id, r.name]), [[0, null, null], [1, B, 'P1']]);
+  assert.ok(!rows(h, 'node_match_history').some((r) => r.data.includes(A)));
+  h.obj.replayNames.clear();
+  const one = (await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN })).json.matches[0];
+  assert.deepEqual(one.seats[0], { slot: 0, team: 0, bot: false, name: null, id: null, hidden: false });
+  // Only the id is kept, and only HISTORY_DAYS: the cron's prune takes it with the history.
+  assert.deepEqual(rows(h, 'node_forgotten').map((r) => r.player_id), [A]);
+  assert.deepEqual([...h.obj.store.forgotten([B, A, A, ...Array.from({ length: 120 }, (_, i) => i.toString(16).padStart(16, '0'))])], [A], 'asked in parts, each id once');
+  clock += (HISTORY_DAYS + 1) * DAY;
+  assert.equal((await call(h, 'POST', '/internal/health')).status, 200);
+  assert.deepEqual(rows(h, 'node_forgotten'), []);
+});

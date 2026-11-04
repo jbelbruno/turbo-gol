@@ -42,6 +42,9 @@
  *   node_match_players its human seats (name and player id, both for the maintainers only, ids never
  *                 served elsewhere): a purged account's are blanked (forgetPlayer, at
  *                 /internal/operator-deleted), a name its player hides is left out when read (NodeRegistryDO)
+ *   node_forgotten the ids of those purged accounts (no name, nothing else), kept HISTORY_DAYS: a
+ *                 match held when its player was purged settles later, and its seat is written blank
+ *                 (AccountsDO tells the purge once). The open matches leave them out too (forgotten)
  *   node_alerts   the ALERT lines the object posts to the team's channel (log and audit), whether or
  *                 not a webhook is set, as the channel gets them (the same alert once in 10 minutes,
  *                 every audit line): a ring of ALERT_RING_MAX lines
@@ -70,6 +73,8 @@ export const ALERT_RING_MAX = 2000;
 export const NODE_EVENTS_MAX = 100_000;
 /** History rows a write prunes at most on its way (the cron's prune takes REPLAY_PRUNE_MAX). */
 const HISTORY_PRUNE_ON_WRITE = 50;
+/** Player ids one node_forgotten query asks for at most (a Durable Object's SQL binds 100 values a query). */
+const FORGOTTEN_ASK_MAX = 50;
 /** A row's settle hour in SQL (integer division: `at` is an INTEGER), the expression replay_index_hour indexes. */
 const REPLAY_HOUR_SQL = `(at / ${HOUR_MS})`;
 /** Rows one prune deletes at most (the cron's, every 5 minutes): bounded work on the object's thread. */
@@ -271,6 +276,8 @@ export class NodeStore implements RegistryStore, MatchStore {
     s.exec('CREATE INDEX IF NOT EXISTS node_match_history_node ON node_match_history (node_id, at, match_id)');
     s.exec('CREATE TABLE IF NOT EXISTS node_match_players (match_id TEXT NOT NULL, slot INTEGER NOT NULL, player_id TEXT, name TEXT, PRIMARY KEY (match_id, slot))');
     s.exec('CREATE INDEX IF NOT EXISTS node_match_players_player ON node_match_players (player_id)');
+    s.exec('CREATE TABLE IF NOT EXISTS node_forgotten (player_id TEXT PRIMARY KEY, at INTEGER NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_forgotten_at ON node_forgotten (at)');
     s.exec('CREATE TABLE IF NOT EXISTS node_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, line TEXT NOT NULL)');
     s.exec('CREATE INDEX IF NOT EXISTS node_alerts_at ON node_alerts (at)');
     const v = s.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'state_version'").toArray()[0]?.v;
@@ -580,11 +587,18 @@ export class NodeStore implements RegistryStore, MatchStore {
 
   // ---- the maintainers' history --------------------------------------------------------------
 
-  /** A settled match's row and seats (in finished()'s transaction), and the rows past HISTORY_DAYS that a write prunes on its way. */
+  /**
+   * A settled match's row and seats (in finished()'s transaction), and the rows past HISTORY_DAYS that
+   * a write prunes on its way. A seat of an account purged while the match was held is written blank.
+   */
   private historyRow(h: { match: MatchHistory; players: HistorySeat[] }, now: number): void {
     const x = h.match;
+    const gone = this.forgotten(h.players.flatMap((p) => (p.playerId === null ? [] : [p.playerId])));
     this.sql.exec('INSERT INTO node_match_history (match_id, node_id, at, result, reason, delisted_at, data) VALUES (?, ?, ?, ?, ?, NULL, ?) ON CONFLICT(match_id) DO NOTHING', x.matchId, x.nodeId, x.settledAt, x.result, x.reason, JSON.stringify(x));
-    for (const p of h.players) this.sql.exec('INSERT INTO node_match_players (match_id, slot, player_id, name) VALUES (?, ?, ?, ?) ON CONFLICT(match_id, slot) DO NOTHING', x.matchId, p.slot, p.playerId, p.name);
+    for (const p of h.players) {
+      const blank = p.playerId !== null && gone.has(p.playerId);
+      this.sql.exec('INSERT INTO node_match_players (match_id, slot, player_id, name) VALUES (?, ?, ?, ?) ON CONFLICT(match_id, slot) DO NOTHING', x.matchId, p.slot, blank ? null : p.playerId, blank ? null : p.name);
+    }
     this.pruneMatchHistory(now - HISTORY_DAYS * DAY_MS, HISTORY_PRUNE_ON_WRITE);
   }
 
@@ -706,17 +720,39 @@ export class NodeStore implements RegistryStore, MatchStore {
       .map((r) => ({ nodeId: r.node_id, reason: r.reason ?? '', count: Number(r.n) }));
   }
 
-  /** A purged account (/internal/operator-deleted): its name and id leave every history seat it held. */
+  /**
+   * A purged account (/internal/operator-deleted): its name and id leave every history seat it held,
+   * and its id is kept (node_forgotten) so that a match it is still in settles with its seat blank:
+   * AccountsDO tells a purge once, and a match can be held for hours after it (its verification).
+   */
   forgetPlayer(playerId: string): void {
-    this.sql.exec('UPDATE node_match_players SET player_id = NULL, name = NULL WHERE player_id = ?', playerId);
+    const now = this.now();
+    this.tx(() => {
+      this.sql.exec('INSERT INTO node_forgotten (player_id, at) VALUES (?, ?) ON CONFLICT(player_id) DO NOTHING', playerId, now);
+      this.sql.exec('UPDATE node_match_players SET player_id = NULL, name = NULL WHERE player_id = ?', playerId);
+      this.sql.exec('DELETE FROM node_forgotten WHERE at < ?', now - HISTORY_DAYS * DAY_MS);
+    });
   }
 
-  /** The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events and ALERT lines past it. Returns the matches pruned. */
+  /** Which of `playerIds` are purged accounts' (forgetPlayer), asked FORGOTTEN_ASK_MAX at a time (a query binds 100 values at most). */
+  forgotten(playerIds: readonly string[]): Set<string> {
+    const out = new Set<string>();
+    const ids = [...new Set(playerIds)];
+    for (let i = 0; i < ids.length; i += FORGOTTEN_ASK_MAX) {
+      const part = ids.slice(i, i + FORGOTTEN_ASK_MAX);
+      const marks = part.map(() => '?').join(', ');
+      for (const r of this.sql.exec<{ player_id: string }>(`SELECT player_id FROM node_forgotten WHERE player_id IN (${marks})`, ...part).toArray()) out.add(r.player_id);
+    }
+    return out;
+  }
+
+  /** The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events, ALERT lines and purged ids past it. Returns the matches pruned. */
   pruneHistory(now: number, max: number = REPLAY_PRUNE_MAX): number {
     const before = now - HISTORY_DAYS * DAY_MS;
     return this.tx(() => {
       this.sql.exec('DELETE FROM node_events WHERE at < ?', before);
       this.sql.exec('DELETE FROM node_alerts WHERE at < ?', before);
+      this.sql.exec('DELETE FROM node_forgotten WHERE at < ?', before);
       return this.pruneMatchHistory(before, max);
     });
   }

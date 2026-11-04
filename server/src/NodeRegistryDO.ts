@@ -62,7 +62,7 @@
  *   POST /internal/operator-deleted { userId }  AccountsDO's purge of an account (sign-in PR 12): every node of
  *                                it banned (told, its socket closed 4403) -> { ok, banned }; an ALERT when there
  *                                were any; its name and id out of every history seat (any purged account, a
- *                                player's too); 409 trusted for a NODE_TRUSTED_OPERATORS id (never deleted)
+ *                                player's too), now and when a match it is still in settles; 409 trusted for a NODE_TRUSTED_OPERATORS id (never deleted)
  *   GET  /internal/replays       the public replay list and one entry of it, as the public sees them (replays():
  *                                an hour after the settle, rounded to the hour, hidden names as 'Jugador N', asked
  *                                of AccountsDO /replay-hidden and kept a minute)
@@ -1733,15 +1733,18 @@ export class NodeRegistryDO extends DurableObject<Env> {
   /**
    * GET /nodes/admin/matches: the matches the control plane holds and has not settled (being played,
    * reported or verified), newest first, OPEN_MATCHES_MAX at most, with their seats (a name its player
-   * hides left out, as in the history) and where each stands.
+   * hides left out, as in the history; a purged account's seat with neither name nor id, as the
+   * history writes it when the match settles) and where each stands.
    */
   private async adminMatches(cp: ControlPlane, id: string, actor: string): Promise<Response> {
     const open = [...cp.matches.values()].filter((m) => m.state !== 'done').sort((a, b) => b.assign.createdAt - a.assign.createdAt);
     const page = open.slice(0, OPEN_MATCHES_MAX);
     this.readAudit(id, actor, `the open matches (${open.length})`);
     const humans = (m: (typeof page)[number]) => m.assign.roster.filter((e) => e.kind === 'player' && e.playerId);
+    // The roster keeps a purged player's id (the outcome is delivered with it): the panel never shows it.
+    const gone = this.store?.forgotten(page.flatMap((m) => humans(m).map((e) => e.playerId as string))) ?? new Set<string>();
     const hidden = await this.hiddenOf(
-      page.flatMap((m) => humans(m).map((e) => 'i:' + (e.playerId as string))),
+      page.flatMap((m) => humans(m).flatMap((e) => (gone.has(e.playerId as string) ? [] : ['i:' + (e.playerId as string)]))),
       'open match names left out',
     );
     const nameOf = (nodeId: string | null) => (nodeId === null ? null : (cp.registry.node(nodeId)?.name ?? null));
@@ -1768,6 +1771,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
           leaves: m.leaves.size,
           seats: m.assign.roster.map((e) => {
             if (e.kind !== 'player' || !e.playerId) return { slot: e.slot, team: e.team, bot: true, name: null, id: null, hidden: false };
+            if (gone.has(e.playerId)) return { slot: e.slot, team: e.team, bot: false, name: null, id: null, hidden: false };
             const hide = hidden === null || hidden.get('i:' + e.playerId) === true;
             return { slot: e.slot, team: e.team, bot: false, name: hide ? null : e.name, id: e.playerId, hidden: hidden?.get('i:' + e.playerId) === true };
           }),
@@ -1956,7 +1960,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * banned node stays as it is, and the call is made again until it is answered. A retired node is
    * left as it is too: it is refused at every login already, and banning it would change nothing but
    * its status in the panel. Every purged account comes here, a player's too: its name and id leave
-   * every seat of the maintainers' history (NodeStore.forgetPlayer). A NODE_TRUSTED_OPERATORS id
+   * every seat of the maintainers' history (NodeStore.forgetPlayer), the seat of a match it is still
+   * in when that match settles, and the open matches' list. A NODE_TRUSTED_OPERATORS id
    * (the project's account is never deleted) changes nothing: 409 trusted.
    */
   private async operatorDeleted(request: Request, cp: ControlPlane): Promise<Response> {
