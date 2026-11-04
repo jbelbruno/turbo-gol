@@ -1175,10 +1175,11 @@ export class AccountClient {
 
   /**
    * ENTRAR with an address (POST /api/auth/signin { email, password }): the current key only (a
-   * password of before signs in by its username, and re-keys there). One bad_credentials for an
-   * unknown address and a wrong password alike (I6). Level 2; this device remembers it. A pending
-   * deletion rejects with deletion_pending (detail.purgeAt), and `cancelDeletion` calls it off, as
-   * legacySignIn.
+   * password of before with no verified address signs in by its username, and re-keys there; beside
+   * an address it signs in nowhere until a reset or "confirm it's you" re-keys it). One
+   * bad_credentials for an unknown address and a wrong password alike (I6). Level 2; this device
+   * remembers it. A pending deletion rejects with deletion_pending (detail.purgeAt), and
+   * `cancelDeletion` calls it off, as legacySignIn.
    */
   async signIn(email: string, password: string, opts: SignInOptions = {}): Promise<AccountSession> {
     return this.adopt(sessionPart(await this.emailSignIn(email, password, false, opts.cancelDeletion === true)));

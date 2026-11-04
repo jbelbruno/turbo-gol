@@ -768,7 +768,8 @@ test("M10's way in, before the cutoff: the username sign-in refuses the account 
   assert.equal(await obj.legacyAlarm(Date.now()), 1);
   const m10 = outbox.at(-1);
   assert.deepEqual([m10.to, m10.subject], ['ana.camino@x.com', 'Elige tu contraseña de Turbogol para entrar con tu correo']);
-  assert.ok(m10.text.includes('tu contraseña de antes todavía no sirve con él. Elige tu contraseña con este enlace (puede ser la misma de siempre). Caduca en 30 minutos:'), m10.text);
+  assert.ok(m10.text.includes('Tu cuenta tiene este correo, así que ya no entra con tu usuario: entra con el correo'), m10.text);
+  assert.ok(m10.text.includes('Tu contraseña de antes todavía no sirve con el correo. Elige tu contraseña con este enlace (puede ser la misma de siempre si cumple las reglas). Caduca en 30 minutos:'), m10.text);
   assert.ok(m10.text.includes('Después entras con este correo y esa contraseña.'));
   const link = linkIn(m10);
   assert.equal(link.kind, 'reset');

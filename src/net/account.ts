@@ -528,7 +528,7 @@ export interface MeInfo {
   emailHint?: string | null;
   /** The account has a verified address (`email` is set). */
   emailVerified?: boolean;
-  /** Its password is still the legacy key, salted with the username: the next password sign-in or "confirm it's you" re-keys it. */
+  /** Its password is still the legacy key, salted with the username: a username sign-in (no verified address), a reset or "confirm it's you" re-keys it. */
   legacy?: boolean;
   /** The newest news consent is a grant (news by email, never by default). */
   news?: boolean;

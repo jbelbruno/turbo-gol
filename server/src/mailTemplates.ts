@@ -449,8 +449,10 @@ const TEMPLATES: { [K in MailKind]: (d: Extract<MailData, { kind: K }>, x: Tools
 
   legacy_reminder(d, x) {
     // Its accounts have a password of before (salted with the name) and a verified address: the
-    // username sign-in refuses an account with an address, and the email sign-in reads only the
-    // current key, so neither takes that password. The reset link stores it as the current key.
+    // username sign-in refuses an account with an address already, before the cutoff (checkPassword
+    // legacyOnly), and the email sign-in reads only the current key, so neither takes that
+    // password. The reset link stores it as the current key; the day is only context. The reset
+    // sheet checks today's rules (passwordIssue), so the same password is not always possible.
     const day = x.date(d.at, 'day');
     const forgot = { url: `${x.origin}/account#forgot` };
     if (x.lang === 'es')
@@ -458,7 +460,7 @@ const TEMPLATES: { [K in MailKind]: (d: Extract<MailData, { kind: K }>, x: Tools
         subject: 'Elige tu contraseña de Turbogol para entrar con tu correo',
         blocks: [
           p(`Hola, ${d.name}:`),
-          p(`Desde el ${day} ya no se entra con usuario. Tu cuenta tiene este correo, así que entra con el correo, pero tu contraseña de antes todavía no sirve con él. Elige tu contraseña con este enlace (puede ser la misma de siempre). Caduca en 30 minutos:`),
+          p(`Tu cuenta tiene este correo, así que ya no entra con tu usuario: entra con el correo (desde el ${day}, ninguna cuenta entra con usuario). Tu contraseña de antes todavía no sirve con el correo. Elige tu contraseña con este enlace (puede ser la misma de siempre si cumple las reglas). Caduca en 30 minutos:`),
           x.link('reset', d.token, 'Elegir mi contraseña'),
           p('Después entras con este correo y esa contraseña. Si el enlace caducó, pide otro en ', forgot, ' con este correo.'),
         ],
@@ -467,7 +469,7 @@ const TEMPLATES: { [K in MailKind]: (d: Extract<MailData, { kind: K }>, x: Tools
       subject: 'Choose your Turbogol password to sign in with your email',
       blocks: [
         p(`Hi ${d.name},`),
-        p(`From ${day}, you can't sign in with a username. Your account has this email, so it signs in with the email, but your old password doesn't work with it yet. Choose your password with this link (it can be the same one). It expires in 30 minutes:`),
+        p(`Your account has this email, so it no longer signs in with your username: it signs in with the email (from ${day}, no account signs in with a username). Your old password doesn't work with the email yet. Choose your password with this link (it can be the same one if it meets the rules). It expires in 30 minutes:`),
         x.link('reset', d.token, 'Choose my password'),
         p('Then sign in with this email and that password. If the link has expired, ask for another at ', forgot, ' with this email.'),
       ],
