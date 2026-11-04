@@ -200,9 +200,10 @@ reportes de errores de red (sección 9.4).
 **Lo que llega al canal del equipo en Discord:** los nombres de usuario de los anfitriones, sus
 servidores y la dirección de cada uno, el país de cada ingreso del equipo a su cuenta de
 mantenimiento, el identificador de una cuenta a la que el equipo le da o le quita un ítem o cuyos
-puntos consulta, el identificador de la cuenta de un anfitrión que se borró, los identificadores de partidas y el motivo
-que escribe el equipo cuando saca una repetición o bloquea un servidor. Ese motivo puede nombrar a
-un jugador.
+puntos consulta, el identificador de la cuenta de un anfitrión que se borró, los identificadores
+de partidas y el motivo que escribe el equipo cuando saca una repetición, anula una partida o
+cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo retira). Ese motivo puede nombrar
+a un jugador.
 
 La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/subprocessors/>.
 
@@ -346,7 +347,7 @@ Damos datos a una autoridad solo cuando la ley nos obliga, con un pedido formal.
 | **Malasia** | Tu IP y la partida, en el servidor del proyecto en Malasia. Las repeticiones de las partidas de COMPETITIVO que ese servidor vuelve a simular, de cualquier servidor del proyecto (sin tu IP) | Jugar con poco retraso en Asia. Verificar partidas de COMPETITIVO |
 | **Sudáfrica, Australia y Estados Unidos (Google Cloud)** | Por ahora, tu IP y la partida, en los servidores del proyecto en esos países | Jugar con poco retraso en África, en Oceanía y en Norteamérica |
 | **Estados Unidos (Discord y Google)** | Que iniciaste sesión en Turbogol. Nosotros no les mandamos datos del juego | Tu inicio de sesión |
-| **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las cuentas de anfitrión y las repeticiones |
+| **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las partidas, las cuentas de anfitrión y las repeticiones |
 | **Estados Unidos (Google)** | Lo que nos escribes | Leer y responder tus pedidos |
 | **El país de cada jugador** | Tu IP, en las partidas de sala (P2P) | La conexión directa |
 | **El país de cada anfitrión** | Tu IP y la partida, cuando se abran los servidores de terceros | Jugar la partida |

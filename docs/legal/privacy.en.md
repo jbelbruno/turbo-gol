@@ -199,8 +199,9 @@ receives the network error reports (section 9.4).
 **What reaches the team's channel on Discord:** the hosts' usernames, their servers and each one's
 address, the country of each sign-in by the team to its maintenance account, the identifier of an
 account the team gives an item to, takes an item from or looks up the points of, the identifier of
-a host's account that was deleted, match identifiers and the reason the team writes when it takes down a replay or
-blocks a server. That reason may name a player.
+a host's account that was deleted, match identifiers and the reason the team writes when it takes
+down a replay, voids a match or changes something about a server (for example, when it blocks or
+retires it). That reason may name a player.
 
 Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocessors/>.
 
@@ -340,7 +341,7 @@ We give data to an authority only when the law requires us to, with a formal req
 | **Malaysia** | Your IP and the match, on the project's server in Malaysia. The replays of the COMPETITIVE matches that this server simulates again, from any project server (without your IP) | Playing with low lag in Asia. Verifying COMPETITIVE matches |
 | **South Africa, Australia and the United States (Google Cloud)** | For now, your IP and the match, on the project's servers in those countries | Playing with low lag in Africa, in Oceania and in North America |
 | **The United States (Discord and Google)** | That you signed in to Turbogol. We do not send them game data | Your sign-in |
-| **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures and to what it does with servers, host accounts and replays |
+| **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures and to what it does with servers, matches, host accounts and replays |
 | **The United States (Google)** | What you write to us | Reading and answering your requests |
 | **Each player's country** | Your IP, in lobby matches (P2P) | The direct connection |
 | **Each host's country** | Your IP and the match, once third-party servers open | Playing the match |
