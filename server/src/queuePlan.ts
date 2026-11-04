@@ -204,9 +204,12 @@ function perArrival(n: number): number {
 /**
  * The waiting answer's `wait` (§2.2). Casual: the next arrival here, or anywhere once widened (an
  * arrival elsewhere pairs at the widening), or the moment either this waiter or the oldest other
- * one is widened; capped by the 5:00 bots match (kind 'bots' when that comes first). Ranked: the
- * missing humans at the arrival rate (here, or here then everywhere after the widening); none
- * above an hour. Pure.
+ * one is widened; capped by the 5:00 bots match: kind 'bots' when that comes first, or when the
+ * rounded estimate would reach it (never "~5 min" next to "bots in 5:00"). Ranked: the missing
+ * humans at the arrival rate (here, or here then everywhere after the widening); none above an
+ * hour. A waiter held by a cap (`busy`: its match could form, every server is full) gets no
+ * estimate at all (kind 'none', null): nobody it waits for is missing, and the bots match needs a
+ * server too; the client shows its busy line instead. Pure.
  */
 export function estimateWait(input: WaitInput): QueueWait {
   const waited = Math.max(0, input.waitedMs);
@@ -215,15 +218,18 @@ export function estimateWait(input: WaitInput): QueueWait {
     const widenInMs = Math.max(0, CASUAL_WIDEN_MS - waited);
     const widened = widenInMs === 0;
     const botsInMs = Math.max(0, SOLO_AFTER_MS - waited);
+    if (input.busy) return { ...base, widened, widenInMs, estimateMs: null, estimateKind: 'none', botsInMs };
     const here = perArrival(input.arrivalsHere);
     const all = perArrival(input.arrivalsAll);
     let t = widened ? all : Math.min(here, Math.max(widenInMs, all));
     if (!widened && input.othersWidenInMs !== undefined && input.othersWidenInMs !== null) t = Math.min(t, widenInMs, Math.max(0, input.othersWidenInMs));
-    if (t >= botsInMs) return { ...base, widened, widenInMs, estimateMs: botsInMs, estimateKind: 'bots', botsInMs };
-    return { ...base, widened, widenInMs, estimateMs: Math.min(roundEstimate(t), botsInMs), estimateKind: 'humans', botsInMs };
+    const rounded = roundEstimate(t);
+    if (t >= botsInMs || rounded >= botsInMs) return { ...base, widened, widenInMs, estimateMs: botsInMs, estimateKind: 'bots', botsInMs };
+    return { ...base, widened, widenInMs, estimateMs: rounded, estimateKind: 'humans', botsInMs };
   }
   const widenInMs = Math.max(0, RANKED_WIDEN_MS - waited);
   const widened = widenInMs === 0;
+  if (input.busy) return { ...base, widened, widenInMs, estimateMs: null, estimateKind: 'none' };
   const time = (k: number | undefined, n: number): number => (k === undefined ? Infinity : k <= 0 ? 0 : k * perArrival(n));
   const kAll = input.missingAll;
   const kHere = input.missingHere ?? kAll;

@@ -286,7 +286,8 @@ test('the caps are global in the hub: 15 non-ranked MatchDOs across every host r
   }
   await w.join(pid(), { kind: 'ranked', mode: '1v1' });
   const rbusy = await w.join(pid(), { kind: 'ranked', mode: '1v1' });
-  assert.deepEqual([rbusy.json.status, rbusy.json.wait.busy, rbusy.json.wait.estimateKind], ['waiting', true, 'humans']);
+  assert.deepEqual([rbusy.json.status, rbusy.json.wait.busy, rbusy.json.wait.estimateKind, rbusy.json.wait.estimateMs], ['waiting', true, 'none', null], 'held by the cap: no estimate (A4)');
+  assert.deepEqual([busy.json.wait.estimateKind, busy.json.wait.estimateMs], ['none', null], 'a Casual pair held by the cap: no "humans ~1 min" either');
   assert.equal(w.created().length, M.MAX_ACTIVE_ROOMS);
 });
 

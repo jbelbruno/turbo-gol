@@ -149,9 +149,31 @@ test('estimateWait (Casual): another waiter elsewhere -> the min of both widen-i
   assert.deepEqual([mine.estimateKind, mine.estimateMs], ['humans', 30_000], 'mine first: 20 s');
 });
 
-test('estimateWait (Casual): never above botsIn; busy is passed on; searchingHere never above searching', () => {
-  const e = casual({ waitedMs: 290_000, arrivalsHere: 1, arrivalsAll: 1, busy: true, searching: 3, searchingHere: 9 });
-  assert.deepEqual([e.estimateKind, e.estimateMs, e.botsInMs, e.busy, e.searching, e.searchingHere], ['bots', 10_000, 10_000, true, 3, 3]);
+test('estimateWait (Casual): never above botsIn; searchingHere never above searching', () => {
+  const e = casual({ waitedMs: 290_000, arrivalsHere: 1, arrivalsAll: 1, searching: 3, searchingHere: 9 });
+  assert.deepEqual([e.estimateKind, e.estimateMs, e.botsInMs, e.busy, e.searching, e.searchingHere], ['bots', 10_000, 10_000, false, 3, 3]);
+});
+
+test('estimateWait (Casual): a humans estimate that ROUNDS to botsIn or past it is the bots match (never "~5 min" next to "bots in 5:00")', () => {
+  // A fresh waiter, 13 arrivals here in the last hour: one every 4:37, rounded up to 5:00 = botsIn (review-live:A, S3's W3).
+  const fresh = casual({ arrivalsHere: 13, arrivalsAll: 13 });
+  assert.equal(Q.roundEstimate(3_600_000 / 13), 300_000);
+  assert.deepEqual([fresh.estimateKind, fresh.estimateMs, fresh.botsInMs], ['bots', 300_000, 300_000]);
+  // At 0:50 (bots in 4:10): an arrival every 4:05 rounds up to 4:30, past the bots: bots; one every 3:50 rounds to 4:00: humans.
+  const late = casual({ waitedMs: 50_000, arrivalsHere: 60 / (245 / 60), arrivalsAll: 60 / (245 / 60) });
+  assert.deepEqual([late.estimateKind, late.estimateMs], ['bots', 250_000]);
+  const early = casual({ waitedMs: 50_000, arrivalsHere: 60 / (230 / 60), arrivalsAll: 60 / (230 / 60) });
+  assert.deepEqual([early.estimateKind, early.estimateMs, early.botsInMs], ['humans', 240_000, 250_000]);
+});
+
+test('estimateWait: a waiter held by a cap (busy) gets no estimate (none, null), Casual and ranked; Casual keeps its botsIn', () => {
+  // Two SA waiters both there, held by the cap: no "humans ~1 min".
+  const held = casual({ waitedMs: 10_000, searching: 2, searchingHere: 2, arrivalsHere: 30, arrivalsAll: 30, othersWidenInMs: 50_000, busy: true });
+  assert.deepEqual([held.estimateKind, held.estimateMs, held.botsInMs, held.busy], ['none', null, 290_000, true]);
+  const due = casual({ waitedMs: 400_000, busy: true });
+  assert.deepEqual([due.estimateKind, due.estimateMs, due.botsInMs], ['none', null, 0], 'a solo match held by the solo cap: no estimate either');
+  const r = ranked({ arrivalsHere: 20, arrivalsAll: 20, missingHere: 0, missingAll: 0, busy: true });
+  assert.deepEqual([r.estimateKind, r.estimateMs, r.busy, r.botsInMs], ['none', null, true, undefined]);
 });
 
 const ranked = (o) => Q.estimateWait({ kind: 'ranked', waitedMs: 0, searching: 1, searchingHere: 1, arrivalsHere: 0, arrivalsAll: 0, missingHere: 1, missingAll: 1, busy: false, ...o });
