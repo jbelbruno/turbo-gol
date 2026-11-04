@@ -1686,8 +1686,8 @@ test('status guards: active for a node that is not trusted needs { force: true, 
   assert.deepEqual([forced.status, forced.json.status], [200, 'active']);
   assert.equal((await run({ status: 'banned', reason: 'cheating' })).json.status, 'banned');
   await h.ctx.settle();
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) active -> banned: cheating\``));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) active -> banned: cheating\``));
   // A trusted operator's banned node takes no slot: out of its ban it takes one again, so at the cap
   // (2 here) it stays banned, with an ALERT, as a token is refused there. Else ban, register, unban
   // would add a trusted node past the cap with every token.

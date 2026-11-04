@@ -89,6 +89,34 @@ test("an operator's name: the project's newest one, a number for the token's id 
   assert.deepEqual([PROJECT.id, 'b1b2c3d4e5f60718', JUAN.id, '99999999aaaaaaaa'].map(nameOf), ['Proyecto', 'Anfitrión 1', 'Anfitrión 2', 'Anfitrión 3']);
 });
 
+test("a node registered with no name is named by its region and a number, never by its operator: not its name, not the start of its id", async () => {
+  const reg = new Registry({ trustedOperators: [PROJECT.id], maxTrustedNodes: 8, log: () => undefined });
+  // NodeRegistryDO's token: the start of the id when the account's name could not be read.
+  const NAMELESS = { id: '5e5e5e5e5e5e5e5e', name: '5e5e5e' };
+  const unnamed = async (op, region, now) => {
+    const { token } = await reg.createToken(op, region, now);
+    const keys = await generateEd25519();
+    const r = await reg.register({ token, publicKey: keys.publicKey, roles: ['host'], publicUrl: 'wss://203.0.113.7', build: BUILD, specs: SPECS, capacity: CAP }, now);
+    assert.ok(r.ok, JSON.stringify(r));
+    r.node.status = 'active';
+    return r.node;
+  };
+  const names = [];
+  names.push((await unnamed(JUAN, 'SA', 1000)).name);
+  names.push((await unnamed(NAMELESS, 'SA', 2000)).name);
+  names.push((await unnamed(PROJECT, 'EU', 3000)).name);
+  // A name someone chose that looks like one of these is never given twice.
+  await regNode(reg, ANA, 4000, 'sa-node-4', 'active');
+  names.push((await unnamed(JUAN, 'SA', 5000)).name);
+  assert.deepEqual(names, ['sa-node-1', 'sa-node-2', 'eu-node-1', 'sa-node-5']);
+  const text = JSON.stringify(publicStatus(cpOf(reg), 6000)).toLowerCase();
+  assert.ok(!text.includes('juan') && !text.includes('proyecto-') && !text.includes('5e5e5e'), text);
+  assert.deepEqual(
+    publicStatus(cpOf(reg), 6000).nodes.map((n) => [n.name, n.operator]),
+    [['sa-node-1', 'Anfitrión 1'], ['sa-node-2', 'Anfitrión 2'], ['eu-node-1', 'Proyecto'], ['sa-node-4', 'Anfitrión 3'], ['sa-node-5', 'Anfitrión 1']],
+  );
+});
+
 test('an empty registry: a valid answer all the same (the deploy check asks for a 200)', () => {
   const reg = new Registry({ log: () => undefined });
   assert.deepEqual(publicStatus(cpOf(reg), 1), { build: BUILD, nodes: [], hosts: [] });

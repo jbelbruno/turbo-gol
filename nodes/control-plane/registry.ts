@@ -420,6 +420,20 @@ export class Registry {
     return true;
   }
 
+  /**
+   * The name of a node registered with none (no --name, a token without one): its region and a
+   * number, `sa-node-3`. Never its operator's name, which the public list (publicList.ts) would show
+   * beside the "Anfitrión <n>" that hides it, nor the start of the operator's id (the name a token
+   * carries when the account's could not be read). The number counts the region's records, which
+   * are never deleted, and skips a name already taken, so two nodes never share one.
+   */
+  private unnamedName(region: string): string {
+    const taken = new Set(this.list().map((n) => n.name));
+    let k = this.list().filter((n) => n.region === region).length + 1;
+    while (taken.has(`${region.toLowerCase()}-node-${k}`)) k++;
+    return `${region.toLowerCase()}-node-${k}`;
+  }
+
   async register(req: RegisterRequest, now: number): Promise<RegisterResult> {
     if (!req || typeof req.token !== 'string' || !req.token.startsWith(TOKEN_PREFIX) || req.token.length > 80) return { ok: false, code: 'bad_token' };
     const tok = this.tokens.get(await sha256Hex(req.token));
@@ -457,12 +471,11 @@ export class Registry {
     if (!c || !Number.isInteger(c.matches) || c.matches < 1 || c.matches > MAX_CAPACITY) return { ok: false, code: 'bad_capacity' };
 
     const nodeId = randomHexId(8);
-    const count = this.byOperator(tok.operatorId).length + 1;
     const node: NodeRecord = {
       nodeId,
       operatorId: tok.operatorId,
       operatorName: tok.operatorName,
-      name: cleanName(req.name ?? tok.name, `${tok.region.toLowerCase()}-${tok.operatorName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'node'}-${count}`),
+      name: cleanName(req.name ?? tok.name, this.unnamedName(tok.region)),
       region: tok.region,
       publicKey: req.publicKey,
       roles,
