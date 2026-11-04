@@ -1,6 +1,6 @@
 # Política de privacidad de Turbogol
 
-Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
+Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
 
 ---
 
@@ -15,10 +15,10 @@ Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en espa
   nunca llega a nuestros servidores.
 - **Algunas cosas son públicas:** tu nombre de usuario en la clasificación (hoy no puedes
   ocultarlo), en la lista de salas si eres el anfitrión de una sala pública y, durante 30 días, en
-  las repeticiones de las partidas en servidores de la comunidad, donde sí puedes ocultarlo
-  (sección 4.5).
-- **En las partidas P2P, los otros jugadores reciben tu dirección IP.** Si no quieres eso, elige
-  «Servidor».
+  las repeticiones de las partidas en servidores de la comunidad (de COMPETITIVO y de CASUAL),
+  donde sí puedes ocultarlo (sección 4.5).
+- **En las salas, que se juegan P2P, los otros jugadores reciben tu dirección IP.** CASUAL y
+  COMPETITIVO siempre se juegan en un servidor.
 - **Quien opera un servidor de la comunidad ve tu dirección IP** y la partida. Hoy esos servidores
   son solo los del proyecto.
 - **Medimos las visitas con Cloudflare Web Analytics,** que según Cloudflare no usa cookies. Le
@@ -67,9 +67,10 @@ Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en espa
 | **Cada dispositivo con tu sesión** | El tipo (navegador o TV), las fechas, el método con que entraste, cuándo confirmaste por última vez que eras tú y el **país y la ciudad aproximados**, que Cloudflare deduce de tu IP | Mostrarte en PERFIL (el tipo, las fechas, el país y la ciudad) dónde está abierta tu sesión, para que cierres la que no reconozcas. Pedirte que confirmes que eres tú antes de un cambio importante |
 | **Cambias tu correo o tu contraseña, o pides una contraseña nueva** | El correo nuevo, con un código que le mandamos a él. Un aviso al correo anterior con un enlace para deshacer el cambio durante 7 días (ese correo queda reservado para tu cuenta esos 7 días). Si pides una contraseña nueva, un enlace a tu correo que vale 30 minutos y sirve una vez | Comprobar que el correo es tuyo y poder deshacer un cambio que no hiciste. Al cambiar el correo o la contraseña, se cierra la sesión en tus otros dispositivos |
 | **Confirmas que eres tú** | Tu contraseña, o un código de 6 dígitos que mandamos al correo de tu cuenta (vale 10 minutos), o el botón de Discord o Google | Pedirte que lo confirmes antes de un cambio importante (cambiar o agregar el correo, vincular o desvincular Discord o Google, borrar la cuenta) |
-| **Juegas una partida** | Tu nombre, tu auto, tu equipo y tus controles (cada tecla o movimiento). En una partida P2P, tu dirección IP. En las salas P2P, anotamos en memoria los lugares que tomaste y a los que no te conectaste, con tu identificador de sesión | Jugar la partida. Mostrar el resultado. Frenar a quien toma lugares en salas P2P sin conectarse (sección 7.4) |
+| **Juegas una partida** | Tu nombre, tu auto, tu equipo y tus controles (cada tecla o movimiento). En una partida de sala (P2P), tu dirección IP | Jugar la partida. Mostrar el resultado |
 | **Juegas COMPETITIVO** | Tu puntaje, tus partidas, victorias y derrotas, tu mejor puntaje, tus abandonos y tus bloqueos de la cola | Emparejarte con rivales parejos. La clasificación. Las sanciones por abandonar |
-| **Usas una sala personalizada** | El código de la sala, su título, su contraseña (guardamos solo una huella), los miembros (su identificador de sesión, su nombre, su auto y su equipo), a quién sacó el anfitrión y los intentos fallidos de contraseña de cada jugador. Si la creas tú y tu conexión usa IPv6, el prefijo de tu red. Las salas nuevas son privadas y P2P | Hacer funcionar la sala. Limitar cuántas salas abre una misma red y una misma sesión |
+| **Usas una sala personalizada** | El código de la sala, su título, su contraseña (guardamos solo una huella), los miembros (su identificador de sesión, su nombre, su auto y su equipo), a quién sacó el anfitrión y los intentos fallidos de contraseña de cada jugador. Si la creas tú y tu conexión usa IPv6, el prefijo de tu red. Al crearla eliges si es pública o privada. Las salas se juegan P2P | Hacer funcionar la sala. Limitar cuántas salas abre una misma red y una misma sesión |
+| **Buscas partida (CASUAL o COMPETITIVO)** | Mientras buscas, en la memoria del servidor: tu identificador de sesión, tu región, el formato que prefieres, desde cuándo buscas, si estás jugando contra bots o entrenando y si tienes el juego a la vista; si la búsqueda se corta, lo guardamos 10 minutos más para que siga sola cuando vuelves. Además contamos por día, sin tu cuenta, tu nombre ni tu IP, cuántas búsquedas empiezan y terminan, cuántas partidas se arman y con cuántas personas, cuánto se esperó (por tramos) y cuántas veces se juega contra bots o se entrena mientras se espera; esos totales se guardan 90 días | Armar tu partida y estimar la espera. Saber si la espera funciona y mejorarla |
 | **Juegas en un servidor de la comunidad** | Tu nombre, tu identificador de jugador (el mismo en todas tus partidas), tu equipo, tus controles y tu dirección IP, que ve quien opera el servidor. Después, la repetición de la partida y, sin publicarse, qué cuenta (o sesión de invitado) ocupó cada lugar. Si el anfitrión no es el proyecto, para calcular sus puntos también anotamos cuánto tiempo jugaste y, si tienes cuenta, cuántos días tiene tu cuenta. La repetición, los lugares y esas notas se guardan 30 días. Hoy esos servidores son solo los del proyecto (sección 4.4) | Jugar la partida. Verificar que el resultado sea limpio. Publicar la repetición. Calcular los puntos del anfitrión, cuando el anfitrión no es el proyecto |
 | **Marcas una repetición como favorita (una estrella) o miras «Mis repeticiones»** | El identificador de tu cuenta junto al de la partida, nunca tu nombre. Puedes marcar hasta 500 repeticiones. Cuántas cuentas marcaron cada partida es público; cuáles, no | Mostrar las partidas más marcadas y tu lista de partidas. Se borran cuando la repetición cumple 30 días, también si borras tu cuenta antes |
 | **Conectas una TV con tu teléfono** | El código de la TV. El país, la ciudad, la red y el nombre del proveedor de internet aproximados de la TV. La dirección IP de la TV (de IPv6, solo el prefijo de la red), mientras vive el código. La de tu teléfono solo se compara con la de la TV; si te equivocas de código, se guarda 15 minutos, para frenar los intentos fallidos. Todo en memoria | Que tu teléfono te muestre qué TV vas a conectar y si está en tu misma red, para que nadie te engañe con un código ajeno. Frenar los intentos fallidos |
@@ -180,7 +181,7 @@ reportes de errores de red (sección 9.4).
 
 - aloja el juego y sus datos;
 - manda los correos del juego y recibe los que nos escribes;
-- ayuda a que los dispositivos de una partida P2P se encuentren (STUN);
+- ayuda a que los dispositivos de una partida de sala (P2P) se encuentren (STUN);
 - frena bots (Turnstile);
 - cuenta los pedidos por minuto, con tu IP (o el prefijo de tu red IPv6) o con el identificador de
   tu sesión o de tu cuenta, para frenar abusos, y guarda copias temporales de páginas públicas
@@ -230,32 +231,27 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
 
 - **En cada partida** ven tu nombre, tu auto y tu equipo. En una sala, los demás miembros ven tu
   nombre.
-- **En una partida P2P,** tu dispositivo se conecta directo con el de los otros jugadores, aunque
-  no los conozcas. **Cada uno recibe tu dirección IP pública.** Con ella se puede saber, más o
-  menos, tu ciudad y tu proveedor de internet.
-  - **Cuándo es P2P:** en CASUAL con la conexión «Auto» (la que viene elegida) o «P2P», y en las
-    salas P2P. Las salas nuevas vienen con P2P elegido. Si juegas solo, «Auto» te da un servidor
-    con bots.
-  - **Cómo evitarlo:** elige «Servidor» en la conexión de CASUAL (MODOS > Avanzado > Conexión), o,
-    si eres el anfitrión de una sala, cambia su conexión a «Servidor». En la sala de otra persona la
-    conexión la decide su anfitrión; la lista de salas dice si es P2P o servidor. COMPETITIVO
-    siempre usa un servidor.
-  - La única forma de que no vean tu IP es elegir «Servidor».
-  - Si no se logra la conexión con los demás jugadores en unos 10 segundos, el juego pasa la
-    partida a un servidor.
+- **En una partida de sala (P2P),** tu dispositivo se conecta directo con el de los otros
+  jugadores de la sala, aunque no los conozcas. **Cada uno recibe tu dirección IP pública.** Con
+  ella se puede saber, más o menos, tu ciudad y tu proveedor de internet.
+  - **Cuándo es P2P:** siempre en las salas, públicas o privadas, las crees tú o entres a la de
+    otra persona. CASUAL y COMPETITIVO nunca son P2P: se juegan en un servidor.
+  - **Cómo evitarlo:** no juegues en salas, o juega solo con gente que conoces.
+  - Si no se logra la conexión con los demás jugadores en unos 10 segundos, el juego te devuelve a
+    la sala.
   - Te lo avisamos una vez, al aceptar los Términos: el aviso que está sobre el botón con que los
     aceptas («JUGAR COMO INVITADO», «CREAR CUENTA», «NO, CREAR MI CUENTA» o «ACEPTAR Y JUGAR»)
-    dice que en las partidas P2P los demás jugadores pueden ver tu IP. No hay un aviso antes de
-    cada partida P2P.
+    dice que en las salas los demás jugadores pueden ver tu IP. No hay un aviso antes de cada
+    partida de sala.
 
 ### 4.4 Los servidores de la comunidad y sus anfitriones
 
 - Algunas partidas se juegan en servidores de la comunidad («nodos»). **Hoy el único es el del
   proyecto, en São Paulo (Brasil),** en una máquina de Hostinger. Cuando puede tomarlas,
-  le llegan las partidas de la región de Sudamérica que se juegan por servidor: las de CASUAL con
-  conexión «Servidor», las de COMPETITIVO y las de quien juega solo en «Auto». Si no puede, se
-  juegan en servidores de Cloudflare. Las partidas de salas personalizadas y las P2P no pasan por
-  ahí. **Nadie fuera del proyecto puede registrar un servidor todavía.** Aunque el juego hable de
+  le llegan las partidas de CASUAL y de COMPETITIVO cuya mayoría de jugadores es de Sudamérica
+  (si empatan, decide la región de quien esperó más), también las de CASUAL contra bots de quien
+  busca desde Sudamérica y esperó 5 minutos sin rivales. Si no puede, se juegan en servidores de
+  Cloudflare. Las partidas de salas no pasan por ahí. **Nadie fuera del proyecto puede registrar un servidor todavía.** Aunque el juego hable de
   alojar servidores, hoy no puedes registrar uno.
 - **Cuando la red se abra a otras personas** (lo anunciaremos), quien opere un servidor verá tu
   nombre, tu identificador de jugador (el mismo en todas tus partidas), tus controles, lo que pasa
@@ -278,8 +274,8 @@ Cualquiera, sin cuenta, puede ver:
 | Qué | Con qué datos | Por cuánto tiempo | Cómo evitarlo |
 |---|---|---|---|
 | **La clasificación** de cada modo | Los 100 mejores con al menos 5 partidas en la temporada: nombre de usuario, puntaje, rango, partidas y victorias. No aparecen las cuentas suspendidas ni las que pidieron el borrado | Mientras tengas cuenta | Hoy no hay una opción para ocultar tu nombre en la clasificación. Aparece solo quien juega COMPETITIVO y está entre los 100 mejores de un modo. Si pides el borrado de tu cuenta, dejas de aparecer en menos de un minuto |
-| **La lista de salas públicas** | El título de la sala, el nombre de su anfitrión actual, su código, el modo, la región, cuántos jugadores tiene, si tiene contraseña, si es P2P o servidor y, si las tiene, sus reglas experimentales | Mientras la sala esté abierta | Las salas nuevas son privadas. Déjala así |
-| **Las repeticiones públicas** | Las partidas en servidores de la comunidad: lo que se ve de la partida y lo que se ve de ti (abajo). Nunca tu identificador ni tu IP | 30 días | «Ocultar mi nombre en repeticiones públicas» (abajo) |
+| **La lista de salas públicas** | El título de la sala, el nombre de su anfitrión actual, su código, el modo, la región, cuántos jugadores tiene, si tiene contraseña y, si las tiene, sus reglas experimentales | Mientras la sala esté abierta | Crea tu sala con CREAR SALA PRIVADA, o cámbiala a privada en CONFIGURAR |
+| **Las repeticiones públicas** | Las partidas de COMPETITIVO y de CASUAL en servidores de la comunidad: lo que se ve de la partida y lo que se ve de ti (abajo). Nunca tu identificador ni tu IP | 30 días | «Ocultar mi nombre en repeticiones públicas» (abajo) |
 | **La lista de servidores de la comunidad** | El nombre de cada servidor, el nombre de usuario de su anfitrión, la región, el estado, si está conectado, cuántas partidas tiene en curso, la capacidad, el retraso medido, la versión, si es un servidor del proyecto, si aloja o verifica partidas y qué conexiones acepta. Aparte, los puntos de los últimos 30 días de los 50 anfitriones que más sumaron | Sin plazo: un servidor sigue en la lista, sin conexión, aunque se apague. Si el anfitrión borra su cuenta, el servidor queda en la lista como bloqueado, con su nombre de usuario. Hoy solo hay servidores del proyecto | Solo afecta a los anfitriones |
 
 - **Lo que se ve de la partida:** el modo, la región, el resultado, la duración, si fue de
@@ -320,13 +316,13 @@ Damos datos a una autoridad solo cuando la ley nos obliga, con un pedido formal.
 
 | Adónde | Qué | Por qué |
 |---|---|---|
-| **Estados Unidos y la red de Cloudflare** | Todo lo que guardamos en Cloudflare. Cloudflare decide en qué centro de datos corre y guarda cada cosa. En octubre de 2026 los servidores de las partidas se midieron en Miami y en Atlanta. Las repeticiones se guardan en un almacenamiento de Cloudflare que no tiene región en Sudamérica. Cada pedido pasa por el centro de Cloudflare más cercano a ti | Alojar el juego |
+| **Estados Unidos y la red de Cloudflare** | Todo lo que guardamos en Cloudflare. Cloudflare decide en qué centro de datos corre y guarda cada cosa. En octubre de 2026 los servidores de las partidas se midieron en Miami y en Atlanta. Para una partida de CASUAL o COMPETITIVO le pedimos a Cloudflare que la corra cerca de la región de la mayoría de sus jugadores (Términos 7.6), y Cloudflare decide. Las repeticiones se guardan en un almacenamiento de Cloudflare que no tiene región en Sudamérica. Cada pedido pasa por el centro de Cloudflare más cercano a ti | Alojar el juego |
 | **Estados Unidos (Cloudflare, por su cuenta)** | Las señales de Turnstile | Mejorar su detección de bots |
 | **Brasil** | Tu IP y la partida, en el servidor del proyecto en São Paulo | Jugar con poco retraso en Sudamérica |
 | **Estados Unidos (Discord y Google)** | Que iniciaste sesión en Turbogol. Nosotros no les mandamos datos del juego | Tu inicio de sesión |
 | **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las cuentas de anfitrión y las repeticiones |
 | **Estados Unidos (Google)** | Lo que nos escribes | Leer y responder tus pedidos |
-| **El país de cada jugador** | Tu IP, en las partidas P2P | La conexión directa |
+| **El país de cada jugador** | Tu IP, en las partidas de sala (P2P) | La conexión directa |
 | **El país de cada anfitrión** | Tu IP y la partida, cuando se abran los servidores de terceros | Jugar la partida |
 
 **Para Argentina:** ni Estados Unidos ni Brasil están en la lista de países con protección
@@ -372,16 +368,16 @@ art. 33 IX).
 | Contadores contra abusos que duran (huellas con clave secreta) | Cada uno cuenta de 1 minuto a 1 día, según para qué sea. Se borra al día siguiente de empezar a contar |
 | Pausas por intentos fallidos | De 30 segundos a 1 hora para entrar con contraseña (la pausa crece con los fallos). 1 día para los códigos de un correo con muchos errores |
 | Contadores cortos con tu IP (o el prefijo de tu red IPv6) o con el identificador de tu sesión o de tu cuenta | De segundos a minutos, en la memoria del servidor y en el contador de límites de Cloudflare. Si te equivocas al confirmar el código de una TV, el contador de intentos fallidos (con tu IP) dura 15 minutos |
-| Los lugares de sala P2P que tomaste sin conectarte, con tu identificador de sesión | Cuentan 10 minutos y, si llegan a 3, bloquean 5 minutos más: hasta 15 minutos. Solo en la memoria del servidor, que se pierde si se reinicia |
-| El prefijo de tu red IPv6, si tu conexión usa IPv6 | Mientras dura tu partida por servidor como invitado o la sala que creaste. Sirve para limitar cuántas abre una misma red |
+| El prefijo de tu red IPv6, si tu conexión usa IPv6 | Mientras dura la sala que creaste. Sirve para limitar cuántas salas abre una misma red |
 | Código para conectar una TV | Solo en memoria. Vale 4 minutos; la TV lo renueva hasta 6 veces (unos 28 minutos en total). Cuando vence o se usa, queda 5 minutos más solo para decir «vencido» o «usado» |
 
 **Partidas, salas y COMPETITIVO**
 
 | Dato | Cuánto |
 |---|---|
-| Datos de una partida en curso | Lo que dura la partida. Un servidor los borra al terminar, como máximo 10 minutos después del tiempo de juego. Una sala P2P dura 20 minutos como máximo |
+| Datos de una partida en curso | Lo que dura la partida. Un servidor los borra al terminar, como máximo 10 minutos después del tiempo de juego. La conexión P2P de una partida de sala dura 20 minutos como máximo |
 | Salas personalizadas | Se cierran a los 2 minutos sin nadie conectado, o a las 6 horas. Su lugar en la lista se borra al cerrarse (15 minutos después, si se cerró por una falla) |
+| Búsquedas de partida | En memoria mientras buscas, y 10 minutos más si la búsqueda se corta. Los totales por día, 90 días |
 | Abandonos en COMPETITIVO | 24 horas |
 | Bloqueos de la cola | Hasta que terminan: de 5 minutos a 24 horas |
 | Resultados de cada partida de COMPETITIVO | 30 días |
@@ -476,8 +472,6 @@ Estas decisiones las toma el juego solo, sin una persona:
   Cloudflare o del proyecto, estás desconectado cuando termina, no puedes buscar partida de
   COMPETITIVO por 5 minutos la primera vez, 15 la segunda, 1 hora la tercera y 24 horas desde la
   cuarta, dentro de 24 horas.
-- **No presentarse en P2P:** si tomas 3 lugares en salas P2P sin conectarte en 10 minutos, no
-  puedes buscar partidas P2P por 5 minutos. Las partidas por servidor siguen abiertas.
 - **Partidas no verificadas:** una partida de COMPETITIVO en un servidor de la comunidad que no
   pasa la verificación automática no cuenta.
 - **Servidores de la comunidad:** si una partida de tu servidor no pasa la verificación, el
@@ -532,7 +526,8 @@ Puedes reclamar ante la autoridad de tu país:
 - **Pensando en los más jóvenes,** Turbogol no tiene publicidad, perfiles para publicidad, compras,
   cajas de recompensas al azar ni chat.
 - **Consejo:** si eres menor, usa un nombre que no sea tu nombre real, activa «Ocultar mi nombre en
-  repeticiones públicas» (PERFIL > PRIVACIDAD) y elige «Servidor» para no mostrar tu IP.
+  repeticiones públicas» (PERFIL > PRIVACIDAD) y, si no quieres mostrar tu IP, no juegues en salas
+  con gente que no conoces.
 
 > **Si tienes entre 13 y 17 años, lo importante:**
 > - Usamos tu correo, tu nombre de usuario, tu dirección IP, el país y la ciudad aproximados de
@@ -541,7 +536,8 @@ Puedes reclamar ante la autoridad de tu país:
 > - Tu nombre se ve en la clasificación si estás entre los 100 mejores, y hoy no se puede ocultar.
 >   En las repeticiones de las partidas en servidores de la comunidad también se ve, salvo que lo
 >   ocultes en PERFIL > PRIVACIDAD.
-> - En P2P otros jugadores pueden ver tu IP. Elige «Servidor» si no quieres.
+> - En una sala, los otros jugadores pueden ver tu IP. Si no quieres, juega CASUAL (con cuenta),
+>   contra la IA o entrena.
 > - Puedes pedirnos que borremos todo. Pídele ayuda a un adulto si lo necesitas.
 
 ---
@@ -576,7 +572,7 @@ Ninguna de las nuestras la puede leer el código de la página: solo viajan a nu
 | «Este navegador entró como…» (`turbogol.account`): tu nombre y tu identificador de cuenta | Saber quién entró en este navegador | Al cerrar sesión, o cuando tu sesión deja de valer |
 | Tus funciones experimentales y ajustes de física (`turbogol.experimental.v1.` y el identificador de tu cuenta) | Usarlos sin conexión | Quedan después de cerrar sesión |
 | Tus récords de entrenamiento (`turbogol.training.v1` como invitado, y una copia por cada cuenta que usaste en este navegador, con su identificador) | Mostrártelos | Los de invitado, cuando borras los datos del sitio. La copia de una cuenta queda después de cerrar sesión |
-| Tus opciones: idioma, gráficos, controles, región, modo, conexión, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
+| Tus opciones: idioma, gráficos, controles, región, modo, el formato que prefieres en CASUAL, qué haces mientras buscas, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
 | El nivel de gráficos que falló en esta placa de video (con el nombre de la placa) | No volver a usarlo | A los 30 días, o cuando borras los datos del sitio |
 
 ### 9.3 Almacenamiento de la pestaña (se borra al cerrarla)
@@ -844,7 +840,7 @@ Para quien quiera saber qué hay detrás de las palabras simples de esta políti
 | El almacenamiento de las repeticiones | Cloudflare R2 |
 | Los correos del juego | Cloudflare Email Service, desde `no-reply@turbo-gol.com` |
 | Los correos que nos escribes | Cloudflare Email Routing, que reenvía privacy@turbo-gol.com a un buzón de Google, en Estados Unidos |
-| Conectar las partidas P2P | WebRTC, con el STUN de Cloudflare |
+| Conectar las partidas de sala (P2P) | WebRTC, con el STUN de Cloudflare |
 | El control contra bots | Cloudflare Turnstile |
 | La medición de visitas | Cloudflare Web Analytics (el script de medición de Cloudflare, RUM) |
 | Los registros técnicos | Cloudflare Workers Logs |

@@ -1,6 +1,6 @@
 # Turbogol Privacy Policy
 
-Version 2026-11-04. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
+Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
 
 ---
 
@@ -15,9 +15,9 @@ Version 2026-11-04. In force from November 4, 2026. The Spanish text is the offi
   reaches our servers.
 - **Some things are public:** your username on the leaderboard (today you cannot hide it), in the
   lobby list if you are the host of a public lobby and, for 30 days, in the replays of matches on
-  community servers, where you can hide it (section 4.5).
-- **In P2P matches, the other players receive your IP address.** If you do not want that, choose
-  "Server".
+  community servers (COMPETITIVE and CASUAL ones), where you can hide it (section 4.5).
+- **In lobbies, which are played P2P, the other players receive your IP address.** CASUAL and
+  COMPETITIVE are always played on a server.
 - **Whoever operates a community server sees your IP address** and the match. Today those servers
   are only the project's own.
 - **We measure visits with Cloudflare Web Analytics,** which, according to Cloudflare, uses no
@@ -68,9 +68,10 @@ Version 2026-11-04. In force from November 4, 2026. The Spanish text is the offi
 | **Each device with your session** | The type (browser or TV), the dates, the method you signed in with, when you last confirmed it was you and the **approximate country and city**, which Cloudflare derives from your IP | Show you in PROFILE (the type, the dates, the country and the city) where your session is open, so you can close the one you do not recognize. Ask you to confirm it is you before an important change |
 | **You change your email or your password, or ask for a new password** | The new email, with a code we send to it. A notice to the previous email with a link to undo the change for 7 days (that email stays reserved for your account during those 7 days). If you ask for a new password, a link to your email that is valid for 30 minutes and works once | Check that the email is yours and be able to undo a change you did not make. When you change your email or your password, you are signed out on your other devices |
 | **You confirm it is you** | Your password, or a 6-digit code we send to your account's email (valid for 10 minutes), or the Discord or Google button | Ask you to confirm it before an important change (changing or adding the email, linking or unlinking Discord or Google, deleting the account) |
-| **You play a match** | Your name, your car, your team and your controls (each key or movement). In a P2P match, your IP address. In P2P match rooms (where the players of a P2P match meet to connect), we note in memory the seats you took and did not connect to, with your session identifier | Play the match. Show the result. Stop anyone who takes seats in P2P rooms without connecting (section 7.4) |
+| **You play a match** | Your name, your car, your team and your controls (each key or movement). In a lobby match (P2P), your IP address | Play the match. Show the result |
 | **You play COMPETITIVE** | Your rating, your matches, wins and losses, your best rating, your abandoned matches and your queue blocks | Match you with evenly matched opponents. The leaderboard. The sanctions for abandoning |
-| **You use a custom lobby** | The lobby's code, its title, its password (we keep only a hash), the members (their session identifier, their name, their car and their team), who the host removed and each player's failed password attempts. If you create it and your connection uses IPv6, your network's prefix. New lobbies are private and P2P | Run the lobby. Limit how many lobbies one network and one session open |
+| **You use a custom lobby** | The lobby's code, its title, its password (we keep only a hash), the members (their session identifier, their name, their car and their team), who the host removed and each player's failed password attempts. If you create it and your connection uses IPv6, your network's prefix. When you create it you choose public or private. Lobbies are played P2P | Run the lobby. Limit how many lobbies one network and one session open |
+| **You search for a match (CASUAL or COMPETITIVE)** | While you search, in the server's memory: your session identifier, your region, the format you prefer, since when you are searching, whether you are playing bots or training and whether the game is in view; if the search drops, we keep it 10 more minutes so it goes on by itself when you are back. We also count per day, without your account, your name or your IP, how many searches start and end, how many matches form and with how many people, how long people waited (in ranges) and how often people play bots or train while waiting; those totals are kept 90 days | Form your match and estimate the wait. Learn whether the wait works and improve it |
 | **You play on a community server** | Your name, your player identifier (the same in all your matches), your team, your controls and your IP address, which whoever operates the server sees. Afterwards, the match replay and, unpublished, which account (or guest session) took each seat. If the host is not the project, to compute their points we also note how long you played and, if you have an account, how many days old your account is. The replay, the seats and those notes are kept for 30 days. Today those servers are only the project's own (section 4.4) | Play the match. Check that the result is clean. Publish the replay. Compute the host's points, when the host is not the project |
 | **You mark a replay as a favorite (a star) or look at "My replays"** | Your account's identifier next to the match's, never your name. You can mark up to 500 replays. How many accounts marked each match is public; which ones is not | Show the most starred matches and your list of matches. They are deleted when the replay turns 30 days old, even if you delete your account before then |
 | **You connect a TV with your phone** | The TV's code. The TV's approximate country, city, network and internet provider name. The TV's IP address (for IPv6, only the network prefix), while the code is valid. Your phone's IP is only compared with the TV's; if you enter the wrong code, it is kept for 15 minutes, to stop failed attempts. All in memory | Let your phone show you which TV you are about to connect and whether it is on your same network, so nobody tricks you with someone else's code. Stop failed attempts |
@@ -179,7 +180,7 @@ receives the network error reports (section 9.4).
 
 - hosts the game and its data;
 - sends the game's emails and receives the ones you write to us;
-- helps the devices in a P2P match find each other (STUN);
+- helps the devices in a lobby match (P2P) find each other (STUN);
 - stops bots (Turnstile);
 - counts requests per minute, with your IP (or your IPv6 network prefix) or with your session or
   account identifier, to stop abuse, and keeps temporary copies of public pages (cache);
@@ -227,31 +228,26 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
 
 - **In each match** they see your name, your car and your team. In a lobby, the other members see
   your name.
-- **In a P2P match,** your device connects directly to the other players' devices, even if you do
-  not know them. **Each of them receives your public IP address.** With it one can tell, roughly,
-  your city and your internet provider.
-  - **When it is P2P:** in CASUAL with the "Auto" connection (the one selected by default) or
-    "P2P", and in P2P lobbies. New lobbies come with P2P selected. If you play alone, "Auto" gives
-    you a server with bots.
-  - **How to avoid it:** choose "Server" as the CASUAL connection (MODES > Advanced > Connection),
-    or, if you are the host of a lobby, switch its connection to "Server". In someone else's lobby
-    the connection is decided by its host; the lobby list says whether it is P2P or server.
-    COMPETITIVE always uses a server.
-  - The only way to keep them from seeing your IP is to choose "Server".
+- **In a lobby match (P2P),** your device connects directly to the devices of the other players
+  in the lobby, even if you do not know them. **Each of them receives your public IP address.**
+  With it one can tell, roughly, your city and your internet provider.
+  - **When it is P2P:** always in lobbies, public or private, whether you create them or join
+    someone else's. CASUAL and COMPETITIVE are never P2P: they are played on a server.
+  - **How to avoid it:** do not play in lobbies, or play only with people you know.
   - If the connection with the other players does not succeed within about 10 seconds, the game
-    moves the match to a server.
+    takes you back to the lobby.
   - We tell you once, when you accept the Terms: the notice above the button you accept them with
     ("PLAY AS GUEST", "CREATE ACCOUNT", "NO, CREATE MY ACCOUNT" or "ACCEPT AND PLAY") says that in
-    P2P matches the other players can see your IP. There is no notice before each P2P match.
+    lobbies the other players can see your IP. There is no notice before each lobby match.
 
 ### 4.4 Community servers and their hosts
 
 - Some matches are played on community servers ("nodes"). **Today the only one is the project's
   own, in São Paulo (Brazil),** on a Hostinger machine. When it can take them,
-  it gets the South America region matches that are played on a server: CASUAL matches with the
-  "Server" connection, COMPETITIVE matches and those of anyone who plays alone on "Auto". If it
-  cannot, they are played on Cloudflare servers. Matches in custom lobbies and P2P matches do not
-  go through it. **Nobody outside the project can register a server yet.** Even if the game talks
+  it gets the CASUAL and COMPETITIVE matches whose players are mostly from South America (on a tie,
+  the region of whoever waited longest decides), and also the CASUAL bots matches of whoever
+  searches from South America and waited 5 minutes with no rivals. If it cannot, they are played on
+  Cloudflare servers. Lobby matches do not go through it. **Nobody outside the project can register a server yet.** Even if the game talks
   about hosting servers, today you cannot register one.
 - **When the network opens to other people** (we will announce it), whoever operates a server will
   see your name, your player identifier (the same in all your matches), your controls, what happens
@@ -272,8 +268,8 @@ Anyone, without an account, can see:
 | What | With what data | For how long | How to avoid it |
 |---|---|---|---|
 | **The leaderboard** of each mode | The top 100 with at least 5 matches in the season: username, rating, rank, matches and wins. Suspended accounts and accounts that asked for deletion do not appear | While you have an account | Today there is no option to hide your name on the leaderboard. Only those who play COMPETITIVE and are in the top 100 of a mode appear. If you ask for your account to be deleted, you stop appearing in less than a minute |
-| **The public lobby list** | The lobby's title, the name of its current host, its code, the mode, the region, how many players it has, whether it has a password, whether it is P2P or server and, if it has them, its experimental rules | While the lobby is open | New lobbies are private. Leave yours that way |
-| **Public replays** | Matches on community servers: what is seen of the match and what is seen of you (below). Never your identifier or your IP | 30 days | "Hide my name in public replays" (below) |
+| **The public lobby list** | The lobby's title, the name of its current host, its code, the mode, the region, how many players it has, whether it has a password and, if it has them, its experimental rules | While the lobby is open | Create your lobby with CREATE PRIVATE LOBBY, or make it private in SETTINGS |
+| **Public replays** | COMPETITIVE and CASUAL matches on community servers: what is seen of the match and what is seen of you (below). Never your identifier or your IP | 30 days | "Hide my name in public replays" (below) |
 | **The community server list** | Each server's name, its host's username, the region, the status, whether it is connected, how many matches it has in progress, the capacity, the measured lag, the version, whether it is a project server, whether it hosts or verifies matches and which connections it accepts. Separately, the points of the last 30 days of the 50 hosts who earned the most | No time limit: a server stays on the list, offline, even if it is shut down. If the host deletes their account, the server stays on the list as blocked, with their username. Today there are only project servers | It only concerns hosts |
 
 - **What is seen of the match:** the mode, the region, the result, the length, whether it was
@@ -314,13 +310,13 @@ We give data to an authority only when the law requires us to, with a formal req
 
 | Where to | What | Why |
 |---|---|---|
-| **The United States and Cloudflare's network** | Everything we store at Cloudflare. Cloudflare decides in which data center each thing runs and is stored. In October 2026 the match servers were measured in Miami and in Atlanta. Replays are stored in Cloudflare storage that has no region in South America. Each request goes through the Cloudflare data center nearest to you | Hosting the game |
+| **The United States and Cloudflare's network** | Everything we store at Cloudflare. Cloudflare decides in which data center each thing runs and is stored. In October 2026 the match servers were measured in Miami and in Atlanta. For a CASUAL or COMPETITIVE match we ask Cloudflare to run it near the region of most of its players (Terms 7.6), and Cloudflare decides. Replays are stored in Cloudflare storage that has no region in South America. Each request goes through the Cloudflare data center nearest to you | Hosting the game |
 | **The United States (Cloudflare, on its own account)** | The Turnstile signals | Improving its bot detection |
 | **Brazil** | Your IP and the match, on the project's server in São Paulo | Playing with low lag in South America |
 | **The United States (Discord and Google)** | That you signed in to Turbogol. We do not send them game data | Your sign-in |
 | **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures and to what it does with servers, host accounts and replays |
 | **The United States (Google)** | What you write to us | Reading and answering your requests |
-| **Each player's country** | Your IP, in P2P matches | The direct connection |
+| **Each player's country** | Your IP, in lobby matches (P2P) | The direct connection |
 | **Each host's country** | Your IP and the match, once third-party servers open | Playing the match |
 
 **For Argentina:** neither the United States nor Brazil is on the AAIP's list of countries with
@@ -367,16 +363,16 @@ art. 33 IX).
 | Abuse counters that persist (hashes with a secret key) | Each one counts from 1 minute to 1 day, depending on what it is for. It is deleted the day after it starts counting |
 | Pauses after failed attempts | From 30 seconds to 1 hour for signing in with a password (the pause grows with the failures). 1 day for the codes of an email with many errors |
 | Short counters with your IP (or your IPv6 network prefix) or with your session or account identifier | From seconds to minutes, in the server's memory and in Cloudflare's rate-limit counter. If you get it wrong when confirming a TV's code, the failed-attempts counter (with your IP) lasts 15 minutes |
-| The P2P room seats you took without connecting, with your session identifier | They count for 10 minutes and, if they reach 3, block for 5 more minutes: up to 15 minutes. Only in the server's memory, which is lost if it restarts |
-| Your IPv6 network prefix, if your connection uses IPv6 | While your server match as a guest, or the lobby you created, lasts. It is used to limit how many of those matches or lobbies one network opens |
+| Your IPv6 network prefix, if your connection uses IPv6 | While the lobby you created lasts. It is used to limit how many lobbies one network opens |
 | Code to connect a TV | Only in memory. Valid for 4 minutes; the TV renews it up to 6 times (about 28 minutes in total). When it expires or is used, it stays 5 more minutes only to say "expired" or "used" |
 
 **Matches, lobbies and COMPETITIVE**
 
 | Data | How long |
 |---|---|
-| Data of a match in progress | As long as the match lasts. A server deletes it at the end, at most 10 minutes after the playing time. A P2P room lasts 20 minutes at most |
+| Data of a match in progress | As long as the match lasts. A server deletes it at the end, at most 10 minutes after the playing time. The P2P connection of a lobby match lasts 20 minutes at most |
 | Custom lobbies | They close after 2 minutes with nobody connected, or after 6 hours. Their place in the list is deleted when they close (15 minutes later, if they closed because of a failure) |
+| Match searches | In memory while you search, and 10 more minutes if the search drops. The daily totals, 90 days |
 | Abandoned COMPETITIVE matches | 24 hours |
 | Queue blocks | Until they end: from 5 minutes to 24 hours |
 | Results of each COMPETITIVE match | 30 days |
@@ -473,8 +469,6 @@ The game takes these decisions on its own, without a person:
   project server, are disconnected when it ends, you cannot search for a COMPETITIVE match for
   5 minutes the first time, 15 the second, 1 hour the third and 24 hours from the fourth, within
   24 hours.
-- **Not showing up in P2P:** if, within 10 minutes, you take 3 seats in P2P rooms and never connect
-  to them, you cannot search for P2P matches for 5 minutes. Server matches stay open.
 - **Unverified matches:** a COMPETITIVE match on a community server that does not pass the
   automatic verification does not count.
 - **Community servers:** if a match on your server does not pass verification, the system suspends
@@ -534,7 +528,8 @@ You can complain to the authority of your country:
 - **With the youngest players in mind,** Turbogol has no advertising, advertising profiles,
   purchases, random reward boxes or chat.
 - **Tip:** if you are a minor, use a name that is not your real name, turn on "Hide my name in
-  public replays" (PROFILE > PRIVACY) and choose "Server" so you do not show your IP.
+  public replays" (PROFILE > PRIVACY) and, if you do not want to show your IP, do not play in
+  lobbies with people you do not know.
 
 > **If you are between 13 and 17, what matters:**
 > - We use your email, your username, your IP address, the approximate country and city of your
@@ -543,7 +538,8 @@ You can complain to the authority of your country:
 > - Your name shows on the leaderboard if you are in the top 100, and today it cannot be hidden.
 >   In the replays of matches on community servers it also shows, unless you hide it in
 >   PROFILE > PRIVACY.
-> - In P2P other players can see your IP. Choose "Server" if you do not want that.
+> - In a lobby, other players can see your IP. If you do not want that, play CASUAL (with an
+>   account), against the AI or train.
 > - You can ask us to delete everything. Ask an adult for help if you need it.
 
 ---
@@ -578,7 +574,7 @@ None of ours can be read by the page's code: they only travel to our server.
 | "This browser signed in as…" (`turbogol.account`): your name and your account identifier | Know who signed in on this browser | When you sign out, or when your session stops being valid |
 | Your experimental features and physics presets (`turbogol.experimental.v1.` and your account identifier) | Use them offline | They stay after you sign out |
 | Your training records (`turbogol.training.v1` as a guest, and a copy for each account you used on this browser, with its identifier) | Show them to you | The guest ones, when you clear the site's data. An account's copy stays after you sign out |
-| Your options: language, graphics, controls, region, mode, connection, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
+| Your options: language, graphics, controls, region, mode, the format you prefer in CASUAL, what you do while you search, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
 | The graphics level that failed on this graphics card (with the card's name) | Not use it again | After 30 days, or when you clear the site's data |
 
 ### 9.3 Tab storage (deleted when you close the tab)
@@ -852,7 +848,7 @@ For anyone who wants to know what lies behind the plain words of this policy.
 | Where replays are stored | Cloudflare R2 |
 | The game's emails | Cloudflare Email Service, from `no-reply@turbo-gol.com` |
 | The emails you write to us | Cloudflare Email Routing, which forwards privacy@turbo-gol.com to a Google mailbox, in the United States |
-| Connecting P2P matches | WebRTC, with Cloudflare's STUN |
+| Connecting lobby matches (P2P) | WebRTC, with Cloudflare's STUN |
 | The anti-bot check | Cloudflare Turnstile |
 | Measuring visits | Cloudflare Web Analytics (Cloudflare's measurement script, RUM) |
 | Technical logs | Cloudflare Workers Logs |

@@ -1,6 +1,6 @@
 # Términos de uso de Turbogol
 
-Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
+Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
 
 ---
 
@@ -14,11 +14,12 @@ Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en espa
 - Para una cuenta necesitas 13 años o más. Si eres menor de 18, pide permiso a tu madre, padre o
   tutor.
 - Juega limpio: sin trampas, sin bots, sin atacar el servicio, sin acosar a nadie.
-- En las partidas P2P los otros jugadores reciben tu dirección IP. Si no quieres eso, elige
-  «Servidor».
+- Sin cuenta puedes jugar contra la IA, entrenar y jugar en salas; CASUAL y COMPETITIVO necesitan
+  una cuenta y se juegan siempre en un servidor. Las salas se juegan P2P: los otros jugadores de la
+  sala reciben tu dirección IP.
 - Tu nombre de usuario se ve en la clasificación (hoy no puedes ocultarlo ahí) y, durante 30 días,
-  en las repeticiones públicas de las partidas en servidores de la comunidad (ahí sí puedes
-  ocultarlo).
+  en las repeticiones públicas de las partidas de COMPETITIVO y CASUAL en servidores de la
+  comunidad (ahí sí puedes ocultarlo).
 - Los puntos de anfitrión se ganan solo alojando un servidor de la comunidad. Hoy solo hay
   servidores del proyecto, y esos no ganan puntos: aunque el juego hable de alojar servidores, hoy
   no puedes registrar uno. Los puntos no valen dinero.
@@ -97,11 +98,10 @@ Versión 2026-11-04. Vigente desde el 4 de noviembre de 2026. Este texto en espa
 1. El servidor te da un nombre: «Invitado» y un número de cuatro cifras («Guest» en inglés). No lo
    puedes elegir ni cambiar.
 2. Tu sesión de invitado vale 24 horas. Después empiezas otra.
-3. **Lo que un invitado no puede hacer:** jugar COMPETITIVO, usar funciones o reglas
+3. **Lo que un invitado no puede hacer:** jugar CASUAL ni COMPETITIVO, usar funciones o reglas
    experimentales, ponerle nombre a su sala ni elegir otro auto.
-4. **Los límites de un invitado:** solo puede estar en una partida a la vez en un servidor de
-   Cloudflare. Y en una sala que juega en un servidor, si hay invitados, la partida dura 5 minutos
-   como máximo. Además, hay un tope de partidas de invitados por red y por región.
+4. **Los límites de un invitado:** puede crear salas y jugar en ellas, con un tope de salas
+   abiertas por sesión y por red.
 5. Si borras los datos de tu navegador, pierdes tu sesión de invitado y tus récords de
    entrenamiento.
 
@@ -181,36 +181,43 @@ otros jugadores, **no puedes:**
 
 ## 7. Modos y conexiones
 
-1. **CASUAL.** La conexión puede ser:
-   - **Auto** (la que viene elegida): P2P con otros jugadores, o un servidor con bots si juegas
-     solo;
-   - **P2P**: lo mismo que Auto;
-   - **Servidor**: un servidor de tu región.
-2. **P2P quiere decir que tu dispositivo se conecta directo con el de los otros jugadores,**
-   también con personas que no conoces. Para armar esa conexión, cada dispositivo recibe la
-   dirección IP pública de los demás. Con una IP se puede saber, más o menos, en qué ciudad estás y cuál es tu
-   proveedor de internet. **Si no quieres que otros jugadores vean tu IP, elige «Servidor»** en la
-   conexión de CASUAL (MODOS > Avanzado > Conexión). Si eres el anfitrión de una sala, cambia su
-   conexión a «Servidor»; si entras a la sala de otra persona, su anfitrión decide la conexión, y la
-   lista de salas dice si es P2P o servidor. COMPETITIVO siempre usa un servidor.
-3. **COMPETITIVO** siempre se juega en un servidor, con la física oficial del juego. El
-   resultado cambia tu puntaje. Los 100 mejores de cada modo, con al menos 5 partidas en la
-   temporada, se ven con su nombre de usuario en una clasificación pública. Hoy no hay una opción
-   para ocultar tu nombre en ella. Si pides el borrado de tu cuenta, dejas de aparecer en ella
-   enseguida.
+1. **CASUAL** necesita una cuenta y siempre se juega en un servidor, con la física oficial del
+   juego. Buscamos primero jugadores de tu región y, si en 1 minuto no aparece nadie, de todas las
+   regiones. Apenas hay 2 o más personas buscando, la partida empieza y los bots completan los
+   lugares libres; el formato depende de cuántas sean. Si en 5 minutos no llega nadie, juegas en un
+   servidor contra bots, en el formato que elegiste, si hay lugar en los servidores y tienes el
+   juego a la vista (si no, apenas haya lugar o vuelvas al juego). Mientras esperas puedes jugar
+   contra bots o entrenar en tu navegador: cuando aparece tu partida entras al instante y ese
+   partido local se pierde. CASUAL no cuenta para el puntaje.
+2. **Las salas se juegan P2P:** tu dispositivo se conecta directo con el de los otros jugadores de
+   la sala, también con personas que no conoces. Para armar esa conexión, cada dispositivo recibe
+   la dirección IP pública de los demás. Con una IP se puede saber, más o menos, en qué ciudad estás
+   y cuál es tu proveedor de internet. Pasa igual si creas la sala o si entras a la de otra
+   persona. **Si no quieres que otros jugadores vean tu IP, no juegues en salas, o juega solo con
+   gente que conoces.** CASUAL y COMPETITIVO nunca son P2P.
+3. **COMPETITIVO** siempre se juega en un servidor, con la física oficial del juego. Necesita una
+   cuenta. Buscamos primero en tu región y, después de 2 minutos, en todas. El resultado cambia tu
+   puntaje. Los 100 mejores de cada modo, con al menos 5 partidas en la temporada, se ven con su
+   nombre de usuario en una clasificación pública. Hoy no hay una opción para ocultar tu nombre en
+   ella. Si pides el borrado de tu cuenta, dejas de aparecer en ella enseguida.
 4. **Salas personalizadas.** Quien crea una sala es el anfitrión de la sala (puede pasarle el rol a
    otro miembro): elige el modo y las reglas, y el título si tiene cuenta; puede ponerle contraseña
-   y puede sacar a un jugador. Las salas nuevas son privadas y P2P: el anfitrión de la sala puede
-   cambiar las dos cosas. Una sala pública aparece en una lista que cualquiera puede ver, con su
-   título, el nombre de su anfitrión actual, su código, el modo, la región, cuántos jugadores tiene,
-   si tiene contraseña, si es P2P o servidor y, si las tiene, sus reglas experimentales. Las
-   partidas de una sala nunca cuentan para el puntaje, no se juegan en servidores de la comunidad y
-   no se publican como repeticiones.
+   y puede sacar a un jugador. Al crear una sala eliges si es pública (CREAR SALA PÚBLICA) o
+   privada (CREAR SALA PRIVADA), y el anfitrión de la sala puede cambiarlo. Las salas siempre se
+   juegan P2P (sección 7.2) y una partida necesita al menos 2 jugadores. Una sala pública aparece
+   en una lista que cualquiera puede ver, con su título, el nombre de su anfitrión actual, su
+   código, el modo, la región, cuántos jugadores tiene, si tiene contraseña y, si las tiene, sus
+   reglas experimentales. Las partidas de una sala nunca cuentan para el puntaje, no se juegan en
+   servidores de la comunidad y no se publican como repeticiones.
 5. **Funciones y reglas experimentales.** Son para cuentas, pueden cambiar o desaparecer y **no
    cuentan para nada**: ni puntaje, ni estadísticas, ni récords.
 6. **Servidores.** Las partidas por servidor se juegan en servidores de Cloudflare o en servidores
    de la comunidad (sección 12). Hoy el único servidor de la comunidad es el del proyecto, en São
-   Paulo, y solo el proyecto puede registrar servidores.
+   Paulo, y solo el proyecto puede registrar servidores. Una partida de CASUAL o COMPETITIVO se
+   juega en la región de la mayoría de sus jugadores (si empatan, la de quien esperó más): con
+   mayoría de Sudamérica va al servidor del proyecto en São Paulo cuando tiene lugar; si no, y para
+   las demás regiones, a un servidor de Cloudflare: le pedimos que lo ponga cerca de esa región,
+   pero el lugar lo decide Cloudflare.
 
 ## 8. COMPETITIVO: abandonos y verificación
 
@@ -223,8 +230,10 @@ otros jugadores, **no puedes:**
    - 24 horas, desde la cuarta.
 
    Además, un abandono cuenta como derrota en tu puntaje, aunque tu equipo gane.
-2. **Si tomas 3 lugares en salas P2P sin conectarte en 10 minutos,** no puedes buscar partidas P2P
-   durante 5 minutos. Las partidas por servidor siguen abiertas.
+2. **Mientras esperas COMPETITIVO jugando contra bots o entrenando,** el juego te lleva a tu
+   partida apenas aparece. Con la pestaña en segundo plano entras igual y la partida se juega
+   aunque no estés mirando: el resultado cuenta. Si la pestaña está cerrada o el dispositivo dormido
+   y no llegas a conectarte, cuenta como no presentarte (sección 8.1).
 3. Estos bloqueos los decide el juego solo. Puedes pedir que una persona los revise (sección 9).
 4. **Las partidas de COMPETITIVO en servidores de la comunidad se verifican** volviendo a simular
    la partida. Si una no pasa la verificación, o no se puede verificar a tiempo, su resultado no
@@ -261,8 +270,10 @@ otros jugadores, **no puedes:**
 ## 10. Repeticiones públicas
 
 1. Las partidas que se juegan en servidores de la comunidad se graban enteras, con los controles de
-   cada jugador, para que se puedan volver a ver. Las partidas P2P, las de salas personalizadas y
-   las de servidores de Cloudflare no se graban.
+   cada jugador, para que se puedan volver a ver: las de COMPETITIVO y las de CASUAL. Desde esta
+   versión, toda partida de CASUAL con mayoría de jugadores de Sudamérica se juega ahí cuando hay
+   lugar (sección 7.6), así que también se graba. Las partidas de salas (que son P2P) y las de
+   servidores de Cloudflare no se graban.
 2. Cualquiera, sin cuenta, puede verlas en turbo-gol.com, de 1 a 2 horas después de la partida y
    **durante 30 días**. Una partida anulada no se publica. Pedimos a los buscadores que no las
    indexen, pero quien ve una repetición puede copiarla, y eso no lo podemos deshacer.
@@ -478,8 +489,8 @@ personas, para ser anfitrión necesitas:
      de tu dispositivo, o de fallas de los servicios que usamos (por ejemplo, Cloudflare,
      Hostinger, Discord o Google), si hicimos lo razonable para evitarlos (sección 15.1);
    - lo que hagan otros jugadores o terceras personas: lo que escriben o publican, lo que hagan con
-     tu dirección IP en una partida P2P (sección 7.2) y las copias que hagan de lo que es público,
-     como las repeticiones (sección 10.2);
+     tu dirección IP en una partida de sala (sección 7.2) y las copias que hagan de lo que es
+     público, como las repeticiones (sección 10.2);
    - los daños que vengan de que rompas estos términos o la ley, de que compartas tu cuenta o tu
      contraseña, o de que pierdas el acceso a tu correo;
    - si no eres consumidor (por ejemplo, si alojas servidores como actividad profesional), los
