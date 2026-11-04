@@ -507,3 +507,26 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
     for (const text of [es[k], en[k]]) assert.doesNotMatch(text, /rocket\s*league/i, k);
   }
 });
+
+test("the deploy day's notice for Discord (docs/legal/avisos/2026-11-04-2.md): two messages that paste as they are, each under Discord's 2,000 characters", () => {
+  const text = readFileSync(new URL('../docs/legal/avisos/2026-11-04-2.md', import.meta.url), 'utf8');
+  const parts = text.split(/^## Mensaje \d\n/m);
+  assert.equal(parts.length, 3, 'a preface, then Mensaje 1 and Mensaje 2');
+  const msgs = parts.slice(1).map((m) => m.trim());
+  for (const [i, m] of msgs.entries()) {
+    // Discord counts every character and shows every newline: no hard wraps (a line that goes on
+    // indented), no headings, and less than a plain message's 2,000 (4,000 is Nitro's).
+    assert.ok(m.length < 2000, `message ${i + 1}: ${m.length} characters`);
+    assert.doesNotMatch(m, /\n {2,}\S/, `message ${i + 1}: a bullet or paragraph broken over two lines`);
+    assert.doesNotMatch(m, /^#/m, `message ${i + 1}: Discord's own headings are not ours`);
+    assert.doesNotMatch(m, /\b(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)\b/i);
+    assert.doesNotMatch(m, /rocket\s*league/i);
+  }
+  assert.ok(msgs[0].startsWith('**Cambian los modos de juego y los Términos (versión 2026-11-04-2)**\n'), 'the title is its first line, in bold');
+  // What the code does: São Paulo takes the match when it has room (MatchmakerDO formMatch).
+  assert.match(msgs[0], /todas las que tienen mayoría de jugadores de Sudamérica, cuando hay lugar,/);
+  // The link in < > (no embed), the only contact the public one.
+  assert.match(msgs[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  assert.doesNotMatch(msgs.join('\n'), /(?<!<)https?:\/\//, 'every link between < and >');
+  for (const m of msgs.join('\n').matchAll(/[\w.+-]+@[\w.-]+/g)) assert.equal(m[0], 'privacy@turbo-gol.com');
+});
