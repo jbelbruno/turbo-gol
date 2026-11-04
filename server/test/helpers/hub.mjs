@@ -113,12 +113,15 @@ export function fakeNs(handler = () => ({ ok: true })) {
   };
 }
 
-/** A control plane that places every match it is offered (`place` replaceable). */
+/**
+ * A control plane with nodes in SA only, as production today (`place` replaceable): it places every
+ * match hosted SA it is offered, and one hosted elsewhere finds no node there (hosts 0).
+ */
 export function fakeNodes() {
   const calls = [];
   const n = {
     calls,
-    place: (body) => ({ placement: placementOf(body), hosts: 1 }),
+    place: (body) => (body.region === 'SA' ? { placement: placementOf(body), hosts: 1 } : { placement: null, hosts: 0 }),
     of: (path) => calls.filter((c) => c.path === path),
     ns: {
       idFromName: (name) => ({ name }),
@@ -146,7 +149,7 @@ export const accountToken = (sub, name = 'Ana') => signJwt(SECRET, { sub, name, 
 export const guestToken = async (sub) => (await createSession(SECRET, sub, 'Invitado')).token;
 
 /**
- * The world: `flags` the KV flags, `nodes: true` configures a control plane (placing everything),
+ * The world: `flags` the KV flags, `nodes: true` configures a control plane (nodes in SA only: fakeNodes),
  * `rooms` MatchDO matches already alive in the hub (`solos` of them solo matches: ids room:solo0...), `ranked` what AccountsDO's /ranked-check answers.
  */
 export async function makeHubWorld({ flags = {}, nodes = false, rooms = 0, solos = 0, now = Date.UTC(2026, 10, 4, 12), ranked = null } = {}) {
