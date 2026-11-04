@@ -271,7 +271,7 @@ export default {
   // Toast; {car} is the car's name
   'garage.equipped': '{car} equipped',
   'garage.loading': 'Loading your points…',
-  // How points are earned (GANA PUNTOS, a locked car's REDEEM): the guide and its QR
+  // How points are earned (the earn card, garage.earn; a locked car's REDEEM): the guide and its QR
   'garage.guideTitle': 'How server points are earned',
   'garage.guideText': 'Earned only by hosting a community server, never by playing. Today only the project runs servers: you cannot register one yet.',
   'garage.guideScan': 'Scan it to open the guide on your phone.',
@@ -2139,6 +2139,7 @@ export default {
   'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu',
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
+  // Its consent covers what it names: storage in the United States and Brazil (the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)
   'legal.notice': 'By pressing "{button}" you accept the {terms} and that your data is stored in the United States and Brazil. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.',
   'legal.termsLink': 'Terms',
   'legal.privacyLink': 'Privacy policy',

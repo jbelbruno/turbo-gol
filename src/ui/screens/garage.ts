@@ -8,13 +8,14 @@
  *
  * Left: TU AUTO (the car driven, its line, "Gratis para todos" for the free one), PUNTOS DE
  * SERVIDOR (the balance; a guest's 0 and SIGN IN, which opens PERFIL as a detour, Menu.open: Back
- * or a sign-in comes back here; a paused account's --warn line) and GANA PUNTOS, the card that says
- * how points are earned ("ALOJAR UN SERVIDOR DA PUNTOS: AÚN NO ABIERTO": today only the project
+ * or a sign-in comes back here; a paused account's --warn line) and the earn card, ALOJAR UN
+ * SERVIDOR DA PUNTOS: AÚN NO ABIERTO, which says how points are earned (today only the project
  * registers a server, Terms 11.1 and 12.1.2; the hosting guide: a new tab with a mouse, a keyboard
- * or a finger; with a controller, a remote or on a TV a sheet with its QR). Right: the tabs AUTOS │ ESTADIOS (`.mn-tabs`: Q / E, LT / RT, CH± /
- * PgUp / PgDn step them, Menu.stepTabs; focus = selection), the list (a row per car with its
- * outline, components/carRow.ts; or the three stadiums) and the detail card: the car's name and
- * price, its action and why it cannot be had.
+ * or a finger; with a controller, a remote or on a TV a sheet with its QR). Right: the tabs
+ * AUTOS │ ESTADIOS (`.mn-tabs`: Q / E, LT / RT, CH± / PgUp / PgDn step them, Menu.stepTabs;
+ * focus = selection), the list (a row per car with its outline, components/carRow.ts; or the
+ * three stadiums) and the detail card: the car's name and price, its action and why it cannot be
+ * had.
  *
  * A row: the focus picks it (its car in the showroom once the focus rested PREVIEW_MS, a look
  * only, never the car driven: Game.previewCar); a click or a tap picks it at once; A / Enter / OK
@@ -64,7 +65,7 @@ function guideUrl(): string {
 /** The whole screen: where the showroom fits the car when the stage has no room of its own. */
 const FULL_FRAME: ShowroomFrame = { x0: 0, y0: 0, x1: 1, y1: 1 };
 
-/** What a car costs at most (the catalog's): GANA PUNTOS' "CADA AUTO · 1.500 PTS". */
+/** What a car costs at most (the catalog's): the earn card's "CADA AUTO · 1.500 PTS". */
 const EACH_CAR = Math.max(...CARS.map((c) => c.price));
 
 type Tab = 'cars' | 'stadiums';
@@ -119,7 +120,7 @@ export function garageScreen(menu: Menu): Screen {
   const signedIn = (): boolean => sample !== null || store().signedIn;
   const view = (): GarageView => (sample !== null ? garageView({ signedIn: true, equipped: 'dune', owned: sample.owned, shop: sample.shop, selected }) : store().view(selected));
 
-  // ---- left: TU AUTO, PUNTOS DE SERVIDOR, GANA PUNTOS ----
+  // ---- left: TU AUTO, PUNTOS DE SERVIDOR, the earn card (ALOJAR UN SERVIDOR DA PUNTOS) ----
   const yourName = h('h2.mn-gar-your-name');
   const yourFree = h('span.mn-gar-free', null, t('garage.free'));
   const yourDesc = h('p.mn-gar-desc');
@@ -547,7 +548,7 @@ export function garageScreen(menu: Menu): Screen {
     });
   };
 
-  /** GANA PUNTOS: the guide in a new tab, or (a TV, a remote, a controller: no pop-up from a pad press) its sheet. */
+  /** The earn card (ALOJAR UN SERVIDOR DA PUNTOS): the guide in a new tab, or (a TV, a remote, a controller: no pop-up from a pad press) its sheet. */
   const earnClick = (e: MouseEvent): void => {
     if (!noPopup()) return;
     e.preventDefault();

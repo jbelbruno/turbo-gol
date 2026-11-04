@@ -73,7 +73,7 @@ test('a phone held sideways: the row picked stays in view, the action names its 
   assert.match(CSS, /html\[data-shell='rail'\] \.mn-gar-det-head,\s*html\[data-layout='portrait'\] \.mn-gar-det-head \{\s*display: none;/, 'the head the name stands in for');
 });
 
-test('GANA PUNTOS with a controller: the sheet offers no button that cannot open (QR and CERRAR, as on a TV)', () => {
+test('the earn card (ALOJAR UN SERVIDOR DA PUNTOS) with a controller: the sheet offers no button that cannot open (QR and CERRAR, as on a TV)', () => {
   // Menu knows the click running is a controller's A (data-input says so only after this frame).
   assert.match(body(MENU, '  get padPress(): boolean {'), /return this\.padAccept;/);
   assert.match(MENU, /this\.padAccept = true;\s*try \{\s*this\.nav\.accept\(\);\s*\} finally \{\s*this\.padAccept = false;\s*\}/);

@@ -71,7 +71,7 @@ test('0 points: CANJEAR says how many are missing, is never lime, and explains h
   }
 });
 
-test('enough points: CANJEAR is the lime action and opens the redeem sheet; GANA PUNTOS steps back from lime', () => {
+test('enough points: CANJEAR is the lime action and opens the redeem sheet; the earn card steps back from lime', () => {
   const v = account(shop(2100), 'condor');
   const d = M.detailView(v.selected, v);
   assert.deepEqual([d.button, d.lime, d.press, d.reason], ['redeem', true, 'redeem', null]);

@@ -1,7 +1,7 @@
 /**
  * GARAJE's decisions (src/ui/screens/garage.ts, plan §1.4.2 and PR 8), pure: what a car's row says,
- * what the detail card's button is and what pressing it does, the points card, whether GANA PUNTOS
- * is the lime card and the redeem sheet's balance line. Everything reads src/game/garage.ts's view
+ * what the detail card's button is and what pressing it does, the points card, whether the earn
+ * card (ALOJAR UN SERVIDOR DA PUNTOS) is the lime one and the redeem sheet's balance line. Everything reads src/game/garage.ts's view
  * model (garageView) and hands back locale keys with their params; the screen writes them
  * (tests/garage-screen.test.mjs).
  *
@@ -105,7 +105,7 @@ export function pointsCard(v: GarageView, s: { readonly signedIn: boolean; reado
   return { kind: s.error !== null && !s.loading ? 'error' : 'loading', points: 0, paused: false };
 }
 
-/** GANA PUNTOS… is the lime card unless a car can be redeemed now (then CANJEAR is the one lime action). */
+/** The earn card (ALOJAR UN SERVIDOR DA PUNTOS) is the lime card unless a car can be redeemed now (then CANJEAR is the one lime action). */
 export function earnIsLime(v: GarageView): boolean {
   return !v.cars.some((c) => c.state === 'claimable');
 }
