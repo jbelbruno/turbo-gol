@@ -262,6 +262,12 @@ const RECENT_MAX = 5_000;
  * the alarm writes them once the 60 s are up (armIdle), and it also wakes the hub to forget a
  * dropped search at its RECENT_MS (counted as dropped then) and a solo row at its
  * SOLO_UNPLAYED_MS, so nothing stays in storage longer than said.
+ * The counts (and new arrivals) of that minute live in memory only (§2.6: at most one write a minute). An
+ * idle hub's eviction comes after the alarm that writes them (production evicts after about
+ * 70-140 s with no request; the alarm is at most 60 s after the last write, which is at most the
+ * last request), so what can lose them is a restart (a deploy, the platform moving the object) or
+ * an eviction sooner than that (local workerd evicts after about 10 s): at most one minute of
+ * counts, never a stored day.
  */
 const RECENT_PREFIX = 'recent:';
 const SOLO_PREFIX = 'solo:';
