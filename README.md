@@ -73,7 +73,7 @@ npm run dev                      # wrangler dev on http://127.0.0.1:8787 (Vite p
 | `npm run smoke:match` | Headless bots-vs-bots match, prints touches / goals / speed |
 | `npm run build:wasm` | Rebuild the physics WebAssembly (needs the Emscripten SDK, see `native/README.md`) |
 | `cd server && npm test` | Backend unit tests |
-| `node server/test/smoke-accounts.mjs` | End-to-end test of accounts, ranked and lobbies against `wrangler dev` |
+| `node server/test/smoke-accounts.mjs --api=http://127.0.0.1:8787` | End-to-end test of accounts, ranked and lobbies against your `wrangler dev` (the target is required: see CONTRIBUTING.md) |
 
 ## Controls (defaults, all rebindable)
 
