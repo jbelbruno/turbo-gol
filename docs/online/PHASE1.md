@@ -1,5 +1,11 @@
 # Fase 1 online: autoridad en Durable Object + WebSocket
 
+> **Histórico.** Es el plan de la fase 1 tal como se escribió, y no se actualiza. El juego de hoy
+> es otro: desde el 2026-11-04, Casual y Competitivo necesitan una cuenta y se juegan siempre en
+> servidor (un nodo de la comunidad o un Durable Object), con una cola única para todas las
+> regiones (`mm:SA`), y las salas se juegan siempre P2P. Lo vigente está en
+> [`server/README.md`](../../server/README.md) y en [`DECISIONS.md`](DECISIONS.md).
+
 Objetivo: jugar partidos reales entre navegadores contra un host autoritativo que corre en un
 Durable Object de Cloudflare, con predicción y rollback en el cliente, cuentas invitado, tickets
 firmados, y un panel de métricas de red. Todo corre localmente con `wrangler dev` (workerd) + `vite`;

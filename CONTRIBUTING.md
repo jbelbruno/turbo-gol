@@ -84,7 +84,8 @@ Origin, or one that forges a loopback Origin) can `POST /api/dev/signin` with an
 A deployed fork therefore has no way to create accounts until it brings one of its own: Cloudflare
 Email Service on its own domain (`MAIL_LIVE`, `MAIL_FROM` and `MAIL_LINK_ORIGIN`, once the email
 accounts ship), or a Discord or Google OAuth application of its own ([docs/online/ACCOUNTS.md](docs/online/ACCOUNTS.md)).
-Guests, Casual, lobbies and training work without either.
+Guests, lobbies and training work without either; Casual and ranked need an account (`DEV_AUTH=1`
+locally).
 
 The physics engine is prebuilt (`src/sim/wasm/rocketsim.wasm` is committed). You only need the
 Emscripten SDK if you change the C++ wrapper or the physics library: see `native/README.md`.
@@ -142,9 +143,15 @@ cd server && npm run typecheck && npm test     # backend: types + unit tests
 (cd nodes && npm ci && npm run typecheck && npm test)   # community nodes (about 95 s)
 ```
 
-Online changes should also pass the end-to-end smokes against `wrangler dev`
-(`node server/test/smoke.mjs`, `smoke-p2p.mjs`, `smoke-accounts.mjs`; the accounts smoke signs in
-through the dev sign-in, so it needs `DEV_AUTH=1` in your `server/.dev.vars`).
+Online changes should also pass the end-to-end smokes against your `wrangler dev`:
+`node server/test/smoke.mjs --api=http://127.0.0.1:8787`, then `smoke-p2p.mjs` and
+`smoke-accounts.mjs` the same way. Each needs its target, `--api=<base url>` or `API`: there is no
+default, so a script never reaches somebody else's Worker. `smoke.mjs` and `smoke-accounts.mjs`
+sign in through the dev sign-in (Casual is for accounts), so they need `DEV_AUTH=1` in your
+`server/.dev.vars`. On another port, start the Worker with
+`npx wrangler dev --port <P> --ip 127.0.0.1 --local-upstream 127.0.0.1:<P>` (without
+`--local-upstream` it hands out its socket URLs on 8787) and give the smokes
+`--api=http://127.0.0.1:<P>` ([server/README.md](server/README.md), "Run locally").
 
 Pull request checklist:
 

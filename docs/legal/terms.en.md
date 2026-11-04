@@ -1,6 +1,6 @@
 # Turbogol Terms of Use
 
-Version 2026-11-04. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
+Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the official one; this English translation is informative.
 
 ---
 
@@ -14,10 +14,12 @@ Version 2026-11-04. In force from November 4, 2026. The Spanish text is the offi
 - For an account you need to be 13 or older. If you are under 18, ask your mother, father or
   guardian for permission.
 - Play fair: no cheats, no bots, no attacks on the service, no harassing anyone.
-- In P2P matches the other players receive your IP address. If you do not want that, choose
-  "Server".
+- Without an account you can play against the AI, train and play in lobbies; CASUAL and
+  COMPETITIVE need an account and are always played on a server. Lobbies are played P2P: the other
+  players in the lobby receive your IP address.
 - Your username is shown on the leaderboard (today you cannot hide it there) and, for 30 days, in
-  the public replays of matches on community servers (there you can hide it).
+  the public replays of COMPETITIVE and CASUAL matches on community servers (there you can hide
+  it).
 - Host points are earned only by hosting a community server. Today there are only project servers,
   and those earn no points: even if the game talks about hosting servers, today you cannot register
   one. Points are worth no money.
@@ -95,11 +97,10 @@ Version 2026-11-04. In force from November 4, 2026. The Spanish text is the offi
 1. The server gives you a name: "Guest" and a four-digit number ("Invitado" in Spanish). You cannot
    choose it or change it.
 2. Your guest session is valid for 24 hours. After that you start another one.
-3. **What a guest cannot do:** play COMPETITIVE, use experimental features or rules, give their
-   lobby a name or choose another car.
-4. **A guest's limits:** a guest can only be in one match at a time on a Cloudflare server. And in a
-   lobby that plays on a server, if there are guests, the match lasts 5 minutes at most. Also, there
-   is a cap on guest matches per network and per region.
+3. **What a guest cannot do:** play CASUAL or COMPETITIVE, use experimental features or rules,
+   give their lobby a name or choose another car.
+4. **A guest's limits:** a guest can create lobbies and play in them, with a cap on open lobbies per
+   session and per network.
 5. If you clear your browser's data, you lose your guest session and your training records.
 
 ## 5. Your account
@@ -178,35 +179,48 @@ cannot:**
 
 ## 7. Modes and connections
 
-1. **CASUAL.** The connection can be:
-   - **Auto** (the one selected by default): P2P with other players, or a server with bots if you
-     play alone;
-   - **P2P**: the same as Auto;
-   - **Server**: a server in your region.
-2. **P2P means that your device connects directly to the other players' devices,** including
-   people you do not know. To set up that connection, each device receives the public IP address of
-   the others. From an IP it is possible to tell, roughly, which city you are in and who your
-   internet provider is. **If you do not want other players to see your IP, choose "Server"** as
-   the CASUAL connection (MODES > Advanced > Connection). If you are the host of a lobby, change its
-   connection to "Server"; if you join someone else's lobby, its host decides the connection, and
-   the lobby list says whether it is P2P or server. COMPETITIVE always uses a server.
-3. **COMPETITIVE** is always played on a server, with the game's official physics. The result
-   changes your rating. The top 100 of each mode, with at least 5 matches in the season, are shown
-   with their username on a public leaderboard. Today there is no option to hide your name on it.
-   If you ask for your account to be deleted, you stop appearing on it right away.
+1. **CASUAL** needs an account and is always played on a server, with the game's official
+   physics. We look for players in your region first and, if nobody shows up within 1 minute, in
+   every region. Someone who has already searched for 1 minute in another region also finds you as
+   soon as you start, and the match may then be played in their region (section 7.6). As soon as 2
+   or more people find each other, the match starts and bots fill the free seats; the format
+   depends on how many they are. If nobody comes within 5 minutes, you play bots on a server, in
+   the format you picked, once the game is in view (otherwise, as soon as you are back in the
+   game). If the servers are full, the match, with people or with bots, waits until there is room.
+   While you wait you can play bots or train in your browser: when your match is found you join it
+   at once and that local match is lost. CASUAL never counts for the rating.
+2. **Lobbies are played P2P:** your device connects directly to the devices of the other players
+   in the lobby, including people you do not know. To set up that connection, each device receives
+   the public IP address of the others. From an IP it is possible to tell, roughly, which city you
+   are in and who your internet provider is. It is the same whether you create the lobby or join
+   someone else's. **If you do not want other players to see your IP, do not play in lobbies, or
+   play only with people you know.** CASUAL and COMPETITIVE are never P2P.
+3. **COMPETITIVE** is always played on a server, with the game's official physics. It needs an
+   account. We search your region first and, after 2 minutes, every region. The result changes
+   your rating. The top 100 of each mode, with at least 5 matches in the season, are shown with
+   their username on a public leaderboard. Today there is no option to hide your name on it. If you
+   ask for your account to be deleted, you stop appearing on it right away.
 4. **Custom lobbies.** Whoever creates a lobby is the lobby host (they can hand the role to another
    member): they choose the mode and the rules, and the title if they have an account; they can set
-   a password and they can remove a player. New lobbies are private and P2P: the lobby host can
-   change both. A public lobby appears in a list that anyone can see, with its title, the name of
-   its current host, its code, the mode, the region, how many players it has, whether it has a
-   password, whether it is P2P or server and, if it has any, its experimental rules. Lobby matches
-   never count for the rating, are not played on community servers and are not published as
-   replays.
+   a password and they can remove a player. When you create a lobby you choose whether it is
+   public (CREATE PUBLIC LOBBY) or private (CREATE PRIVATE LOBBY), and the lobby host can change
+   it. Lobbies are always played P2P (section 7.2) and a match needs at least 2 players. A public
+   lobby appears in a list that anyone can see, with its title, the name of its current host, its
+   code, the mode, the region, how many players it has, whether it has a password and, if it has
+   any, its experimental rules. Lobby matches never count for the rating, are not played on
+   community servers and are not published as replays.
 5. **Experimental features and rules.** They are for accounts, they may change or disappear and
    **they count for nothing**: no rating, no stats, no records.
 6. **Servers.** Server matches are played on Cloudflare servers or on community servers (section
    12). Today the only community server is the project's, in São Paulo, and only the project can
-   register servers.
+   register servers. A CASUAL or COMPETITIVE match is played in the region of most of its players
+   (on a tie, the region of whoever waited longest): with a South American majority it goes to the
+   project's server in São Paulo when it has room; otherwise, and for the other regions, to a
+   Cloudflare server: we ask Cloudflare to place it near that region, but Cloudflare decides
+   where. If in an emergency we turn off matches on Cloudflare servers, every CASUAL or
+   COMPETITIVE match is played on the project's server in São Paulo, whatever its region, and
+   waits until it has room (or, if that server is not available either, you cannot search for a
+   match).
 
 ## 8. COMPETITIVE: abandons and verification
 
@@ -219,8 +233,10 @@ cannot:**
    - 24 hours, from the fourth on.
 
    Also, an abandon counts as a loss in your rating, even if your team wins.
-2. **If, within 10 minutes, you take 3 seats in P2P matches and never connect to them,** you cannot
-   search for P2P matches for 5 minutes. Server matches stay open.
+2. **While you wait for COMPETITIVE playing bots or training,** the game takes you into your match
+   as soon as it is found. With the tab in the background you join all the same and the match is
+   played even if you are not watching: the result counts. If the tab is closed or the device asleep
+   and you never connect, it counts as not showing up (section 8.1).
 3. The game decides these blocks on its own. You can ask for a person to review them (section 9).
 4. **COMPETITIVE matches on community servers are verified** by simulating the match again. If one
    fails verification, or cannot be verified in time, its result does not count.
@@ -255,8 +271,10 @@ cannot:**
 ## 10. Public replays
 
 1. Matches played on community servers are recorded in full, with each player's controls, so that
-   they can be watched again. P2P matches, custom lobby matches and matches on Cloudflare servers
-   are not recorded.
+   they can be watched again: COMPETITIVE ones and CASUAL ones. Since this version, every CASUAL
+   match with a South American majority is played there when there is room (section 7.6), so it is
+   recorded too. Lobby matches (which are P2P) and matches on Cloudflare servers are not
+   recorded.
 2. Anyone, without an account, can watch them at turbo-gol.com, from 1 to 2 hours after the match
    and **for 30 days**. A voided match is not published. We ask search engines not to index
    them, but whoever watches a replay can copy it, and we cannot undo that.
@@ -469,7 +487,7 @@ people, to be a host you need to:
      failures of the services we use (for example, Cloudflare, Hostinger, Discord or Google), if we
      did what was reasonable to avoid them (section 15.1);
    - what other players or third parties do: what they write or post, what they do with your IP
-     address in a P2P match (section 7.2) and the copies they make of what is public, such as
+     address in a lobby match (section 7.2) and the copies they make of what is public, such as
      replays (section 10.2);
    - damage that comes from your breaking these terms or the law, from your sharing your account or
      your password, or from your losing access to your email;

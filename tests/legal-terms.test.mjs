@@ -292,7 +292,7 @@ test('the guest sheet: nothing while unpublished; else "Before you play", the no
     assert.equal(menu.spec.title, 'Before you play');
     const notice = menu.sheet.all().find((e) => e.className.includes('mn-legal-notice'));
     assert.equal(notice.getAttribute('data-terms'), 'v2');
-    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the Privacy policy.');
+    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the Privacy policy.');
     assert.deepEqual(links(notice), [['/terms', 'Terms'], ['/privacy', 'Privacy policy']]);
     assert.ok(notice.all().filter((e) => e.tagName === 'A').every((a) => a.target === '_blank' && a.rel === 'noopener' && a.getAttribute('data-nav') === ''), 'a new tab, reachable with the arrows');
     const play = button(menu, 'PLAY AS GUEST');
@@ -493,8 +493,8 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
   // The notice is also the express consent to the transfers the privacy policy's section 5 relies on
   // (Argentina: Decreto 1558/2001, art. 12): the press accepts that the data is kept in the United
   // States and Brazil, so both countries are named in the sentence the button's label is in.
-  assert.equal(es['legal.notice'], 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos y Brasil. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en partidas P2P los demás jugadores pueden ver tu IP. Lee la {privacy}.');
-  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.');
+  assert.equal(es['legal.notice'], 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos y Brasil. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en las salas, que se juegan P2P, los demás jugadores pueden ver tu IP. Lee la {privacy}.');
+  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.');
   // After a change, the account accepts the Terms of use (the privacy policy is informed, not accepted).
   assert.equal(es['legal.changedNote'], 'Hay una versión nueva de los Términos de uso y de la Política de privacidad. Para seguir jugando online con tu cuenta, acepta los Términos de uso.');
   assert.equal(en['legal.changedNote'], 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept the Terms of use.');
@@ -506,4 +506,29 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
     assert.doesNotMatch(es[k], voseo, k);
     for (const text of [es[k], en[k]]) assert.doesNotMatch(text, /rocket\s*league/i, k);
   }
+});
+
+test("the deploy day's notice for Discord (docs/legal/avisos/2026-11-04-2.md): two messages that paste as they are, each under Discord's 2,000 characters", () => {
+  const text = readFileSync(new URL('../docs/legal/avisos/2026-11-04-2.md', import.meta.url), 'utf8');
+  const parts = text.split(/^## Mensaje \d\n/m);
+  assert.equal(parts.length, 3, 'a preface, then Mensaje 1 and Mensaje 2');
+  const msgs = parts.slice(1).map((m) => m.trim());
+  for (const [i, m] of msgs.entries()) {
+    // Discord counts every character and shows every newline: no hard wraps (a line that goes on
+    // indented), no headings, and less than a plain message's 2,000 (4,000 is Nitro's).
+    assert.ok(m.length < 2000, `message ${i + 1}: ${m.length} characters`);
+    assert.doesNotMatch(m, /\n {2,}\S/, `message ${i + 1}: a bullet or paragraph broken over two lines`);
+    assert.doesNotMatch(m, /^#/m, `message ${i + 1}: Discord's own headings are not ours`);
+    assert.doesNotMatch(m, /\b(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)\b/i);
+    assert.doesNotMatch(m, /rocket\s*league/i);
+  }
+  assert.ok(msgs[0].startsWith('**Cambian los modos de juego y los Términos (versión 2026-11-04-2)**\n'), 'the title is its first line, in bold');
+  // What the code does: São Paulo takes the match when it has room (MatchmakerDO formMatch).
+  assert.match(msgs[0], /todas las que tienen mayoría de jugadores de Sudamérica, cuando hay lugar,/);
+  // A lobby open at the deploy closes (its old page's rejoin gets 426 reload_required): say so.
+  assert.match(msgs[0], /Las salas que estaban abiertas en el momento de la actualización se cierran: después de recargar, crea la sala de nuevo\./);
+  // The link in < > (no embed), the only contact the public one.
+  assert.match(msgs[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  assert.doesNotMatch(msgs.join('\n'), /(?<!<)https?:\/\//, 'every link between < and >');
+  for (const m of msgs.join('\n').matchAll(/[\w.+-]+@[\w.-]+/g)) assert.equal(m[0], 'privacy@turbo-gol.com');
 });

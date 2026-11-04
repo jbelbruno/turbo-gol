@@ -8,10 +8,10 @@ prueba en `tests/rating.test.mjs`.
 Estructura:
 
 ```
-Inicio ── JUGAR ── Casual            (playlists Mano a mano / Parejas / Tríos, varias a la vez,
-      │        │                       región, conexión P2P o servidor)
+Inicio ── JUGAR ── Casual            (cuenta; todos los formatos juntos, región; siempre en
+      │        │                       servidor)
       │        ├─ Competitivo         (solo cuentas: rango por playlist, clasificación, bloqueo)
-      │        ├─ Partidas personalizadas ── lista pública por región, unirse por código,
+      │        ├─ Partidas personalizadas ── lista pública (tu región primero), unirse por código,
       │        │                             crear sala ── Sala (equipos, anfitrión, iniciar)
       │        └─ Amistoso            (offline contra la IA)
       ├─ ENTRENAMIENTO  (Práctica libre + 9 packs: Definición / Atajadas / Aéreos × Principiante / Intermedio / Experto)
@@ -43,7 +43,7 @@ Inicio ── JUGAR ── Casual            (playlists Mano a mano / Parejas / 
 | Recuperación | «¿Olvidaste tu contraseña?» manda un enlace a tu correo (30 minutos, un uso). Los códigos de recuperación viejos sirven hasta la fecha de corte |
 | Fuerza bruta | Turnstile en cada entrada y registro; límites durables en `AccountsDO` por correo y red, por correo y por red, más altos para una dirección IPv4 (escuelas, redes móviles) |
 | Almacenamiento | Un Durable Object con SQLite (`AccountsDO`): 25.000 cuentas ocupan pocos MB |
-| Invitados | Siguen igual: Casual, salas y entrenamiento. No tienen rango ni aparecen en la clasificación |
+| Invitados | Salas, contra la IA y entrenamiento (desde 2026-11-04, Casual necesita una cuenta). No tienen rango ni aparecen en la clasificación |
 
 ### Agregar o cambiar el correo
 
@@ -254,14 +254,14 @@ falsifica un Origin local) puede usar `POST /api/dev/signin` con cualquier nombr
 ## Salas personalizadas
 
 - Cada sala es un `LobbyDO` con hibernación. El código es de 6 caracteres, sin I/O/0/1.
-  - Opciones: contraseña opcional, pública (en la lista) o privada (solo por código), modo,
-    conexión P2P o servidor, y duración de 3, 5 o 10 min o sin límite.
+  - Opciones: contraseña opcional, pública (en la lista) o privada (solo por código), modo y
+    duración de 3, 5 o 10 min o sin límite (las salas siempre se juegan P2P).
 - **Lista pública:** se ordena con tu región primero, después las abiertas, y por cantidad de
   jugadores.
 - **Equipos:** cada jugador entra al equipo con menos gente y se cambia si hay lugar. El anfitrión
   configura, saca jugadores e inicia la partida, y si se va, pasa al que más tiempo lleva.
 - **Inicio:** el matchmaker de la región arma la partida con esos equipos exactos y completa con
-  bots. P2P necesita 2 humanos o más; uno solo juega en servidor. No suman ni restan rango.
+  bots. Hacen falta 2 humanos o más (P2P). No suman ni restan rango.
 - **Vuelta:** al terminar el partido vuelves a la sala. Se reabre cuando vuelven todos, o a los
   40 min.
 - **Reglas experimentales** (Ajustes > Experimental, solo cuentas con el interruptor activado):

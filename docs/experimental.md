@@ -25,8 +25,8 @@ because the game then restarts on Performance.
 - **Experimental free play** (Training): free play with the physics of a preset. Pick the preset on
   the training screen, or change it during play with **RULES** in the pause menu (the new rules
   apply when you go back to the pause menu). It saves no records.
-- **Experimental rules in custom lobbies**: the host of a P2P lobby picks the lobby's rules in
-  **Rules (experimental)**. Details below.
+- **Experimental rules in custom lobbies**: the host of a lobby (lobbies are always P2P) picks the
+  lobby's rules in **Rules (experimental)**. Details below.
 
 ## Presets
 
@@ -86,9 +86,9 @@ any value outside its own limits. The game cannot crash, even when a modified pa
 - **Who can play.** Only signed-in players can play in a lobby with experimental rules. Guests see
   the lobby in the list as "🔒 EXP" but cannot join it. A host can only pick rules while every
   member of the lobby is signed in. Other members do not need the switch on.
-- **Where.** Experimental rules work only with the **P2P** connection. If the host switches the
-  lobby to Server, the rules are cleared. A match needs at least two players. If the players cannot
-  connect, everyone goes back to the lobby: an experimental match never moves to a game server.
+- **Where.** Lobbies are always P2P, so experimental matches are too. A match needs at least two
+  players. If the players cannot connect, everyone goes back to the lobby: an experimental match
+  never moves to a game server.
 - **What everyone sees.** The lobby list tags the lobby **EXP**. Before the match, every member sees
   the line "Experimental rules: Moon ball · Gravity 40% · …". During the match, Settings >
   Experimental shows the same line instead of the editor.
@@ -98,7 +98,7 @@ any value outside its own limits. The game cannot crash, even when a modified pa
 
 ## Experimental matches count for nothing
 
-Every ranked or counted match uses the **standard physics**. This includes Casual (P2P and
+Every ranked or counted match uses the **standard physics**. This includes Casual (always on a
 server), Competitive, server matches, matches on community servers, training packs and offline
 matches against the bots. A match or free play with experimental rules gives:
 
@@ -186,10 +186,12 @@ The branch changes code that community servers run, so a deploy needs these step
    - The P2P protocol goes from 4 to 5 (`P2P_PROTOCOL_VERSION`, `ROOM_PROTOCOL`).
    - The server-match protocol stays at 3, because a recorded trace shows the standard physics did
      not change by one bit (`tests/stock-trace.test.mjs`).
-5. **Stale pages.** A page loaded before the deploy is told to reload when it joins the P2P queue
-   (426 `reload_required`) or a P2P room. If an old page joins an experimental lobby, it fails at
+5. **Stale pages.** A page loaded before the deploy is told to reload when it joins a P2P room
+   (there is no P2P queue any more). If an old page joins an experimental lobby, it fails at
    the room's welcome and the others start with a bot in its slot. Server matches, ranked and
-   community servers keep working for old pages until they reload.
+   community servers kept working for old pages until they reloaded; since the modes redesign
+   (2026-11-04) a page from before it gets 426 `reload_required` on its search (an account) and
+   on its lobby create or join, and 403 `account_required` on a guest's search.
 
 What only a person can check: a real gamepad and TV keyboard in the editor, a real touch screen, and
 `bot-bench --preset` plus `#diag` on the Mali-G31 TV box with the extreme presets.
