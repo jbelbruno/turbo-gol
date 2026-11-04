@@ -89,7 +89,8 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  padding-block: 0.5rem;
+  padding: 0.5rem;
+  margin-inline: -0.5rem;
   border-top: 1px solid var(--edge);
 }
 
@@ -122,6 +123,22 @@ dd > .mn-na-raw {
   background: var(--surface-0);
   border: 1px solid var(--edge);
   border-radius: var(--r-key);
+}
+
+/* A read-only block the arrows stop on (nodesAdmin.ts readOnly: the flags, the cards, the lines, the
+   install line): the ring inside it and no heel, as the board's rows (leaderboard.css), since they
+   stack closer than the heel's 15 px. A line without a padding of its own gets one for the ring,
+   its text kept in line with the rest by as much margin out. */
+.mn-na-read {
+  --ring-offset: calc(-1 * var(--focus-w));
+  --ring-shadow: inset 0 0 0 calc(var(--focus-w) + var(--focus-gap)) var(--ink);
+  --ring-heel: none;
+}
+
+p.mn-na-read,
+dl.mn-na-read {
+  padding: 0.25rem 0.5rem;
+  margin-inline: -0.5rem;
 }
 
 .mn-tag-warn {
@@ -223,6 +240,8 @@ html[data-layout='portrait'] .mn-na-x {
   display: grid;
   grid-template-columns: 1.4fr repeat(6, 1fr);
   gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-inline: -0.5rem;
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
 }

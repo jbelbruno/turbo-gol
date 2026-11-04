@@ -82,6 +82,7 @@ import type { AdminTab, ConfirmAction, WizardStep } from './nodesAdminModel';
 import type { Menu, Screen } from '../Menu';
 import { field, primary, screenHead, secondary, section } from './common';
 import type { Field } from './common';
+import { onNavTo } from '../nav';
 import { icon } from '../components/icons';
 import { picker } from '../components/picker';
 import { seg } from '../components/seg';
@@ -120,6 +121,15 @@ const ACT_KEY: Readonly<Record<NodeStatus, Key>> = {
 const TONE_TAG: Readonly<Record<Tone, string>> = { ok: 'mn-tag.mn-tag-live', warn: 'mn-tag.mn-tag-warn', muted: 'mn-tag', bad: 'mn-tag.mn-tag-bad' };
 
 const tag = (tone: Tone, text: string): HTMLElement => h(`span.${TONE_TAG[tone]}` as 'span', null, text);
+
+/**
+ * A read-only block the arrows (and Tab) stop on, as the install line's .mn-cmd: the Menu scrolls the
+ * focus into view, and a view with nothing to press below its last control (RESUMEN's flags, the
+ * region and release cards, a used token, the queue days) or above its first (a node's facts) would
+ * leave a pad or a keyboard short of it. With its own data-key, so a refresh keeps the focus on it;
+ * its ring inside it (nodes.css).
+ */
+const readOnly = (key: string): Record<string, unknown> => ({ class: 'mn-na-read', 'data-nav': true, tabindex: '0', 'data-key': key });
 
 /** A region by its name when it is one of the game's (a node's own label as it is otherwise). */
 const regionLabel = (id: string): string => (isRegion(id) ? regionName(id) : id);
@@ -322,12 +332,13 @@ export function nodesAdminScreen(menu: Menu): Screen {
             : w.kind === 'no_webhook'
               ? t('nodesAdmin.warn.noWebhook')
               : t('nodesAdmin.warn.trustRemoved', { name: w.name, date: when(w.at) });
-      return h('div.mn-na-alert', null, icon('warning'), h('p', null, text));
+      const of = w.kind === 'trusted_off_channel' || w.kind === 'trust_removed' ? '-' + w.nodeId : w.kind === 'verifier_node_versions' ? '-' + w.version : '';
+      return h('div.mn-na-alert', readOnly('na-warn-' + w.kind + of), icon('warning'), h('p', null, text));
     });
     const flags = o.flags.map((f) =>
       h(
         'div.mn-na-flag',
-        null,
+        readOnly('na-flag-' + f.name),
         h('code', null, f.name),
         tag(f.set ? 'warn' : 'muted', t(f.set ? 'nodesAdmin.flagOn' : 'nodesAdmin.flagOff')),
         f.raw !== null && f.raw !== '' ? h('code.mn-na-raw', null, f.raw.length > 40 ? f.raw.slice(0, 40) + '…' : f.raw) : null,
@@ -340,7 +351,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
       kpis,
       channel,
       section(t('nodesAdmin.warnTitle'), ...(warnings.length > 0 ? warnings : [h('p.mn-note', null, t('nodesAdmin.noWarnings'))])),
-      section(t('nodesAdmin.flagsTitle'), h('p.mn-note', null, t('nodesAdmin.flagsNote')), h('div.mn-cmd', null, cmds.set), h('div.mn-cmd', null, cmds.clear), ...flags),
+      section(t('nodesAdmin.flagsTitle'), h('p.mn-note', null, t('nodesAdmin.flagsNote')), h('div.mn-cmd', readOnly('na-flag-set'), cmds.set), h('div.mn-cmd', readOnly('na-flag-clear'), cmds.clear), ...flags),
     ];
   };
 
@@ -432,9 +443,14 @@ export function nodesAdminScreen(menu: Menu): Screen {
       a.retire ? secondary(t('nodesAdmin.act.retire'), () => confirmSheet('retire', n.name, t('nodesAdmin.act.retire'), (reason) => act(() => acc.nodesAction('retire', { nodeId: n.nodeId, reason }), () => menu.toast(t('nodesAdmin.done'), 'ok'))), { 'data-key': 'na-act-retire', class: 'mn-btn-cancel' }) : null,
     );
     const help = hint !== null ? h('p.mn-note', null, t(`nodesShared.hint.${hint}` as Key)) : null;
+    // Its facts are a stop of their own: on a phone held sideways they are taller than the stage.
+    const card = h('div.mn-prof-node', readOnly('na-detail-' + n.nodeId), h('div.mn-prof-node-head', null, icon('server', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, n.name), state), facts, help);
+    const revealButton = secondary(t(reveal ? 'nodesAdmin.hideAddresses' : 'nodesAdmin.showAddresses'), () => ((reveal = !reveal), keepFocus(paintBody)), { 'data-key': 'na-reveal', 'aria-pressed': String(reveal) });
+    // ▼ from the facts: MOSTRAR DIRECCIONES under them (the pick from a box that wide takes the action nearest its middle).
+    onNavTo(card, 'down', () => revealButton);
     return [
-      h('div.mn-prof-node', null, h('div.mn-prof-node-head', null, icon('server', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, n.name), state), facts, help),
-      h('div.mn-na-tools', null, secondary(t(reveal ? 'nodesAdmin.hideAddresses' : 'nodesAdmin.showAddresses'), () => ((reveal = !reveal), keepFocus(paintBody)), { 'data-key': 'na-reveal', 'aria-pressed': String(reveal) })),
+      card,
+      h('div.mn-na-tools', null, revealButton),
       retired ? h('p.mn-note', null, t('nodesAdmin.retiredNote')) : actions,
       n.status === 'suspended' && n.statusReason === 'verification_failed' ? reviewView(n) : null,
     ].filter((x): x is HTMLElement => x !== null);
@@ -497,10 +513,11 @@ export function nodesAdminScreen(menu: Menu): Screen {
   const tokensView = (o: Overview): HTMLElement[] => {
     const now = Date.now();
     const STATE_TONE: Record<string, Tone> = { unused: 'warn', used: 'ok', expired: 'muted', revoked: 'bad' };
+    // A row with REVOCAR is reached by its button; one without (used, expired, revoked) by itself.
     const rows = o.tokens.map((tk) =>
       h(
         'div.mn-na-token',
-        { 'data-key': 'na-token-' + tk.id },
+        revocable(tk, now) ? { 'data-key': 'na-token-' + tk.id } : readOnly('na-token-' + tk.id),
         h('code', null, tk.id),
         h('b', null, tk.name ?? '—'),
         h('span', null, regionLabel(tk.region)),
@@ -520,7 +537,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     const cards = regionRows(o).map((r) =>
       h(
         'div.mn-prof-node',
-        { 'data-key': 'na-region-' + r.region },
+        readOnly('na-region-' + r.region),
         h('div.mn-prof-node-head', null, icon('globe', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, regionLabel(r.region)), r.empty ? null : tag(r.rankedReady ? 'ok' : 'muted', t(r.rankedReady ? 'nodesAdmin.region.ranked' : 'nodesAdmin.region.noRanked'))),
         r.empty
           ? h('p.mn-note', null, t('nodesAdmin.region.empty'))
@@ -536,11 +553,11 @@ export function nodesAdminScreen(menu: Menu): Screen {
             ),
       ),
     );
-    const queue = o.verifyQueue.map((q) => h('p', null, h('code', null, `${q.version} · ${q.wasmSha256.slice(0, 8)}`), ' ', t('nodesAdmin.queueLine', { depth: q.depth, time: ago(q.oldestAt, now) })));
-    const verifiers = o.verifiers.map((v) => h('p', null, h('span.mn-dot', { class: v.online ? 'on' : '' }), ' ', h('b', null, v.name), ` · ${regionLabel(v.region)} · ${v.version}${v.node ? ` · Node.js ${v.node}` : ''}`, v.verifying > 0 ? ` · ${t('nodesAdmin.kpi.verifying', { count: v.verifying })}` : ''));
+    const queue = o.verifyQueue.map((q) => h('p', readOnly(`na-queue-${q.version}-${q.wasmSha256.slice(0, 8)}`), h('code', null, `${q.version} · ${q.wasmSha256.slice(0, 8)}`), ' ', t('nodesAdmin.queueLine', { depth: q.depth, time: ago(q.oldestAt, now) })));
+    const verifiers = o.verifiers.map((v) => h('p', readOnly('na-verifier-' + v.nodeId), h('span.mn-dot', { class: v.online ? 'on' : '' }), ' ', h('b', null, v.name), ` · ${regionLabel(v.region)} · ${v.version}${v.node ? ` · Node.js ${v.node}` : ''}`, v.verifying > 0 ? ` · ${t('nodesAdmin.kpi.verifying', { count: v.verifying })}` : ''));
     return [
       h('div.mn-na-grid', null, ...cards),
-      section(t('nodesAdmin.verifiersTitle'), ...(verifiers.length > 0 ? verifiers : [h('p.mn-note', null, t('nodesAdmin.noVerifiers'))]), ...(queue.length > 0 ? queue : [h('p.mn-note', null, t('nodesAdmin.queueEmpty'))])),
+      section(t('nodesAdmin.verifiersTitle'), ...(verifiers.length > 0 ? verifiers : [h('p.mn-note', readOnly('na-verifiers-none'), t('nodesAdmin.noVerifiers'))]), ...(queue.length > 0 ? queue : [h('p.mn-note', readOnly('na-queue-none'), t('nodesAdmin.queueEmpty'))])),
     ];
   };
 
@@ -548,13 +565,13 @@ export function nodesAdminScreen(menu: Menu): Screen {
 
   const releaseView = (o: Overview): HTMLElement[] => {
     const rows = releaseRows(o).map((r) =>
-      h('div.mn-prof-node', { 'data-key': 'na-release-' + r.version }, h('div.mn-prof-node-head', null, h('b.mn-prof-node-name', null, r.version), r.stable ? tag('ok', t('nodesAdmin.release.stable')) : null), h('p', null, r.nodes.map((n) => n.name).join(', '))),
+      h('div.mn-prof-node', readOnly('na-release-' + r.version), h('div.mn-prof-node-head', null, h('b.mn-prof-node-name', null, r.version), r.stable ? tag('ok', t('nodesAdmin.release.stable')) : null), h('p', null, r.nodes.map((n) => n.name).join(', '))),
     );
     return [
       h('p.mn-note', null, o.channel !== null ? t('nodesAdmin.channel', { stable: o.channel.stable, minimum: o.channel.minimum }) : t('nodesAdmin.noChannel'), ' · ', t('nodesAdmin.release.build', { version: o.build.version })),
       h('div.mn-na-grid', null, ...rows),
       h('div.mn-na-tools', null, secondary(t('nodesAdmin.act.update'), () => confirmSheet('update', '', t('nodesAdmin.act.update'), () => act(() => acc.nodesAction('update', {}), () => menu.toast(t('nodesAdmin.release.updated'), 'ok'))), { 'data-key': 'na-update' })),
-      section(t('nodesAdmin.release.cliTitle'), h('p.mn-note', null, t('nodesAdmin.release.cliNote')), h('div.mn-cmd', null, 'node nodes/scripts/channel.mjs --show'), h('div.mn-cmd', null, 'node nodes/scripts/channel.mjs --stable X.Y.Z'), h('div.mn-cmd', null, 'node nodes/scripts/channel.mjs --rollback')),
+      section(t('nodesAdmin.release.cliTitle'), h('p.mn-note', null, t('nodesAdmin.release.cliNote')), h('div.mn-cmd', readOnly('na-cli-show'), 'node nodes/scripts/channel.mjs --show'), h('div.mn-cmd', readOnly('na-cli-stable'), 'node nodes/scripts/channel.mjs --stable X.Y.Z'), h('div.mn-cmd', readOnly('na-cli-rollback'), 'node nodes/scripts/channel.mjs --rollback')),
     ];
   };
 
@@ -624,7 +641,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
                 ? h('p.mn-note', null, t('nodesAdmin.loading'))
                 : h(
                     'dl.mn-prof-node-facts',
-                    null,
+                    readOnly('na-wallet-facts'),
                     ...fact(t('nodesAdmin.points.balance'), w.wallet !== null ? formatPoints(w.wallet.balance) : '—'),
                     ...fact(t('nodesAdmin.points.earned'), w.wallet !== null ? formatPoints(w.wallet.earned) : '—'),
                     ...fact(t('nodesAdmin.points.spent'), w.wallet !== null ? formatPoints(w.wallet.spent) : '—'),
@@ -645,7 +662,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     return [
       h('form.mn-form.mn-na-lookup', { onsubmit: (e: Event) => e.preventDefault() }, idField.el, secondary(t('nodesAdmin.points.find'), goLookup, { 'data-key': 'na-find' })),
       ...(card !== null ? [card] : []),
-      section(t('nodesAdmin.points.frozenTitle'), h('div.mn-na-tools', null, secondary(t('nodesAdmin.refresh'), () => ((frozen = null), keepFocus(paintBody), void loadFrozen()), { 'data-key': 'na-frozen-refresh' })), ...list, frozen?.more ? h('p.mn-note', null, t('nodesAdmin.points.more')) : null),
+      section(t('nodesAdmin.points.frozenTitle'), h('div.mn-na-tools', null, secondary(t('nodesAdmin.refresh'), () => ((frozen = null), keepFocus(paintBody), void loadFrozen()), { 'data-key': 'na-frozen-refresh' })), ...list, frozen?.more ? h('p.mn-note', readOnly('na-frozen-more'), t('nodesAdmin.points.more')) : null),
     ];
   };
 
@@ -678,8 +695,8 @@ export function nodesAdminScreen(menu: Menu): Screen {
       h('p.mn-note', null, t('nodesAdmin.stats.note')),
       h('div.mn-na-tools', null, secondary(t('nodesAdmin.refresh'), () => void loadStats(), { 'data-key': 'na-stats-refresh', 'aria-busy': s?.loading ? 'true' : undefined })),
       s?.error ? h('p.mn-field-error', null, s.error) : null,
-      section(t('nodesAdmin.stats.accounts'), counts.length > 0 ? h('dl.mn-prof-node-facts', null, ...counts.flatMap(([k, v]) => fact(k, String(v)))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
-      section(t('nodesAdmin.stats.queues'), days.length > 0 ? h('div.mn-na-days', null, head, ...days.map((d) => h('div.mn-na-day', null, h('span', null, d.date), h('span', null, String(d.searches)), h('span', null, String(d.formed)), h('span', null, String(d.onNode)), h('span', null, String(d.onCloud)), h('span', null, String(d.cancelled)), h('span', null, String(d.dropped))))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
+      section(t('nodesAdmin.stats.accounts'), counts.length > 0 ? h('dl.mn-prof-node-facts', readOnly('na-stats-accounts'), ...counts.flatMap(([k, v]) => fact(k, String(v)))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
+      section(t('nodesAdmin.stats.queues'), days.length > 0 ? h('div.mn-na-days', null, head, ...days.map((d) => h('div.mn-na-day', readOnly('na-day-' + d.date), h('span', null, d.date), h('span', null, String(d.searches)), h('span', null, String(d.formed)), h('span', null, String(d.onNode)), h('span', null, String(d.onCloud)), h('span', null, String(d.cancelled)), h('span', null, String(d.dropped))))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
     ].filter((x): x is HTMLElement => x !== null);
   };
 
@@ -850,14 +867,11 @@ export function nodesAdminScreen(menu: Menu): Screen {
     if (tk === null) return [];
     followEl = h('div.mn-na-followbox', { 'aria-live': 'polite' });
     paintFollow();
-    const cmd = tk.lineOk
-      ? h(
-          'div.mn-na-cmdbox',
-          null,
-          h('div.mn-cmd', { 'data-key': 'na-wiz-cmd', tabindex: '0', 'data-nav': true }, tk.line),
-          secondary(t('nodesShared.copy'), () => void copyText(tk.line).then((ok) => menu.toast(t(ok ? 'nodesShared.copied' : 'nodesShared.copyFailed'), ok ? 'ok' : 'error')), { 'data-key': 'na-wiz-copy', 'data-autofocus': true }),
-        )
-      : h('p.mn-field-error', null, t('nodesAdmin.wiz.badLine'));
+    const line = h('div.mn-cmd', readOnly('na-wiz-cmd'), tk.line);
+    const copy = secondary(t('nodesShared.copy'), () => void copyText(tk.line).then((ok) => menu.toast(t(ok ? 'nodesShared.copied' : 'nodesShared.copyFailed'), ok ? 'ok' : 'error')), { 'data-key': 'na-wiz-copy', 'data-autofocus': true });
+    // ▼ from the line: COPIAR under it (the pick from a box that wide takes LISTO).
+    onNavTo(line, 'down', () => copy);
+    const cmd = tk.lineOk ? h('div.mn-na-cmdbox', null, line, copy) : h('p.mn-field-error', null, t('nodesAdmin.wiz.badLine'));
     return [
       h('p.mn-note', null, t('nodesAdmin.wiz.cmdTitle')),
       cmd,

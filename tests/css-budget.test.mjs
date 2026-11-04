@@ -272,7 +272,8 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // (styles/screens/nodes.css: the KPIs, the node rows and the columns a phone drops, the tags by
 // state, mn-cmd, the wizard's checklist and follow-up, the queue days, menu.css' shared controls at
 // the class's type roles as on PERFIL) and deletes menu.css' dead .mn-codes (233 B): 171,406 B
-// (main 168,525 B), the cap that plus about 0.6 KB.
+// (main 168,525 B), the cap that plus about 0.6 KB. Its review's fix, the read-only blocks as stops
+// of the arrows with their ring inside them, takes it to 171,678 B under the same cap.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
 const CSS_BUDGET = 172_006;
