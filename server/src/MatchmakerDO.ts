@@ -338,6 +338,8 @@ interface Waiter extends HumanEntry {
   busy: boolean;
   /** Its last formation found no node and no MatchDO, or failed: not tried again before this. */
   noRoomUntil?: number;
+  /** This search already had a solo match nobody played and got its clock back once (soloUnplayed): no second time. */
+  soloRetried?: true;
 }
 
 /** A dropped search the next join of the same player and kind continues (RECENT_MS). */
@@ -348,15 +350,19 @@ interface RecentSearch {
   until: number;
   /** A waiter that stopped polling (counted as dropped if it never comes back), not a solo match nobody played. */
   stale: boolean;
+  /** Waiter.soloRetried, kept across the drop. */
+  soloRetried?: true;
 }
 
-/** A solo match (RoomEntry.solo; node ones in memory only): its human's search, and when it formed. */
+/** A solo match (RoomEntry.solo; a node one in a 'solo:' row): its human's search, and when it formed. */
 export interface SoloInfo {
   playerId: string;
   joinedAt: number;
   home: RegionId;
   /** When the match formed (SOLO_UNPLAYED_MS counts from it). */
   at: number;
+  /** Its search had an unplayed solo match before (Waiter.soloRetried): unplayed again, the search ends. */
+  retried?: true;
 }
 
 /** What formMatch formed: the match id and whether a node took it. */
@@ -427,7 +433,7 @@ function soloOf(v: unknown): SoloInfo | null {
   if (typeof v !== 'object' || v === null) return null;
   const s = v as Partial<SoloInfo>;
   if (typeof s.playerId !== 'string' || typeof s.joinedAt !== 'number' || typeof s.at !== 'number') return null;
-  return { playerId: s.playerId, joinedAt: s.joinedAt, home: normalizeHome(s.home), at: s.at };
+  return { playerId: s.playerId, joinedAt: s.joinedAt, home: normalizeHome(s.home), at: s.at, ...(s.retried === true ? { retried: true as const } : {}) };
 }
 
 /** A stored 'recent:' row, or null for one of another shape. */
@@ -435,7 +441,7 @@ function recentOf(v: unknown): RecentSearch | null {
   if (typeof v !== 'object' || v === null) return null;
   const r = v as Partial<RecentSearch>;
   if (typeof r.joinedAt !== 'number' || typeof r.until !== 'number' || (r.kind !== 'server' && r.kind !== 'ranked')) return null;
-  return { joinedAt: r.joinedAt, kind: r.kind, home: normalizeHome(r.home), until: r.until, stale: r.stale === true };
+  return { joinedAt: r.joinedAt, kind: r.kind, home: normalizeHome(r.home), until: r.until, stale: r.stale === true, ...(r.soloRetried === true ? { soloRetried: true as const } : {}) };
 }
 
 function roomEntryOf(v: unknown): RoomEntry | null {
@@ -718,7 +724,7 @@ interface FormOptions {
   /** formMatch: the match's host region (hostRegion): a node only for SA, else a MatchDO with its location hint. Default: this matchmaker's region. */
   host?: RegionId;
   /** formMatch: a solo bots match (SOLO_ROOMS_MAX) of this search. */
-  solo?: { playerId: string; joinedAt: number; home: RegionId };
+  solo?: Omit<SoloInfo, 'at'>;
 }
 
 /**
@@ -1240,7 +1246,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       const restored = back !== undefined && back.kind === kind && back.until > now;
       if (back !== undefined && restored) this.forgetRecent(playerId);
       const joinedAt = restored ? back.joinedAt : now;
-      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}) };
+      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}), ...(restored && back.soloRetried ? { soloRetried: true as const } : {}) };
       if (!restored) {
         this.stat(now).searches[statsKindOf(kind)]++;
         this.arrive({ at: now, kind: statsKindOf(kind), home });
@@ -1309,13 +1315,16 @@ export class MatchmakerDO extends DurableObject<Env> {
    * SOLO_UNPLAYED_MS after it formed, nobody played it (a locked phone never connected), so its
    * human's search goes back to `recent` with its old clock: the next join gets a new solo match
    * at once instead of starting from 0:00 (§1.10). A human queued again meanwhile is left alone.
+   * Once per search: when that new solo match goes unplayed too (SoloInfo.retried), the search
+   * ends there and the next join starts from 0:00, so one 5:00 wait gives at most two solo matches
+   * nobody plays (§6: a ghost solo costs about a minute), never one after the other for good.
    */
   private soloUnplayed(matchId: string, now: number): void {
     const s = this.solos.get(matchId);
     if (s === undefined) return;
     this.forgetSolo(matchId);
-    if (now - s.at >= SOLO_UNPLAYED_MS || this.findWaiter(s.playerId) !== null || this.forming.has(s.playerId)) return;
-    this.remember(s.playerId, { joinedAt: s.joinedAt, kind: 'server', home: s.home, stale: false }, now);
+    if (s.retried || now - s.at >= SOLO_UNPLAYED_MS || this.findWaiter(s.playerId) !== null || this.forming.has(s.playerId)) return;
+    this.remember(s.playerId, { joinedAt: s.joinedAt, kind: 'server', home: s.home, stale: false, soloRetried: true }, now);
   }
 
   /**
@@ -2229,7 +2238,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       const w = list[i];
       if (now - w.lastSeen <= STALE_MS) continue;
       this.dropWaiter(w);
-      this.remember(w.playerId, { joinedAt: w.joinedAt, kind: w.kind, home: w.home, stale: true }, now);
+      this.remember(w.playerId, { joinedAt: w.joinedAt, kind: w.kind, home: w.home, stale: true, ...(w.soloRetried ? { soloRetried: true as const } : {}) }, now);
     }
   }
 
@@ -2284,7 +2293,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       // do_disabled (the nodes on for them, or the Worker would have refused them): node only, so hosted SA.
       const host = planHost !== QUEUE_HUB && this.nodesFor(humans.map((h) => h.playerId)) && (await flag(this.env, 'do_disabled')) ? QUEUE_HUB : planHost;
       const first = humans[0];
-      formed = await this.formMatch(g.mode, humans, now, { host, ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home } } : {}) });
+      formed = await this.formMatch(g.mode, humans, now, { host, ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home, ...(first.soloRetried ? { retried: true as const } : {}) } } : {}) });
       this.countFormed('casual', humans, formed, now);
     } catch (e) {
       this.formFailed(e, humans, now);

@@ -330,6 +330,42 @@ test('an unplayed solo match outlives the evictions (MatchDO and node): released
   }
 });
 
+test('an unplayed solo match gives its search its clock back once: a second one unplayed in a row ends the search (MatchDO and node, across evictions and a drop in between)', async () => {
+  for (const nodes of [false, true]) {
+    const label = nodes ? 'node' : 'MatchDO';
+    const w = await makeHubWorld(nodes ? { flags: { nodes_on: '1' }, nodes: true } : {});
+    const a = pid();
+    await w.join(a);
+    w.advance(Q.SOLO_AFTER_MS);
+    const first = await w.join(a);
+    assert.equal(first.json.humans, 1, label);
+    w.advance(45 * SEC);
+    await w.release(first.json.matchId, [a]); // unplayed: the search is back, once
+    await w.evict();
+    // Back with the tab hidden (no solo match yet), then dropped again: the retry is kept across the drop.
+    const hidden = await w.join(a, { visible: false });
+    assert.deepEqual([hidden.json.status, hidden.json.wait.waitedMs > Q.SOLO_AFTER_MS], ['waiting', true], label + ': the clock is back');
+    w.advance(41 * SEC);
+    noSweep(w);
+    await w.hub().sweep();
+    noSweep(w);
+    assert.equal(w.storage().map.get('recent:' + a)?.stale, true, label + ': dropped');
+    await w.evict();
+    const second = await w.join(a);
+    assert.deepEqual([second.json.status, second.json.humans], ['matched', 1], label + ': the second solo match at once');
+    await w.evict();
+    w.advance(45 * SEC);
+    await w.release(second.json.matchId, [a]); // unplayed again: the search ends
+    assert.equal(w.storage().map.has('recent:' + a), false, label + ': not back in `recent`');
+    await w.evict();
+    w.advance(30 * SEC);
+    const again = await w.join(a);
+    assert.deepEqual([again.json.status, again.json.wait.waitedMs], ['waiting', 0], label + ': a new search from 0:00, no third solo match');
+    noSweep(w);
+    assert.equal((await w.daily(1)).days[0].searches.casual, 2, label + ': counted as a new search');
+  }
+});
+
 test('a dropped search that expires while the hub is evicted: the alarm wakes it at its 10 min, forgets it and counts one drop (written: nothing stays past 10 min)', async () => {
   const w = await makeHubWorld();
   const a = pid();
