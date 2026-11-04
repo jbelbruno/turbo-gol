@@ -1641,11 +1641,11 @@ export class NodeRegistryDO extends DurableObject<Env> {
    */
   private adminEvents(url: URL, cp: ControlPlane, id: string, actor: string): Response {
     const store = this.store;
-    if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    if (!store) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
     const node = url.searchParams.get('node');
     const before = url.searchParams.get('before');
-    if (node !== null && !NODE_ID_RE.test(node)) return error(400, 'bad_node_id', 'node: the 16 hex characters of a node');
-    if (before !== null && !/^\d{1,15}$/.test(before)) return error(400, 'bad_cursor', "before: the `next` of the page before");
+    if (node !== null && !NODE_ID_RE.test(node)) return refuse(400, 'bad_node_id', 'node: the 16 hex characters of a node');
+    if (before !== null && !/^\d{1,15}$/.test(before)) return refuse(400, 'bad_cursor', "before: the `next` of the page before");
     const rows = store.eventList({ nodeId: node, before: before === null ? null : Number(before), limit: EVENTS_PAGE + 1 });
     const page = rows.slice(0, EVENTS_PAGE);
     this.readAudit(id, actor, node === null ? 'the node events' : `the events of node ${node}`);
@@ -1659,9 +1659,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
   /** GET /nodes/admin/alerts[?before=<id>]: the ALERT lines the object posted to the team's channel (node_alerts), newest first, ALERTS_PAGE a page. */
   private adminAlerts(url: URL, id: string, actor: string): Response {
     const store = this.store;
-    if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    if (!store) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
     const before = url.searchParams.get('before');
-    if (before !== null && !/^\d{1,15}$/.test(before)) return error(400, 'bad_cursor', "before: the `next` of the page before");
+    if (before !== null && !/^\d{1,15}$/.test(before)) return refuse(400, 'bad_cursor', "before: the `next` of the page before");
     const rows = store.alertList({ before: before === null ? null : Number(before), limit: ALERTS_PAGE + 1 });
     const page = rows.slice(0, ALERTS_PAGE);
     this.readAudit(id, actor, 'the alert lines');
@@ -1678,14 +1678,14 @@ export class NodeRegistryDO extends DurableObject<Env> {
    */
   private async adminHistory(url: URL, cp: ControlPlane, id: string, actor: string): Promise<Response> {
     const store = this.store;
-    if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    if (!store) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
     const node = url.searchParams.get('node');
     const match = url.searchParams.get('match');
     const before = url.searchParams.get('before');
-    if (node !== null && !NODE_ID_RE.test(node)) return error(400, 'bad_node_id', 'node: the 16 hex characters of a node');
-    if (match !== null && !MATCH_ID_RE.test(match)) return error(400, 'bad_match_id', 'match: the 64 hex characters of a match');
+    if (node !== null && !NODE_ID_RE.test(node)) return refuse(400, 'bad_node_id', 'node: the 16 hex characters of a node');
+    if (match !== null && !MATCH_ID_RE.test(match)) return refuse(400, 'bad_match_id', 'match: the 64 hex characters of a match');
     const c = before === null ? null : HISTORY_CURSOR.exec(before);
-    if (before !== null && !c) return error(400, 'bad_cursor', "before: the `next` of the page before");
+    if (before !== null && !c) return refuse(400, 'bad_cursor', "before: the `next` of the page before");
     const cursor: HistoryCursor | null = c ? { at: Number(c[1]), matchId: c[2] } : null;
     const rows = store.historyList({ nodeId: node, matchId: match, cursor, limit: HISTORY_PAGE + 1 });
     const page = rows.slice(0, HISTORY_PAGE);
@@ -1787,9 +1787,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
   private async adminReplay(url: URL, cp: ControlPlane, actor: string): Promise<Response> {
     const store = this.store;
     const env = this.cfg;
-    if (!store || !env) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    if (!store || !env) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
     const matchId = url.searchParams.get('matchId') ?? '';
-    if (!MATCH_ID_RE.test(matchId)) return error(400, 'bad_match_id', 'matchId: the 64 hex characters of a match');
+    if (!MATCH_ID_RE.test(matchId)) return refuse(400, 'bad_match_id', 'matchId: the 64 hex characters of a match');
     const open = cp.matches.get(matchId);
     const h = store.historyList({ nodeId: null, matchId, cursor: null, limit: 1 })[0] ?? null;
     const why =
@@ -1811,12 +1811,12 @@ export class NodeRegistryDO extends DurableObject<Env> {
         bytes = o ? new Uint8Array(await o.arrayBuffer()) : null;
       } catch (e) {
         this.audit(`ALERT admin ${actor}: the replay of match ${matchId} was asked for, R2 did not answer: ${clip(String(e), 120)}`);
-        return error(503, 'nodes_unavailable', UNAVAILABLE);
+        return refuse(503, 'nodes_unavailable', UNAVAILABLE);
       }
     }
     if (!bytes) {
       this.audit(`ALERT admin ${actor}: the replay of match ${matchId} was asked for, none served (${why ?? 'gone from R2'})`);
-      return error(404, 'no_replay', 'no replay of that match is kept');
+      return refuse(404, 'no_replay', 'no replay of that match is kept');
     }
     this.audit(`ALERT admin ${actor}: downloaded the replay of match ${matchId} (${bytes.byteLength} bytes)`);
     return new Response(bytes, {
@@ -1833,26 +1833,26 @@ export class NodeRegistryDO extends DurableObject<Env> {
    */
   private async adminMatch(request: Request, cp: ControlPlane, actor: string, what: 'match/void' | 'match/verify'): Promise<Response> {
     const b = await readJson<{ matchId?: unknown; reason?: unknown; strike?: unknown }>(request);
-    if (!b || !isHex(b.matchId, 64)) return error(400, 'bad_match_id', 'matchId: the 64 hex characters of a match');
+    if (!b || !isHex(b.matchId, 64)) return refuse(400, 'bad_match_id', 'matchId: the 64 hex characters of a match');
     const matchId = b.matchId;
     const n = cp.registry.node(cp.matches.get(matchId)?.nodeId ?? '');
     const on = n ? ` on ${label(n)}` : '';
     if (what === 'match/verify') {
       const r = this.as(actor, () => cp.verifyNow(matchId));
       this.audit(`ALERT admin ${actor}: match ${matchId}${on}: verification asked for now (${r === 'queued' ? 'queued' : r.replace('_', ' ')})`);
-      if (r === 'none') return error(404, 'no_match', 'the control plane holds no such match');
-      if (r === 'not_verifying') return error(409, 'not_verifying', 'the match is not waiting for its verification');
-      if (r === 'in_flight') return error(409, 'in_flight', 'a verifier has it now');
+      if (r === 'none') return refuse(404, 'no_match', 'the control plane holds no such match');
+      if (r === 'not_verifying') return refuse(409, 'not_verifying', 'the match is not waiting for its verification');
+      if (r === 'in_flight') return refuse(409, 'in_flight', 'a verifier has it now');
       if (this.busy()) await this.ensureAlarm();
       return json({ matchId, queued: true }, 200, { 'cache-control': 'no-store' });
     }
     const reason = reasonOf(b.reason);
-    if (!reason) return error(400, 'reason_required', 'reason: why the match is voided');
+    if (!reason) return refuse(400, 'reason_required', 'reason: why the match is voided');
     const strike = b.strike === true;
     const r = this.as(actor, () => cp.voidByAdmin(matchId, reason, strike));
     this.audit(`ALERT admin ${actor}: match ${matchId}${on} ${r === 'voided' ? `voided${strike ? ', a strike for its node' : ''}` : `not voided (${r === 'none' ? 'not held' : 'settled already'})`}: ${reason}`);
-    if (r === 'none') return error(404, 'no_match', 'the control plane holds no such match');
-    if (r === 'settled') return error(409, 'already_settled', 'the match is settled already: its outcome was delivered');
+    if (r === 'none') return refuse(404, 'no_match', 'the control plane holds no such match');
+    if (r === 'settled') return refuse(409, 'already_settled', 'the match is settled already: its outcome was delivered');
     return json({ matchId, voided: true, strike }, 200, { 'cache-control': 'no-store' });
   }
 
@@ -2221,6 +2221,11 @@ function closeQuietly(ws: WebSocket, code: number, reason: string): void {
   } catch {
     /* already closed */
   }
+}
+
+/** A refusal of a maintainer's history route: error(), never kept by a browser either (the routes say no-store, refused or not). */
+function refuse(status: number, code: string, message?: string): Response {
+  return json({ error: code, message: message ?? code }, status, { 'cache-control': 'no-store' });
 }
 
 /** Another object's answer as it is (its status and JSON body), never cached on the way. */

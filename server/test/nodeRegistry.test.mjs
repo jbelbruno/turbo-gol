@@ -2246,7 +2246,8 @@ test('the raw replay: the TGR1 bytes as R2 keeps them, no-store, an ALERT every 
     assert.deepEqual(new Uint8Array(await res.arrayBuffer()), bytes);
     assert.deepEqual([res.headers.get('content-type'), res.headers.get('cache-control'), res.headers.get('content-disposition')], ['application/octet-stream', 'no-store', `attachment; filename="${rid}.tgr"`]);
   }
-  assert.equal((await get(id)).status, 404, 'never uploaded');
+  const none = await get(id);
+  assert.deepEqual([none.status, none.headers.get('cache-control')], [404, 'no-store'], 'never uploaded: refused, and never kept either');
   assert.equal((await get('9'.repeat(64))).status, 404, 'not in the history');
   assert.equal((await get('nope')).status, 400);
   await h.ctx.settle();
