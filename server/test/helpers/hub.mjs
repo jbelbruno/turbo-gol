@@ -159,9 +159,22 @@ export async function makeHubWorld({ flags = {}, nodes = false, rooms = 0, solos
   const objs = new Map();
   const storages = new Map();
   const mmCalls = [];
-  /** A MatchmakerDO for `name` on `storage` (its constructor's load done), on the world's clock. */
+  /**
+   * A MatchmakerDO for `name` on `storage` (its constructor's load done), on the world's clock. The
+   * load (the constructor's blockConcurrencyWhile) reads Date.now() once, synchronously, before the
+   * clock can be injected: it gets the world's clock too, or a fresh object (an eviction) would drop
+   * every row the world wrote as expired by the real date once it passes the world's (2026-11-04
+   * 12:00 UTC + an hour: these tests failed from 13:00 UTC on that day).
+   */
   const construct = async (storage) => {
-    const mm = new M.MatchmakerDO({ storage, blockConcurrencyWhile: (fn) => fn() }, env);
+    const realNow = Date.now;
+    Date.now = () => t;
+    let mm;
+    try {
+      mm = new M.MatchmakerDO({ storage, blockConcurrencyWhile: (fn) => fn() }, env);
+    } finally {
+      Date.now = realNow;
+    }
     await pause(0);
     mm.now = () => t;
     return mm;
