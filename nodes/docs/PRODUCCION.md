@@ -325,7 +325,8 @@ configurados ni siquiera se lee KV).
   Un error, 8 s sin respuesta o una respuesta que no es una ubicación válida para esos jugadores
   vuelven a `MatchDO`, y frenan los intentos 60 s. Las partidas en nodos no cuentan para
   `MAX_ACTIVE_ROOMS`; una ranked en un nodo toma el lock ranked con el id del nodo; las salas
-  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11).
+  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11)
+  (hasta 2026-11-04; desde entonces toda partida de Casual cuyo host es SA puede caer en un nodo).
 - [x] **P23. `/api/rejoin` y `/api/leave` para partidas de nodo:** `rejoin` libera el lock si
   la partida no existe, terminó o el jugador no estaba, y lo mantiene si salió (`left`) o el nodo
   no responde; un id de 64 hex que no es nada responde 404 y libera el lock. `leave` le pregunta
@@ -545,13 +546,14 @@ aviso.
 
 ### Decisiones de producto
 
-- [ ] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
+- [x] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
   (recomendada)" en `src/locales/es.ts`). Las salas P2P nunca pasan por `formMatch`, así que nunca
   llegan a un nodo; solo un jugador que espera solo en la cola P2P termina en el servidor contra
   bots (`server/src/MatchmakerDO.ts:1028-1041`). Las PCs en prueba solo hostean casuales y
   necesitan 20 verificadas para el ranked: sin casuales por servidor, tardarían mucho. Hay que
   decidir si los nodos comunitarios toman casuales, por ejemplo con una opción "servidores de la
-  comunidad".
+  comunidad". **Decidido 2026-11-04:** Casual y Competitivo siempre en servidor, el nodo de São
+  Paulo primero; P2P solo en salas.
 - [ ] **La latencia no entra en la elección del nodo.** Las regiones son continentes y el
   scheduler elige al azar entre los menos cargados. Para la beta, preferir el VPS de São Paulo;
   después, que el cliente mida el ping a los nodos de su región.

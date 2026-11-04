@@ -3,8 +3,8 @@
 The online backend of Turbogol: guest sessions, regional matchmaking, an
 authoritative match host that runs the **same RocketSim `.wasm` as the browser** inside a Durable
 Object at 120 Hz, streaming full-state snapshots at 30 Hz over WebSocket (phase 1, "server"
-matches), and the signaling rooms of the **peer-to-peer rollback matches** (phase 2, "p2p",
-casual): the browsers simulate, the Worker only relays WebRTC signals, agrees the start and
+matches), and the signaling rooms of the **peer-to-peer rollback matches** of lobbies (phase 2,
+"p2p"): the browsers simulate, the Worker only relays WebRTC signals, agrees the start and
 announces drops. Design: `docs/online/PHASE1.md`, `docs/online/PHASE2.md`; decisions:
 `docs/online/DECISIONS.md`; wire protocols: `src/net/protocol.ts` (phase 1) and
 `src/net/p2p/protocol.ts` (phase 2), both shared with the client.
@@ -19,7 +19,10 @@ server/
                         /api/where, asset fallback
   src/auth.ts           HS256 JWT on WebCrypto: sessions (24 h), tickets (90 s, jti; role 'player' | 'peer'), internal header
   src/env.ts            Env bindings / vars / secrets, JSON helpers, iceServersFor (STUN + optional Cloudflare TURN credentials)
-  src/MatchmakerDO.ts   one per region: queues per (mode, kind), p2p rooms / server matches, bot fill, roster + tickets, locks, capacity
+  src/MatchmakerDO.ts   mm:SA is the hub of every public queue (casual pool, ranked, the 5:00 bots match, the global caps,
+                        the daily counters); one per region holds its lobbies' p2p rooms; roster + tickets, locks
+  src/queuePlan.ts      the hub's pure rules: casual formats, host region, location hints, the wait estimate
+  src/queueStats.ts     the hub's anonymous daily counters (QueueDay)
   src/MatchDO.ts        one per server match: sockets, RoomHost loop, snapshots, events, TTL, shutdown
   src/RoomDO.ts         one per p2p match: hibernating signaling room (welcome, signal relay, ready -> start, unreachable -> drop, TTL)
   src/roomHost.ts       RoomHost: input buffers, bots, match rules, snapshot encoding (env-agnostic)
@@ -98,7 +101,7 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `MATCH_LENGTH_SECONDS` | var | regulation length (300) |
 | `REGION_OVERRIDE` | var | force a matchmaking region (empty = `request.cf.continent`, `dev` locally) |
 | `TURN_KEY_ID`, `TURN_KEY_TOKEN` | secrets, optional (both or none) | a Cloudflare Realtime TURN key: the room welcome then appends 10-minute TURN credentials minted per request (`POST .../turn/keys/{id}/credentials/generate-ice-servers`, `{ ttl: 600 }`); unset = STUN only (`stun.cloudflare.com:3478`) |
-| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, `do_disabled` refuses only its P2P queue: server and ranked matches wait for a node, where one can host: see "Community nodes"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
+| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node, where one can host: see "Community nodes"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
 | `NODES`, `NODE_REPLAYS`, `NODE_RELEASES` | Durable Object, R2, R2 | community nodes: the NodeRegistryDO, the replays the nodes upload, the signed releases and `channel.json` (see "Community nodes") |
 | `NODE_CONTROL_PRIVATE_KEY` | secret, optional | the Ed25519 key (PKCS#8, `npm run keys` in `nodes/`) that signs the players' node tickets; without it no match goes to a node |
 | `NODE_CONTROL_PUBLIC_KEY` | var | its public half, handed to every node at registration; a pair that does not match places nothing (ALERT) |
@@ -114,14 +117,14 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | Route | Body / headers | Result |
 |---|---|---|
 | `POST /api/guest` | `{ turnstileToken? }` (a `name` is ignored) | `GuestSession { playerId, name, session, expiresAt }`; the name is the server's, `Invitado NNNN` (1000-9999 from the player id, `src/net/guestName.ts`), shown in each player's language (`Guest NNNN`); a guest never chooses or changes it |
-| `POST /api/queue` | `{ mode: '1v1'|'2v2'|'3v3', kind?: 'p2p'|'server' }` (default `p2p`), `Authorization: Bearer <session>` | long-poll up to 25 s: `QueueResultP2p { status: 'matched', kind: 'p2p', roomId, ticket, wsUrl: ws(s)://host/room/<roomId> }`, the phase 1 `{ status: 'matched', matchId, ticket, wsUrl: .../ws/<matchId> }` (kind `server`, or the p2p fallback of a lone human; with the nodes on, `node: true` and the community node's own `wss://` address and ticket) or `{ status: 'waiting', waiting }` (call again); `409 { error: 'active_match', matchId, kind }` while a match / room of yours is alive (a room cannot be rejoined: its lock is freed when your room socket closes; a node match answers kind `server` with `node: true`) |
+| `POST /api/queue` | `{ api: 2, mode or modes, kind?, prefer?, region?, local?, visible? }`, `Authorization: Bearer <session>`; `kind` is `'server'` (Casual, the default; `'p2p'` is read as `'server'`) or `'ranked'` | the first answer of a search at once, then a long-poll up to 25 s: `{ status: 'waiting', waiting, region, wait }` (`wait` is a `QueueWait`, `src/net/queueWait.ts`; call again) or the phase 1 `{ status: 'matched', matchId, ticket, wsUrl: .../ws/<matchId> }` (with the nodes on, `node: true` and the community node's own `wss://` address and ticket) plus `mode`, `host` and `humans`; 403 `account_required` for a guest; 426 `reload_required` without `api: 2` (a page from before 2026-11-04); `409 { error: 'active_match', matchId, kind }` as before, while a match of yours is alive (a node match answers kind `server` with `node: true`) |
 | `POST /api/rejoin` | `{ matchId }`, Bearer | a fresh ticket for a server or node match that still has you in its roster (reconnection; p2p rooms have no rejoin: 410 `p2p_room`; a match you quit with `/api/leave { matchId }`: 410 `left`, or 404 when you were its last human: your quit ended it). A node match answers its node's ticket and `wss://` address with `node: true`, and 503 while the node is out of reach (your lock stays: try again); an id that names no match: 404, and its lock is freed |
-| `POST /api/leave` | `{ matchId?, connected? }`, Bearer | `{ ok, left, released }`: drops you from the queue if you are still waiting (the menu's Esc / BACK calls it, so the bot fill does not open a room nobody joins) and frees your P2P room lock. With the `matchId` of your server match (an explicit quit: the client's menu) that lock is freed too and the MatchDO closes your socket (1000 `left`) and hands your car to its bots for good; without a `matchId` a server match is not affected (queueing for a server match again answers `409 active_match` and the client rejoins it). A node match is quit the same way, but its node is told first: when it does not take the leave (out of reach, no answer in 8 s) the lock stays and `released` is false (like every lock, it holds only in its region; a Competitive match is also locked across regions). A leave while your match is being formed still counts: you are not put back in the queue, and a node match or P2P room formed meanwhile is left (a node one with `connected: false`). `connected: false` (you never got into the match) only goes to a node |
+| `POST /api/leave` | `{ matchId?, connected? }`, Bearer | `{ ok, left, released }`, from the queue hub (`mm:SA`) and, when your region is another one, from that region's matchmaker too, where a lobby's P2P room lock lives (`released`: either released): drops you from the queue if you are still waiting (the menu's Esc / BACK calls it, so the 5:00 bots match does not open a match nobody joins). With the `matchId` of your server match (an explicit quit: the client's menu) that lock is freed too and the MatchDO closes your socket (1000 `left`) and hands your car to its bots for good; without a `matchId` a server match is not affected (queueing for a server match again answers `409 active_match` and the client rejoins it). A node match is quit the same way, but its node is told first: when it does not take the leave (out of reach, no answer in 8 s) the lock stays and `released` is false (like every lock, it holds only in its region; a Competitive match is also locked across regions). A leave while your match is being formed still counts: you are not put back in the queue, and a node match formed meanwhile is left (with `connected: false`). `connected: false` (you never got into the match) only goes to a node |
 | `GET /ws/:matchId` | `Sec-WebSocket-Protocol: tg1, ticket.<jwt>` (role `player`) | 101 with `Sec-WebSocket-Protocol: tg1`; 400/401/403 before any Durable Object is touched |
 | `GET /room/:roomId` | same, with a role `peer` ticket whose `mid` is the room id | 101 to the RoomDO: first message `RoomWelcome` (JSON; see `src/net/p2p/protocol.ts`) |
 | `GET /api/health` | | `{ ok, version, protocol }` |
 | `GET /api/time` | | `{ now }` |
-| `GET /api/config` | | public client configuration: `{ turnstileSiteKey, protocol, version, region, autoRegion, regions, oauth, accounts, botFillMs, auth: { devSignIn, email } }` (the sitekey is `null` when Turnstile is off; `oauth` lists the configured sign-in providers; `auth.devSignIn` is true only where the dev sign-in is open; `auth.email` is true where the flows that send mail may show: live mail, or the stub's outbox on a loopback host, links with an origin and `email_off` unset) |
+| `GET /api/config` | | public client configuration: `{ turnstileSiteKey, protocol, version, region, autoRegion, regions, oauth, accounts, botFillMs, queue, auth: { devSignIn, email } }` (`botFillMs` is `null`, so a page from before 2026-11-04 hides its server countdown; `queue: { soloAfterMs: 300000, widenMs: { casual: 60000, ranked: 120000 }, accountRequired: true }`; the sitekey is `null` when Turnstile is off; `oauth` lists the configured sign-in providers; `auth.devSignIn` is true only where the dev sign-in is open; `auth.email` is true where the flows that send mail may show: live mail, or the stub's outbox on a loopback host, links with an origin and `email_off` unset) |
 | `POST /api/dev/signin`, `GET /api/dev/mail` | `{ name }` (1-32 of `A-Z a-z 0-9 _ -`) | local work only (`DEV_AUTH=1`, a loopback host, no Origin or a loopback one; anywhere else 404 `not_found`, as an unknown route, never rate-counted): the account of that dev name, made the first time (`<name>@dev.invalid`, verified; its username the name when it is a valid free one, else `Dev` and digits) as an `AccountSession` plus the refresh cookie; and the stub mailer's outbox, newest first |
 | `GET /api/where` | | `{ edgeColo, country, city?, asn?, ip }`: the Cloudflare colo (IATA code) that served the request and the client address masked to /24 (IPv6 /48), from `request.cf`; for the deploy measurements. The colo the *match* runs in is `Welcome.hostColo` (the MatchDO reads it once per isolate from `cloudflare.com/cdn-cgi/trace`, 5 s cap, `unknown` on failure) |
 | `GET /nodes/whoami` | | `{ ip }`: the address a node installer is seen from (`CF-Connecting-IP`) |
@@ -142,23 +145,28 @@ One active match per playerId (lock in the matchmaker, released when the MatchDO
 for a p2p room, when the player's signaling socket closes / its slot is dropped / the room is
 cleaned up; expiring after regulation + 10 min, or the room TTL, as a fallback).
 
-Matchmaking (one queue per mode and kind, in the region's MatchmakerDO):
+Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms keep their region's):
 
-* `kind: 'server'`: a MatchDO match forms when the mode's humans are present (2 / 4 / 6) or when
-  the oldest waiter has waited 10 s (bots fill the rest, at least one human).
-* `kind: 'p2p'` (default): a RoomDO room forms at once when the mode's humans are present; after
-  15 s (`P2P_FILL_WAIT_MS`) with at least two humans it forms with bots in the free slots; a lone
-  human after those 15 s is moved to the server path (a MatchDO match with bots, answered in the
-  phase 1 shape, so the client falls back transparently).
-* With the nodes on for every human of a server-path match (`nodes_on`, see "Community nodes"),
-  the match is offered to a community node first, and a MatchDO is created only when none takes
-  it.
+* Casual (`kind: 'server'`; `'p2p'` is read as it): accounts only (403 `account_required` for a
+  guest); a request without `api: 2` (a page from before 2026-11-04) gets 426 `reload_required`.
+  One pool for every format. 2 or more humans form at once (2 -> 2v2 rivals with a bot each,
+  3-4 -> 2v2, 5-6 -> 3v3, bots in the free seats): same region, or any region once one of them has
+  waited 60 s (the oldest waiter is served first). Alone after 5 min with the tab visible: a match
+  with bots in its preferred format.
+* Ranked: accounts, humans only, MMR windows as before, own region first, every region after 120 s.
+* The host region is the majority's (a tie: the longest wait's). SA with the nodes on: a community
+  node first, else a MatchDO; every MatchDO is created with its host region's location hint
+  (SA 'sam', NA 'enam', EU 'weur', AS 'apac', OC 'oc', AF 'afr'). A home that is not one of the
+  six regions counts as SA.
+* Capacity, global in the hub: 20 MatchDO in total (5 kept for ranked; at most 5 solo bots
+  matches); at a cap the group waits (`wait.busy`), no 503. Node matches do not count.
+* Waiting answers carry `wait` (src/net/queueWait.ts): searching counts, the estimate, the 5:00
+  countdown, the widening. Daily anonymous counters: GET /nodes/admin/queue-stats.
+* Lobbies: always P2P (a `'server'` setting is read as P2P), at least 2 members to start; create
+  and join without `api: 2` get 426 `reload_required`.
 
 Humans alternate teams; slot order is blue humans, blue bots, red humans, red bots; slots
-are the sim's car creation order. Capacity: at most 20 live matches + rooms per region (503
-`capacity` for new joiners beyond that; waiters keep waiting). Node matches do not count, and a
-player the nodes are on for is not refused at the cap: the match waits for a node (unless no
-node can host in the region for now, see "Community nodes").
+are the sim's car creation order.
 
 P2P room lifecycle (RoomDO, Hibernation API: no timers, the object sleeps between messages):
 roster + random uint32 `seed` registered by the matchmaker -> each peer opens `/room/<id>` with
@@ -302,13 +310,13 @@ routes under `wrangler dev`, put a development pair in `.dev.vars` (both halves:
 value overrides the committed var).
 
 Matches reach the nodes through the matchmaker, behind the KV flag `nodes_on` (absent: off). When
-the nodes are on for every human of a server or ranked match, or for the lone human of a P2P
-queue, the match is offered to a node first; when none takes it, or the control plane fails or
+the nodes are on for every human of a Casual or ranked match whose host region is SA, the match is
+offered to a node first; when none takes it, or the control plane fails or
 does not answer within 8 s, the match goes to a MatchDO as before (after a failure, or when the
 region has no host online, the matchmaker stops asking for a minute, and meanwhile the region
-counts as without the nodes: 503 `capacity` at the cap and, with `do_disabled`, 503
-`do_disabled` for server and ranked queues instead of a wait for a node). P2P rooms and custom
-lobbies never go to a node. `nodes_on` and `vm_disabled` are read through KV's 60 s edge cache,
+counts as without the nodes: at the cap the group waits (`wait.busy`) and, with `do_disabled`,
+503 `do_disabled` for Casual and ranked queues instead of a wait for a node). Lobby matches (P2P)
+never go to a node. `nodes_on` and `vm_disabled` are read through KV's 60 s edge cache,
 so a change takes up to about two minutes to reach every matchmaker:
 
 ```sh
@@ -393,7 +401,7 @@ lands within a minute or two.
 | Flag | What it stops | What goes on |
 |---|---|---|
 | `matchmaking_off` | `POST /api/queue` and `POST /api/lobbies`: 503 `matchmaking_off` (no new match, room or lobby) | matches and lobbies already open, sign-in, the menus |
-| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and the P2P queue; with the nodes on for a player, its server and ranked queues wait for a node instead | node matches; sockets already open |
+| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503); with the nodes on for a player, its Casual and ranked queues wait for a node instead | node matches; sockets already open |
 | `vm_disabled` | no new match goes to a community node, whatever `nodes_on` says | the control plane and the nodes' sockets; matches already on a node |
 | `replays_off` | the public replays only: `GET /nodes/replays` and `GET /nodes/replays/<id>/view` answer 404, their edge-cached copies too (read once per isolate every 30 s), the object never asked | the nodes, the verifiers' signed replay routes, everything else |
 | `nodes_off` | every `/nodes/*` route that would reach the NodeRegistryDO: registration, the control socket's upgrade, replay uploads and downloads, tokens, `/nodes/mine`, `/nodes/status`, the replay list and view, the maintainers' routes (503 `nodes_off`, the object never asked), and the cron's health check. Set `vm_disabled` with it: sockets already open stay, and the matchmaker still reaches the object directly | the node releases and the installers (edge-cached), the shop aliases (AccountsDO) |
@@ -462,7 +470,7 @@ platform's DDoS protection.
 
 Phase 1: DO authority over WebSocket, guest accounts, full-state snapshots, bots, measurements
 (RTT / jitter from Argentina, `setInterval` jitter inside the DO, hash determinism in the smoke test).
-Phase 2 (this, server side): the p2p queue kind, signaling rooms, ICE servers with optional
+Phase 2 (this, server side): the P2P rooms of lobbies (the p2p queue kind until 2026-11-04), signaling rooms, ICE servers with optional
 Cloudflare TURN in the room welcome; the client side (rollback engine, WebRTC mesh, room client, P2P session) lives in
 `src/net/p2p/`. Later: VPS authority + replay verification for ranked (phase 3), WebRTC transport
 for server matches, snapshot quantisation / deltas, D1 for MMR / bans, OAuth, spend-control cron

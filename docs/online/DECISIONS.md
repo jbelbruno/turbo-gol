@@ -18,11 +18,11 @@ propuestos en los informes, que quedan vigentes salvo cambio explícito.
 
 | # | Decisión | Elegido |
 |---|---|---|
-| 1 | Topología casual (unranked, salas privadas) | **P2P con rollback determinista en malla de inputs** entre los 2–6 navegadores (estilo GGPO). Cero costo de servidor por partida. (confirmada) |
+| 1 | Topología casual (unranked, salas privadas) | ~~**P2P con rollback determinista en malla de inputs** entre los 2–6 navegadores (estilo GGPO)~~ → **actualizada 2026-11-04**: Casual y Competitivo siempre en servidor (nodo de São Paulo primero, si no Durable Object); el P2P con rollback queda solo para las salas, públicas y privadas. Motivo: con pocos jugadores, partidas con gente apenas hay dos personas y espera jugando en local. (confirmada) |
 | 2 | Topología ranked | **Autoridad en servidor**: VPS en **São Paulo** (~~unos US$ 7/mes: Hostinger / Linode / Vultr~~ → **actualizada 2026-10-19**: comprado, con el precio real en el presupuesto de abajo; el proveedor y el plan, en las notas del mantenedor) para SAM; **Hetzner** (Ashburn o Falkenstein, ~US$ 6–12/mes) para NA/EU. Hetzner además corre el coturn de respaldo y el verificador de replays. (confirmada) |
 | 3 | Transporte | **WebRTC DataChannel** `{ordered:false, maxRetransmits:0}` para inputs/estado + canal confiable para eventos; **fallback WebSocket** al mismo endpoint (DO o servidor vía proxy de Cloudflare). (confirmada) |
 | 4 | Fases | **Fase 1**: autoridad en Durable Object + WebSocket para tener online en días y medir (RTT/jitter desde Argentina, jitter de `setInterval` en DO, determinismo por hash). **Fase 2**: P2P rollback en malla. **Fase 3**: VPS São Paulo + Hetzner (ranked, coturn, verificador). **Fase 4**: NA/EU, WebTransport, espectadores vía SFU. (confirmada) |
-| 5 | Cuentas | ~~Solo invitados~~ → **actualizada 2026-10-15**: invitados para casual / salas / entrenamiento; **cuentas registradas** (usuario + contraseña, y Google / Discord cuando estén sus secretos) obligatorias para ranked y con MMR por playlist. Guardadas en un Durable Object con SQLite (`AccountsDO`) en vez de D1 (sin permisos ni recursos extra). Detalle: `ACCOUNTS.md`. (confirmada) |
+| 5 | Cuentas | ~~Solo invitados~~ → **actualizada 2026-10-15**: ~~invitados para casual / salas / entrenamiento~~ → **actualizada 2026-11-04**: invitados para salas, contra la IA y entrenamiento; Casual y Competitivo con cuenta; **cuentas registradas** (usuario + contraseña, y Google / Discord cuando estén sus secretos) obligatorias para ranked y con MMR por playlist. Guardadas en un Durable Object con SQLite (`AccountsDO`) en vez de D1 (sin permisos ni recursos extra). Detalle: `ACCOUNTS.md`. (confirmada) |
 | 6 | Plan Cloudflare | **Workers Paid desde el día uno** (US$ 5/mes). Como no hay tope de gasto nativo, las cuotas viven en el código (ver abajo). (confirmada) |
 | 7 | Capa Cloudflare | Workers (API, señalización, tickets), Durable Objects (matchmaking por región, lobbies con Hibernation API, autoridad fase 1 y plan B), D1 (cuentas, MMR, resultados), R2 (replays ranked por inputs, 7–30 días), Turnstile, Cloudflare TURN (1.000 GB/mes gratis), hosting estático del cliente |
 
@@ -46,11 +46,11 @@ propuestos en los informes, que quedan vigentes salvo cambio explícito.
 ## Matchmaking y región
 
 - Bucket por `request.cf` + sondeo de RTT desde el cliente a cada autoridad candidata; salas P2P solo dentro del bucket con RTT máximo ≤ 60 ms; cross-bucket con advertencia y delay ≥ 5 ticks.
-- Un Durable Object de matchmaking por región; tickets de partido HMAC `{sub, mid, team, slot, role, iat, exp 60–120 s, jti}` verificados en el Worker antes de tocar un DO o un servidor; viajan en `Sec-WebSocket-Protocol` / señalización, nunca en query string.
+- Un Durable Object de matchmaking para todas las colas públicas (`mm:SA`, actualizada 2026-11-04; las salas siguen con el de su región); tickets de partido HMAC `{sub, mid, team, slot, role, iat, exp 60–120 s, jti}` verificados en el Worker antes de tocar un DO o un servidor; viajan en `Sec-WebSocket-Protocol` / señalización, nunca en query string.
 
 ## Control de gasto (obligatorio: Cloudflare no tiene tope)
 
-- Cuotas en el DO de matchmaking: TURN de Cloudflare 900 GB/mes (credenciales de 10 min emitidas solo con sesión + ticket y cuota disponible) → coturn propio en Hetzner → solo STUN; Durable Objects ≈ 1.900 partidas-hora/mes y **máximo 20 partidas concurrentes** en DO; VPS dentro de su egreso incluido.
+- Cuotas en el DO de matchmaking: TURN de Cloudflare 900 GB/mes (credenciales de 10 min emitidas solo con sesión + ticket y cuota disponible) → coturn propio en Hetzner → solo STUN; Durable Objects ≈ 1.900 partidas-hora/mes y **máximo 20 partidas concurrentes** en DO; VPS dentro de su egreso incluido. Desde 2026-11-04 la cola única (`mm:SA`) crea todas las partidas en DO y aplica el tope de 20 en total (5 reservadas para COMPETITIVO, como máximo 5 solo con bots); las partidas en nodos no cuentan.
 - Cron Worker cada 5–15 min proyecta el gasto y flipea flags en KV (`p2p_only`, `turn_cf_disabled`, `turn_self_disabled`, `do_disabled`, `vm_disabled`, `matchmaking_off`).
 - DOs de partida con TTL duro de 10 min, lobbies hibernables sin timers, `limits.cpu_ms` bajo, nada sin ticket crea un DO.
 - Alertas de presupuesto de Cloudflare a US$ 15 / 30 / 45 + Usage Report a webhook + mails de tráfico de Hetzner, como respaldo (son informativas y llegan al día siguiente).
