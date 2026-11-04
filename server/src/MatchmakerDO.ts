@@ -1111,6 +1111,17 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (Number.isFinite(at)) this.armAlarm(at);
   }
 
+  /**
+   * After a leave or a release: with nobody queued no sweep runs, so the counters are written now
+   * if the minute allows it and the idle alarm is armed for the rest (with somebody queued the
+   * sweep does both). No KV read, no pass: a regional matchmaker's room releases cost nothing.
+   */
+  private idleIfEmpty(now: number): void {
+    if (this.queued()) return;
+    this.maybeFlushStats(now);
+    this.armIdle(now);
+  }
+
   /** Somebody is in a public queue (the sweep then runs every SWEEP_MS). */
   private queued(): boolean {
     return this.casual.length > 0 || [...this.ranked.values()].some((q) => q.length > 0);
@@ -1429,8 +1440,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     const act = this.active.get(playerId);
     const named = typeof body.matchId === 'string' ? body.matchId : null;
     const released = act !== undefined && (await this.leaveLock(playerId, act, named, body.connected === false, now));
-    // The pass that sees the queues empty arms the idle alarm (the counters of this leave).
-    this.scheduleSweep();
+    this.idleIfEmpty(now); // the counters of this leave
     return json({ ok: true, left, released });
   }
 
@@ -1625,8 +1635,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (closeRoom && this.rooms.delete(matchId)) await this.ctx.storage.delete('room:' + matchId);
     // A solo match over this soon was never played: its human's search continues (soloUnplayed).
     this.soloUnplayed(matchId, now);
-    // A pass over the queues: with nobody queued it arms the idle alarm (that search's RECENT_MS).
-    this.scheduleSweep();
+    this.idleIfEmpty(now); // that search's RECENT_MS
     return json({ ok: true, released: n });
   }
 

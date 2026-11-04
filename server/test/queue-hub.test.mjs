@@ -359,17 +359,43 @@ test('the estimate outlives an eviction: the arrivals ring is one row written wi
     await w.leave(p);
     w.advance(SEC);
   }
-  const writesBefore = w.storage().writes('arrivals').length;
-  assert.equal(writesBefore, 0, 'never per request');
-  await w.hub().sweep(); // the first write of the counters, the ring with them
   await pause(5);
-  assert.equal(w.storage().writes('arrivals').length, 1);
+  // The first leave wrote the counters (and the ring with them); the other 29 cycles waited for the minute.
+  assert.equal(w.storage().writes('arrivals').length, 1, 'never per request');
+  w.advance(60 * SEC);
+  await w.hub().alarm(); // the end of the minute: the rest
+  await pause(5);
+  assert.equal(w.storage().writes('arrivals').length, 2, 'two writes for 30 searches');
   const row = w.storage().map.get('arrivals');
   assert.equal(row.a.length, 30 * 3);
   assert.doesNotMatch(JSON.stringify(row), /[0-9a-f]{16}/, 'no id');
   await w.evict();
   const b = await w.join(pid());
   assert.deepEqual([b.json.wait.estimateKind, b.json.wait.estimateMs], ['humans', 2 * MIN], '30 others in the hour: one every 2 min');
+});
+
+test('a leave or a release with nobody queued runs no pass: the idle alarm is armed by the request itself, and a regional room release reads no KV', async () => {
+  const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true });
+  await w.join(pid());
+  await w.join(pid()); // formed: the first write of the counters
+  await pause(5);
+  const firstAt = w.time();
+  w.advance(5 * SEC);
+  const c = pid();
+  await w.join(c);
+  await w.leave(c);
+  await pause(5); // well before any 500 ms sweep
+  assert.equal(w.storage().alarm, firstAt + 60 * SEC, 'the leave armed it: the counts are written once the minute is up');
+  noSweep(w); // the hub's own sweep (the joins scheduled it) is not what this counts
+  const reads = [];
+  const get = w.env.FLAGS.get;
+  w.env.FLAGS.get = async (k, o) => (reads.push(k), get(k, o));
+  for (let i = 0; i < 3; i++) {
+    assert.equal((await w.call('/release', { matchId: hex64(), playerIds: [] }, 'EU')).status, 200);
+    w.advance(11 * SEC);
+  }
+  await pause(700);
+  assert.deepEqual(reads, [], 'a lobby room\'s release in mm:EU: no pass, so no nodes_on read');
 });
 
 test('an explicit quit of a solo match (leave with its id) is a played match: no restore', async () => {
