@@ -1605,7 +1605,7 @@ test('retire: only a node offline, or drained with no open match; its socket clo
   assert.equal(back.obj.cp.registry.node(node.nodeId).retiredReason, 'moved to a new machine');
 });
 
-test('status guards: active for a node that is not trusted needs { force: true, reason }; a pending node is never set in service; a ban needs a reason', async () => {
+test('status guards: active for a node that is not trusted needs { force: true, reason }; a pending node is never set in service; a ban needs a reason; a trusted banned node leaves its ban only into a free slot', async () => {
   const h = await boot(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }));
   const juan = await communityNode(h);
   const run = (body) => call(h, 'POST', '/nodes/admin/status', { body: { nodeId: juan.nodeId, ...body }, headers: ADMIN });
@@ -1623,6 +1623,28 @@ test('status guards: active for a node that is not trusted needs { force: true, 
   await h.ctx.settle();
   assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
   assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) active -> banned: cheating\``));
+  // A trusted operator's banned node takes no slot: out of its ban it takes one again, so at the cap
+  // (2 here) it stays banned, with an ALERT, as a token is refused there. Else ban, register, unban
+  // would add a trusted node past the cap with every token.
+  const set = (nodeId, body) => call(h, 'POST', '/nodes/admin/status', { body: { nodeId, ...body }, headers: ADMIN });
+  const t1 = await registerNode(h, { publicUrl: 'wss://t1.turbo-gol.test' });
+  const t2 = await registerNode(h, { publicUrl: 'wss://t2.turbo-gol.test' });
+  for (const t of [t1, t2]) h.obj.cp.registry.markReachable(t.nodeId, clock);
+  assert.equal((await set(t1.nodeId, { status: 'banned', reason: 'a bad first install' })).status, 200);
+  assert.deepEqual(h.obj.cp.registry.slots(PROJECT), { used: 1, max: 2 });
+  const t3 = await registerNode(h, { publicUrl: 'wss://t3.turbo-gol.test' });
+  for (const status of ['active', 'probation', 'suspended']) {
+    const r = await set(t1.nodeId, { status, reason: 'unban' });
+    assert.deepEqual([r.status, r.json.error], [409, 'too_many_nodes'], status);
+  }
+  assert.deepEqual([h.obj.cp.registry.node(t1.nodeId).status, h.obj.cp.registry.slots(PROJECT)], ['banned', { used: 2, max: 2 }], 'never past the cap');
+  // A slot free (t3 retired: it never connected): the same unban goes through.
+  assert.equal((await call(h, 'POST', '/nodes/admin/retire', { body: { nodeId: t3.nodeId, reason: 'test' }, headers: ADMIN })).status, 200);
+  const back = await set(t1.nodeId, { status: 'active', reason: 'unban' });
+  assert.deepEqual([back.status, back.json.was, back.json.status], [200, 'banned', 'active']);
+  assert.deepEqual(h.obj.cp.registry.slots(PROJECT), { used: 2, max: 2 });
+  await h.ctx.settle();
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sao-paulo-1 (${t1.nodeId}) stays banned (not set active), the operator already has its 2 nodes\``), posted().join('\n'));
 });
 
 test('trust lost at a deploy: a trusted node whose account left NODE_TRUSTED_OPERATORS starts in probation, 0 of 20, with one ALERT, once; the overview marks it; active again only forced', async () => {

@@ -1499,7 +1499,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * Refused first: a retired node (409 retired); probation or active for a node never proven
    * reachable (409 not_reachable: it moves on by itself when its probe passes); active for a node
    * that is not trusted, one that lost its trust included, without { force: true, reason } (409
-   * force_required: it skips its 20 verified matches); a ban without a reason (400 reason_required).
+   * force_required: it skips its 20 verified matches); a ban without a reason (400 reason_required);
+   * a trusted operator's banned node out of its ban while the operator has every node it may have
+   * (409 too_many_nodes, an ALERT).
    */
   private async adminStatus(cp: ControlPlane, actor: string, n: NodeRecord, status: unknown, reason: string | null, force: boolean): Promise<Response> {
     if (!ADMIN_STATUSES.includes(status as NodeStatus)) return error(400, 'bad_status', `status: ${ADMIN_STATUSES.join(', ')}`);
@@ -1509,6 +1511,16 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const forced = to === 'active' && !n.trusted && n.status !== 'active';
     if (forced && !(force && reason)) return error(409, 'force_required', 'a node that is not trusted earns active with its verified matches: { force: true, reason } skips them');
     if (to === 'banned' && !reason) return error(400, 'reason_required', 'reason: why the node is banned');
+    // A trusted operator's banned node takes no slot (Registry slots), and out of its ban it takes one
+    // again: at the cap it stays banned, as a token is refused there (token()). Else a ban, a new
+    // node and the unban would add a trusted node past the cap with every token.
+    if (n.status === 'banned' && to !== 'banned' && cp.registry.isTrusted(n.operatorId)) {
+      const slots = cp.registry.slots(n.operatorId);
+      if (slots.used >= slots.max) {
+        this.audit(`ALERT admin ${actor}: node ${label(n)} stays banned (not set ${to}), the operator already has its ${slots.max} nodes`);
+        return error(409, 'too_many_nodes', `its operator has its ${slots.max} nodes: retire one first`);
+      }
+    }
     const was = n.status;
     cp.setStatus(n.nodeId, to, reason);
     // The node was told (a 'status' message); a banned one's socket goes now, not at its next login.

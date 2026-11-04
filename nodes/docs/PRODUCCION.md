@@ -303,10 +303,12 @@ las releases; sin `NODE_TRUSTED_OPERATORS`, nadie crea tokens (403 `not_trusted`
   - Una cuenta de confianza tiene como mucho `NODE_TRUSTED_MAX_NODES` nodos (una var de
     `wrangler.jsonc`, hoy 4; acotada en código de 2 a 8, y 2 si falta: `trustedNodeCap`,
     `control-plane/registry.ts`). Un nodo retirado no ocupa lugar, y uno baneado tampoco para la
-    cuenta del proyecto (para la comunidad sí). Con el tope lleno, `POST /nodes/tokens` responde
-    409 `too_many_nodes` sin crear el token; el registro vuelve a comprobarlo, así que también vale
-    para tokens creados antes: un registro rechazado (403 `too_many_nodes`) deja el token sin gastar
-    y un `ALERT`. Un operador que ya tenía más nodos al entrar a la lista los conserva.
+    cuenta del proyecto (para la comunidad sí); al salir de su baneo vuelve a ocupar uno, así que
+    con el tope lleno sigue baneado (409 `too_many_nodes`). Con el tope lleno, `POST /nodes/tokens`
+    responde 409 `too_many_nodes` sin crear el token; el registro vuelve a comprobarlo, así que
+    también vale para tokens creados antes: un registro rechazado (403 `too_many_nodes`) deja el
+    token sin gastar y un `ALERT`. Un operador que ya tenía más nodos al entrar a la lista los
+    conserva.
   - **Retiro y pérdida de confianza.** `POST /nodes/admin/retire` saca de los libros un nodo
     apagado, o drenado y sin partidas abiertas: libera su lugar, no recibe partidas, sale de
     `/nodes/mine` y el cron lo ignora; cada login suyo se rechaza (4403) y su ficha queda en el
