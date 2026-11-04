@@ -26,7 +26,7 @@ font (Barlow Condensed, SIL Open Font License) for the titles.
   - Casual pools every format: 2 or more players start at once with bots in the free seats, a lone
     player gets an online bots match after 5 minutes; your region first, then every region;
   - lobbies: CREATE PUBLIC LOBBY or CREATE PRIVATE LOBBY, public list, join by code, password, team
-    picks.
+    picks; a match needs 2 players, and a host alone plays bots or trains until someone joins.
 - **Accounts and ranked**: an email confirmed with a code, plus a password (optional Google /
   Discord); one email, one account. Accounts made with a username before keep it until the cutoff
   the owner announces. Ranked play gives a rating

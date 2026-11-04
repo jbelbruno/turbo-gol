@@ -24,7 +24,9 @@ licencia SIL Open Font License) para los títulos.
   - Casual mezcla los formatos: con 2 o más personas la partida empieza enseguida y los bots
     completan, y quien está solo juega online contra bots a los 5 minutos; primero tu región,
     después todas;
-  - salas: CREAR SALA PÚBLICA o CREAR SALA PRIVADA, lista pública, código y contraseña.
+  - salas: CREAR SALA PÚBLICA o CREAR SALA PRIVADA, lista pública, código y contraseña; una
+    partida necesita 2 personas, y el anfitrión que está solo juega contra bots o entrena hasta que
+    entra alguien.
 - **Cuentas y competitivo**: un correo confirmado con un código y una contraseña (Google / Discord
   opcionales); un correo, una cuenta. Las cuentas que se crearon con usuario lo conservan hasta la
   fecha de corte que anuncie el proyecto. Competitivo da un
