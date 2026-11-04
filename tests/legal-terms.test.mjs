@@ -696,9 +696,10 @@ test(`the notice of version ${VERSION_A} (the official text) and its English tra
   assert.ok(en[0].includes('shows as "Anfitrión" and a number'));
   // Message 2: the 7 days, the same-day effect, the apology again, then the full texts.
   assert.ok(es[1].includes('Esta versión acorta el aviso de los cambios importantes de 30 a 7 días (Términos, sección 18.2)'));
-  assert.ok(es[1].includes('sin esos 7 días de aviso: te pedimos disculpas otra vez.'));
+  // The promise this version skips is the 30 days of the version before it (2026-11-04-2's 18.2).
+  assert.ok(es[1].includes('sin los 30 días de aviso que prometía la versión anterior, ni siquiera los 7 nuevos: te pedimos disculpas otra vez.'));
   assert.ok(en[1].includes('This version shortens the notice of important changes from 30 to 7 days (Terms, section 18.2)'));
-  assert.ok(en[1].includes('without those 7 days of notice: we apologize again.'));
+  assert.ok(en[1].includes('without the 30 days of notice the previous version promised, or even the new 7: we apologize again.'));
   assert.match(es[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
   assert.match(en[1], /\nThe Spanish texts are the official ones; the English translations are informative\. Full texts: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
   // The prefaces say it took effect the day it was posted, by the owner's decision.
