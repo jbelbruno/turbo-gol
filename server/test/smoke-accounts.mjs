@@ -4,7 +4,8 @@
 // sign-in open, which only a loopback Worker with DEV_AUTH=1 has:
 //   add the line DEV_AUTH=1 to your own server/.dev.vars (never committed; CONTRIBUTING.md)
 //   cd server && npm run dev               (wrangler dev on 8787, another terminal)
-//   node server/test/smoke-accounts.mjs [--api=http://127.0.0.1:8787]
+//   node server/test/smoke-accounts.mjs --api=http://127.0.0.1:8787   (or API=...; required, no
+//                                          default: helpers/smokeTarget.mjs)
 //
 // Flow:
 //   config (accounts on, OAuth providers listed, auth.devSignIn) -> the stub's outbox (GET
@@ -34,6 +35,10 @@
 // (accounts.test.mjs, takeover.test.mjs): the email accounts replace them, and register is gone.
 // Exit 0 = pass, 1 = a check failed, 2 = the dev sign-in is not open on the target.
 import { registerHooks } from 'node:module';
+import { smokeApiOrExit } from './helpers/smokeTarget.mjs';
+
+// The target first: no default (never another developer's 127.0.0.1:8787), exit 2 without one.
+const API = smokeApiOrExit();
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -47,8 +52,6 @@ registerHooks({
   },
 });
 
-const argv = process.argv.slice(2);
-const API = (argv.find((a) => a.startsWith('--api='))?.slice(6) ?? process.env.API ?? 'http://127.0.0.1:8787').replace(/\/$/, '');
 const ACC = await import('../../src/net/account.ts');
 const P = await import('../../src/net/protocol.ts');
 const P2 = await import('../../src/net/p2p/protocol.ts');

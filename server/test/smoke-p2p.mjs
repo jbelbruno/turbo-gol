@@ -1,10 +1,11 @@
-// End-to-end smoke test of the phase 2 signaling path against a running Worker: `wrangler dev
-// --port 8787` (run from server/) or a deploy. Node 24 (global fetch + WebSocket), no browser, no
+// End-to-end smoke test of the phase 2 signaling path against a running Worker: a `wrangler dev`
+// of yours (run from server/) or a deploy. Node 24 (global fetch + WebSocket), no browser, no
 // WebRTC: the two "peers" are plain WebSocket clients that exchange a fake SDP through the room.
-//   node test/smoke-p2p.mjs                                (server/: local wrangler dev)
+//   node test/smoke-p2p.mjs --api=http://127.0.0.1:<port>  (server/: your local wrangler dev)
 //   API=https://turbo-gol.com node server/test/smoke-p2p.mjs
 //
-// Options (flags win over env): --api=<base url> / API (default http://127.0.0.1:8787), --session-a /
+// Options (flags win over env): --api=<base url> / API (required: no default, it exits 2 without
+// one, helpers/smokeTarget.mjs), --session-a /
 // --session-b (ready-made guest sessions when the deploy has Turnstile on; see smoke.mjs).
 //
 // Since the modes redesign (November 2026) P2P rooms come only from lobbies: every room here is a
@@ -38,6 +39,10 @@
 // Exit 0 = pass, 1 = a check failed, 2 = cannot run (no session: Turnstile).
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
+import { smokeApiOrExit } from './helpers/smokeTarget.mjs';
+
+// The target first: no default (never another developer's 127.0.0.1:8787), exit 2 without one.
+const API = smokeApiOrExit();
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -67,13 +72,8 @@ const argOf = (name) => {
   const a = argv.find((s) => s.startsWith(`--${name}=`));
   return a === undefined ? undefined : a.slice(name.length + 3);
 };
-const API = (argOf('api') ?? process.env.API ?? 'http://127.0.0.1:8787').replace(/\/+$/, '');
 const SESSION_A = (argOf('session-a') ?? process.env.SESSION_A ?? '').trim();
 const SESSION_B = (argOf('session-b') ?? process.env.SESSION_B ?? '').trim();
-if (!/^https?:\/\//.test(API)) {
-  console.error(`API must be an http(s) URL, got '${API}'`);
-  process.exit(2);
-}
 const WS_BASE = API.replace(/^http/, 'ws');
 const START_DELAY_MS = 1_500;
 /** server/src/RoomDO.ts DROP_LEAD_TICKS: the drop tick is min(reported), nothing added. */

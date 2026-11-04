@@ -1,6 +1,7 @@
 // Live checks of the abuse guards against a running `wrangler dev` (any port; the state is per
 // server, so run it on a private instance or right after `smoke.mjs`):
-//   API=http://127.0.0.1:8787 node server/test/hardening.mjs
+//   API=http://127.0.0.1:<port> node server/test/hardening.mjs   (or --api=<url>; required, no
+//                                                                  default: helpers/smokeTarget.mjs)
 //   WAIT_UNUSED=1 ...        also waits ~100 s for the 'unused room' alarm (a room nobody joins)
 //
 // Casual is for accounts since the modes redesign: two dev accounts (POST /api/dev/signin, wrangler
@@ -12,6 +13,10 @@
 // (queue again -> not 409). Exit 0 = pass, 2 = no dev accounts.
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
+import { smokeApiOrExit } from './helpers/smokeTarget.mjs';
+
+// The target first: no default (never another developer's 127.0.0.1:8787), exit 2 without one.
+const API = smokeApiOrExit();
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -30,7 +35,6 @@ registerHooks({
 
 const P = await import('../../src/net/protocol.ts');
 
-const API = process.env.API ?? 'http://127.0.0.1:8787';
 const WAIT_UNUSED = process.env.WAIT_UNUSED === '1';
 const t0 = performance.now();
 const log = (...a) => console.log(`[${((performance.now() - t0) / 1000).toFixed(2)}s]`, ...a);

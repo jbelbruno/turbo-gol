@@ -1,11 +1,11 @@
-// End-to-end smoke test against a running Worker: `wrangler dev --port 8787` (run from server/) or a
+// End-to-end smoke test against a running Worker: a `wrangler dev` of yours (run from server/) or a
 // deploy. Node 24 (global fetch + WebSocket), no browser.
-//   npm run smoke                                         (server/: local wrangler dev)
-//   npm run smoke:remote -- --duration=20                 (root; API env or --api=... picks the target)
+//   npm run smoke -- --api=http://127.0.0.1:<port>        (server/: your local wrangler dev)
+//   npm run smoke:remote -- --api=<url> --duration=20     (root; API env or --api=... picks the target)
 //   API=https://turbo-gol.com MODE=1v1 node server/test/smoke.mjs --duration=20
 //
-// Options (flags win over env): --api=<base url> / API (default http://127.0.0.1:8787; the match socket
-// uses ws:// or wss:// from the same scheme), --mode=<1v1|2v2|3v3> / MODE (the format the account
+// Options (flags win over env): --api=<base url> / API (required: no default, it exits 2 without one,
+// helpers/smokeTarget.mjs; the match socket uses ws:// or wss:// from the same scheme), --mode=<1v1|2v2|3v3> / MODE (the format the account
 // prefers; two humans always play a 2v2), --duration=<s> / SECONDS (seconds of snapshot capture,
 // default 10), --session=<jwt> / SESSION and --session2=<jwt> / SESSION2 (two ready-made ACCOUNT
 // sessions, see Sessions below).
@@ -37,6 +37,10 @@
 // needs a browser for its guest: the guest check is skipped when POST /api/guest is refused.
 import { registerHooks } from 'node:module';
 import { performance } from 'node:perf_hooks';
+import { smokeApiOrExit } from './helpers/smokeTarget.mjs';
+
+// The target first: no default (never another developer's 127.0.0.1:8787), exit 2 without one.
+const API = smokeApiOrExit();
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -63,14 +67,9 @@ const argOf = (name) => {
   const a = argv.find((s) => s.startsWith(`--${name}=`));
   return a === undefined ? undefined : a.slice(name.length + 3);
 };
-const API = (argOf('api') ?? process.env.API ?? 'http://127.0.0.1:8787').replace(/\/+$/, '');
 const MODE = argOf('mode') ?? process.env.MODE ?? '1v1';
 const SECONDS = Number(argOf('duration') ?? process.env.SECONDS ?? 10);
 const SESSION = (argOf('session') ?? process.env.SESSION ?? '').trim();
-if (!/^https?:\/\//.test(API)) {
-  console.error(`API must be an http(s) URL, got '${API}'`);
-  process.exit(2);
-}
 if (!['1v1', '2v2', '3v3'].includes(MODE) || !(SECONDS > 0)) {
   console.error(`bad --mode '${MODE}' or --duration '${SECONDS}'`);
   process.exit(2);
