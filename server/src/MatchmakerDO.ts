@@ -2446,13 +2446,13 @@ export class MatchmakerDO extends DurableObject<Env> {
    * one account plays one ranked match across every region). With the nodes on for every human: on
    * a community node of the host region when one takes it (placeOnNode), and with do_disabled, when
    * none does, on one of SA (never a MatchDO then, and never another region's node without
-   * do_disabled). Otherwise a MatchDO created with the host region's location hint, its slot checked
-   * against the global caps and reserved at once (no await in between: concurrent formations never
-   * pass a cap together); NoRoom when the Worker's own servers are off (do_disabled: never a
-   * MatchDO, whether the nodes were asked or are not on for the group), when a cap is reached, or
-   * when one of the humans left meanwhile. The results carry the hub's extras (mode, humans, and
-   * `host`: the region where the match is hosted, SA for a node of SA under do_disabled; the same
-   * region its ranked result names).
+   * do_disabled); the result's `host` is the region where it was placed, the one its ranked result
+   * names (SA for a node of SA under do_disabled). Otherwise a MatchDO created with the
+   * host region's location hint, its slot checked against the global caps and reserved at once (no
+   * await in between: concurrent formations never pass a cap together); NoRoom when the Worker's
+   * own servers are off (do_disabled: never a MatchDO, whether the nodes were asked or are not on
+   * for the group), when a cap is reached, or when one of the humans left meanwhile. The results
+   * carry the hub's extras (mode, host, humans).
    */
   private async formMatch(mode: GameModeId, humans: readonly HumanEntry[], now: number, opts: FormOptions = {}): Promise<FormedMatch> {
     // A MatchDO and a community node run the standard physics only (/custom never sends rules here).

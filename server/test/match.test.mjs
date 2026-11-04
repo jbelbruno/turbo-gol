@@ -198,17 +198,14 @@ class FakeStorage {
 
 const random32 = () => Array.from({ length: 32 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
 
-/**
- * A created MatchDO for `roster` (`create`: more /internal/create fields) with helpers: internal
- * calls, upgrades, the matchmaker's /release calls (and the object each reached), AccountsDO's calls.
- */
-async function makeMatch(roster, create = {}) {
+/** A created MatchDO for `roster` (`extra`: more create fields) with helpers: internal calls, upgrades, the matchmaker's /release calls. */
+async function makeMatch(roster, extra = {}) {
   const storage = new FakeStorage();
   await storage.put('hostColo', 'TST'); // no colo trace (network) in the tests
   const waits = [];
   const ctx = { storage, blockConcurrencyWhile: (fn) => fn(), waitUntil: (p) => waits.push(Promise.resolve(p).catch(() => undefined)) };
-  const releases = [];
-  const accounts = [];
+  const releases = []; // each with the matchmaker object it reached (`name`)
+  const accounts = []; // AccountsDO's calls (a ranked match's report)
   const env = {
     JWT_SECRET: SECRET,
     MATCHMAKER: {
@@ -242,7 +239,7 @@ async function makeMatch(roster, create = {}) {
     );
     return { status: res.status, json: await res.json() };
   };
-  const created = await internal('/internal/create', { matchId: MATCH_ID, mode: '1v1', region: 'test', roster, matchLengthSeconds: 300, createdAt: Date.now(), ...create });
+  const created = await internal('/internal/create', { matchId: MATCH_ID, mode: '1v1', region: 'test', roster, matchLengthSeconds: 300, createdAt: Date.now(), ...extra });
   assert.equal(created.status, 200, `create: ${JSON.stringify(created.json)}`);
   /** The Worker's forwarded upgrade for `slot` (a fresh ticket id): the raw Response. */
   const upgrade = (slot) => {
