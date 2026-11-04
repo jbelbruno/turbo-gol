@@ -658,6 +658,22 @@ export function replayHref(matchId: string | null): string | null {
   return matchId !== null && /^[0-9a-f]{64}$/.test(matchId) ? `./replay.html?id=${encodeURIComponent(matchId)}` : null;
 }
 
+/**
+ * A match id PARTIDAS looks up: its 64 hex alone, or the `id` of a replay link a player sends
+ * (replay.html?id=<matchId>, whole or not), lower case; else null.
+ */
+export function matchIdOf(raw: string): string | null {
+  const v = raw.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(v)) return v;
+  let id: string | null = null;
+  try {
+    id = new URL(v, 'https://replay.invalid/').searchParams.get('id');
+  } catch {
+    return null;
+  }
+  return id !== null && /^[0-9a-f]{64}$/.test(id) ? id : null;
+}
+
 /** An account id the points tab looks up: 16 hex, lower case. */
 export function accountIdOf(raw: string): string | null {
   const v = raw.trim().toLowerCase();

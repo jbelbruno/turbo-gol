@@ -438,7 +438,7 @@ test('the panel paints server text as text only: no innerHTML, no outerHTML, no 
   assert.doesNotMatch(SCREEN, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.equal([...SCREEN.matchAll(/h\('a\./g)].length, 2, "two links, both the public viewer's: the review's and a match's (PARTIDAS)");
   assert.match(SCREEN, /const href = replayHref\(match\);/);
-  assert.match(SCREEN, /const href = a\.viewer \? replayHref\(base\.matchId\) : null;/);
+  assert.match(SCREEN, /const href = a\.viewer \? replayHref\(matchId\) : null;/);
   // The raw replay is saved from a blob of its bytes: the one other href, a link made, clicked and removed, never painted.
   assert.equal([...SCREEN.matchAll(/\.href = /g)].length, 1);
   assert.match(SCREEN, /link\.href = url;\s*link\.download = `\$\{matchId\}\.tgr`;/);
@@ -573,6 +573,30 @@ test("the history's reads are their tab's (opened, ACTUALIZAR, MÁS), never the 
   const tick = SCREEN.slice(SCREEN.indexOf('const load = async'), SCREEN.indexOf('/** A POST of the panel'));
   assert.doesNotMatch(tick, /nodesHistory|nodesEvents|nodesAlerts|nodesMatches|nodesReplay/);
   assert.match(SCREEN, /if \(id === 'matches' && matches === null\) void loadMatches\(\);/);
-  assert.match(SCREEN, /confirmSheet\('download', short, t\('nodesAdmin\.match\.download'\), \(\) => download\(base\.matchId\)\)/);
+  assert.match(SCREEN, /confirmSheet\('download', short, t\('nodesAdmin\.match\.download'\), \(\) => download\(matchId\)\)/);
   assert.match(SCREEN, /confirmSheet\('delist', short, t\('nodesAdmin\.match\.delist'\), \(reason\) => act\(\(\) => acc\.nodesAction\('delist', \{ matchId, reason \}\)/);
+});
+
+test("PARTIDAS' lookup: a match id or the replay link a player sent opens its detail; one the history does not keep still offers the viewer and DESLISTAR, never the raw download", () => {
+  const id = HID('c');
+  assert.equal(N.matchIdOf(id), id);
+  assert.equal(N.matchIdOf('  ' + id.toUpperCase() + ' '), id, 'trimmed, lower case');
+  assert.equal(N.matchIdOf('https://turbo-gol.com/replay.html?id=' + id), id);
+  assert.equal(N.matchIdOf('replay.html?id=' + id + '&t=12'), id, 'a link without its origin, with more after it');
+  for (const bad of ['', id.slice(1), id + 'a', 'replay.html?id=' + id.slice(2), 'replay.html?match=' + id, 'g'.repeat(64), 'http://[::1', 'javascript:alert(1)//?id=x']) assert.equal(N.matchIdOf(bad), null, bad);
+  // Not kept by the history (listed before it was, or past its 30 days): what a listed replay takes.
+  assert.deepEqual(M.matchActions({ open: false, match: null }), { viewer: true, delist: true, download: false, void: false, verify: false });
+  // The screen: the field asks the history for that one match (never the refresh), and the detail without a row keeps DESLISTAR.
+  assert.match(SCREEN, /const id = matchIdOf\(matchField\.input\.value\);/);
+  assert.match(SCREEN, /const page = await acc\.nodesHistory\(\{ match: matchId \}\);/);
+  assert.match(SCREEN, /if \(base === null && lookedUp === null\) return null;/);
+  assert.match(SCREEN, /matchActions\(\{ open: false, match: settled \}\)/);
+  const tick = SCREEN.slice(SCREEN.indexOf('const load = async'), SCREEN.indexOf('/** A POST of the panel'));
+  assert.doesNotMatch(tick, /askMatch|matchIdOf/);
+  for (const k of ['lookup', 'find', 'badId', 'noRow']) {
+    const key = 'nodesAdmin.match.' + k;
+    assert.equal(typeof en[key], 'string', key);
+    assert.equal(typeof es[key], 'string', key);
+    assert.notEqual(es[key], en[key], key);
+  }
 });

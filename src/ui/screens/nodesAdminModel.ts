@@ -381,14 +381,18 @@ export function matchRows(open: OpenMatches | null, settled: readonly HistoryMat
  * What a match's detail offers, as the server would answer it: an open one may be voided (with or
  * without a strike) and, waiting for its verification with no verifier on it, verified now; a
  * settled one's replay opens in the public viewer once published, is delisted while listed, and
- * downloads raw (audited) while one was uploaded and no delist took it.
+ * downloads raw (audited) while one was uploaded and no delist took it. A match looked up by its id
+ * that the history does not keep (`match: null`: listed before the history was, or settled more
+ * than 30 days ago) may still have a listed replay: the viewer and the delist, which takes any
+ * listed match (404 no_replay otherwise); no raw download (the server keeps none for it).
  */
-export function matchActions(m: { open: true; match: OpenMatch } | { open: false; match: HistoryMatch }): { viewer: boolean; delist: boolean; download: boolean; void: boolean; verify: boolean } {
+export function matchActions(m: { open: true; match: OpenMatch } | { open: false; match: HistoryMatch | null }): { viewer: boolean; delist: boolean; download: boolean; void: boolean; verify: boolean } {
   if (m.open) {
     const x = m.match;
     return { viewer: false, delist: false, download: x.replay, void: true, verify: x.state === 'verifying' && !x.verifying };
   }
   const x = m.match;
+  if (x === null) return { viewer: true, delist: true, download: false, void: false, verify: false };
   const kept = x.delistedAt === null;
   return { viewer: x.published && kept, delist: x.listed && kept, download: x.replay && kept, void: false, verify: false };
 }

@@ -939,6 +939,12 @@ export default {
   'nodesAdmin.match.namesUnavailable': "The players' names could not be checked: none is shown.",
   'nodesAdmin.match.voidsTitle': 'VOID IN THE LAST 24 H',
   'nodesAdmin.match.noVoids': 'No void match',
+  // The lookup of one match: its 64-character id, or the link to its replay a player sent (replay.html?id=)
+  'nodesAdmin.match.lookup': 'A match: its id or its replay link',
+  'nodesAdmin.match.find': 'LOOK UP',
+  'nodesAdmin.match.badId': 'The 64 characters of a match id (0-9, a-f), or a replay link with its id.',
+  // A match looked up that the history does not keep: it may still be in the public replays
+  'nodesAdmin.match.noRow': 'The history keeps no row of this match: it settled before the history was kept, more than 30 days ago, or not on a node. If its replay is in the public list, it can still be delisted here.',
   // After the mode ("2v2 · Ranked")
   'nodesAdmin.match.ranked': 'Ranked',
   // A match's state: being played, its report being read, waiting for its verification; then how it settled

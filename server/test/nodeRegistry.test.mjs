@@ -2371,3 +2371,23 @@ test('a player purged while their match is held: the open matches show their sea
   assert.equal((await call(h, 'POST', '/internal/health')).status, 200);
   assert.deepEqual(rows(h, 'node_forgotten'), []);
 });
+
+test("a replay listed before the history was kept (its index row, no history row): the panel's lookup by match id finds no row, and the delist still takes it", async () => {
+  const { h, env } = await watched();
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+  const x = h.obj.cp.matches.get(placement.matchId);
+  Object.assign(x, { state: 'done', doneAt: clock, replaySha: 'c'.repeat(64), outcome: { kind: 'unrated', matchId: placement.matchId, nodeId: x.nodeId, blue: 1, red: 0, verified: true } });
+  h.obj.store.finished(x, x.outcome);
+  await env.NODE_REPLAYS.put(placement.matchId, new TextEncoder().encode('TGR1 old'));
+  // What a match settled before this build looks like: listed, with no row in the history.
+  h.ctx.db.prepare('DELETE FROM node_match_history WHERE match_id = ?').run(placement.matchId);
+  h.ctx.db.prepare('DELETE FROM node_match_players WHERE match_id = ?').run(placement.matchId);
+  clock += 3 * 60 * MIN;
+  const one = await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN });
+  assert.deepEqual([one.status, one.json.matches], [200, []]);
+  const d = await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: placement.matchId, reason: 'a player asked' }, headers: ADMIN });
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  assert.deepEqual(rows(h, 'replay_index'), []);
+  const again = await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: placement.matchId, reason: 'a player asked' }, headers: ADMIN });
+  assert.deepEqual([again.status, again.json.error], [404, 'no_replay'], 'what the lookup shows when it is not listed');
+});

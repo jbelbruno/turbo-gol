@@ -22,7 +22,9 @@
  *              its times, outcome, verdict and verifier, strike, seats (a hidden name as "Jugador
  *              N"); VER LA REPETICIÓN (the public viewer, once published), DESCARGAR (the raw TGR1,
  *              every download posted to the team's channel), DESLISTAR, and for an open one ANULAR
- *              (with or without a strike) and VERIFICAR AHORA
+ *              (with or without a strike) and VERIFICAR AHORA. A match id, or the replay link a
+ *              player sent, opens its detail: one the history does not keep (listed before it was,
+ *              or older than its 30 days) offers the viewer and DESLISTAR all the same
  *   HISTORIAL  the nodes' events, newest first; ALERTAS the ALERT lines of the team's channel. These
  *              three are asked when their tab opens, with ACTUALIZAR and MÁS, never by the refresh
  *
@@ -53,6 +55,7 @@ import {
   accountIdOf,
   installLineMatches,
   maskAddress,
+  matchIdOf,
   nodeErrorKey,
   nodeFailure,
   probeHint,
@@ -198,6 +201,8 @@ export function nodesAdminScreen(menu: Menu): Screen {
   let matches: { open: OpenMatches | null; settled: HistoryMatch[]; next: string | null; names: NamesState; error: string | null; loading: boolean } | null = null;
   let events: { list: NodeEvent[]; next: string | null; error: string | null; loading: boolean } | null = null;
   let alertLines: { list: AlertLine[]; next: string | null; webhook: boolean; error: string | null; loading: boolean } | null = null;
+  /** A match looked up by its id in PARTIDAS: its history row, or null when the history keeps none. */
+  let found: { matchId: string; row: HistoryMatch | null; names: NamesState } | null = null;
   /** The wizard's countdown and follow-up, repainted by the tick and the refresh without touching its fields. */
   let followEl: HTMLElement | null = null;
   let slotsEl: HTMLElement | null = null;
@@ -217,6 +222,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     matches = null;
     events = null;
     alertLines = null;
+    found = null;
     reveal = false;
     view = { kind: 'tabs' };
     tab = 'summary';
@@ -784,6 +790,44 @@ export function nodesAdminScreen(menu: Menu): Screen {
       s?.next ? secondary(t('nodesAdmin.more'), more, { 'data-key': `na-${key}-more` }) : null,
     ].filter((x): x is HTMLElement => x !== null);
 
+  /**
+   * One match of the history by its id (GET /nodes/admin/history?match=): its row, or null when the
+   * history keeps none. `then` opens its detail (a lookup); else its detail, if shown, repaints (after an action).
+   */
+  const askMatch = async (matchId: string, then: boolean): Promise<void> => {
+    const me = acc.account?.playerId ?? null;
+    try {
+      const page = await acc.nodesHistory({ match: matchId });
+      if (me !== (acc.account?.playerId ?? null)) return;
+      found = { matchId, row: page.matches.find((x) => x.matchId === matchId) ?? null, names: page.names };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      if (failureOf(e) === 'reauth') return askPassword(() => void askMatch(matchId, then));
+      if (then) matchField.error(errText(e));
+      return;
+    }
+    if (!el.isConnected) return;
+    if (then) openMatch(matchId);
+    else if (view.kind === 'match' && view.matchId === matchId) keepFocus(paintBody);
+  };
+
+  // A match id or the replay link a player sent (replay.html?id=): the pages need not be walked with MÁS.
+  const matchField = field(t('nodesAdmin.match.lookup'), { maxLength: 200, keypad: 'text', enterkeyhint: 'go' });
+  const goFind = (): void => {
+    matchField.error(null);
+    const id = matchIdOf(matchField.input.value);
+    if (id === null) return matchField.error(t('nodesAdmin.match.badId'));
+    if (matchRows(matches?.open ?? null, matches?.settled ?? []).some((r) => r.matchId === id)) return openMatch(id);
+    if (sample !== null) {
+      found = { matchId: id, row: null, names: 'shown' };
+      return openMatch(id);
+    }
+    void askMatch(id, true);
+  };
+  matchField.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.defaultPrevented) goFind();
+  });
+
   const matchesView = (o: Overview): HTMLElement[] => {
     const m = matches;
     const now = Date.now();
@@ -804,6 +848,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     );
     const voids = o.voids24h.map((v, i) => h('p', { 'data-key': 'na-void-' + i }, h('b', null, v.name ?? v.nodeId), ' · ', h('code.mn-na-raw', null, v.reason), ` · ${v.count}`));
     return historyTab('nodesAdmin.match.note', () => void loadMatches(), m, rows, () => void loadMatches(true), 'matches', [
+      h('form.mn-form.mn-na-lookup', { onsubmit: (e: Event) => e.preventDefault() }, matchField.el, secondary(t('nodesAdmin.match.find'), goFind, { 'data-key': 'na-match-find' })),
       m?.names === 'unavailable' ? h('p.mn-note', null, t('nodesAdmin.match.namesUnavailable')) : null,
       section(t('nodesAdmin.match.voidsTitle'), ...(voids.length > 0 ? voids : [h('p.mn-note', null, t('nodesAdmin.match.noVoids'))])),
     ]);
@@ -837,13 +882,37 @@ export function nodesAdminScreen(menu: Menu): Screen {
 
   const matchDetail = (matchId: string): HTMLElement[] | null => {
     const open = matches?.open?.matches.find((x) => x.matchId === matchId) ?? null;
-    const settled = open === null ? (matches?.settled.find((x) => x.matchId === matchId) ?? null) : null;
+    const lookedUp = found !== null && found.matchId === matchId ? found : null;
+    const settled = open === null ? (matches?.settled.find((x) => x.matchId === matchId) ?? lookedUp?.row ?? null) : null;
     const base: OpenMatch | HistoryMatch | null = open ?? settled;
-    if (base === null) return null;
-    const now = Date.now();
-    const a = open !== null ? matchActions({ open: true, match: open }) : matchActions({ open: false, match: settled as HistoryMatch });
-    const state = open !== null ? open.state : (settled as HistoryMatch).result;
+    // A match looked up by its id that the history does not keep: only its id, the viewer and DESLISTAR.
+    if (base === null && lookedUp === null) return null;
+    const a = open !== null ? matchActions({ open: true, match: open }) : matchActions({ open: false, match: settled });
     const short = matchId.slice(0, 8);
+    const done = (key: Key) => (): void => {
+      menu.toast(t(key), 'ok');
+      void loadMatches();
+      if (found?.matchId === matchId) void askMatch(matchId, false);
+    };
+    // The public viewer's link: built from the match id once checked (64 hex), never from a server's text.
+    const href = a.viewer ? replayHref(matchId) : null;
+    const actions = h(
+      'div.mn-na-actions',
+      null,
+      href !== null ? h('a.mn-btn', { href, target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'na-match-viewer' }, t('nodesAdmin.match.viewer')) : null,
+      a.download ? secondary(t('nodesAdmin.match.download'), () => confirmSheet('download', short, t('nodesAdmin.match.download'), () => download(matchId)), { 'data-key': 'na-match-download' }) : null,
+      a.verify ? secondary(t('nodesAdmin.match.verify'), () => void act(() => acc.nodesAction('match/verify', { matchId }), done('nodesAdmin.match.verifyAsked')), { 'data-key': 'na-match-verify' }) : null,
+      a.delist ? secondary(t('nodesAdmin.match.delist'), () => confirmSheet('delist', short, t('nodesAdmin.match.delist'), (reason) => act(() => acc.nodesAction('delist', { matchId, reason }), done('nodesAdmin.match.delisted'))), { 'data-key': 'na-match-delist', class: 'mn-btn-cancel' }) : null,
+      a.void ? secondary(t('nodesAdmin.match.void'), () => confirmSheet('voidMatch', short, t('nodesAdmin.match.void'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void', class: 'mn-btn-cancel' }) : null,
+      a.void ? secondary(t('nodesAdmin.match.voidStrike'), () => confirmSheet('voidStrike', short, t('nodesAdmin.match.voidStrike'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason, strike: true }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void-strike', class: 'mn-btn-cancel' }) : null,
+    );
+    if (base === null) {
+      return [h('div.mn-prof-node', null, h('div.mn-prof-node-head', null, icon('ball', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, short)), h('dl.mn-prof-node-facts', null, ...fact(t('nodesAdmin.match.id'), h('code.mn-na-raw', null, matchId))), h('p.mn-note', null, t('nodesAdmin.match.noRow'))), actions];
+    }
+    const now = Date.now();
+    const state = open !== null ? open.state : (settled as HistoryMatch).result;
+    // A looked-up row's names were checked with it, a listed one's with its page.
+    const names = open === null && lookedUp !== null && lookedUp.row === settled ? lookedUp.names : matches?.names;
     const facts = h(
       'dl.mn-prof-node-facts',
       null,
@@ -863,23 +932,10 @@ export function nodesAdminScreen(menu: Menu): Screen {
         : settledFacts(settled as HistoryMatch)),
       ...fact(t('nodesAdmin.match.replay'), t(base.replay ? 'nodesAdmin.match.yes' : 'nodesAdmin.match.no')),
     );
-    const done = (key: Key) => () => (menu.toast(t(key), 'ok'), void loadMatches());
-    // The public viewer's link: built from the match id once checked (64 hex), never from a server's text.
-    const href = a.viewer ? replayHref(base.matchId) : null;
-    const actions = h(
-      'div.mn-na-actions',
-      null,
-      href !== null ? h('a.mn-btn', { href, target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'na-match-viewer' }, t('nodesAdmin.match.viewer')) : null,
-      a.download ? secondary(t('nodesAdmin.match.download'), () => confirmSheet('download', short, t('nodesAdmin.match.download'), () => download(base.matchId)), { 'data-key': 'na-match-download' }) : null,
-      a.verify ? secondary(t('nodesAdmin.match.verify'), () => void act(() => acc.nodesAction('match/verify', { matchId }), done('nodesAdmin.match.verifyAsked')), { 'data-key': 'na-match-verify' }) : null,
-      a.delist ? secondary(t('nodesAdmin.match.delist'), () => confirmSheet('delist', short, t('nodesAdmin.match.delist'), (reason) => act(() => acc.nodesAction('delist', { matchId, reason }), done('nodesAdmin.match.delisted'))), { 'data-key': 'na-match-delist', class: 'mn-btn-cancel' }) : null,
-      a.void ? secondary(t('nodesAdmin.match.void'), () => confirmSheet('voidMatch', short, t('nodesAdmin.match.void'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void', class: 'mn-btn-cancel' }) : null,
-      a.void ? secondary(t('nodesAdmin.match.voidStrike'), () => confirmSheet('voidStrike', short, t('nodesAdmin.match.voidStrike'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason, strike: true }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void-strike', class: 'mn-btn-cancel' }) : null,
-    );
     return [
       h('div.mn-prof-node', null, h('div.mn-prof-node-head', null, icon('ball', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, short), tag(matchTone(state), t(`nodesAdmin.match.state.${state}` as Key))), facts),
       actions,
-      section(t('nodesAdmin.match.seats'), ...(matches?.names === 'unavailable' ? [h('p.mn-note', null, t('nodesAdmin.match.namesUnavailable'))] : []), ...base.seats.map(seatLine)),
+      section(t('nodesAdmin.match.seats'), ...(names === 'unavailable' ? [h('p.mn-note', null, t('nodesAdmin.match.namesUnavailable'))] : []), ...base.seats.map(seatLine)),
     ];
   };
 
@@ -1240,6 +1296,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
       sample = sampleOverview();
       data = sample;
       problem = null;
+      found = null;
       view = { kind: 'tabs' };
       tab = (ADMIN_TABS as readonly string[]).includes(kind) ? (kind as AdminTab) : 'summary';
       if (kind === 'points') {
@@ -1250,12 +1307,14 @@ export function nodesAdminScreen(menu: Menu): Screen {
       if (kind === 'detail') view = { kind: 'node', nodeId: sample.nodes[2].nodeId };
       if (kind === 'review') view = { kind: 'node', nodeId: sample.nodes[3].nodeId };
       if (kind === 'review') frozen = { frozen: [{ account: sample.nodes[3].operator.id, reason: 'verification_failed:' + 'c'.repeat(64), at: Date.now() - 3_600_000 }], more: false };
-      if (kind === 'matches' || kind === 'match' || kind === 'history' || kind === 'alerts') {
+      if (kind === 'matches' || kind === 'match' || kind === 'lone' || kind === 'history' || kind === 'alerts') {
         const x = sampleHistory(sample);
         matches = { open: x.open, settled: x.settled, next: 'more', names: 'shown', error: null, loading: false };
         events = { list: x.events, next: 'more', error: null, loading: false };
         alertLines = { list: x.alerts, next: null, webhook: false, error: null, loading: false };
         if (kind === 'match') ((tab = 'matches'), (view = { kind: 'match', matchId: x.settled[0].matchId }));
+        // A replay listed before the history was kept, looked up by its link: no row, the viewer and DESLISTAR.
+        if (kind === 'lone') ((tab = 'matches'), (found = { matchId: '9'.repeat(64), row: null, names: 'shown' }), (view = { kind: 'match', matchId: '9'.repeat(64) }));
       }
       if (kind === 'wizard' || kind === 'checklist' || kind === 'token') {
         wiz = { step: kind === 'wizard' ? 'form' : kind === 'checklist' ? 'checklist' : 'token', form: { region: 'EU', name: 'frankfurt-1', host: 'node-1.example.com', roles: 'host,verify', matches: '12', egress: '2000' }, checks: new Set(), token: null };
@@ -1377,7 +1436,7 @@ function sampleOverview(): Overview {
   };
 }
 
-/** The history's samples (window.__nodesAdmin('matches' | 'match' | 'history' | 'alerts')): an open match, settled ones of every kind, events and alert lines. */
+/** The history's samples (window.__nodesAdmin('matches' | 'match' | 'lone' | 'history' | 'alerts')): an open match, settled ones of every kind, events and alert lines. */
 function sampleHistory(o: Overview): { open: OpenMatches; settled: HistoryMatch[]; events: NodeEvent[]; alerts: AlertLine[] } {
   const now = Date.now();
   const sp = o.nodes[0];
