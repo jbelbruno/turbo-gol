@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 registerHooks({
@@ -508,27 +508,78 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
   }
 });
 
-test("the deploy day's notice for Discord (docs/legal/avisos/2026-11-04-2.md): two messages that paste as they are, each under Discord's 2,000 characters", () => {
-  const text = readFileSync(new URL('../docs/legal/avisos/2026-11-04-2.md', import.meta.url), 'utf8');
-  const parts = text.split(/^## Mensaje \d\n/m);
-  assert.equal(parts.length, 3, 'a preface, then Mensaje 1 and Mensaje 2');
+// The notices of a change to the texts (docs/legal/avisos, docs/legal/README.md): `<version>.md` is
+// the official one, in Spanish ("## Mensaje 1", "## Mensaje 2"); `<version>.en.md` is its English
+// copy ("## Message 1", "## Message 2"), the one the bot posts, because the Discord server is
+// English-only. Both are pasted into Discord as they are, so both pass the same checks.
+const AVISOS = new URL('../docs/legal/avisos/', import.meta.url);
+function noticeMessages(file, heading) {
+  const version = file.replace(/(?:\.en)?\.md$/, '');
+  const parts = readFileSync(new URL(file, AVISOS), 'utf8').split(new RegExp(`^## ${heading} \\d\\n`, 'm'));
+  assert.equal(parts.length, 3, `${file}: a preface, then ${heading} 1 and ${heading} 2`);
   const msgs = parts.slice(1).map((m) => m.trim());
   for (const [i, m] of msgs.entries()) {
-    // Discord counts every character and shows every newline: no hard wraps (a line that goes on
-    // indented), no headings, and less than a plain message's 2,000 (4,000 is Nitro's).
-    assert.ok(m.length < 2000, `message ${i + 1}: ${m.length} characters`);
-    assert.doesNotMatch(m, /\n {2,}\S/, `message ${i + 1}: a bullet or paragraph broken over two lines`);
-    assert.doesNotMatch(m, /^#/m, `message ${i + 1}: Discord's own headings are not ours`);
-    assert.doesNotMatch(m, /\b(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)\b/i);
-    assert.doesNotMatch(m, /rocket\s*league/i);
+    const at = `${file}, message ${i + 1}`;
+    // Discord counts every character and shows every newline: no hard wraps (a line that goes on,
+    // indented or not; only a list's bullets follow each other), no headings, and less than a plain
+    // message's 2,000 (4,000 is Nitro's).
+    assert.ok(m.length < 2000, `${at}: ${m.length} characters`);
+    const lines = m.split('\n');
+    for (let j = 1; j < lines.length; j++)
+      if (lines[j - 1] !== '' && lines[j] !== '')
+        assert.ok(lines[j - 1].startsWith('- ') && lines[j].startsWith('- '), `${at}: a bullet or paragraph broken over two lines (${JSON.stringify(lines[j])})`);
+    assert.doesNotMatch(m, /^#/m, `${at}: Discord's own headings are not ours`);
+    assert.doesNotMatch(m, /rocket\s*league/i, at);
+    // Read alone, each message still names the version the players are asked to accept.
+    assert.ok(m.includes(version), `${at}: the version ${version}`);
   }
-  assert.ok(msgs[0].startsWith('**Cambian los modos de juego y los Términos (versión 2026-11-04-2)**\n'), 'the title is its first line, in bold');
+  // The links in < > (no embed), the only contact the public one.
+  const all = msgs.join('\n');
+  assert.doesNotMatch(all, /(?<!<)https?:\/\//, `${file}: every link between < and >`);
+  assert.ok(all.includes('privacy@turbo-gol.com'), `${file}: the contact`);
+  for (const m of all.matchAll(/[\w.+-]+@[\w.-]+/g)) assert.equal(m[0], 'privacy@turbo-gol.com', file);
+  return msgs;
+}
+const noticeBullets = (m) => m.split('\n').filter((l) => l.startsWith('- ')).length;
+const noticeNumbers = (m) => m.match(/\d+(?:[.-]\d+)*/g);
+const noticeLinks = (m) => [...m.matchAll(/<(https:\/\/[^>]+)>/g)].map((x) => x[1]);
+
+test('every notice in docs/legal/avisos has its English copy, and both paste into Discord as they are: two messages under 2,000 characters, no hard wraps, no headings, links in < >, the version, only the public contact; the copy says the same as the official one', () => {
+  const files = readdirSync(AVISOS);
+  const notices = files.filter((f) => f.endsWith('.md') && !f.endsWith('.en.md'));
+  assert.ok(notices.includes('2026-11-04-2.md'));
+  for (const f of files) assert.match(f, /^\d{4}-\d{2}-\d{2}(?:-\d+)?(?:\.en)?\.md$/, `docs/legal/avisos/${f}: <version>.md or <version>.en.md`);
+  for (const es of notices) {
+    const en = es.replace(/\.md$/, '.en.md');
+    assert.ok(files.includes(en), `${es}: its English copy, ${en}`);
+    const msgsEs = noticeMessages(es, 'Mensaje');
+    const msgsEn = noticeMessages(en, 'Message');
+    for (const m of msgsEs) assert.doesNotMatch(m, /\b(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)\b/i, es);
+    // The copy is a translation, not another notice: the same bullets, the same numbers in the same
+    // order (dates, minutes, days, sections) and the same links, message by message.
+    for (const i of [0, 1]) {
+      const at = `${en}, message ${i + 1}`;
+      assert.equal(noticeBullets(msgsEn[i]), noticeBullets(msgsEs[i]), `${at}: the bullets of ${es}`);
+      assert.deepEqual(noticeNumbers(msgsEn[i]), noticeNumbers(msgsEs[i]), `${at}: the numbers of ${es}`);
+      assert.deepEqual(noticeLinks(msgsEn[i]), noticeLinks(msgsEs[i]), `${at}: the links of ${es}`);
+    }
+    // Its preface says which text is the official one.
+    assert.match(readFileSync(new URL(en, AVISOS), 'utf8').split('\n## ')[0], new RegExp(`official notice is the Spanish one, \\[${es.replace(/\./g, '\\.')}\\]\\(${es.replace(/\./g, '\\.')}\\)`), en);
+  }
+});
+
+test("the deploy day's notice for Discord (docs/legal/avisos/2026-11-04-2.md) and its English copy (2026-11-04-2.en.md, the text the server shows)", () => {
+  const es = noticeMessages('2026-11-04-2.md', 'Mensaje');
+  const en = noticeMessages('2026-11-04-2.en.md', 'Message');
+  assert.ok(es[0].startsWith('**Cambian los modos de juego y los Términos (versión 2026-11-04-2)**\n'), 'the title is its first line, in bold');
+  assert.ok(en[0].startsWith('**Game modes and the Terms are changing (version 2026-11-04-2)**\n'), 'the title is its first line, in bold');
   // What the code does: São Paulo takes the match when it has room (MatchmakerDO formMatch).
-  assert.match(msgs[0], /todas las que tienen mayoría de jugadores de Sudamérica, cuando hay lugar,/);
+  assert.match(es[0], /todas las que tienen mayoría de jugadores de Sudamérica, cuando hay lugar,/);
+  assert.match(en[0], /all those with a majority of players from South America, when there is room,/);
   // A lobby open at the deploy closes (its old page's rejoin gets 426 reload_required): say so.
-  assert.match(msgs[0], /Las salas que estaban abiertas en el momento de la actualización se cierran: después de recargar, crea la sala de nuevo\./);
-  // The link in < > (no embed), the only contact the public one.
-  assert.match(msgs[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
-  assert.doesNotMatch(msgs.join('\n'), /(?<!<)https?:\/\//, 'every link between < and >');
-  for (const m of msgs.join('\n').matchAll(/[\w.+-]+@[\w.-]+/g)) assert.equal(m[0], 'privacy@turbo-gol.com');
+  assert.match(es[0], /Las salas que estaban abiertas en el momento de la actualización se cierran: después de recargar, crea la sala de nuevo\./);
+  assert.match(en[0], /Lobbies that were open at the moment of the update are closed: after reloading, create your lobby again\./);
+  // The full texts, last; in English, after saying which ones are official.
+  assert.match(es[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  assert.match(en[1], /\nThe Spanish texts are the official ones; the English translations are informative\. Full texts: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
 });

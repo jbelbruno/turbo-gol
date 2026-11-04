@@ -19,9 +19,38 @@ Worker renders them as they are.
 **Changing a text** means changing it in both languages, giving it a new version in its header and
 in `TERMS_VERSION`, in the same deploy, and announcing it 30 days ahead when it is an important
 change (Términos 18). Version `2026-11-04-2` skipped that notice once, by the owner's decision: it
-was announced on Discord and in `docs/legal/avisos/2026-11-04-2.md` the day it took effect, and
-every account and guest accepted it again before playing online. Nothing checks that a `[[TOKEN]]`
-was left in a text: search for `[[` before publishing.
+was announced the day it took effect, in the repository and on Discord (below), and every account
+and guest accepted it again before playing online. Nothing checks that a `[[TOKEN]]` was left in a
+text: search for `[[` before publishing.
+
+## The notices of a change
+
+Every notice of a change (Términos 18.2) is two files in `avisos/`, named after the version:
+
+| File | What it is |
+|---|---|
+| `avisos/2026-11-04-2.md` | The notice of version `2026-11-04-2` (4 November 2026), in Spanish: the official text |
+| `avisos/2026-11-04-2.en.md` | Its English copy: the text posted on Discord |
+
+The Discord server is English-only, so from now on the post on Discord is the English copy, and
+every notice gets one. Términos 18.2 still says the notice is posted "in Spanish" on Discord and in
+the repository: the Spanish file in the repository stays the official one, and the next version of
+the texts should say that Discord gets the English copy.
+
+On the day the notice is posted (30 days ahead, or the deploy day when a change skips that):
+
+1. Write `avisos/<version>.md`, the official notice in Spanish, and `avisos/<version>.en.md`, its
+   English copy. Both have an H1, a short preface (which text is the official one, how to post
+   it), then `## Mensaje 1` and `## Mensaje 2` (`## Message 1` and `## Message 2` in English).
+2. Each bullet and each paragraph is one line, because Discord shows every line break. Each
+   message is under 2,000 characters (a message without Nitro), names the version, has no
+   headings and gives no address but privacy@turbo-gol.com. Links go between `<` and `>`, so
+   Discord does not unfurl them. The English message 2 says the Spanish texts are the official
+   ones. `tests/legal-terms.test.mjs` checks both files, and that the copy has the same bullets,
+   numbers and links as the Spanish notice.
+3. Merge both before posting, so message 2's link to the full texts already shows them.
+4. Post the English copy in the server's announcements channel as it is (on GitHub, from "Raw"):
+   the text of "Message 1", then that of "Message 2".
 
 ## How they reach the players
 
