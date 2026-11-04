@@ -1,17 +1,22 @@
 /**
- * MODOS › SALAS' part (plan §6.4, PR 12; lobbyBrowser: screens/modes.ts, whose action zone has CREATE
- * LOBBY AND SHARE): the JOIN WITH CODE tile (mn-codecells in a sheet, screens/lobby.ts), the region
- * (mn-picker: the region sheet), and the region's public lobbies in 56 px rows (name, format,
- * players / places, a state slot: OPEN, IN MATCH, FULL; a full or playing row stays focusable and its
- * press says why), or "No public lobbies in {region}" with CREATE PRIVATE LOBBY. Also the host's
- * SETTINGS dialog (configureLobby) and the labels the Sala shares.
+ * MODOS › SALAS' part (plan §6.4, PR 12; lobbyBrowser: screens/modes.ts, whose action zone has
+ * CREATE PUBLIC LOBBY and CREATE PRIVATE LOBBY): the JOIN WITH CODE tile (mn-codecells in a sheet,
+ * screens/lobby.ts), the region (mn-picker: the region sheet), and the public lobbies (every
+ * region, the player's own first) in 56 px rows (name, format, players / places, a state slot: OPEN,
+ * IN MATCH, FULL; a full or playing row stays focusable and its press says why), or "No public
+ * lobbies right now" with CREATE PUBLIC LOBBY. Also the host's SETTINGS dialog (configureLobby) and
+ * the labels the Sala shares. Lobbies are always P2P (the modes redesign, November 2026): no
+ * connection to pick, none to show.
+ *
+ * A TV guest whose anti-bot check is not ready (homeModel.ts roomsLocked: a remote may not pass one
+ * that asks) gets SIGN IN WITH YOUR PHONE instead of a join (the code tile, a row's press).
  *
  * Experimental rules (Settings > Experimental presets, src/game/physicsRules.ts): a signed-in host
  * with the switch on picks them in the settings ("Rules (experimental)": Standard, the built-ins,
- * the player's own presets; P2P only, so switching to a server match clears them; EDIT PRESETS
- * opens Settings > Experimental and comes back with the draft kept). The list tags such a lobby EXP
- * (with a lock for a guest, who cannot join it) and the Sala shows the rules line before the match.
- * The server enforces all of it (LobbyDO, the matchmaker, RoomDO).
+ * the player's own presets; EDIT PRESETS opens Settings > Experimental and comes back with the
+ * draft kept). The list tags such a lobby EXP (with a lock for a guest, who cannot join it) and the
+ * Sala shows the rules line before the match. The server enforces all of it (LobbyDO, the
+ * matchmaker, RoomDO).
  */
 import { h, setChildren } from '../dom';
 import { LOBBY_LENGTHS, PLAYLISTS, lobbyNameIssue } from '../../net/account';
@@ -30,6 +35,7 @@ import { cycler, field, secondary } from './common';
 import { createAndShare, joinFlow, openCodeEntry, salaTitle } from './lobby';
 import { rowState } from './lobbyModel';
 import type { RowState } from './lobbyModel';
+import { roomsLocked } from './homeModel';
 
 const REFRESH_MS = 5_000;
 
@@ -37,8 +43,9 @@ export function lengthLabel(s: number): string {
   return s === 0 ? t('custom.noLimit') : t('custom.minutes', { count: s / 60 });
 }
 
-export function netLabel(n: 'p2p' | 'server'): string {
-  return n === 'p2p' ? t('custom.netP2p') : t('custom.netServer');
+/** A TV guest's rooms wait for the anti-bot check (homeModel.ts roomsLocked): its SIGN IN WITH YOUR PHONE then. */
+export function tvRoomsLocked(menu: Menu): boolean {
+  return roomsLocked({ tv: document.documentElement.classList.contains('tg-tv'), guest: !menu.host.accounts.signedIn, antiBotReady: menu.host.antiBotReady === true });
 }
 
 function errText(e: unknown): string {
@@ -117,19 +124,24 @@ const ROW_STATE: Record<RowState, 'lobby.rowOpen' | 'lobby.rowInMatch' | 'lobby.
 export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; tick: (now: number) => void } {
   const list = h('div.mn-lobbies');
   const status = h('p.mn-lobbies-status', { hidden: true });
+  // A TV guest whose check is not ready: the phone's sign-in instead of the code (its line says so).
+  const joinText = h('span.mn-lobby-join-text');
+  let joinLocked: boolean | null = null;
+  const drawJoin = (): void => {
+    const locked = tvRoomsLocked(menu);
+    if (locked === joinLocked) return;
+    joinLocked = locked;
+    setChildren(joinText, h('b', null, t(locked ? 'tvsign.tile' : 'lobby.joinCode')), h('small', null, t(locked ? 'modes.lobbiesTvLocked' : 'lobby.joinCodeSub')));
+  };
   const joinTile = h(
     'button.mn-lobby-join',
-    { type: 'button', 'data-nav': true, 'data-key': 'lobby-join-code', onclick: () => openCodeEntry(menu) },
+    { type: 'button', 'data-nav': true, 'data-key': 'lobby-join-code', onclick: () => (tvRoomsLocked(menu) ? menu.tvSignIn() : openCodeEntry(menu)) },
     icon('code'),
-    h('span.mn-lobby-join-text', null, h('b', null, t('lobby.joinCode')), h('small', null, t('lobby.joinCodeSub'))),
+    joinText,
     icon('next'),
   );
+  drawJoin();
   const region = picker('lobbies-region', 'globe', t('common.region'), () => menu.openRegionSheet());
-  /** The region's name for the empty line ("No public lobbies in South America"). */
-  const regionText = (): string => {
-    const r = menu.regionId;
-    return r !== null ? regionName(r) : menu.regionLabel;
-  };
   let refreshAt = 0;
   let loading = false;
   const row = (l: LobbySummary): HTMLElement => {
@@ -144,6 +156,7 @@ export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; t
       if (st === 'full') menu.toast(t('lobby.whyFull'), 'info');
       else if (st === 'inMatch') menu.toast(t('lobby.whyInMatch'), 'info');
       else if (guest) menu.toast(t('error.lobby.account_required'), 'error');
+      else if (tvRoomsLocked(menu)) menu.tvSignIn();
       else void joinFlow(menu, l.code, l.locked);
     };
     return h(
@@ -155,8 +168,16 @@ export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; t
       h('span.mn-lobby-state', null, slot(t(ROW_STATE[st]), { ink: st === 'open' })),
     );
   };
+  // The public list spans every region (the player's own first): no region in the empty line.
   const empty = (): HTMLElement =>
-    h('div.mn-lobbies-empty', null, h('p', null, t('lobby.empty', { region: regionText() })), secondary(t('lobby.createPrivate'), () => void createAndShare(menu), { 'data-key': 'lobby-create-private' }));
+    h(
+      'div.mn-lobbies-empty',
+      null,
+      h('p', null, t('lobby.empty')),
+      tvRoomsLocked(menu)
+        ? secondary(t('tvsign.tile'), () => menu.tvSignIn(), { 'data-key': 'lobby-create-public' })
+        : secondary(t('lobby.createPublic'), () => void createAndShare(menu, 'public'), { 'data-key': 'lobby-create-public' }),
+    );
   const load = async (): Promise<void> => {
     if (loading) return;
     loading = true;
@@ -184,6 +205,7 @@ export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; t
       setChildren(list, h('div.mn-empty', null, t('custom.loading')));
     },
     tick: (now) => {
+      drawJoin(); // a TV guest's check warmed (or a session came): the code again
       if (now < refreshAt) return;
       refreshAt = now + REFRESH_MS;
       void load();
@@ -193,13 +215,14 @@ export function lobbyBrowser(menu: Menu): { el: HTMLElement; show: () => void; t
 
 /**
  * The settings controls of the host's SETTINGS dialog (configureLobby). With `rules`, the
- * experimental rules row (P2P only: hidden, and the rules cleared, while the connection is Server).
+ * experimental rules row (lobbies are always P2P now: no connection row, the rules row always there
+ * for an unlocked host). A stored `net` other than P2P is sent back as P2P (the server reads it so).
  */
 function settingsControls(s: LobbySettings, rules: RulesControls | null = null): HTMLElement[] {
+  s.net = 'p2p';
   const current = lobbyRules(s.physics ?? null);
   const choices = rules !== null ? rulesChoices(rules.presets, current, rules.pick.id) : null;
   let rulesRow: HTMLElement | null = null;
-  let syncRules = (): void => undefined;
   if (rules !== null && choices !== null) {
     const kept = rules.pick.id !== null ? choices.find((c) => c.id === rules.pick.id) : undefined;
     let picked = (kept ?? choices.find((c) => sameRules(c.physics, current)) ?? choices[0]).id;
@@ -215,33 +238,17 @@ function settingsControls(s: LobbySettings, rules: RulesControls | null = null):
     note.hidden = s.physics === null;
     const edit = rules.onEdit !== null ? secondary(t('custom.editPresets'), rules.onEdit) : null;
     rulesRow = h('div.mn-rules', null, pick.el, note, edit);
-    syncRules = () => {
-      const p2p = s.net === 'p2p';
-      (rulesRow as HTMLElement).hidden = !p2p;
-      if (!p2p && s.physics !== null) {
-        s.physics = null;
-        picked = (choices.find((c) => c.physics === null) ?? choices[0]).id;
-        rules.pick.id = picked;
-        pick.refresh();
-        note.hidden = true;
-      }
-    };
-    syncRules();
   }
   return [
     cycler<Playlist>(t('custom.settingMode'), PLAYLISTS.map((p) => ({ value: p, label: p })), () => s.mode, (v) => (s.mode = v)).el,
     cycler<'public' | 'private'>(t('custom.settingVisibility'), [{ value: 'public', label: t('custom.visibilityPublicListed') }, { value: 'private', label: t('custom.visibilityPrivateCode') }], () => s.visibility, (v) => (s.visibility = v)).el,
-    cycler<'p2p' | 'server'>(t('custom.settingNet'), [{ value: 'p2p', label: t('custom.netP2pRecommended') }, { value: 'server', label: t('custom.netServer') }], () => s.net, (v) => {
-      s.net = v;
-      syncRules();
-    }).el,
     cycler<number>(t('custom.settingLength'), LOBBY_LENGTHS.map((l) => ({ value: l, label: lengthLabel(l) })), () => s.matchLengthSeconds, (v) => (s.matchLengthSeconds = v)).el,
     ...(rulesRow !== null ? [rulesRow] : []),
   ];
 }
 
 /**
- * The host's SETTINGS dialog (the Sala's "…"): name, format, visibility, connection, length, the
+ * The host's SETTINGS dialog (the Sala's "…"): name, format, visibility, length, the
  * experimental rules row for an unlocked player, the password. `kept`: the draft (typed name, picked
  * rules) to reopen with, back from EDIT PRESETS. A format change is remembered for the next lobby.
  * The name field shows the title as the Sala does (names.ts lobbyTitle) and is sent only when it
