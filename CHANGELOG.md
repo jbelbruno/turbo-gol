@@ -7,6 +7,14 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Full screen on the pitch: on a computer the game fills the screen when a match or a training
+  starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
+  tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
+  Esc is still the pause and holding Esc leaves full screen; a player who leaves is not taken back
+  until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
+  screen when playing" (on by default), turns it off, and Android's tap to full screen with it; the
+  row is not listed on an iPhone, an iPad or a TV. The replay viewer has a Full screen button and
+  the F key.
 - The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
   /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
   notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what

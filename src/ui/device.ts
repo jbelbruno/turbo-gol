@@ -193,7 +193,7 @@ export function reducesMotion(pref: MotionPref, system: boolean): boolean {
 }
 
 /** The interface settings in force (installDevice, applyUiSettings) and the layout's apply. */
-let uiNow: Readonly<UiSettings> = { size: 0, motion: 'system' };
+let uiNow: Readonly<Pick<UiSettings, 'size' | 'motion'>> = { size: 0, motion: 'system' };
 let relayout: (() => void) | null = null;
 /**
  * The system's prefers-reduced-motion, kept by its change event. Not read from the query each

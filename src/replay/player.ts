@@ -47,6 +47,7 @@ import {
 import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
+import { fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
 import { replayName } from './names';
 import { clockText, el } from './list';
 
@@ -319,9 +320,13 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const distSlider = el('input', { type: 'range', min: String(CHASE_MIN), max: String(CHASE_MAX), step: '10', 'aria-label': t('replay.distance') }) as HTMLInputElement;
   const chaseCtl = el('span.rp-ctl.rp-hidden', null, ballCamBtn, el('span.rp-ctl-label', null, t('replay.distance')), distSlider);
   const hint = el('span.rp-keys.rp-grow', null, '');
+  // Full screen by hand (its button, the F key), never by itself: the page loads with no press.
+  // Not where the page cannot go full screen (an iPhone).
+  const fullscreenBtn = el('button.rp-btn', { type: 'button', 'aria-pressed': 'false' }, t('replay.fullscreen')) as HTMLButtonElement;
+  document.addEventListener('fullscreenchange', () => fullscreenBtn.setAttribute('aria-pressed', String(document.fullscreenElement != null)));
   o.bar.replaceChildren(
     el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time),
-    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, list),
+    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
   );
   o.bar.classList.remove('rp-hidden');
 
@@ -430,6 +435,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   camSel.addEventListener('change', () => setCam(Number(camSel.value) || 0));
   prevGoalBtn.addEventListener('click', () => goalJump(-1));
   nextGoalBtn.addEventListener('click', () => goalJump(1));
+  fullscreenBtn.addEventListener('click', () => togglePageFullscreen());
   ballCamBtn.addEventListener('click', () => {
     chase.toggle();
     prefs.ballCam = chase.ballCam;
@@ -541,6 +547,9 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       goalJump(e.code === 'BracketLeft' ? -1 : 1);
     } else if (e.code === 'KeyB' && camIndex >= CAM_CAR0) {
       ballCamBtn.click();
+    } else if (e.code === 'KeyF') {
+      // In the keydown itself (its user activation). With the keyboard lock a short Esc still opens the menu.
+      togglePageFullscreen();
     } else if (/^Digit[0-9]$/.test(e.code)) {
       setCam(Number(e.code.slice(5)));
     }
