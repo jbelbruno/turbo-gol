@@ -572,6 +572,26 @@ test("Worker /api/config: botFillMs null (older pages hide their server countdow
   assert.equal(res.status, 200);
   const cfg = await res.json();
   assert.equal(cfg.botFillMs, null);
-  assert.deepEqual(cfg.queue, { soloAfterMs: Q.SOLO_AFTER_MS, widenMs: { casual: Q.CASUAL_WIDEN_MS, ranked: Q.RANKED_WIDEN_MS }, accountRequired: true });
-  assert.deepEqual(cfg.queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true });
+  assert.deepEqual(cfg.queue, { soloAfterMs: Q.SOLO_AFTER_MS, widenMs: { casual: Q.CASUAL_WIDEN_MS, ranked: Q.RANKED_WIDEN_MS }, accountRequired: true, botLevel: 'hard' });
+  assert.deepEqual(cfg.queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true, botLevel: 'hard' });
+});
+
+test("Worker /api/config: queue.botLevel is the KV flag bot_level's level (what a 5:00 solo match plays while its player picked none: MODOS shows it picked); unset, junk or an unreadable KV is hard", async () => {
+  for (const [stored, want] of [[null, 'hard'], ['easy', 'easy'], [' MEDIUM ', 'medium'], ['hard', 'hard'], ['expert', 'hard'], ['', 'hard'], ['throw', 'hard']]) {
+    const { env } = workerEnv({ status: 200, body: {} });
+    const reads = [];
+    env.FLAGS = {
+      get: async (name, opts) => {
+        reads.push([name, opts?.cacheTtl]);
+        if (stored === 'throw') throw new Error('kv down');
+        return name === 'bot_level' ? stored : null;
+      },
+    };
+    const res = await worker.fetch(new Request('http://127.0.0.1:8787/api/config'), env);
+    assert.equal(res.status, 200, String(stored));
+    const cfg = await res.json();
+    assert.equal(cfg.queue.botLevel, want, JSON.stringify(stored));
+    assert.equal(cfg.queue.soloAfterMs, 300_000, 'the clocks stay');
+    assert.deepEqual(reads.find(([n]) => n === 'bot_level'), ['bot_level', 60], 'edge-cached as every flag');
+  }
 });

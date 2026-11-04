@@ -125,6 +125,7 @@ import type { Outcome } from '../net/outcome';
 import type { RejoinRecord } from '../game/rejoinStore';
 import type { QueueWait } from '../net/queueWait';
 import { waitSheetStep } from './screens/searchModel';
+import { searchBots } from './screens/modesModel';
 import type { QueueTimes } from './screens/searchModel';
 import { openWaitSheet } from './screens/waitSheet';
 import { openTvSignIn } from './screens/tvSignIn';
@@ -681,8 +682,11 @@ export class Menu {
     this.prefs.lastQueue = req.kind;
     this.savePrefs();
     this.waitSheetDue = opts.sheet === true;
-    // Every Casual search (MODOS, Inicio's hero, PLAY AGAIN) carries the player's solo bots level.
-    this.host.search(req.kind === 'casual' ? { ...req, bots: this.prefs.casualBots } : req);
+    // Every Casual search (MODOS, Inicio's hero, PLAY AGAIN) carries the player's solo bots level
+    // once they picked one; until then none, so the KV flag bot_level (the server's level) plays it.
+    const { bots: _old, ...base } = req;
+    const bots = searchBots(req.kind, this.prefs.casualBots);
+    this.host.search(bots !== null ? { ...base, bots } : base);
     this.renderSearch(performance.now());
   }
 

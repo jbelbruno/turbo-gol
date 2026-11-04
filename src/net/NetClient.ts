@@ -18,7 +18,8 @@
  *                   November 2026: `api` is QUEUE_API, src/net/queueWait.ts, and a page without it
  *                   gets 426 reload_required; Casual is kind 'server' and pools every format, its
  *                   `prefer` the format of its online bots match and `bots` (queueBots) that
- *                   match's bots level; `local` says what the player does
+ *                   match's bots level once the player picked one (none: the server's, the KV
+ *                   flag bot_level); `local` says what the player does
  *                   locally meanwhile, for the daily counters; `visible` whether the tab is in
  *                   view, which gates the 5:00 bots match). Kind 'p2p' is never sent any more (read
  *                   as 'server'). The first answer of a search comes at once (`first: true` until
@@ -445,9 +446,11 @@ export interface ServerConfig {
   botFillMs?: number | null;
   /**
    * The queue's times (the modes redesign): Casual's online bots match after `soloAfterMs` alone,
-   * every region after `widenMs` of each kind. Absent from an older Worker (the menus' defaults then).
+   * every region after `widenMs` of each kind, and `botLevel`: the bots' level of that match while the
+   * player picked none (the KV flag bot_level; MODOS shows it picked). Absent from an older Worker
+   * (the menus' defaults then).
    */
-  queue?: { soloAfterMs: number; widenMs: { casual: number; ranked: number } };
+  queue?: { soloAfterMs: number; widenMs: { casual: number; ranked: number }; botLevel?: Difficulty };
   /** legal.terms: the terms version in force (src/net/terms.ts), absent until the owner publishes them (Inicio's links then: the legal draft's P12). */
   terms?: string;
 }
@@ -477,13 +480,14 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
   };
 }
 
-/** GET /api/config's `queue`: each time a positive number, else the hub's (300 s, 60 s, 120 s); null when there is no object. */
+/** GET /api/config's `queue`: each time a positive number, else the hub's (300 s, 60 s, 120 s), and botLevel only as one of the three levels; null when there is no object. */
 function queueTimesOf(v: unknown): ServerConfig['queue'] | null {
   if (typeof v !== 'object' || v === null) return null;
   const o = v as Record<string, unknown>;
   const ms = (x: unknown, d: number): number => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : d);
   const w = typeof o.widenMs === 'object' && o.widenMs !== null ? (o.widenMs as Record<string, unknown>) : {};
-  return { soloAfterMs: ms(o.soloAfterMs, 300_000), widenMs: { casual: ms(w.casual, 60_000), ranked: ms(w.ranked, 120_000) } };
+  const level = o.botLevel === 'easy' || o.botLevel === 'medium' || o.botLevel === 'hard' ? o.botLevel : null;
+  return { soloAfterMs: ms(o.soloAfterMs, 300_000), widenMs: { casual: ms(w.casual, 60_000), ranked: ms(w.ranked, 120_000) }, ...(level !== null ? { botLevel: level } : {}) };
 }
 
 // ---- Guest persistence ---------------------------------------------------------------------

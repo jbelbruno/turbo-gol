@@ -7,10 +7,11 @@
  * - CASUAL: FORMAT IF YOU PLAY BOTS, 1v1, 2v2 and 3v3 (Casual pools every format: with other
  *   people the format follows how many they are, as the note under the grid says); its pick is the
  *   search's `prefer` and, while Casual searches, changes the running search in place (no restart:
- *   MenuHost.setQueuePrefer); under it DIFFICULTY IF YOU PLAY BOTS (Easy, Normal, Hard: Hard until
- *   the player picks another, MenuPrefs.casualBots), the search's `bots` for that match alone (with
- *   other people the server picks the level), changed in place the same way (MenuHost.setQueueBots),
- *   and named in the 5:00 box. COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY, whose
+ *   MenuHost.setQueuePrefer); under it DIFFICULTY IF YOU PLAY BOTS (Easy, Normal, Hard: the server's
+ *   level, GET /api/config queue.botLevel, until the player picks one, MenuPrefs.casualBots; its label
+ *   hidden on a TV and the rail), the search's `bots` for that match alone once picked (with other
+ *   people the server picks the level), changed in place the same way (MenuHost.setQueueBots), and
+ *   named in the 5:00 box. COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY, whose
  *   pick restarts a running search, as its note says. A format's press picks it and searches (from
  *   Inicio a search of a chosen format is two presses). Then Region (the region sheet). Both always
  *   play on a server (the modes redesign, November 2026: no connection to pick). The action zone:
@@ -58,7 +59,7 @@ import { openStadiumPicker } from '../components/stadium';
 import { lobbyBrowser, tvRoomsLocked } from './custom';
 import { createAndShare } from './lobby';
 import { spacedCode } from './lobbyModel';
-import { FORMATS, MODE_TABS, actionKind, botsCountdown, botsSegments, formatOf, formatsOf, isModeTab, modesOf, stepTab } from './modesModel';
+import { FORMATS, MODE_TABS, actionKind, botsCountdown, botsSegments, formatOf, formatsOf, isModeTab, modesOf, shownBots, stepTab } from './modesModel';
 import type { ActionKind, Format, ModeTab } from './modesModel';
 import { answerRegion, waitLines } from './searchModel';
 import { estimateText, overrideText, peopleText, reachText } from './searchText';
@@ -142,9 +143,11 @@ export function modesScreen(menu: Menu): Screen {
   const noteText = h('span');
   const note = h('p.mn-modes-note', { hidden: true }, icon('info'), noteText);
   const formatLabel = h('span.mn-modes-label');
-  // Casual: the bots' level of its bots match (the player's; with other people the server picks it).
+  // Casual: the bots' level of its bots match (the player's once picked, else the server's, picked as
+  // the seg's value; with other people the server picks it).
+  const botsLevel = (): Difficulty => shownBots(menu.prefs.casualBots, menu.cfg?.queue?.botLevel);
   const botsLabel = h('span.mn-modes-label.mn-modes-bots-label', { hidden: true }, t('modes.botsPrefer'));
-  const botsSeg = seg<Difficulty>('casual-bots', t('modes.botsPrefer'), DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d) })), () => menu.prefs.casualBots, (v) => pickBots(v));
+  const botsSeg = seg<Difficulty>('casual-bots', t('modes.botsPrefer'), DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d) })), () => botsLevel(), (v) => pickBots(v));
   botsSeg.el.classList.add('mn-modes-bots');
   botsSeg.el.hidden = true;
   const region = picker('modes-region', 'globe', t('common.region'), () => menu.openRegionSheet());
@@ -182,7 +185,7 @@ export function modesScreen(menu: Menu): Screen {
   const sWarn = h('div.mn-act-est.mn-act-warn', { hidden: true });
   const botsTime = h('b.mn-act-bots-time');
   const botsBar = h('span.mn-act-bar', { 'aria-hidden': 'true' }, ...Array.from({ length: SEGMENTS }, () => h('span')));
-  // "Bots (Hard) join in 4:32": the level the player picked for that match (MenuPrefs.casualBots).
+  // "Bots (Hard) join in 4:32": the level that match plays (the player's pick, else the server's: botsLevel).
   const botsText = h('span');
   const bots = h('div.mn-act-bots', { hidden: true }, h('div.mn-act-bots-row', null, icon('bot'), botsText, botsTime), botsBar, h('p.mn-act-always', null, t('search.always')));
   const cancel = h(
@@ -449,7 +452,7 @@ export function modesScreen(menu: Menu): Screen {
       const left = botsCountdown({ kind, since: v.since, now, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, soloAfterMs: menu.cfg?.queue?.soloAfterMs });
       setHidden(bots, left === null);
       if (left !== null) {
-        setText(botsText, t('search.botsLevel', { level: difficultyName(menu.prefs.casualBots) }));
+        setText(botsText, t('search.botsLevel', { level: difficultyName(botsLevel()) }));
         setText(botsTime, clock(left.left + 999));
         const on = botsSegments(left.left, left.total, SEGMENTS);
         botsBar.childNodes.forEach((n, i) => (n as HTMLElement).classList.toggle('on', i < on));

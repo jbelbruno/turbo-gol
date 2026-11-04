@@ -2,14 +2,16 @@
  * MODOS' decisions, pure (no DOM, no texts: tests/modes.test.mjs): its four tabs and their order,
  * the formats a search is named by (1v1, 2v2, 3v3 or any of them, never "pairs"; Casual picks one,
  * the format of its online bots match: it pools every format), the 5:00 "bots join in" countdown
- * (Casual only), the threshold under which a count is not shown, and what the action zone offers on
- * each tab. src/ui/screens/modes.ts puts them on the page.
+ * (Casual only) and the level of those bots (the player's once picked, else the server's), the
+ * threshold under which a count is not shown, and what the action zone offers on each tab.
+ * src/ui/screens/modes.ts puts them on the page.
  *
  * Since the modes redesign (November 2026) Casual and Competitive need an account and always play
  * on a server: the connection picked under Advanced (auto, P2P, server) is gone.
  */
 import type { GameMode } from '../../sim/constants';
 import type { QueueWait } from '../../net/queueWait';
+import type { Difficulty } from '../../ai/Bot';
 
 /** The vertical tabs, in their order on every device. */
 export type ModeTab = 'casual' | 'ranked' | 'lobbies' | 'ai';
@@ -78,6 +80,27 @@ export function botsCountdown(b: BotsInput): { left: number; total: number } | n
   if (w !== null && w.busy) return null;
   const left = w !== null && typeof w.botsInMs === 'number' ? w.botsInMs - Math.max(0, b.now - b.waitAt) : total - Math.max(0, b.now - b.since);
   return left > 0 ? { left: Math.min(left, total), total } : null;
+}
+
+/** The bots' level of Casual's 5:00 solo match when nothing says one (the Worker's CASUAL_BOT_LEVEL: an unset KV bot_level). */
+export const SERVER_BOTS_DEFAULT: Difficulty = 'hard';
+
+/**
+ * The search's `bots` (POST /api/queue): Casual's own level only once the player picked one
+ * (MenuPrefs.casualBots); none before, so the KV flag bot_level (the server's level) sets that
+ * match, and never for Competitive. Pure.
+ */
+export function searchBots(kind: 'casual' | 'ranked', picked: Difficulty | null): Difficulty | null {
+  return kind === 'casual' ? picked : null;
+}
+
+/**
+ * The level DIFFICULTY IF YOU PLAY BOTS shows picked and the 5:00 box names: the player's pick, else
+ * the server's (GET /api/config queue.botLevel, the KV flag bot_level), else SERVER_BOTS_DEFAULT
+ * (an older Worker, or no config yet). Pure.
+ */
+export function shownBots(picked: Difficulty | null, server: Difficulty | undefined): Difficulty {
+  return picked ?? server ?? SERVER_BOTS_DEFAULT;
 }
 
 /** How many of `segments` the countdown's bar fills (the time left, rounded up). */

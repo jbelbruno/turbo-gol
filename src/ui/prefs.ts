@@ -2,7 +2,8 @@
  * The menus' own preferences, in localStorage `turbogol.menu.v1` (Menu.ts loads and saves them):
  * the region, Casual's preferred format (the format of its online bots match; Casual pools every
  * format, so with other people searching the format follows how many they are) and that match's
- * bots level (hard unless the player picks another; other people's matches play the server's), the playlists
+ * bots level (none until the player picks one: the server's level, the KV flag bot_level, sets it
+ * then; other people's matches always play the server's), the playlists
  * picked for Competitive, the leaderboard's playlist, the kind of the last search started
  * anywhere, which JUGAR AHORA plays again in one press (screens/homeModel.ts heroQueue), the format
  * of the last lobby the player had (CREATE PUBLIC / PRIVATE LOBBY's: screens/lobbyModel.ts
@@ -26,8 +27,12 @@ export interface MenuPrefs {
   region: RegionId | null;
   /** Casual's format when it plays bots online (the 5-minute match), and its search's `prefer`. */
   casualPrefer: GameMode;
-  /** The bots' level of that match (the search's `bots`); a match with other people plays the server's level. */
-  casualBots: Difficulty;
+  /**
+   * The bots' level of that match the player picked (the search's `bots`); null until they pick one:
+   * the search sends none and the server's level (the KV flag bot_level) plays. A match with other
+   * people always plays the server's level.
+   */
+  casualBots: Difficulty | null;
   rankedModes: GameMode[];
   leaderboardPlaylist: GameMode;
   /** The kind of the last search started anywhere (hero, Casual, Competitive): what JUGAR AHORA repeats. */
@@ -41,8 +46,8 @@ export interface MenuPrefs {
 /** The same key as before: an older object reads with these defaults for what it lacks, no migration step. */
 export const PREFS_KEY = STORAGE_PREFIX + 'menu.v1';
 
-/** A first visit: Casual preferring 2v2 against hard bots in the automatic region (the connection's continent), bots while waiting. */
-export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualPrefer: '2v2', casualBots: 'hard', rankedModes: ['2v2'], leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' };
+/** A first visit: Casual preferring 2v2 against the server's bots level in the automatic region (the connection's continent), bots while waiting. */
+export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualPrefer: '2v2', casualBots: null, rankedModes: ['2v2'], leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' };
 
 const isMode = (v: unknown): v is GameMode => v === '1v1' || v === '2v2' || v === '3v3';
 const isLevel = (v: unknown): v is Difficulty => v === 'easy' || v === 'medium' || v === 'hard';
@@ -66,7 +71,7 @@ export function parsePrefs(raw: string | null): MenuPrefs {
   return {
     region: isRegion(o.region) ? o.region : null,
     casualPrefer: prefer,
-    casualBots: isLevel(o.casualBots) ? o.casualBots : d.casualBots,
+    casualBots: isLevel(o.casualBots) ? o.casualBots : null,
     rankedModes: modes(o.rankedModes) ?? d.rankedModes,
     leaderboardPlaylist: o.leaderboardPlaylist === '1v1' || o.leaderboardPlaylist === '3v3' ? o.leaderboardPlaylist : '2v2',
     lastQueue: o.lastQueue === 'ranked' ? 'ranked' : 'casual',
