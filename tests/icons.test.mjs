@@ -25,7 +25,7 @@ test('every icon is one path on the 24 grid, with a symbol of its own', () => {
   assert.equal(new Set(ICON_NAMES.map(iconId)).size, ICON_NAMES.length);
 });
 
-// The top bar's gear: the owner read the old circle of rays as odd (a sun); a cog says Settings.
+// The top bar's gear: the owner found the old circle of rays odd (it read as a sun); a cog says Settings.
 test('settings is a cog: one closed outline of eight teeth round a hole', () => {
   const d = ICON_PATHS.settings;
   const subpaths = d.split('M').filter(Boolean);
