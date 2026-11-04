@@ -97,7 +97,7 @@ html.tg-tv .mn-tiles[data-role='guest'] .mn-mtile-ranked {
   display: none;
 }
 
-.mn-home-next + .mn-tiles {
+.mn-home-next:not([hidden]) + .mn-tiles {
   margin-top: 0;
 }
 
@@ -131,6 +131,7 @@ html.tg-tv .mn-tiles[data-role='guest'] .mn-mtile-ranked {
 }
 
 .mn-home-next-x {
+  align-self: stretch;
   min-width: 2.75rem;
   padding: 0;
 }

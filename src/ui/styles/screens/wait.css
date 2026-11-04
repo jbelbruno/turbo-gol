@@ -66,7 +66,7 @@ html[data-shell='tv'] .mn-act-est {
 .hud-search {
   position: absolute;
   z-index: var(--z-score);
-  top: calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 8px);
+  top: calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 14px);
   left: calc(var(--safe-left) + clamp(12px, 2.2vw, 36px));
   max-width: calc(100vw - 32px);
   padding: 4px 12px;
