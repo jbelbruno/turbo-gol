@@ -422,6 +422,7 @@ export default {
   'lobby.waitLine': 'Mientras esperas a que entre alguien:',
   'lobby.joinedBack': '{name} entró a tu sala',
   'lobby.hudWaiting': 'Sala {code} · esperando jugadores',
+  'lobby.hudBack': 'Pausa: volver a la sala',
 
   'lost.title': 'Se cortó tu conexión',
   'lost.body': 'El partido sigue sin ti',
