@@ -200,7 +200,8 @@ test("the Game's round-2 wiring: no search over a busy other session, the sheet 
   assert.match(menu, /waitPlayStarted\(\): void \{\s*this\.waitSheetDue = false;/);
   assert.match(menu, /const step = waitSheetStep\(\{/, "Menu's rule is searchModel.ts' (tests/search-model.test.mjs)");
   // The clock: the menus' and the HUD's from the server's waitedMs once it came.
-  assert.match(method(game, 'private searchClock(): number {'), /return searchStart\(this\.searchSince, online\?\.wait \?\? null, online\?\.waitAt \?\? 0\);/);
+  // Final review: a search still at the terms sheet or the sign-in (no POST yet) shows 0:00, then counts from its first POST.
+  assert.match(method(game, 'private searchClock(): number {'), /const queueing = online !== null && online\.state === 'queue';\s*return searchStart\(this\.searchSince, online\?\.wait \?\? null, online\?\.waitAt \?\? 0, online\?\.postedAt \?\? 0, queueing \? performance\.now\(\) : this\.searchSince\);/);
   assert.match(method(game, 'private menuSearchView(): SearchView {'), /since: this\.searchClock\(\),/);
   assert.match(method(game, 'private waitHudText(): { text: string | null; warn: boolean } {'), /since: this\.searchClock\(\)/);
   assert.match(method(game, 'private menuSearchView(): SearchView {'), /queueing: online !== null && online\.state === 'queue',\s*postedAt: online\?\.postedAt \?\? 0,\s*waitRegion: online\?\.waitRegion \?\? null,/);

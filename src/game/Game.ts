@@ -1598,12 +1598,14 @@ export class Game implements P2PGameHooks {
 
   /**
    * When the running search started, for its every clock (the menus', the HUD's): the server's once
-   * an answer said it (searchModel.ts searchStart: `waitedMs`, a restored search's too), else the
-   * local start.
+   * an answer said it (searchModel.ts searchStart: `waitedMs`, a restored search's too), else when
+   * its first POST left; a search queueing before that POST (the terms sheet, the sign-in) stands at
+   * 0:00. A rejoin connecting counts from its press, as before.
    */
   private searchClock(): number {
     const online = this.online !== null && this.session === this.online ? this.online : null;
-    return searchStart(this.searchSince, online?.wait ?? null, online?.waitAt ?? 0);
+    const queueing = online !== null && online.state === 'queue';
+    return searchStart(this.searchSince, online?.wait ?? null, online?.waitAt ?? 0, online?.postedAt ?? 0, queueing ? performance.now() : this.searchSince);
   }
 
   /** A menu search is queueing (not yet matched): local play keeps it (wait play). */
