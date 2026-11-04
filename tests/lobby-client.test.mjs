@@ -119,7 +119,9 @@ test('a dropped socket joins again by code (same password), quietly: reconnectin
   await tick(10);
   const again = h.calls.filter((c) => c.url === '/api/lobbies/join');
   assert.equal(again.length, 2);
-  assert.deepEqual(again[1].body, { code: 'ABC234', password: 'pw' });
+  // Every join carries the client-version marker (QUEUE_API: a page from before the modes redesign gets 426).
+  assert.deepEqual(again[0].body, { api: 2, code: 'ABC234', password: 'pw' });
+  assert.deepEqual(again[1].body, { api: 2, code: 'ABC234', password: 'pw' });
   assert.equal(h.sockets.length, 2);
   h.sockets[1].open();
   assert.equal(h.lc.status, 'open');

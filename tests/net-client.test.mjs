@@ -321,6 +321,10 @@ test('config: GET /api/config is fetched once per client and cached; a failure i
   // The server queue's bot fill (MODOS' countdown): a positive number of ms, else none.
   assert.equal(parseServerConfig({ botFillMs: 10_000 }).botFillMs, 10_000);
   for (const bad of [0, -1, '10000', Infinity, null]) assert.equal(parseServerConfig({ botFillMs: bad }).botFillMs, null, String(bad));
+  // The queue's times (the modes redesign): only with the object; a bad time takes the hub's.
+  assert.equal(parseServerConfig({}).queue, undefined);
+  assert.deepEqual(parseServerConfig({ queue: { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true } }).queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 } });
+  assert.deepEqual(parseServerConfig({ queue: { soloAfterMs: -1, widenMs: 'x' } }).queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 } });
   assert.deepEqual(parseServerConfig({ autoRegion: 'SA', oauth: ['google', 3] }).oauth, ['google'], 'accounts: providers kept, junk dropped');
   assert.equal(parseServerConfig(null), null);
   // A server without the route (404) means no Turnstile; the answer is cached like any other.
@@ -686,7 +690,8 @@ test('queue: a P2P queue refused by our SERVER match (409 kind server) never rej
   assert.equal(h.client.leaves, 1);
   const order = h.calls.map((c) => c.url).filter((u) => u !== '/api/config' && u !== '/api/guest');
   assert.deepEqual(order, ['/api/queue', '/api/leave', '/api/queue'], 'leave between the two queue calls, no rejoin');
-  assert.deepEqual(h.calls.filter((c) => c.url === '/api/queue').map((c) => c.body.kind), ['p2p', 'p2p'], 'the retry is still a P2P queue');
+  // The P2P queue is gone (the modes redesign): the wire never says 'p2p', the server reads a server queue.
+  assert.deepEqual(h.calls.filter((c) => c.url === '/api/queue').map((c) => c.body.kind), ['server', 'server'], 'never p2p on the wire');
 
   // An old server that keeps the lock: the second 409 fails with the reason, retried once only.
   const stuck = makeClient({
@@ -861,15 +866,16 @@ test('NetError carries the server code (serverCode) and retryAfterMs; recovery b
     '/api/queue': () => jsonResponse(429, { error: 'no_show', message: '3 room tickets taken without opening the room socket', retryAfterMs: 299_400.5 }),
   });
   await assert.rejects(ns.client.queue('1v1', 'p2p'), (err) => err instanceof NetError && err.status === 429 && err.serverCode === 'no_show' && err.retryAfterMs === 299_401 && /429 no_show: 3 room tickets/.test(err.message));
-  // A p2p queue states this page's P2P protocol; a server queue does not.
+  // No P2P protocol any more: every queue states the client-version marker (QUEUE_API) instead, and never 'p2p'.
   const body = ns.calls.find((c) => c.url === '/api/queue').body;
-  assert.deepEqual(body, { mode: '1v1', kind: 'p2p', p2pProtocol: P2.P2P_PROTOCOL_VERSION });
+  assert.equal(P2.P2P_PROTOCOL_VERSION > 0, true);
+  assert.deepEqual(body, { api: 2, mode: '1v1', kind: 'server', visible: true });
   const sv = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => jsonResponse(426, { error: 'reload_required', message: 'reload the page' }) });
   await assert.rejects(sv.client.queue('1v1', 'server'), (err) => err instanceof NetError && err.serverCode === 'reload_required' && err.retryAfterMs === 0);
-  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { mode: '1v1', kind: 'server' });
-  // A body without a code (or not JSON): serverCode ''.
-  const plain = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => ({ ok: false, status: 502, json: async () => { throw new Error('html'); } }) });
-  await assert.rejects(plain.client.queue('1v1'), (err) => err instanceof NetError && err.status === 502 && err.serverCode === '' && err.message === 'queue failed (502)');
+  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { api: 2, mode: '1v1', kind: 'server', visible: true });
+  // A body without a code (or not JSON): serverCode '' (a 4xx ends the search; a 502 is tried again: net-hardening).
+  const plain = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => ({ ok: false, status: 400, json: async () => { throw new Error('html'); } }) });
+  await assert.rejects(plain.client.queue('1v1'), (err) => err instanceof NetError && err.status === 400 && err.serverCode === '' && err.message === 'queue failed (400)');
   // 410 whose MESSAGE mentions p2p_room but whose code is another: no /api/leave (the old regex would have left).
   let q = 0;
   const h = makeClient({
