@@ -7,6 +7,12 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
+  /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
+  notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
+  pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
+  version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
+  the maintainer can delete one on request with a certificate (docs/legal/README.md).
 - Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
   without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
   link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a

@@ -292,7 +292,7 @@ test('the guest sheet: nothing while unpublished; else "Before you play", the no
     assert.equal(menu.spec.title, 'Before you play');
     const notice = menu.sheet.all().find((e) => e.className.includes('mn-legal-notice'));
     assert.equal(notice.getAttribute('data-terms'), 'v2');
-    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and that your data is stored in the United States and Brazil. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the Privacy policy.');
+    assert.equal(notice.textContent, 'By pressing "PLAY AS GUEST" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the Privacy policy.');
     assert.deepEqual(links(notice), [['/terms', 'Terms'], ['/privacy', 'Privacy policy']]);
     assert.ok(notice.all().filter((e) => e.tagName === 'A').every((a) => a.target === '_blank' && a.rel === 'noopener' && a.getAttribute('data-nav') === ''), 'a new tab, reachable with the arrows');
     const play = button(menu, 'PLAY AS GUEST');
@@ -356,7 +356,7 @@ test('the re-accept sheet: an account whose /api/me terms is the version in forc
     await settle();
     assert.equal(menu.spec.title, 'The terms have changed');
     assert.ok(menu.sheet.textContent.includes(en['legal.changedNote'] + ' ' + en['legal.orDelete']));
-    assert.ok(menu.sheet.textContent.includes('By pressing "ACCEPT AND PLAY" you accept the Terms and that your data is stored in the United States and Brazil.'));
+    assert.ok(menu.sheet.textContent.includes('By pressing "ACCEPT AND PLAY" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is.'));
     fail = new AC.AccountError('Los términos cambiaron', 409, 'terms_changed');
     button(menu, 'ACCEPT AND PLAY').click();
     await settle();
@@ -396,7 +396,7 @@ test('the notice above CREATE ACCOUNT (PERFIL\'s sign-up and the mailed link\'s 
     await settle();
     assert.equal(lit.el.hidden, false);
     assert.equal(lit.version(), 'v2');
-    assert.ok(lit.el.textContent.startsWith('By pressing "CREATE ACCOUNT" you accept the Terms and that your data is stored in the United States and Brazil.'));
+    assert.ok(lit.el.textContent.startsWith('By pressing "CREATE ACCOUNT" you accept the Terms and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is.'));
     assert.deepEqual(links(lit.el), [['/terms', 'Terms'], ['/privacy', 'Privacy policy']]);
     // On a TV a link stays in this tab.
     document.documentElement.classList.add('tg-tv');
@@ -493,8 +493,8 @@ test('the copy, in both languages (Spanish with tú, D31\'s notice as the lawyer
   // The notice is also the express consent to the transfers the privacy policy's section 5 relies on
   // (Argentina: Decreto 1558/2001, art. 12): the press accepts that the data is kept in the United
   // States and Brazil, so both countries are named in the sentence the button's label is in.
-  assert.equal(es['legal.notice'], 'Al tocar «{button}» aceptas los {terms} y que tus datos se guarden en Estados Unidos y Brasil. Usamos tu dirección IP y los datos de la partida, y en partidas P2P los demás jugadores pueden ver tu IP. Lee la {privacy}.');
-  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and that your data is stored in the United States and Brazil. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.');
+  assert.equal(es['legal.notice'], 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos y Brasil. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en partidas P2P los demás jugadores pueden ver tu IP. Lee la {privacy}.');
+  assert.equal(en['legal.notice'], 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States and Brazil. Turbogol is free and offered as is. We use your IP address and the match data, and in P2P matches the other players can see your IP. Read the {privacy}.');
   // After a change, the account accepts the Terms of use (the privacy policy is informed, not accepted).
   assert.equal(es['legal.changedNote'], 'Hay una versión nueva de los Términos de uso y de la Política de privacidad. Para seguir jugando online con tu cuenta, acepta los Términos de uso.');
   assert.equal(en['legal.changedNote'], 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept the Terms of use.');

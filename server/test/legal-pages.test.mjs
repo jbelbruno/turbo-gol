@@ -401,12 +401,17 @@ test('P12: GET /api/config says what is published: legal.terms (null until TERMS
   for (const [v, want] of [[undefined, null], ['', null], [' V1 ', 'v1'], ['2026-12-01', '2026-12-01'], ['a b', null], ['x'.repeat(33), null]]) assert.equal(ENV.termsVersion({ TERMS_VERSION: v }), want, JSON.stringify(v));
 });
 
-test('P12: production stays dark: wrangler.jsonc routes the four paths to the Worker first, bundles docs/legal/*.md as text, and keeps TERMS_VERSION empty and DELETION_OPEN "0"; the four texts are there', () => {
+test('P12: production is published: wrangler.jsonc routes the four paths to the Worker first, bundles docs/legal/*.md as text, sets TERMS_VERSION to the version in the four texts\' headers and opens DELETION_OPEN; no text keeps a [[token]] or a draft mark', () => {
   const raw = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const cfg = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, ''));
   for (const p of Object.keys(PAGES)) assert.ok(cfg.assets.run_worker_first.includes(p), p);
   assert.ok(cfg.rules.some((r) => r.type === 'Text' && r.globs.includes('**/*.md')));
-  assert.equal(cfg.vars.TERMS_VERSION, '', 'unpublished');
-  assert.equal(cfg.vars.DELETION_OPEN, '0', 'closed');
-  for (const [file] of Object.values(PAGES)) assert.match(readFileSync(new URL(file, DOCS), 'utf8'), /^# .+\n\n> \*\*/, file);
+  const version = cfg.vars.TERMS_VERSION;
+  assert.match(version, /^[a-z0-9._-]{1,32}$/, 'published');
+  assert.equal(cfg.vars.DELETION_OPEN, '1', 'open with the terms');
+  for (const [file] of Object.values(PAGES)) {
+    const text = readFileSync(new URL(file, DOCS), 'utf8');
+    assert.match(text, new RegExp('^# .+\\n\\nVersi(?:ón|on) ' + version.replace(/\./g, '\\.') + '\\. '), file + ': the header says the version in force');
+    assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, file + ': no token or draft mark left');
+  }
 });

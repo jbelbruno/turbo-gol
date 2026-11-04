@@ -343,9 +343,9 @@ test('deletion: closed until the terms of service (DELETION_OPEN, "0" in wrangle
   const c = await post(env, '/api/auth/delete/cancel', { ip: ip(0), body: { token: linkIn(outbox.at(-1), 'keep') } });
   assert.equal(c.status, 200, JSON.stringify(c.json));
   assert.equal(row(obj, a.id).delete_purge_at, 0);
-  // The switch: only '1' opens it, and the committed wrangler.jsonc keeps production closed.
+  // The switch: only '1' opens it, and the committed wrangler.jsonc opens it with the terms (2026-11-04).
   for (const v of [undefined, '', '0', 'true', 1, ' 1 ', '1']) assert.equal(ENV.deletionOpen({ DELETION_OPEN: v }), v === '1' || v === ' 1 ' || v === 1, String(v));
-  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /\n\s*"DELETION_OPEN": "0"\s*\n/, 'production keeps it closed');
+  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /\n\s*"DELETION_OPEN": "1"\s*\n/, 'production is open with the terms');
 });
 
 test("deletion: M9 counts in the account's own caps (§2.16: 5 notices a day, 10 /api/me/* mails), taken before anything changes; a loop of requests and cancels with one Bearer stops at the 6th, and the day's notice lane stays for everyone else", async () => {
