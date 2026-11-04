@@ -1605,13 +1605,26 @@ test('retire: only a node offline, or drained with no open match; its socket clo
   assert.equal(back.obj.cp.registry.node(node.nodeId).retiredReason, 'moved to a new machine');
 });
 
-test('status guards: active for a node that is not trusted needs { force: true, reason }; a pending node is never set in service; a ban needs a reason; a trusted banned node leaves its ban only into a free slot', async () => {
+test('status guards: active for a node that is not trusted needs { force: true, reason }; a host never proven reachable is never set in service, through a ban either; a ban needs a reason; a trusted banned node leaves its ban only into a free slot', async () => {
   const h = await boot(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }));
   const juan = await communityNode(h);
   const run = (body) => call(h, 'POST', '/nodes/admin/status', { body: { nodeId: juan.nodeId, ...body }, headers: ADMIN });
-  for (const status of ['probation', 'active']) assert.deepEqual([(await run({ status })).status, (await run({ status })).json.error], [409, 'not_reachable'], status);
+  const unproven = async (what) => {
+    for (const status of ['probation', 'active']) {
+      const r = await run({ status, force: true, reason: 'step' });
+      assert.deepEqual([r.status, r.json.error], [409, 'not_reachable'], `${what} -> ${status}`);
+    }
+  };
+  await unproven('pending');
+  // Its probe never passed, whatever status it leaves: a ban, or a suspension, skips nothing.
+  assert.equal((await run({ status: 'banned', reason: 'step' })).json.status, 'banned');
+  await unproven('banned');
+  assert.equal((await run({ status: 'suspended', reason: 'it may log in and be probed' })).json.status, 'suspended');
+  await unproven('suspended');
+  // Proven (its probe passed while suspended): in service again.
   h.obj.cp.registry.markReachable(juan.nodeId, clock);
-  assert.equal(h.obj.cp.registry.node(juan.nodeId).status, 'probation');
+  assert.equal(h.obj.cp.registry.node(juan.nodeId).status, 'suspended', 'the probe moves only a pending node');
+  assert.equal((await run({ status: 'probation' })).json.status, 'probation');
   assert.deepEqual((await run({ status: 'active' })).json.error, 'force_required');
   assert.deepEqual((await run({ status: 'active', force: true })).json.error, 'force_required', 'a forced one needs its reason');
   assert.deepEqual((await run({ status: 'active', reason: 'trust me' })).json.error, 'force_required');
@@ -1638,6 +1651,9 @@ test('status guards: active for a node that is not trusted needs { force: true, 
     assert.deepEqual([r.status, r.json.error], [409, 'too_many_nodes'], status);
   }
   assert.deepEqual([h.obj.cp.registry.node(t1.nodeId).status, h.obj.cp.registry.slots(PROJECT)], ['banned', { used: 2, max: 2 }], 'never past the cap');
+  // A trusted host never proven reachable (t3: pending) skips its probe through a ban neither.
+  assert.equal((await set(t3.nodeId, { status: 'banned', reason: 'step' })).json.status, 'banned');
+  assert.deepEqual((await set(t3.nodeId, { status: 'active' })).json.error, 'not_reachable');
   // A slot free (t3 retired: it never connected): the same unban goes through.
   assert.equal((await call(h, 'POST', '/nodes/admin/retire', { body: { nodeId: t3.nodeId, reason: 'test' }, headers: ADMIN })).status, 200);
   const back = await set(t1.nodeId, { status: 'active', reason: 'unban' });

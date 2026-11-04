@@ -1496,8 +1496,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * POST /nodes/admin/status { nodeId, status, reason?, force? }: ControlPlane.setStatus, and the node
    * is told. A trusted node set to suspended or banned is out of service: no matches, no offline
    * ALERT. Set back in service while offline, its outage is a new one: the alarm runs for its ALERT.
-   * Refused first: a retired node (409 retired); probation or active for a node never proven
-   * reachable (409 not_reachable: it moves on by itself when its probe passes); active for a node
+   * Refused first: a retired node (409 retired); probation or active for a node out of service and
+   * never proven reachable, a pending one or one banned or suspended before its probe passed (409
+   * not_reachable: a pending one moves on by itself when its probe passes); active for a node
    * that is not trusted, one that lost its trust included, without { force: true, reason } (409
    * force_required: it skips its 20 verified matches); a ban without a reason (400 reason_required);
    * a trusted operator's banned node out of its ban while the operator has every node it may have
@@ -1507,7 +1508,14 @@ export class NodeRegistryDO extends DurableObject<Env> {
     if (!ADMIN_STATUSES.includes(status as NodeStatus)) return error(400, 'bad_status', `status: ${ADMIN_STATUSES.join(', ')}`);
     const to = status as NodeStatus;
     if (isRetired(n)) return error(409, 'retired', 'a retired node keeps its status');
-    if ((to === 'probation' || to === 'active') && n.status === 'pending') return error(409, 'not_reachable', 'the node is not proven reachable yet: it leaves pending by itself once its probe passes');
+    // Into service only once its probe passed, whatever status it leaves: a ban or a suspension first
+    // must not skip it. A host that is in service already was proven once (it lost reachableAt only
+    // by failing its re-probes or by moving), so it may still change between probation and active.
+    const inService = (s: NodeStatus) => s === 'probation' || s === 'active';
+    const unproven = n.status === 'pending' || (n.roles.includes('host') && n.reachableAt === null);
+    if (inService(to) && !inService(n.status) && unproven) {
+      return error(409, 'not_reachable', 'the node is not proven reachable: a pending one moves on by itself once its probe passes, a banned one is never probed (suspended, it may log in and be probed)');
+    }
     const forced = to === 'active' && !n.trusted && n.status !== 'active';
     if (forced && !(force && reason)) return error(409, 'force_required', 'a node that is not trusted earns active with its verified matches: { force: true, reason } skips them');
     if (to === 'banned' && !reason) return error(400, 'reason_required', 'reason: why the node is banned');
