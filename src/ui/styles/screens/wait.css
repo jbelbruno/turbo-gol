@@ -94,8 +94,10 @@ html[data-shell='tv'] .mn-wait-text b {
   font-size: var(--t-heading);
 }
 
-/* SALAS' CREATE PRIVATE LOBBY on a TV: in the type scale too, a step below CREATE PUBLIC LOBBY. */
-html[data-shell='tv'] .mn-act-go2 {
+/* SALAS' CREATE PRIVATE LOBBY on a TV: in the type scale too, a step below CREATE PUBLIC LOBBY; and
+   the empty list's CREATE PUBLIC LOBBY (a .mn-btn's 15 px too, __uiFit's smallText). */
+html[data-shell='tv'] .mn-act-go2,
+html[data-shell='tv'] .mn-lobbies-empty .mn-btn {
   font-size: var(--t-body);
 }
 

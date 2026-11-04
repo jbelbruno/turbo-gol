@@ -130,7 +130,7 @@ test("final review: a TV's wait choices name themselves in the buttons' size, CR
   const wait = await srcText('../src/ui/styles/screens/wait.css');
   // A TV: CONTRA BOTS 15 px under its 36 px line; now the buttons' --t-heading (40 px there).
   assert.match(wait, /html\[data-shell='tv'\] \.mn-wait-text b \{\s*font-size: var\(--t-heading\);/);
-  assert.match(wait, /html\[data-shell='tv'\] \.mn-act-go2 \{\s*font-size: var\(--t-body\);/, '__uiFit flagged it at 15 px');
+  assert.match(wait, /html\[data-shell='tv'\] \.mn-act-go2,\s*html\[data-shell='tv'\] \.mn-lobbies-empty \.mn-btn \{\s*font-size: var\(--t-body\);/, '__uiFit flagged both at 15 px');
 });
 
 test("final review: a computer's toasts sit in the hint bar's band, off a screen's last row", async () => {
