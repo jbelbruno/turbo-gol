@@ -1,6 +1,7 @@
-// MODOS' decisions (src/ui/screens/modesModel.ts, plan PR 6): the tabs' order and stepping, formats
-// <-> playlists, the connection's queue, the "bots join in" countdown only where it is true, the
-// counts' threshold and the action zone per tab.
+// MODOS' decisions (src/ui/screens/modesModel.ts, plan PR 6; the modes redesign, November 2026): the
+// tabs' order and stepping, formats <-> playlists (Casual's one preferred format, no connection any
+// more), the 5:00 countdown to Casual's online bots match from the search's answer, the counts'
+// threshold and the action zone per tab (Casual signs a guest in).
 // Run: node --test tests/modes.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,21 +29,30 @@ test('formats: one playlist is itself, any is the three; an older pick of two re
   assert.equal(M.modesOf('any').length, 3, 'a fresh list each time');
 });
 
-test('the connection: auto and P2P join the P2P queue, Server the server one', () => {
-  assert.deepEqual(M.NET_PICKS, ['auto', 'p2p', 'server']);
-  assert.equal(M.queueNet('auto'), 'p2p');
-  assert.equal(M.queueNet('p2p'), 'p2p');
-  assert.equal(M.queueNet('server'), 'server');
+test('no connection to pick any more (Casual and Competitive always on a server); Casual picks one format, no ANY', () => {
+  assert.equal('NET_PICKS' in M, false);
+  assert.equal('queueNet' in M, false);
+  assert.deepEqual(M.PREFER_FORMATS, ['1v1', '2v2', '3v3']);
+  assert.deepEqual(M.formatsOf('casual'), ['1v1', '2v2', '3v3'], "Casual's grid: the format if you play bots");
+  assert.deepEqual(M.formatsOf('ranked'), ['1v1', '2v2', '3v3', 'any'], 'Competitive keeps ANY');
 });
 
-test('bots join in: the path the search takes, counted from its start, never for Competitive', () => {
-  const base = { kind: 'casual', since: 1000, botFillMs: 10_000, p2pFillMs: 15_000 };
-  assert.deepEqual(M.botsCountdown({ ...base, net: 'server', now: 4000 }), { left: 7000, total: 10_000 }, "the server queue's bot fill");
-  assert.deepEqual(M.botsCountdown({ ...base, net: 'p2p', now: 4000 }), { left: 12_000, total: 15_000 }, "the P2P queue's wait");
-  assert.equal(M.botsCountdown({ ...base, net: 'server', now: 11_000 }), null, 'run out: the box goes, no 0:00');
-  assert.equal(M.botsCountdown({ ...base, net: 'server', botFillMs: null, now: 2000 }), null, 'a Worker that did not say');
-  assert.equal(M.botsCountdown({ ...base, kind: 'ranked', net: 'server', now: 2000 }), null, 'Competitive has no bots');
-  assert.deepEqual(M.botsCountdown({ ...base, net: 'server', now: 500 }), { left: 10_000, total: 10_000 }, 'a clock before the start counts 0');
+const WAIT = { searching: 1, searchingHere: 1, waitedMs: 0, widened: false, widenInMs: 60_000, estimateMs: 300_000, estimateKind: 'bots', botsInMs: 300_000, busy: false };
+
+test("the 5:00 box: Casual's online bots match, from the answer's botsInMs counted down locally, else from the start; never Competitive, nor busy", () => {
+  const base = { kind: 'casual', since: 1000, now: 1000, wait: null, waitAt: 0 };
+  assert.deepEqual(M.botsCountdown(base), { left: 300_000, total: 300_000 }, 'no answer yet: 5:00 from the start');
+  assert.deepEqual(M.botsCountdown({ ...base, now: 61_000 }), { left: 240_000, total: 300_000 });
+  assert.deepEqual(M.botsCountdown({ ...base, now: 61_000, soloAfterMs: 120_000 }), { left: 60_000, total: 120_000 }, "the config's soloAfterMs");
+  // The answer's botsInMs, counted down from its arrival (kept across a drop of the search: the server's clock).
+  const w = { ...WAIT, botsInMs: 217_000 };
+  assert.deepEqual(M.botsCountdown({ ...base, wait: w, waitAt: 5000, now: 5000 }), { left: 217_000, total: 300_000 });
+  assert.deepEqual(M.botsCountdown({ ...base, wait: w, waitAt: 5000, now: 15_000 }), { left: 207_000, total: 300_000 });
+  assert.equal(M.botsCountdown({ ...base, wait: { ...w, botsInMs: 0 }, waitAt: 5000, now: 5000 }), null, 'due: the box goes, no 0:00');
+  assert.equal(M.botsCountdown({ ...base, wait: { ...w, busy: true }, waitAt: 5000, now: 5000 }), null, 'the servers full: no promise');
+  assert.equal(M.botsCountdown({ ...base, kind: 'ranked' }), null, 'Competitive has no bots');
+  assert.equal(M.botsCountdown({ ...base, now: 302_000 }), null, 'run out without an answer');
+  assert.deepEqual(M.botsCountdown({ ...base, now: 500 }), { left: 300_000, total: 300_000 }, 'a clock before the start counts 0');
 });
 
 test('the bar: segments for the time left, rounded up, within 0..n', () => {
@@ -60,12 +70,17 @@ test('counts under the threshold are not shown', () => {
   assert.ok(!M.countShown(null, 5));
 });
 
-test('the action zone per tab: search, the searching panel on its own tab, sign in, banned, play, lobbies', () => {
-  const a = { tab: 'casual', signedIn: false, banLeft: 0, searching: null };
+test('the action zone per tab: search, the searching panel on its own tab, sign in (Casual too, for a guest), banned, play, lobbies', () => {
+  const g = { tab: 'casual', signedIn: false, banLeft: 0, searching: null };
+  assert.equal(M.actionKind(g), 'signIn', "a guest's Casual: SIGN IN (Casual needs an account)");
+  assert.equal(M.actionKind({ ...g, tab: 'ai' }), 'play', 'a guest plays the AI');
+  assert.equal(M.actionKind({ ...g, tab: 'lobbies' }), 'lobbies', "a guest's lobbies");
+  const a = { tab: 'casual', signedIn: true, banLeft: 0, searching: null };
   assert.equal(M.actionKind(a), 'search', 'A on Casual searches');
   assert.equal(M.actionKind({ ...a, searching: 'casual' }), 'searching');
   assert.equal(M.actionKind({ ...a, searching: 'ranked' }), 'search', "another kind's search: this tab's own FIND MATCH");
-  assert.equal(M.actionKind({ ...a, tab: 'ranked' }), 'signIn', 'a guest');
+  assert.equal(M.actionKind({ ...a, banLeft: 60_000 }), 'search', 'a ban locks Competitive only');
+  assert.equal(M.actionKind({ ...a, tab: 'ranked', signedIn: false }), 'signIn', 'a guest');
   assert.equal(M.actionKind({ ...a, tab: 'ranked', signedIn: true, banLeft: 60_000 }), 'banned');
   assert.equal(M.actionKind({ ...a, tab: 'ranked', signedIn: true }), 'search');
   assert.equal(M.actionKind({ ...a, tab: 'ranked', signedIn: true, searching: 'ranked' }), 'searching');

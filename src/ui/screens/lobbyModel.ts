@@ -94,12 +94,12 @@ export function withoutLink(hash: string): string {
 }
 
 /**
- * The format CREATE LOBBY AND SHARE gives a new lobby: the last one a lobby of this player had
- * (MenuPrefs.lobbyMode), else Casual's when it picked one format, else 2v2. Pure.
+ * The format CREATE PUBLIC / PRIVATE LOBBY gives a new lobby: the last one a lobby of this player
+ * had (MenuPrefs.lobbyMode), else Casual's preferred format, else 2v2. Pure.
  */
-export function lobbyFormat(p: Pick<MenuPrefs, 'lobbyMode' | 'casualModes'>): Playlist {
+export function lobbyFormat(p: Pick<MenuPrefs, 'lobbyMode' | 'casualPrefer'>): Playlist {
   if (p.lobbyMode !== null) return p.lobbyMode;
-  return p.casualModes.length === 1 && PLAYLISTS.includes(p.casualModes[0]) ? p.casualModes[0] : '2v2';
+  return PLAYLISTS.includes(p.casualPrefer) ? p.casualPrefer : '2v2';
 }
 
 export type RowState = 'open' | 'inMatch' | 'full';

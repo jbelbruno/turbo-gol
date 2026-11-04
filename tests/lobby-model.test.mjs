@@ -69,10 +69,10 @@ test('a broken join link (a cut or hand-edited escape) is no code, never a throw
   assert.equal(M.linkCode('#sala=ABC%20234'), 'ABC234', 'a good escape still decodes');
 });
 
-test("a new lobby's format: the last lobby's, else Casual's single pick, else 2v2; a row's state", () => {
-  assert.equal(M.lobbyFormat({ lobbyMode: '3v3', casualModes: ['1v1'] }), '3v3');
-  assert.equal(M.lobbyFormat({ lobbyMode: null, casualModes: ['1v1'] }), '1v1');
-  assert.equal(M.lobbyFormat({ lobbyMode: null, casualModes: ['1v1', '2v2'] }), '2v2');
+test("a new lobby's format: the last lobby's, else Casual's preferred format, else 2v2; a row's state", () => {
+  assert.equal(M.lobbyFormat({ lobbyMode: '3v3', casualPrefer: '1v1' }), '3v3');
+  assert.equal(M.lobbyFormat({ lobbyMode: null, casualPrefer: '1v1' }), '1v1');
+  assert.equal(M.lobbyFormat({ lobbyMode: null, casualPrefer: 'x' }), '2v2');
   assert.equal(M.rowState({ inGame: false, players: 1, max: 4 }), 'open');
   assert.equal(M.rowState({ inGame: false, players: 4, max: 4 }), 'full');
   assert.equal(M.rowState({ inGame: true, players: 4, max: 4 }), 'inMatch');
