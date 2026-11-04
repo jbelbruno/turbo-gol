@@ -1168,6 +1168,15 @@ export class MatchmakerDO extends DurableObject<Env> {
     this.remember(s.playerId, { joinedAt: s.joinedAt, kind: 'server', home: s.home, stale: false }, now);
   }
 
+  /**
+   * A new solo match (soloUnplayed reads it). Only the first SOLO_UNPLAYED_MS of one matter, so the
+   * older entries go when a new one comes (a node match's never gets a MatchDO's room expiry).
+   */
+  private rememberSolo(matchId: string, s: SoloInfo, now: number): void {
+    for (const [id, x] of this.solos) if (now - x.at >= SOLO_UNPLAYED_MS) this.solos.delete(id);
+    this.solos.set(matchId, s);
+  }
+
   /** 503 do_disabled for a server / ranked join with no node to wait for (join): its waiter, if any, is dropped. */
   private refuseDoDisabled(waiter: Waiter | null): Response {
     if (waiter) this.dropWaiter(waiter);
@@ -1955,6 +1964,7 @@ export class MatchmakerDO extends DurableObject<Env> {
         if (e.kind === kind) n++;
       } else {
         this.rooms.delete(id);
+        this.solos.delete(id);
         void this.ctx.storage.delete('room:' + id);
       }
     }
@@ -2156,7 +2166,7 @@ export class MatchmakerDO extends DurableObject<Env> {
         // The node never hears of cars (placeOnNode): its welcome has none, so the result carries them by slot.
         const carOf = new Map(humans.map((h) => [h.playerId, h.car]));
         const cars = carsBySlot(MODES[mode] * 2, placed.tickets.map((t) => ({ slot: t.slot, car: carOf.get(t.playerId) })));
-        if (solo) this.solos.set(placed.matchId, { ...solo, at: now });
+        if (solo) this.rememberSolo(placed.matchId, { ...solo, at: now }, now);
         await this.issue(
           humans,
           placed.tickets.map((t) => ({ slot: t.slot, team: t.team, name: names.get(t.playerId) ?? '', playerId: t.playerId })),
@@ -2199,7 +2209,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       if (!res.ok) throw new Error(`MatchDO create -> ${res.status} ${await res.text()}`);
       if (opts.ranked) await this.rankedLock(matchId, humans, until);
       const soloInfo: SoloInfo | undefined = solo ? { ...solo, at: now } : undefined;
-      if (soloInfo) this.solos.set(matchId, soloInfo);
+      if (soloInfo) this.rememberSolo(matchId, soloInfo, now);
       await this.issue(
         humans,
         roster.filter((e) => e.kind === 'player'),
