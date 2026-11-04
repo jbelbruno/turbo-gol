@@ -13,22 +13,29 @@
  *                   client-side challenge failure reject with NetError 'turnstile'. Inicio pre-warms
  *                   one token (prewarmAntiBot, kept WARM_MS) for the next registration; a check that
  *                   wants the player says so (onAntiBotAsk: the menus' sheet, its CANCEL ends it)
- *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, local?, visible }
- *                   (Bearer session) long-poll loop until 'matched' (the modes redesign, November
- *                   2026: `api` is QUEUE_API, src/net/queueWait.ts, and a page without it gets 426
- *                   reload_required; Casual is kind 'server' and pools every format, its `prefer`
- *                   the format of its online bots match; `local` says what the player does locally
- *                   meanwhile, for the daily counters; `visible` whether the tab is in view, which
- *                   gates the 5:00 bots match). Kind 'p2p' is never sent any more (read as
- *                   'server'). The first answer of a search comes at once, then each POST
- *                   long-polls (25 s); a waiting answer's `wait` (QueueWait: the counts, the
- *                   estimate, the 5:00 countdown, the widening) is `lastWait`, a matched one's
- *                   `mode` / `host` / `humans` are `lastMatched`. The loop goes on through a
- *                   network error, a 500 / 502 / 504 or a 503 without a known code: it waits
- *                   QUEUE_RETRY_MS (1, 2, 4, 8, 15, then 30 s, forever while not cancelled;
- *                   `queueRetrying`), and a tab coming back into view wakes it at once. Known
- *                   codes end it (account_required, ranked_ban, matchmaking_off, do_disabled,
- *                   rate_limited after its own wait, reload_required, a 401 twice...). Each POST
+ *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, local?, visible,
+ *                   first? } (Bearer session) long-poll loop until 'matched' (the modes redesign,
+ *                   November 2026: `api` is QUEUE_API, src/net/queueWait.ts, and a page without it
+ *                   gets 426 reload_required; Casual is kind 'server' and pools every format, its
+ *                   `prefer` the format of its online bots match; `local` says what the player does
+ *                   locally meanwhile, for the daily counters; `visible` whether the tab is in
+ *                   view, which gates the 5:00 bots match). Kind 'p2p' is never sent any more (read
+ *                   as 'server'). The first answer of a search comes at once (`first: true` until
+ *                   it came: a reloaded page's search too, whose waiter the hub still holds), then
+ *                   each POST long-polls (25 s); a waiting answer's `wait` (QueueWait: the counts,
+ *                   the estimate, the 5:00 countdown, the widening) is `lastWait` and its `region`
+ *                   `lastWaitRegion`, a matched one's `mode` / `host` / `humans` are `lastMatched`.
+ *                   The loop goes on through a network error, a 500 / 502 / 504 or a 503 without a
+ *                   known code, its session's (a guest's registration, an account's refresh) too:
+ *                   it waits QUEUE_RETRY_MS (1, 2, 4, 8, 15, then 30 s, forever while not
+ *                   cancelled; `queueRetrying`, cleared once a retried POST is in flight
+ *                   QUEUE_RETRY_CLEAR_MS), and a tab coming back into view or the network coming
+ *                   back wakes it at once (at most once per QUEUE_REPOST_MIN_MS). An account's
+ *                   session is renewed before it runs out (a search may outlast its hour). The page
+ *                   going away (pagehide) stops it without a leave (the hub keeps the clock for a
+ *                   reload); shown again (pageshow) it goes on. Known codes end it
+ *                   (account_required, ranked_ban, matchmaking_off, do_disabled, rate_limited
+ *                   after its own wait, reload_required, a 401 twice in a row...). Each POST
  *                   has a watchdog (QUEUE_POST_TIMEOUT_MS) and, on the tab coming back, one in
  *                   flight longer than QUEUE_STALE_MS is aborted: both re-POST at once. A change
  *                   of `queuePrefer`, `queueLocal` or the tab's visibility aborts the long-poll in
@@ -137,8 +144,10 @@ export const QUEUE_RETRY_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15
 export const QUEUE_POST_TIMEOUT_MS = 35_000;
 /** The tab back in view: a queue POST in flight longer than this (a phone's sleep) is aborted and re-sent. */
 export const QUEUE_STALE_MS = 30_000;
-/** Early re-POSTs (a prefer / local / visibility change) go at most once per this (under the 20 / min limit). */
+/** Early re-POSTs (a prefer / local / visibility change) and the wakes of a retry wait (the tab or the network back) go at most once per this (under the 20 / min limit). */
 export const QUEUE_REPOST_MIN_MS = 5_000;
+/** A retried queue POST in flight this long has reached the server (a long-poll): the "Offline: ..." line goes. */
+export const QUEUE_RETRY_CLEAR_MS = 2_000;
 /** 429 rate_limited without its own retryAfterMs: the wait before the one try more. */
 const QUEUE_RATE_WAIT_MS = 30_000;
 /** 503 codes that end a search (the rest of the 503s are retried: a Worker's hiccup). */
@@ -150,6 +159,17 @@ export function queueFailure(status: number, code: string): 'end' | 'retry' | 'r
   if (status === 503) return QUEUE_END_503.has(code) ? 'end' : 'retry';
   if (status >= 500) return 'retry';
   return 'end';
+}
+
+/**
+ * A failure on the way to the server, tried again as a queue POST's is (the search's session: a
+ * guest's registration, an account's refresh): a fetch that threw (offline), the config or the
+ * registration unreachable, a 500 / 502 / 504 or an unknown 503. Never a cancel, a refusal or a
+ * failed anti-bot check.
+ */
+export function networkFailure(err: unknown): boolean {
+  if (err instanceof NetError) return err.code === 'network' || (err.code === 'http' && queueFailure(err.status, err.serverCode) === 'retry');
+  return err instanceof TypeError;
 }
 
 /** A waiting answer's `wait` (src/net/queueWait.ts), read defensively; null when absent or malformed (an older server). */
@@ -215,8 +235,11 @@ function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** Why the queue loop aborted its own POST (not a cancel, not a network error): re-POST at once, no backoff. */
-type PostAbort = 'repost' | 'watchdog' | 'stale';
+/**
+ * Why the queue loop aborted its own POST (not a cancel, not a network error): re-POST at once, no
+ * backoff; 'page': the page is going away (pagehide), the next POST waits until it comes back.
+ */
+type PostAbort = 'repost' | 'watchdog' | 'stale' | 'page';
 
 // ---- Injectable environment ----------------------------------------------------------------
 
@@ -278,11 +301,13 @@ export interface NetClientOptions {
   turnstileLoader?: TurnstileLoader;
   /**
    * The tab is in view (the queue body's `visible`; default document.visibilityState, true without
-   * a document). With it given, the client listens to nothing: the caller calls noteVisibility().
+   * a document). With it given, the client listens to nothing: the caller calls noteVisibility(),
+   * noteOnline(), notePageHide() and notePageShow() (without it: visibilitychange, and window's
+   * online, pagehide and pageshow).
    */
   visible?: () => boolean;
-  /** The queue loop's timings (tests): QUEUE_RETRY_MS, QUEUE_POST_TIMEOUT_MS, QUEUE_STALE_MS, QUEUE_REPOST_MIN_MS by default. */
-  queueTiming?: { retryMs?: readonly number[]; postTimeoutMs?: number; staleMs?: number; repostMinMs?: number; rateWaitMs?: number };
+  /** The queue loop's timings (tests): QUEUE_RETRY_MS, QUEUE_POST_TIMEOUT_MS, QUEUE_STALE_MS, QUEUE_REPOST_MIN_MS, QUEUE_RETRY_CLEAR_MS by default. */
+  queueTiming?: { retryMs?: readonly number[]; postTimeoutMs?: number; staleMs?: number; repostMinMs?: number; rateWaitMs?: number; retryClearMs?: number };
 }
 
 /** 'turnstile': the anti-bot check failed (status 403 / 503 from the server, 0 = on the client). */
@@ -724,6 +749,10 @@ export class NetClient {
   lastWaitAt = 0;
   /** Waiting answers of the running search so far (the menus' "While you search" opens on the first). */
   waitingAnswers = 0;
+  /** The last waiting answer's `region`: the hub's normalized home, the region its `searchingHere` counts (null: none said). */
+  lastWaitRegion: string | null = null;
+  /** now() when the running search's first POST left (0: none yet, still at the terms or the session): "While you search" opens about 1 s after it. */
+  queuePostedAt = 0;
   /** The last matched answer's extras (the found band's "Casual · 2v2 · Sudamérica"). */
   lastMatched: QueueMatchedExtra | null = null;
   /** The queue's requests fail and are retried (the menus' and the HUD's "Offline: the search goes on..."). */
@@ -732,7 +761,11 @@ export class NetClient {
   private localValue: 'bots' | 'training' | null = null;
   private readonly visibleFn: () => boolean;
   private lastVisible: boolean;
-  private readonly timing: { retryMs: readonly number[]; postTimeoutMs: number; staleMs: number; repostMinMs: number; rateWaitMs: number };
+  private readonly timing: { retryMs: readonly number[]; postTimeoutMs: number; staleMs: number; repostMinMs: number; rateWaitMs: number; retryClearMs: number };
+  /** The page is going away (pagehide): the queue loop sends nothing more until it shows again (pageshow, the back / forward cache). */
+  private pageGone = false;
+  /** Ends the loop's wait for the page to show again. */
+  private pageBack: (() => void) | null = null;
   /** The queue POST in flight (null between them): its own controller, when it left (now()), the body version it carries, why the loop aborted it. */
   private queuePost: { ctrl: AbortController; at: number; version: number; reason: PostAbort | null } | null = null;
   /** Bumped by every change the body carries (prefer, local, visibility). */
@@ -740,7 +773,7 @@ export class NetClient {
   /** now() of the last early re-POST, and the one waiting for its 5 s. */
   private repostAt = Number.NEGATIVE_INFINITY;
   private repostTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Ends a retry wait at once (the tab back in view). */
+  /** Ends a plain retry wait at once (the tab back in view, the network back): not rate_limited's own wait. */
   private retryWake: (() => void) | null = null;
 
   private readonly inputBuf = new Uint8Array(INPUT_HEADER + INPUT_MAX_BATCH * PACKED_INPUT_BYTES);
@@ -775,11 +808,18 @@ export class NetClient {
       staleMs: qt.staleMs ?? QUEUE_STALE_MS,
       repostMinMs: qt.repostMinMs ?? QUEUE_REPOST_MIN_MS,
       rateWaitMs: qt.rateWaitMs ?? QUEUE_RATE_WAIT_MS,
+      retryClearMs: qt.retryClearMs ?? QUEUE_RETRY_CLEAR_MS,
     };
     const doc = typeof document !== 'undefined' ? document : null;
     this.visibleFn = opts.visible ?? (() => doc === null || doc.visibilityState === 'visible');
     this.lastVisible = this.visibleFn();
     if (opts.visible === undefined && doc !== null && typeof doc.addEventListener === 'function') doc.addEventListener('visibilitychange', () => this.noteVisibility());
+    const win = typeof window !== 'undefined' ? window : null;
+    if (opts.visible === undefined && win !== null && typeof win.addEventListener === 'function') {
+      win.addEventListener('online', () => this.noteOnline());
+      win.addEventListener('pagehide', () => this.notePageHide());
+      win.addEventListener('pageshow', () => this.notePageShow());
+    }
   }
 
   /** Casual's preferred format, sent as `prefer` (null: none); a change re-POSTs a running search at once (the hub updates it in place). */
@@ -808,27 +848,84 @@ export class NetClient {
    * The tab came into view or left it (visibilitychange; the caller's, with opts.visible): the
    * body's `visible` changed, so a running search re-POSTs (the hub's 5:00 bots match waits for a
    * visible tab). Back in view, a POST in flight longer than QUEUE_STALE_MS (a phone's sleep) is
-   * aborted and re-sent at once, and a retry wait ends at once.
+   * aborted and re-sent at once, and a plain retry wait ends (wakeRetry). Hidden, the re-POST goes
+   * a moment later: a page going away hides its tab as it goes, and its pagehide stops the loop
+   * first (notePageHide), so a dying page sends nothing.
    */
   noteVisibility(): void {
     const v = this.visibleFn();
     if (v === this.lastVisible) return;
     this.lastVisible = v;
     if (this.queueAbort === null) return;
-    if (v) {
-      const p = this.queuePost;
-      if (p !== null && this.now() - p.at > this.timing.staleMs) {
-        this.bodyVersion++;
-        this.abortPost('stale');
-        return;
-      }
-      if (this.retryWake !== null) {
-        this.bodyVersion++;
-        this.retryWake();
-        return;
-      }
+    if (!v) {
+      timer(() => {
+        if (!this.pageGone) this.requestRepost();
+      }, 0);
+      return;
+    }
+    const p = this.queuePost;
+    if (p !== null && this.now() - p.at > this.timing.staleMs) {
+      this.bodyVersion++;
+      this.abortPost('stale');
+      return;
+    }
+    if (this.wakeRetry()) {
+      this.bodyVersion++;
+      return;
     }
     this.requestRepost();
+  }
+
+  /** The network came back (window 'online'; the caller's, with opts.visible): a plain retry wait ends (wakeRetry). */
+  noteOnline(): void {
+    if (this.queueAbort !== null) this.wakeRetry();
+  }
+
+  /**
+   * The page is going away (pagehide: a reload, a closed tab, the back / forward cache): the queue
+   * loop stops sending, the long-poll in flight is dropped, and no /api/leave goes (the hub keeps
+   * the search's clock for a while: a reloaded page searching again finds it). Shown again from the
+   * back / forward cache (notePageShow), the same search POSTs again at once.
+   */
+  notePageHide(): void {
+    this.pageGone = true;
+    this.abortPost('page');
+  }
+
+  /** The page shows again (pageshow): a search stopped by notePageHide goes on. */
+  notePageShow(): void {
+    this.pageGone = false;
+    const back = this.pageBack;
+    this.pageBack = null;
+    if (back !== null) back();
+  }
+
+  /**
+   * End a plain retry wait at once (the tab back in view, the network back), at most once per
+   * repostMinMs as the early re-POSTs (toggling the tab through an outage keeps most of the
+   * backoff); never rate_limited's own wait. True when it woke one.
+   */
+  private wakeRetry(): boolean {
+    const wake = this.retryWake;
+    if (wake === null || this.now() - this.repostAt < this.timing.repostMinMs) return false;
+    this.repostAt = this.now();
+    wake();
+    return true;
+  }
+
+  /** While the page is gone (notePageHide): wait until it shows again, or the search is cancelled. */
+  private async pageGate(signal: AbortSignal): Promise<void> {
+    while (this.pageGone && !signal.aborted) {
+      await new Promise<void>((resolve) => {
+        const done = (): void => {
+          signal.removeEventListener('abort', done);
+          if (this.pageBack === done) this.pageBack = null;
+          resolve();
+        };
+        signal.addEventListener('abort', done);
+        this.pageBack = done;
+      });
+    }
   }
 
   /**
@@ -1106,10 +1203,11 @@ export class NetClient {
   }
 
   /**
-   * Wait `ms` between queue tries (a retry: `queueRetrying`), unless the search is cancelled (NetError
-   * 'cancelled') or the tab comes back into view (noteVisibility: at once).
+   * Wait `ms` between queue tries, unless the search is cancelled (NetError 'cancelled'). A plain
+   * retry's wait (`wakeable`: a network error, a 5xx) also ends when the tab comes back into view or
+   * the network comes back (wakeRetry); rate_limited's own wait never does.
    */
-  private async queueWait(ms: number, signal: AbortSignal): Promise<void> {
+  private async queueWait(ms: number, signal: AbortSignal, wakeable = false): Promise<void> {
     if (signal.aborted) throw new NetError('cancelled', 'queue cancelled');
     await new Promise<void>((resolve) => {
       let h: ReturnType<typeof setTimeout> | null = null;
@@ -1121,7 +1219,7 @@ export class NetClient {
       };
       h = timer(done, ms);
       signal.addEventListener('abort', done);
-      this.retryWake = done;
+      if (wakeable) this.retryWake = done;
     });
     if (signal.aborted) throw new NetError('cancelled', 'queue cancelled');
   }
@@ -1134,6 +1232,8 @@ export class NetClient {
     this.lastWait = null;
     this.lastWaitAt = 0;
     this.waitingAnswers = 0;
+    this.lastWaitRegion = null;
+    this.queuePostedAt = 0;
     this.lastMatched = null;
     this.queueRetrying = false;
     this.repostAt = Number.NEGATIVE_INFINITY;
@@ -1143,36 +1243,76 @@ export class NetClient {
     const retryLater = async (): Promise<void> => {
       this.queueRetrying = true;
       const steps = this.timing.retryMs;
-      await this.queueWait(steps[Math.min(retries++, steps.length - 1)], ctrl.signal);
+      await this.queueWait(steps[Math.min(retries++, steps.length - 1)], ctrl.signal, true);
+    };
+    /**
+     * The search's session (ensureGuest: the terms, an account's or the guest's), its failures on
+     * the way to the server tried again as a POST's are (a phone that starts a search offline).
+     */
+    const sessionOf = async (): Promise<GuestSession> => {
+      for (;;) {
+        try {
+          return await this.ensureGuest(ctrl.signal);
+        } catch (err) {
+          if (ctrl.signal.aborted) throw new NetError('cancelled', 'queue cancelled');
+          if (!networkFailure(err)) throw err;
+          await retryLater();
+        }
+      }
     };
     try {
-      let session = await this.ensureGuest(ctrl.signal);
+      let session = await sessionOf();
+      /** A 401 since the last answer: the session was registered (or refreshed) again once. */
       let reRegistered = false;
       let recovered = false;
+      /** No answer yet: the POST says it is the loop's first (`first`: the Worker answers it at once). */
+      let answered = false;
       for (;;) {
+        if (ctrl.signal.aborted) throw new NetError('cancelled', 'queue cancelled');
+        // The page going away: nothing more is sent (back from the back / forward cache: on we go).
+        await this.pageGate(ctrl.signal);
         if (ctrl.signal.aborted) throw new NetError('cancelled', 'queue cancelled');
         // A room lock being released (leaveMatch): the join must land after it, or it answers 409.
         const leaving = this.leavePending;
         if (leaving !== null) await leaving.catch(() => false);
         if (ctrl.signal.aborted) throw new NetError('cancelled', 'queue cancelled');
+        // An account's session lasts an hour and a search may last longer (Competitive, the wait's
+        // unlimited match): renewed before it runs out, never mid-search by a 401.
+        if (this.sessionProvider !== null && sessionExpiryMs(session) - Date.now() <= SESSION_MIN_REMAINING_MS) {
+          const fresh = await this.sessionProvider().catch(() => null);
+          if (ctrl.signal.aborted) throw new NetError('cancelled', 'queue cancelled');
+          if (fresh !== null && fresh.playerId === session.playerId) {
+            session = fresh;
+            this.lastBearer = fresh.session;
+          }
+        }
         // This POST's own controller: the cancel aborts it, and so does the loop (an early re-POST,
         // the watchdog, a stale long-poll on the tab coming back), which then re-POSTs at once.
         const post = { ctrl: new AbortController(), at: this.now(), version: this.bodyVersion, reason: null as PostAbort | null };
         const onCancel = (): void => post.ctrl.abort();
         ctrl.signal.addEventListener('abort', onCancel);
         this.queuePost = post;
+        if (this.queuePostedAt === 0) this.queuePostedAt = post.at || 1;
         const watchdog = timer(() => this.abortPost('watchdog'), this.timing.postTimeoutMs);
+        // A retried POST still in flight after a moment reached the server (a long-poll): the
+        // "Offline: ..." line goes (a failure brings it back).
+        const cleared = this.queueRetrying
+          ? timer(() => {
+              if (this.queuePost === post) this.queueRetrying = false;
+            }, this.timing.retryClearMs)
+          : null;
         let res: ResponseLike | null = null;
         let body: unknown = undefined;
         let failed = false;
         try {
-          res = await raceAbort(this.post('/api/queue', this.queueBody(mode, kind), session.session, post.ctrl.signal), post.ctrl.signal);
+          res = await raceAbort(this.post('/api/queue', this.queueBody(mode, kind, !answered), session.session, post.ctrl.signal), post.ctrl.signal);
           // A waiting or matched answer's body, read here: an abort while it streams is the same abort.
           if (res.ok) body = await raceAbort(res.json(), post.ctrl.signal);
         } catch {
           failed = true;
         } finally {
           clearTimeout(watchdog);
+          if (cleared !== null) clearTimeout(cleared);
           ctrl.signal.removeEventListener('abort', onCancel);
           if (this.queuePost === post) this.queuePost = null;
         }
@@ -1185,13 +1325,22 @@ export class NetClient {
           continue;
         }
         if (res.status === 401) {
-          // Expired / unknown session: register again, once. A second 401 (a proxy stripping
-          // Authorization, a server misconfiguration) is an error, not a loop.
+          // Expired / unknown session: register again (an account: refresh it), once per answer. A
+          // second 401 in a row (a proxy stripping Authorization, a server misconfiguration) is an
+          // error, not a loop; a refresh that could not reach the server (the same session back) is
+          // the network's, tried again later.
           if (reRegistered) throw new NetError('http', 'session rejected', 401);
           reRegistered = true;
           if (this.onSessionRejected !== null) await this.onSessionRejected().catch(() => undefined);
           this.guest = null;
-          session = await this.ensureGuest(ctrl.signal);
+          const refused = session.session;
+          session = await sessionOf();
+          // An account's refresh that never reached the server hands the refused session back (a
+          // guest's registration always makes a new one, kept as `guest`).
+          if (session !== this.guest && session.session === refused) {
+            reRegistered = false;
+            await retryLater();
+          }
           continue;
         }
         if (res.status === 409) {
@@ -1249,14 +1398,17 @@ export class NetClient {
           } else await retryLater();
           continue;
         }
-        // An answer: the network and the server are back.
+        // An answer: the network and the server are back, and the session good (a 401 later, after
+        // the hour an account's lasts, is refreshed again).
         retries = 0;
         rateLimited = false;
+        reRegistered = false;
         this.queueRetrying = false;
         if (typeof body !== 'object' || body === null) {
           await retryLater();
           continue;
         }
+        answered = true;
         const q = body as QueueResult | QueueResultP2p;
         if (q.status === 'matched') {
           if (typeof q.ticket !== 'string' || typeof q.wsUrl !== 'string') throw new NetError('protocol', 'matched without ticket / wsUrl');
@@ -1282,8 +1434,10 @@ export class NetClient {
         }
         const waiting = (q as QueueResult).waiting;
         const wait = parseQueueWait((q as { wait?: unknown }).wait);
+        const home = (q as { region?: unknown }).region;
         this.lastWait = wait;
         this.lastWaitAt = this.now();
+        this.lastWaitRegion = typeof home === 'string' && home.length > 0 ? home : null;
         this.waitingAnswers++;
         if (onWaiting) onWaiting(typeof waiting === 'number' ? waiting : 0, wait ?? undefined);
       }
@@ -1441,9 +1595,13 @@ export class NetClient {
    * POST /api/queue body (read once per POST): the client-version marker (QUEUE_API: a page without
    * it is refused with 426 reload_required), the playlists (`queueModes`, else `mode`), the kind
    * (never 'p2p': the P2P queue is gone, the server reads it as 'server'), the region when one is
-   * chosen, Casual's `prefer`, what the player does locally (`local`) and whether the tab is in view.
+   * chosen, Casual's `prefer`, what the player does locally (`local`), whether the tab is in view,
+   * and `first: true` while the search has had no answer yet (`first`: a new search, or one a
+   * reloaded page starts again, whose waiter the hub still holds): the Worker answers that join at
+   * once, without the long-poll. Only the loop's first POST in practice; again only when it got no
+   * answer (the network, the watchdog, an abort of the loop's own, a 5xx, a 401's new session).
    */
-  private queueBody(mode: Welcome['mode'], kind: QueueKind): Record<string, unknown> {
+  private queueBody(mode: Welcome['mode'], kind: QueueKind, first: boolean): Record<string, unknown> {
     const body: Record<string, unknown> = { api: QUEUE_API, mode, kind: kind === 'p2p' ? 'server' : kind };
     const modes = this.queueModes;
     if (modes !== null && modes.length > 0) body.modes = modes.slice();
@@ -1451,6 +1609,7 @@ export class NetClient {
     if (this.preferValue !== null) body.prefer = this.preferValue;
     if (this.localValue !== null) body.local = this.localValue;
     body.visible = this.visibleFn();
+    if (first) body.first = true;
     this.queuedRegion = this.region;
     return body;
   }

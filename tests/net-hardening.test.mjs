@@ -362,7 +362,7 @@ test('queue body: api, prefer, local and visible; never p2p; the waiting answer\
   const waits = [];
   h.setTime(5000);
   await h.client.queue('3v3', 'p2p', (count, wait) => waits.push({ count, wait, at: h.client.lastWaitAt }));
-  assert.deepEqual(queueCalls(h)[0].body, { api: 2, mode: '3v3', kind: 'server', modes: ['3v3'], region: 'EU', prefer: '3v3', local: 'bots', visible: false });
+  assert.deepEqual(queueCalls(h)[0].body, { api: 2, mode: '3v3', kind: 'server', modes: ['3v3'], region: 'EU', prefer: '3v3', local: 'bots', visible: false, first: true });
   assert.equal(waits.length, 1);
   assert.equal(waits[0].count, 1);
   assert.equal(waits[0].wait.estimateKind, 'bots');
@@ -374,7 +374,7 @@ test('queue body: api, prefer, local and visible; never p2p; the waiting answer\
   h.client.queueLocal = null;
   n = 1;
   await h.client.queue('2v2', 'ranked');
-  assert.deepEqual(queueCalls(h).at(-1).body, { api: 2, mode: '2v2', kind: 'ranked', modes: ['3v3'], region: 'EU', visible: true });
+  assert.deepEqual(queueCalls(h).at(-1).body, { api: 2, mode: '2v2', kind: 'ranked', modes: ['3v3'], region: 'EU', visible: true, first: true }, 'a new search: its first POST again');
   // A malformed wait (an older server): none.
   assert.equal(NC.parseQueueWait({ searching: 'x' }), null);
   assert.equal(NC.parseQueueWait(undefined), null);
@@ -441,7 +441,9 @@ test('the tab: hidden or shown re-POSTs (visible in the body); back in view a PO
   let n = 0;
   const h = makeClient(
     { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': (init) => (++n === 1 ? jsonResponse(200, WAITING) : hanging(init)) },
-    { queueTiming: { retryMs: [60_000], repostMinMs: 0, staleMs: 30_000 }, visible: () => visible },
+    // A window far longer than the test: after the first re-POST only the stale path can abort the
+    // 40 s old long-poll at once (a plain visibility re-POST would wait out the window).
+    { queueTiming: { retryMs: [60_000], repostMinMs: 600_000, staleMs: 30_000 }, visible: () => visible },
   );
   const p = h.client.queue('2v2', 'server');
   for (let i = 0; i < 20 && queueCalls(h).length < 2; i++) await tick(1);
@@ -476,6 +478,211 @@ test('the tab: hidden or shown re-POSTs (visible in the body); back in view a PO
   vis = true;
   off.client.noteVisibility();
   assert.equal((await q).matchId, 'm1', 'woken: no 60 s wait');
+});
+
+// ---- round 2 of the modes redesign: the first marker, long searches, wakes, the page going away ----
+
+const until = async (cond, ms = 400) => {
+  for (let i = 0; i < ms && !cond(); i++) await tick(1);
+};
+
+test("first: true rides on the loop's first POST, and on its re-send while no answer came; never after the first answer; a new search (a reloaded page's) starts again", async () => {
+  let n = 0;
+  const regions = [];
+  const h = makeClient(
+    {
+      '/api/guest': () => jsonResponse(200, GUEST),
+      '/api/queue': () => {
+        n++;
+        if (n === 1) return Promise.reject(new TypeError('Failed to fetch')); // never reached the server
+        if (n <= 3) return jsonResponse(200, WAITING);
+        return jsonResponse(200, MATCHED);
+      },
+    },
+    { queueTiming: { retryMs: [1] }, visible: () => true },
+  );
+  assert.equal(h.client.queuePostedAt, 0);
+  await h.client.queue('2v2', 'server', () => regions.push(h.client.lastWaitRegion));
+  assert.deepEqual(
+    queueCalls(h).map((c) => c.body.first),
+    [true, true, undefined, undefined],
+    'the first, its re-send after the network error, then long-polls',
+  );
+  assert.equal(h.client.queuePostedAt, 1000, "when the loop's first POST left");
+  assert.deepEqual(regions, ['SA', 'SA'], "the answer's region: whose region searchingHere counts");
+  n = 3;
+  await h.client.queue('2v2', 'server');
+  assert.equal(queueCalls(h).at(-1).body.first, true, 'a new loop: first again');
+});
+
+test('a search longer than an account session: a 401 after an answer refreshes it again (each hour), a refresh that cannot reach the server is tried again later, two in a row still end it', async () => {
+  const run = async (plan, refresh) => {
+    let k = 0;
+    const auths = [];
+    const h = makeClient(
+      {
+        '/api/queue': (init) => {
+          auths.push(init.headers.authorization);
+          const a = plan[k++];
+          return a === 401 ? jsonResponse(401, { error: 'unauthorized' }) : jsonResponse(200, a === 'wait' ? WAITING : MATCHED);
+        },
+      },
+      { queueTiming: { retryMs: [1] }, visible: () => true },
+    );
+    let n = 1;
+    let asked = 0;
+    h.client.sessionProvider = async () => ({ kind: 'account', playerId: 'acc1', name: 'Tomi', session: `jwt-a${n}`, expiresAt: Date.now() + 3600_000 });
+    h.client.onSessionRejected = async () => {
+      if (refresh(++asked)) n++;
+    };
+    return { p: h.client.queue('2v2', 'server'), auths };
+  };
+  // Waiting, the hour is over (401), waiting, the next hour (401), matched: refreshed both times.
+  const long = await run(['wait', 401, 'wait', 401, 'match'], () => true);
+  assert.equal((await long.p).matchId, 'm1');
+  assert.deepEqual(long.auths, ['Bearer jwt-a1', 'Bearer jwt-a1', 'Bearer jwt-a2', 'Bearer jwt-a2', 'Bearer jwt-a3']);
+  // The refresh offline the first time (the same session back): tried again, not ended.
+  const offline = await run([401, 401, 'match'], (i) => i > 1);
+  assert.equal((await offline.p).matchId, 'm1');
+  assert.deepEqual(offline.auths, ['Bearer jwt-a1', 'Bearer jwt-a1', 'Bearer jwt-a2']);
+  // Refreshed and refused again at once (a proxy stripping Authorization): the end, as before.
+  const twice = await run([401, 401, 'match'], () => true);
+  await assert.rejects(twice.p, (err) => err instanceof NetError && err.status === 401 && /session rejected/.test(err.message));
+});
+
+test("an account session about to run out is renewed before the queue POST (no 401 needed)", async () => {
+  let calls = 0;
+  const auths = [];
+  const h = makeClient({ '/api/queue': (init) => (auths.push(init.headers.authorization), jsonResponse(200, MATCHED)) }, { visible: () => true });
+  // The first one asked lasts 30 s more (under a minute): the loop asks again before it POSTs.
+  h.client.sessionProvider = async () => {
+    calls++;
+    return { kind: 'account', playerId: 'acc1', name: 'Tomi', session: `jwt-r${calls}`, expiresAt: Date.now() + (calls === 1 ? 30_000 : 3600_000) };
+  };
+  await h.client.queue('2v2', 'server');
+  assert.deepEqual(auths, ['Bearer jwt-r2']);
+  assert.equal(h.client.lastBearer, 'jwt-r2', 'leave / cancel use it too');
+});
+
+test("the search's session on the network is tried again as a POST is: a registration offline, the 401's re-registration offline; a refused check still ends it", async () => {
+  let g = 0;
+  let q = 0;
+  const h = makeClient(
+    {
+      '/api/guest': () => (++g % 2 === 1 ? Promise.reject(new TypeError('Failed to fetch')) : jsonResponse(200, { ...GUEST, session: `jwt-g${g}` })),
+      '/api/queue': () => (++q === 1 ? jsonResponse(401, { error: 'unauthorized' }) : jsonResponse(200, MATCHED)),
+    },
+    { queueTiming: { retryMs: [1] } },
+  );
+  assert.equal((await h.client.queue('2v2', 'server')).matchId, 'm1');
+  assert.equal(g, 4, 'each registration failed once on the network, then went through');
+  assert.deepEqual(
+    queueCalls(h).map((c) => c.init.headers.authorization),
+    ['Bearer jwt-g2', 'Bearer jwt-g4'],
+  );
+  const refused = makeClient({ '/api/guest': () => jsonResponse(403, { error: 'turnstile_failed' }) }, { queueTiming: { retryMs: [1] } });
+  await assert.rejects(refused.client.queue('2v2', 'server'), (err) => err instanceof NetError && err.code === 'turnstile');
+  assert.equal(refused.calls.filter((c) => c.url === '/api/guest').length, 1, 'no retry');
+  assert.equal(NC.networkFailure(new TypeError('Failed to fetch')), true);
+  assert.equal(NC.networkFailure(new NetError('network', 'config request failed')), true);
+  assert.equal(NC.networkFailure(new NetError('http', 'x', 502)), true);
+  assert.equal(NC.networkFailure(new NetError('http', 'x', 503, { code: 'matchmaking_off', message: '', retryAfterMs: 0 })), false);
+  assert.equal(NC.networkFailure(new NetError('http', 'x', 403)), false);
+  assert.equal(NC.networkFailure(new NetError('cancelled', 'x')), false);
+  assert.equal(NC.networkFailure(new Error('a bug')), false);
+});
+
+test("rate_limited's own wait is never woken by the tab; a plain retry wait is, by the tab or the network, at most once per window", async () => {
+  let visible = true;
+  let n = 0;
+  const rl = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => (++n === 1 ? jsonResponse(429, { error: 'rate_limited', retryAfterMs: 150 }) : jsonResponse(200, MATCHED)) }, { visible: () => visible });
+  const t0 = Date.now();
+  const p = rl.client.queue('2v2', 'server');
+  await until(() => queueCalls(rl).length === 1);
+  await tick(5);
+  visible = false;
+  rl.client.noteVisibility();
+  visible = true;
+  rl.client.noteVisibility();
+  rl.client.noteOnline();
+  await tick(30);
+  assert.equal(queueCalls(rl).length, 1, "still in rate_limited's own wait");
+  assert.equal((await p).matchId, 'm1');
+  assert.ok(Date.now() - t0 >= 140, 'its whole wait');
+
+  // Offline, waiting 60 s between tries: the tab back wakes it, the network back too, but once per window.
+  let k = 0;
+  const off = makeClient(
+    { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => (++k <= 3 ? Promise.reject(new TypeError('offline')) : jsonResponse(200, MATCHED)) },
+    { queueTiming: { retryMs: [60_000], repostMinMs: 5_000 }, visible: () => visible },
+  );
+  const q = off.client.queue('2v2', 'server');
+  await until(() => off.client.queueRetrying);
+  visible = false;
+  off.client.noteVisibility();
+  visible = true;
+  off.client.noteVisibility();
+  await until(() => queueCalls(off).length === 2);
+  assert.equal(queueCalls(off).length, 2, 'woken by the tab');
+  await tick(10);
+  off.client.noteOnline();
+  visible = false;
+  off.client.noteVisibility();
+  visible = true;
+  off.client.noteVisibility();
+  await tick(30);
+  assert.equal(queueCalls(off).length, 2, 'inside the window: its backoff stands');
+  off.setTime(off.now() + 5_000);
+  off.client.noteOnline();
+  await until(() => queueCalls(off).length === 3);
+  assert.equal(queueCalls(off).length, 3, "woken by the network ('online') once the window passed");
+  off.setTime(off.now() + 5_000);
+  off.client.noteOnline();
+  assert.equal((await q).matchId, 'm1');
+});
+
+test('the "Offline" line goes once a retried POST has been in flight a moment (it reached the server), and comes back with the next failure', async () => {
+  let n = 0;
+  const h = makeClient(
+    { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': (init) => (++n === 1 || n === 3 ? Promise.reject(new TypeError('offline')) : hanging(init)) },
+    { queueTiming: { retryMs: [1], retryClearMs: 25, postTimeoutMs: 120 }, visible: () => true },
+  );
+  const p = h.client.queue('2v2', 'server');
+  await until(() => queueCalls(h).length === 2);
+  assert.equal(h.client.queueRetrying, true, 'just sent again: not yet');
+  await tick(50);
+  assert.equal(h.client.queueRetrying, false, 'a long-poll in flight: the network is back');
+  // The watchdog re-sends it; that one fails on the network: the line again.
+  await until(() => queueCalls(h).length === 3);
+  await until(() => h.client.queueRetrying);
+  assert.equal(h.client.queueRetrying, true);
+  h.client.cancelQueue();
+  await assert.rejects(p, (err) => err instanceof NetError && err.code === 'cancelled');
+  assert.equal(NC.QUEUE_RETRY_CLEAR_MS, 2_000);
+});
+
+test('the page going away (pagehide): the loop sends nothing more, its long-poll dropped, no leave; shown again (pageshow) it goes on at once', async () => {
+  let visible = true;
+  let n = 0;
+  const h = makeClient(
+    { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': (init) => (++n === 1 ? jsonResponse(200, WAITING) : n === 2 ? hanging(init) : jsonResponse(200, MATCHED)) },
+    { queueTiming: { retryMs: [1], repostMinMs: 0 }, visible: () => visible },
+  );
+  const p = h.client.queue('2v2', 'server');
+  await until(() => queueCalls(h).length === 2);
+  // A reload: the tab hides as it goes, then its pagehide (the hidden re-POST waits a moment, so either order sends nothing).
+  visible = false;
+  h.client.noteVisibility();
+  h.client.notePageHide();
+  await tick(40);
+  assert.equal(queueCalls(h).length, 2, 'no POST from a dying page');
+  assert.equal(h.calls.filter((c) => c.url === '/api/leave').length, 0, "no leave: the hub keeps the search's clock for the reload");
+  // The back / forward cache brings it back: on we go.
+  visible = true;
+  h.client.notePageShow();
+  assert.equal((await p).matchId, 'm1');
+  assert.equal(queueCalls(h).length, 3);
+  assert.equal(queueCalls(h)[2].body.first, undefined, 'answered before: no first');
 });
 
 test('close code 4000 (replaced by a newer socket) is final: no rejoin, no new socket', async () => {

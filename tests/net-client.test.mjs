@@ -869,10 +869,10 @@ test('NetError carries the server code (serverCode) and retryAfterMs; recovery b
   // No P2P protocol any more: every queue states the client-version marker (QUEUE_API) instead, and never 'p2p'.
   const body = ns.calls.find((c) => c.url === '/api/queue').body;
   assert.equal(P2.P2P_PROTOCOL_VERSION > 0, true);
-  assert.deepEqual(body, { api: 2, mode: '1v1', kind: 'server', visible: true });
+  assert.deepEqual(body, { api: 2, mode: '1v1', kind: 'server', visible: true, first: true });
   const sv = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => jsonResponse(426, { error: 'reload_required', message: 'reload the page' }) });
   await assert.rejects(sv.client.queue('1v1', 'server'), (err) => err instanceof NetError && err.serverCode === 'reload_required' && err.retryAfterMs === 0);
-  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { api: 2, mode: '1v1', kind: 'server', visible: true });
+  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { api: 2, mode: '1v1', kind: 'server', visible: true, first: true });
   // A body without a code (or not JSON): serverCode '' (a 4xx ends the search; a 502 is tried again: net-hardening).
   const plain = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => ({ ok: false, status: 400, json: async () => { throw new Error('html'); } }) });
   await assert.rejects(plain.client.queue('1v1'), (err) => err instanceof NetError && err.status === 400 && err.serverCode === '' && err.message === 'queue failed (400)');

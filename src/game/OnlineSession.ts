@@ -2,8 +2,9 @@
  * OnlineSession: an online match (phase 1, docs/online/PHASE1.md) driven inside the Game's frame
  * loop. States: idle -> queue (matchmaking long-poll) -> connecting (socket open, roster built from
  * the Welcome, waiting for the first snapshot) -> playing -> ended (host whistle) -> idle. While it
- * queues, `wait`, `waitAt` and `retrying` are the search's estimate and its network state (NetClient
- * lastWait, queueRetrying); `onFound` fires from the queue's answer as it leaves 'queue' for a match.
+ * queues, `wait`, `waitAt`, `waitRegion`, `postedAt` and `retrying` are the search's estimate, the
+ * region it counts, its first POST's time and its network state (NetClient lastWait, lastWaitRegion,
+ * queuePostedAt, queueRetrying); `onFound` fires from the queue's answer as it leaves 'queue' for a match.
  *
  * Clock: the local sim runs `lead` ticks ahead of the estimated host tick (ClockSync):
  *   lead = ceil((rtt / 2 + jitter margin) / 8.333 ms) + 1, clamped to [2, 24], corrected by the
@@ -249,6 +250,16 @@ export class OnlineSession {
   /** Waiting answers of the running search so far (the menus' "While you search" opens on the first). */
   get waitingAnswers(): number {
     return this.state === 'queue' ? this.client.waitingAnswers : 0;
+  }
+
+  /** The last waiting answer's region: whose region its `searchingHere` counts (the hub's normalized home); null: none said. */
+  get waitRegion(): string | null {
+    return this.state === 'queue' ? this.client.lastWaitRegion : null;
+  }
+
+  /** performance.now() when the running search's first POST left (0: none yet, or no longer queueing): "While you search" opens about 1 s after it. */
+  get postedAt(): number {
+    return this.state === 'queue' ? this.client.queuePostedAt : 0;
   }
 
   /** The search's requests fail and are tried again (the network is away). */
