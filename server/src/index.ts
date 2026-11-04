@@ -796,7 +796,9 @@ async function leave(request: Request, env: Env): Promise<Response> {
   // connected: false (the client never got into the match) only matters to a node match.
   const payload = JSON.stringify({ playerId: session.sub, matchId: isHex(body.matchId, 64) ? body.matchId : undefined, connected: body.connected === false ? false : undefined });
   // The queue hub first (every queue and its matches' locks), then the region's matchmaker when it
-  // is another one (a lobby's P2P room lock lives there): released when either released.
+  // is another one (a lobby's P2P room lock lives there): released when either released. This
+  // fan-out is what covers the cross-instance blind spot (MatchmakerDO.ts header): the two
+  // instances never tell each other about a waiter or a room lock.
   const hub = queueHub(env);
   const res = await hub.stub.fetch('https://matchmaker/leave', { method: 'POST', headers: await internalHeaders(env, hub.region), body: payload });
   const own = matchmakerOf(request, env, body.region);

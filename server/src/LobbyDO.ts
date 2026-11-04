@@ -838,6 +838,9 @@ export class LobbyDO extends DurableObject<Env> {
     }
     let res: Response;
     try {
+      // The lobby's own region (not the queue hub): outside SA this /custom cannot see a member's
+      // queued search in the hub, nor the hub this room's locks; the client's leave() before the
+      // room and POST /api/leave's fan-out cover it (MatchmakerDO.ts header, backlog).
       res = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + rec.region)).fetch('https://matchmaker/custom', {
         method: 'POST',
         headers: { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET), 'content-type': 'application/json', 'x-region': rec.region },

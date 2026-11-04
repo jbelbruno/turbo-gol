@@ -108,6 +108,14 @@
  * Custom lobbies (/custom) form RoomDO signaling rooms (P2P, 2 humans at least): a random uint32
  * seed (kickoff deal + bot RNG on every peer) and tickets with role 'peer'. The P2P queue of phase
  * 2 (decideP2pFormation, P2P_FILL_WAIT) is gone; its pure helpers stay, unused.
+ * The cross-instance blind spot (backlog): a lobby's room forms in ITS region's matchmaker
+ * (LobbyDO: 'mm:' + the lobby's region), the public queues in the hub. For a lobby outside SA the
+ * two cannot see each other: that /custom does not take the members' waiters out of the hub, and
+ * the hub's /join does not see that room's lock (so it does not answer 409 for it). The client
+ * covers both: Game.setSession calls the old session's leave() before the new one starts, and
+ * POST /api/leave goes to the hub and to the region's matchmaker (index.ts leave). A fix on the
+ * server would put lobby rooms in the hub (the build spec keeps them regional, §1.8) or have
+ * every hub join ask the regional instances.
  * Humans alternate teams (1st blue, 2nd red, ...); slot order is blue humans, blue bots, red
  * humans, red bots. Each human seat carries its car (src/net/cosmetics.ts: absent = the default,
  * which every bot drives): the MatchDO roster, the RoomDO slots, and for a node match the result's
@@ -1160,6 +1168,8 @@ export class MatchmakerDO extends DurableObject<Env> {
     // its socket to close, which frees the lock).
     const m = this.matched.get(playerId);
     if (m && m.until > now && !m.delivered) return this.deliver(playerId, m);
+    // This instance's locks only: a lobby room outside SA locks in its region's matchmaker, which
+    // the hub does not ask (the header's cross-instance blind spot).
     const act = this.active.get(playerId);
     if (act && act.until > now) {
       // Really in that room / match? A fresh lock is trusted; an older one is checked against the
@@ -1793,6 +1803,8 @@ export class MatchmakerDO extends DurableObject<Env> {
       const act = this.active.get(h.playerId);
       if (act && act.until > now && (await this.lockHeld(act, h.playerId, now))) return json({ error: 'member_busy', playerId: h.playerId, message: h.name + ' todavía está en otra partida' }, 409);
       if (act) await this.forget(h.playerId, act);
+      // Only a waiter of THIS instance: a lobby outside SA cannot see the hub's (the header's
+      // cross-instance blind spot; the client's leave() before the room covers it).
       const w = this.findWaiter(h.playerId);
       if (w) this.removeWaiter(w);
     }
