@@ -88,6 +88,17 @@ html[data-shell='tv'] .mn-act-line.mn-act-line-wait:not([hidden]) {
   color: var(--text-2);
 }
 
+/* A TV: the choice's name in the buttons' size, its line a step below (a .mn-btn's 15 px made the
+   name the smallest text on the screen, under a 36 px line). */
+html[data-shell='tv'] .mn-wait-text b {
+  font-size: var(--t-heading);
+}
+
+/* SALAS' CREATE PRIVATE LOBBY on a TV: in the type scale too, a step below CREATE PUBLIC LOBBY. */
+html[data-shell='tv'] .mn-act-go2 {
+  font-size: var(--t-body);
+}
+
 /* No actions under the choices (Back and STAY IN THE MENU are the way out): no room for them. */
 .mn-sheet-wait .mn-sheet-actions {
   display: none;
