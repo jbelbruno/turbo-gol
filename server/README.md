@@ -371,6 +371,26 @@ without `NODE_TRUSTED_OPERATORS` nobody can create a node token (403 `not_truste
 routes under `wrangler dev`, put a development pair in `.dev.vars` (both halves: a `.dev.vars`
 value overrides the committed var).
 
+A new development pair, never `npm run keys` in `nodes/` (it writes `nodes/.keys/`, where the real
+key may be), written straight into your own `.dev.vars` from `server/`; it prints nothing:
+
+```sh
+node -e "const c=require('crypto'),{publicKey:p,privateKey:k}=c.generateKeyPairSync('ed25519'),s=p.export({format:'der',type:'spki'});require('fs').appendFileSync('.dev.vars','\nNODE_CONTROL_PRIVATE_KEY='+k.export({format:'der',type:'pkcs8'}).toString('base64url')+'\nNODE_CONTROL_PUBLIC_KEY='+s.subarray(s.length-32).toString('base64url')+'\n')"
+```
+
+Then PERFIL's CONTROL DE NODOS (the maintainers' panel) runs against it:
+
+1. In `.dev.vars`: `DEV_AUTH=1`, and `NODES_PUBLIC_BASE=http://127.0.0.1:8787` (your Worker's port):
+   it overrides the committed var, the install lines and tickets name this Worker, and a loopback
+   base lets the object probe and register nodes on this machine (`loopbackOk`).
+2. Start the Worker and Vite, sign in with ENTRAR (DEV) in PERFIL, and read that account's id
+   (`__game.accounts.account.playerId` in the browser's console).
+3. Put it in `.dev.vars` as `NODE_TRUSTED_OPERATORS=<id>`, restart the Worker, and sign in with
+   ENTRAR (DEV) again: CUENTA DEL PROYECTO now shows CONTROL DE NODOS.
+4. A dev sign-in is level 2 without a password, for 15 minutes: after them the panel pauses on
+   `reauth_required`; sign in with ENTRAR (DEV) again (the password sheet is for an account with a
+   password, the project's).
+
 Matches reach the nodes through the matchmaker, behind the KV flag `nodes_on` (absent: off). When
 the nodes are on for every human of a Casual or ranked match, the match is offered first to a node
 of its host region (the control plane picks among that region's nodes only, never another

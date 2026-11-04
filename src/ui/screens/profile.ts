@@ -6,7 +6,8 @@
  * PRIVACIDAD (hide the name in public replays; with a verified address, "News by email", the news
  * consent, off unless the account opted in: sign-in PR 13),
  * MI SERVIDOR for a community node operator (GET /nodes/mine: each node, its state in words, its
- * region, the matches it hosted, its version), CUENTA Y SEGURIDAD folded (a disclosure: rename,
+ * region, the matches it hosted, its version), CUENTA DEL PROYECTO for the project's account (its
+ * checklist, CONFIRMAR CON LA CONTRASEÑA and CONTROL DE NODOS: screens/nodesAdmin.ts), CUENTA Y SEGURIDAD folded (a disclosure: rename,
  * the password (CAMBIAR with the current one; CREAR by a link to the account's own mailbox, or "add
  * an email first"), link a provider, the signed-in devices (each with where it signed in and a
  * sign-out of its own), sign out, sign out on every device), COMUNIDAD (Discord, host a server, the
@@ -46,7 +47,7 @@ import { REGIONS, USERNAME_MAX, emailTypo, normalizeEmail, passwordIssue, userna
 import type { AccountIssue, DeviceSession, MeInfo, MyNode, OAuthProvider, PlaylistRating } from '../../net/account';
 import { emailNudge, signInRoute } from '../../net/emailAuth';
 import type { StoredAttempt } from '../../net/emailAuth';
-import { authErrText, cutoffDay, emailProviders, emailSheet, googleHidden, graceSheet, graceText, keypadTyping, mailOffText, newPasswordFields, openForgotSheet, openReauthCodeSheet, passwordManagerUser, providersLine, sheetEnter, signupFinishFields, startEmailCode, welcome } from './accountLinks';
+import { authErrText, confirmItsYou, cutoffDay, emailProviders, emailSheet, googleHidden, graceSheet, graceText, keypadTyping, mailOffText, newPasswordFields, openForgotSheet, passwordManagerUser, providersLine, sheetEnter, signupFinishFields, startEmailCode, welcome } from './accountLinks';
 import type { EmailHooks } from './accountLinks';
 import { PROTOCOL_VERSION } from '../../net/protocol';
 import { PROBATION_MATCHES } from '../../../nodes/control-plane/registry';
@@ -768,9 +769,12 @@ export function profileScreen(menu: Menu): Screen {
     // With its password, CONFIRMAR CON LA CONTRASEÑA: the level 2 the node token and maintenance routes ask for (nodes/docs/VPS-SAO-PAULO.md's console line).
     const project = me?.maintainer;
     const confirm = project?.password === true ? h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('profile.maintainerConfirmNote')), secondary(t('profile.maintainerConfirm'), () => fresh(() => menu.toast(t('profile.maintainerConfirmed'), 'ok'), 2, true), { 'data-key': 'profile-maintainer-confirm' })) : null;
+    // CONTROL DE NODOS (prompt 1, decision 5): the maintainers' panel (screens/nodesAdmin.ts), stacked on PERFIL (sections.ts
+    // SCREEN_SECTION). Shown with /api/me's maintainer, its password or not (the panel asks for it), never on a TV.
+    const panel = tv() ? null : h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('nodesAdmin.entryNote')), secondary(t('nodesAdmin.entry'), () => menu.open('nodes-admin'), { 'data-key': 'profile-nodes-admin' }));
     const projectChecks =
       project !== undefined && !(sample === null && acc.account?.tv === true)
-        ? section(t('profile.maintainerTitle'), h('div.mn-prof-node', null, h('p.mn-prof-node-reason', null, t('profile.maintainerNote')), ...maintainerChecks(project).map((c) => h('span.mn-prof-node-state', { 'data-ok': c.ok ? 'true' : 'false' }, h('span.mn-dot'), c.text)), confirm))
+        ? section(t('profile.maintainerTitle'), h('div.mn-prof-node', null, h('p.mn-prof-node-reason', null, t('profile.maintainerNote')), ...maintainerChecks(project).map((c) => h('span.mn-prof-node-state', { 'data-ok': c.ok ? 'true' : 'false' }, h('span.mn-dot'), c.text)), confirm, panel))
         : null;
     const abandons = (m: MeInfo): string =>
       banLeft > 0 ? t('profile.abandonsBanned', { count: m.abandons24h, minutes: Math.ceil(banLeft / 60000) }) : t('profile.abandons', { count: m.abandons24h });
@@ -1158,60 +1162,9 @@ export function profileScreen(menu: Menu): Screen {
   /**
    * Run `go` once this browser proved a credential at `level` in the last minutes (AccountClient.fresh,
    * the server's R6): at once when it did (unless `force`: the server just asked), else after
-   * "confirm it is you" with what reaches that level. Level 1: a provider already on the account (a
-   * round trip that comes back to PERFIL, then the player taps again) or the password here. Level 2
-   * (the server's reauth_required { level: 2 }): the password, or a code to the account's verified
-   * address (POST /api/auth/reauth/code); a press on a provider's page is level 1, Google's too (it
-   * cannot be asked for its password again), and the sheet says so. Google is not offered at level 1
-   * inside another app's browser, which refuses it (the sheet says why). A password of before
-   * (me.legacy) is only re-keyed by itself: no code then.
+   * "confirm it is you" (accountLinks.ts confirmItsYou, shared with CONTROL DE NODOS).
    */
-  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => {
-    if (!force && acc.fresh(level)) {
-      go();
-      return;
-    }
-    const me = acc.me;
-    const configured = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
-    // Level 1 offers the account's providers this browser can sign in with (Google is hidden inside another app's browser, §3.0); level 2 offers none and the note names them all.
-    const own = configured.filter((p) => emailProviders(menu).includes(p));
-    const offered = level === 1 ? own : [];
-    const pass = field(t('profile.yourPassword'), { type: 'password', autocomplete: 'current-password', maxLength: 128 });
-    const withPassword = me?.hasPassword === true;
-    // No code for the project's account: it confirms with its password (the server refuses it the code: 403 password_required).
-    const mailbox = me?.emailVerified === true && typeof me.email === 'string' && me.email.length > 0 && me.legacy !== true && me.maintainer === undefined ? me.email : null;
-    const ownNames = configured.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
-    const notEnough = level === 2 && configured.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
-    const byCode: HTMLButtonElement | null = mailbox !== null ? secondary(t('auth.reauthCode', { email: mailbox }), () => byCode !== null && void busyWhile(byCode, () => openReauthCodeSheet(menu, go)), { 'data-key': 'profile-reauth-code' }) : null;
-    const inAppNote = level === 1 && configured.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
-    menu.modal({
-      title: t('profile.reauthTitle'),
-      body: [h('p.mn-note', null, t('profile.reauthNote')), notEnough, ...offered.map((p) => secondary(t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })), inAppNote, byCode, withPassword ? pass.el : null],
-      actions: [
-        ...(withPassword
-          ? [
-              {
-                label: t('profile.reauthConfirm'),
-                primary: true,
-                onClick: async (): Promise<boolean> => {
-                  pass.error(null);
-                  try {
-                    await acc.reauth(pass.input.value);
-                    queueMicrotask(go);
-                    return true;
-                  } catch (e) {
-                    pass.error(errText(e));
-                    return false;
-                  }
-                },
-              },
-            ]
-          : []),
-        { label: t('profile.cancel'), onClick: () => true },
-      ],
-    });
-  };
-
+  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => confirmItsYou(menu, go, level, force, resume);
 
   /**
    * Take `p` off the account after "confirm it is you" at `level`: 1 first, and 2 when the server
@@ -1386,12 +1339,12 @@ export function profileScreen(menu: Menu): Screen {
     menu.refocus();
   };
 
-  /** The operator's nodes, once per visit (a fork or local dev answers none: AccountClient.myNodes). */
+  /** The operator's nodes, once per visit (a fork or local dev answers none: AccountClient.nodesMine; never a retired node). */
   const loadNodes = (): void => {
     const who = acc.account?.playerId ?? null;
     if (who === null) return;
-    void acc.myNodes().then(
-      (list) => {
+    void acc.nodesMine().then(
+      ({ nodes: list }) => {
         nodes = { who, list };
         if (el.isConnected && list.length > 0) render();
       },
