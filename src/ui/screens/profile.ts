@@ -751,8 +751,10 @@ export function profileScreen(menu: Menu): Screen {
     const linkable = emailProviders(menu).filter((p) => me && !me.providers.includes(p));
     const googleNote = me && !me.providers.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
     const linked = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password');
-    // An unlink never takes the last way in (the server refuses it too: last_method).
-    const ways = me?.providers.length ?? 0;
+    // An unlink never takes the last way in (the server refuses it too: last_method). me.waysIn counts
+    // as the server does (a password of before beside an address is no way in until re-keyed);
+    // providers.length only from a server of before it.
+    const ways = me?.waysIn ?? me?.providers.length ?? 0;
     const linkedRow = (p: OAuthProvider): HTMLElement => {
       const at = me?.linkedAt?.[p];
       return h(

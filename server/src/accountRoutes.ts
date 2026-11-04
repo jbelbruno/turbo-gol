@@ -1969,7 +1969,9 @@ async function signin(c: RouteContext): Promise<Response> {
   if (normalizeEmail(b.email) === null) return error(400, 'bad_email', 'Revisa el correo: no parece una dirección válida');
   const blocked = await c.antiBot(b.turnstileToken);
   if (blocked !== null) return blocked;
-  // Only the current key: an account whose password is still the legacy one signs in by its username (and re-keys there).
+  // Only the current key. A legacy key with no verified address signs in by its username and re-keys
+  // there; beside an address it signs in nowhere (checkPassword legacyOnly) until a reset or "confirm
+  // it's you" (reauth) re-keys it (mailProfile, M10).
   const proof: PasswordProof = { v2: b.password };
   const chk = await checkPassword(c, { email: b.email }, proof, { signIn: true });
   if (!chk.ok) return chk.res;

@@ -203,6 +203,43 @@ test('M7 "move": the code goes into the game, on that account, and is never shar
   assert.doesNotMatch(en, /type this code there/);
 });
 
+// M10 goes to an account whose password is of before and that has a verified address: the username
+// sign-in refuses it already, before the cutoff (it has an address), and the email sign-in reads only
+// the current key, so the way in is the reset link it carries (the same password may be chosen again
+// if today's rules take it), or a new one from ¿Olvidaste tu contraseña? (accounts-email-manage.test.mjs
+// runs both, before and after the cutoff).
+test('M10 (the cutoff reminder): the username is already no way in for it; the reset link it carries is, then the email and that password; another link from #forgot; never "sign in with your username"', () => {
+  const d = { kind: 'legacy_reminder', name: 'Ana', at: AT, token: TOKEN };
+  const es = T.renderMail(d, { origin: ORIGIN, lang: 'es' });
+  const en = T.renderMail(d, { origin: ORIGIN, lang: 'en' });
+  assert.equal(es.subject, 'Elige tu contraseña de Turbogol para entrar con tu correo');
+  assert.equal(
+    es.text,
+    'Hola, Ana:\n\n' +
+      'Tu cuenta tiene este correo, así que ya no entra con tu usuario: entra con el correo (desde el 30 de octubre de 2026, ninguna cuenta entra con usuario). Tu contraseña de antes todavía no sirve con el correo. Elige tu contraseña con este enlace (puede ser la misma de siempre si cumple las reglas). Caduca en 30 minutos:\n' +
+      `${ORIGIN}/account#reset=${TOKEN}\n\n` +
+      `Después entras con este correo y esa contraseña. Si el enlace caducó, pide otro en ${ORIGIN}/account#forgot con este correo.\n\n` +
+      '— Turbogol · turbo-gol.com\nEste correo es automático: no lo respondas.\n',
+  );
+  assert.equal(en.subject, 'Choose your Turbogol password to sign in with your email');
+  assert.equal(
+    en.text,
+    'Hi Ana,\n\n' +
+      "Your account has this email, so it no longer signs in with your username: it signs in with the email (from October 30, 2026, no account signs in with a username). Your old password doesn't work with the email yet. Choose your password with this link (it can be the same one if it meets the rules). It expires in 30 minutes:\n" +
+      `${ORIGIN}/account#reset=${TOKEN}\n\n` +
+      `Then sign in with this email and that password. If the link has expired, ask for another at ${ORIGIN}/account#forgot with this email.\n\n` +
+      "— Turbogol · turbo-gol.com\nThis is an automatic email: please don't reply.\n",
+  );
+  for (const r of [es, en]) {
+    assert.equal(r.link, `${ORIGIN}/account#reset=${TOKEN}`, 'the link is the reset one');
+    assert.doesNotMatch(r.text, /usuario y tu contraseña|username and password|antes de esa fecha|before then|Desde el|From October/, 'no username sign-in to do, no deadline for it, nothing that reads as the username working until the day');
+  }
+  assert.ok(es.html.includes('>Elegir mi contraseña</a>') && en.html.includes('>Choose my password</a>'));
+  assert.ok(es.html.includes(`<a href="${ORIGIN}/account#forgot"`) && en.html.includes(`<a href="${ORIGIN}/account#forgot"`));
+  // A zone moves the day, as M9's.
+  assert.ok(T.renderMail(d, { origin: ORIGIN, lang: 'es', tz: 'America/Argentina/Buenos_Aires' }).text.includes('(desde el 29 de octubre de 2026, ninguna'));
+});
+
 test('{methods} and {providers}: in the mail\'s language, joined with "o" / "or"; a notice without providers drops the clause', () => {
   const create = T.renderMail({ kind: 'reset', name: 'Ana', variant: 'create', methods: ['email', 'google', 'discord'], token: TOKEN }, { origin: ORIGIN, lang: 'es' });
   assert.ok(create.text.includes('Entras a tu cuenta con tu correo y tu contraseña, Google o Discord.'));

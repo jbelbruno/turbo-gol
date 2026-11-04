@@ -1534,9 +1534,11 @@ export class AccountStore {
       const u = this.userById(userId);
       if (u === null || num(u.banned) === 1) return 'no_user' as const;
       if (u[col] === null || u[col] === undefined) return 'not_linked' as const;
-      // A password is a way in by email (a verified address), or by the username until the cutoff (§2.8, §3.10).
+      // A password is a way in by email (a verified address) once it is the current key, or by the
+      // username until the cutoff (§2.8, §3.10). A key of before beside an address signs in nowhere
+      // (mailProfile): never the account's last way in, so Google's fill of it cannot leave a reset alone.
       const hasPassword = u.pw_hash !== null && u.pw_hash !== undefined;
-      const password = hasPassword && ((u.email_canon !== null && u.email_canon !== undefined) || !legacyClosed);
+      const password = hasPassword && (u.email_canon !== null && u.email_canon !== undefined ? num(u.pw_v) === PW_V_CURRENT : !legacyClosed);
       const ways = [password ? 1 : null, u.google_sub, u.discord_id].filter((v) => v !== null && v !== undefined).length;
       if (ways <= 1) return 'last_method' as const;
       if (this.maintainerIds.has(userId) && (!hasPassword || ways - 1 < 2)) return 'maintainer_two_ways' as const;
@@ -2029,7 +2031,8 @@ export class AccountStore {
 
   /**
    * `legacyClosed`: the cutoff for passwords without a verified email has passed (the design's
-   * LEGACY_PASSWORD_UNTIL; none yet), so such a password no longer counts as a way in.
+   * LEGACY_PASSWORD_UNTIL; none yet), so such a password no longer counts as a way in. A password
+   * of before beside a verified email never counts: it signs in nowhere until it is re-keyed.
    */
   me(userId: string, now: number, legacyClosed: boolean = false): MeInfo | null {
     const u = this.userById(userId);
@@ -2043,7 +2046,8 @@ export class AccountStore {
     if (providers.includes('google') && num(u.google_linked_at) > 0) linkedAt.google = num(u.google_linked_at);
     if (providers.includes('discord') && num(u.discord_linked_at) > 0) linkedAt.discord = num(u.discord_linked_at);
     const email = u.email_canon !== null && u.email_canon !== undefined && u.email !== null && u.email !== undefined ? str(u.email) : null;
-    const passwordCounts = providers.includes('password') && (email !== null || !legacyClosed);
+    // As unlink counts it: by email once it is the current key, by the username until the cutoff.
+    const passwordCounts = providers.includes('password') && (email !== null ? num(u.pw_v) === PW_V_CURRENT : !legacyClosed);
     const waysIn = providers.filter((p) => p !== 'password').length + (passwordCounts ? 1 : 0);
     return {
       linkedAt,

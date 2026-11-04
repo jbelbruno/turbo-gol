@@ -446,7 +446,10 @@ test('me(): email, hint, verified, legacy, news (the newest consent), deletion a
   store.setEmailHint(a, 'Ana@Discord-Mail.com', 'discord');
   assert.equal(fields(a).emailHint, 'ana@discord-mail.com');
   store.claimEmail(a, 'Ana@Gmail.com', 'mail', NOW);
-  assert.deepEqual(fields(a, true), { email: 'ana@gmail.com', emailHint: null, emailVerified: true, legacy: true, news: false, deletionAt: 0, waysIn: 1 });
+  // A password of before beside a verified address signs in nowhere (the username sign-in refuses an
+  // account with one, the email sign-in reads the current key only): no way in until it is re-keyed.
+  assert.deepEqual(fields(a, true), { email: 'ana@gmail.com', emailHint: null, emailVerified: true, legacy: true, news: false, deletionAt: 0, waysIn: 0 });
+  assert.equal(fields(a).waysIn, 0, 'before the cutoff too');
   const consent = (granted, at) => db.prepare("INSERT INTO consents (user_id, kind, version, granted, source, at) VALUES (?, 'news', 'news-v1', ?, 'perfil', ?)").run(a, granted, at);
   consent(1, NOW);
   assert.equal(fields(a).news, true);
@@ -462,6 +465,7 @@ test('me(): email, hint, verified, legacy, news (the newest consent), deletion a
   assert.deepEqual([fields(f).legacy, fields(f).waysIn, fields(f, true).waysIn], [false, 2, 2]);
   db.prepare('UPDATE users SET pw_v = 2 WHERE id = ?').run(a);
   assert.equal(fields(a).legacy, false, 'a current key is not legacy');
+  assert.deepEqual([fields(a).waysIn, fields(a, true).waysIn], [1, 1], 'a current key beside the address: a way in, the cutoff aside');
 });
 
 // ---- the daily prune ---------------------------------------------------------------------------------
