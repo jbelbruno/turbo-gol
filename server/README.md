@@ -74,13 +74,13 @@ sign in dev accounts: the Worker needs `DEV_AUTH=1` (your own `.dev.vars`, or `-
 
 From the repository root the same things are `npm run dev:api`, `npm run test:server`,
 `npm run smoke:online -- --api=<base url>` and `npm run typecheck:server`; the RoomHost test on
-the real wasm (`tests/net-roomhost-wasm.test.mjs`: host and client sims in one process, hash per snapshot and
-replay of the applied inputs between snapshots) runs with the root `npm test`. The Vite dev server
-proxies `/api`, `/ws` and `/room` to `127.0.0.1:8787` (see `vite.config.ts`); `wsUrl` is absolute
-(the Worker's own origin, `ws://127.0.0.1:8787/ws/<id>` or `/room/<id>` in dev), so the browser
-opens the socket straight to the Worker. A second checkout beside the first runs its Worker on
-another port with that port in both `--port` and `--local-upstream`, and Vite with `TG_API_PORT`
-set to it:
+the real wasm (`tests/net-roomhost-wasm.test.mjs`: host and client sims in one process, hash per
+snapshot and replay of the applied inputs between snapshots) runs with the root `npm test`. The
+Vite dev server proxies `/api`, `/ws` and `/room` to `127.0.0.1:8787` (see `vite.config.ts`);
+`wsUrl` is absolute (the Worker's own origin, `ws://127.0.0.1:8787/ws/<id>` or `/room/<id>` in
+dev), so the browser opens the socket straight to the Worker. A second checkout beside the first
+runs its Worker on another port with that port in both `--port` and `--local-upstream`, and Vite
+with `TG_API_PORT` set to it:
 
 ```sh
 npx wrangler dev --port 8788 --ip 127.0.0.1 --local-upstream 127.0.0.1:8788 --persist-to .wrangler/state-8788   # in server/
