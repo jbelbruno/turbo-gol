@@ -333,6 +333,66 @@ test('P12: the renderer escapes the text and keeps only safe links; headings get
   }
 });
 
+test("P12: Cloudflare's Email Address Obfuscation (on for the zone) leaves the addresses alone: each one a page shows, and each mailto link whole, goes out between <!--email_off--> and <!--/email_off-->, never nested; the style, the script and their hashes stay as they are", async () => {
+  const LP = await import('../src/legalPages.ts');
+  const OFF = '<!--email_off-->';
+  const ON = '<!--/email_off-->';
+  assert.deepEqual([LP.EMAIL_OFF, LP.EMAIL_ON], [OFF, ON], "Cloudflare's own markers");
+  // Every form the texts use: an autolink, a link with words, a bare address (in a sentence, in a
+  // table, in a heading), one in code and in bold code.
+  const r = LP.renderMarkdown(
+    [
+      '# Contacto',
+      '',
+      'Escríbenos a <mailto:privacy@turbo-gol.com>, o a [nuestro buzón](mailto:privacy@turbo-gol.com), o a privacy@turbo-gol.com. Desde `no-reply@turbo-gol.com` y **`no-reply@turbo-gol.com`**; <https://turbo-gol.com/x> no es un correo.',
+      '',
+      '| Qué | Dónde |',
+      '|---|---|',
+      '| **Domicilio** | Electrónico: privacy@turbo-gol.com |',
+      '',
+      '## 15. Contacto: privacy@turbo-gol.com',
+    ].join('\n'),
+  );
+  assert.ok(r.html.includes(`a ${OFF}<a href="mailto:privacy@turbo-gol.com">privacy@turbo-gol.com</a>${ON}, o a`), r.html);
+  assert.ok(r.html.includes(`${OFF}<a href="mailto:privacy@turbo-gol.com">nuestro buzón</a>${ON}`), 'a link with words: its href');
+  assert.ok(r.html.includes(`o a ${OFF}privacy@turbo-gol.com${ON}. Desde`), "a bare address, the sentence's period outside");
+  assert.ok(r.html.includes(`<code>${OFF}no-reply@turbo-gol.com${ON}</code> y <strong><code>${OFF}no-reply@turbo-gol.com${ON}</code></strong>`), 'in code');
+  assert.ok(r.html.includes(`<td data-label="Dónde">Electrónico: ${OFF}privacy@turbo-gol.com${ON}</td>`), 'in a table');
+  assert.ok(r.html.includes(`<h2 id="15-contacto-privacy-turbo-gol-com">15. Contacto: ${OFF}privacy@turbo-gol.com${ON}</h2>`), 'in a heading');
+  assert.ok(r.html.includes('<a href="https://turbo-gol.com/x" rel="noopener noreferrer">https://turbo-gol.com/x</a>'), 'a web link as before');
+  /** The page without its kept parts; each kept part holds no marker of its own (they do not nest). */
+  const outside = (html) => {
+    assert.equal(html.split(OFF).length, html.split(ON).length, 'as many ends as starts');
+    return html.replace(/<!--email_off-->([\s\S]*?)<!--\/email_off-->/g, (_, inner) => {
+      assert.ok(!inner.includes(OFF), 'never nested');
+      return '';
+    });
+  };
+  const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
+  const left = outside(r.html);
+  assert.doesNotMatch(left, EMAIL, left);
+  assert.doesNotMatch(left, /mailto:/i);
+  // The contents list the heading with its address kept too.
+  const page = LP.legalDocument({ path: '/privacidad', lang: 'es', doc: 'privacy', source: ['# Política', '', '## 15. Contacto: privacy@turbo-gol.com', '', 'Texto.'].join('\n') }, 'v1');
+  assert.ok(page.includes(`<li><a href="#15-contacto-privacy-turbo-gol-com">15. Contacto: ${OFF}privacy@turbo-gol.com${ON}</a></li>`));
+  // Through the Worker, the four pages of docs/legal: no address and no mailto outside the markers;
+  // the style and the script are the module's, untouched, and the policy hashes those.
+  const { env } = makeEnv({ TERMS_VERSION: 'v1' });
+  const csp = await LP.legalCsp();
+  assert.ok(csp.includes(`style-src 'sha256-${b64(LP.LEGAL_CSS)}'`) && csp.includes(`'sha256-${b64(LP.LEGAL_JS)}'`));
+  assert.ok(!LP.LEGAL_CSS.includes('email_off') && !LP.LEGAL_JS.includes('email_off'));
+  for (const [path, [file]] of Object.entries(PAGES)) {
+    const res = await get(env, path);
+    assert.equal(res.headers.get('content-security-policy'), csp, path);
+    assert.equal(/<style>([\s\S]*?)<\/style>/.exec(res.text)[1], LP.LEGAL_CSS, path);
+    assert.equal(/<script>([\s\S]*?)<\/script>/.exec(res.text)[1], LP.LEGAL_JS, path);
+    const rest = outside(res.text);
+    assert.doesNotMatch(rest, EMAIL, path);
+    assert.doesNotMatch(rest, /mailto:/i, path);
+    if (EMAIL.test(readFileSync(new URL(file, DOCS), 'utf8'))) assert.ok(res.text.includes(OFF), `${path}: its addresses kept`);
+  }
+});
+
 test('P12: GET /api/config says what is published: legal.terms (null until TERMS_VERSION is set), legal.deletion (DELETION_OPEN) and the days to cancel', async () => {
   const dark = makeEnv();
   assert.deepEqual((await get(dark.env, '/api/config')).json.legal, { terms: null, deletion: false, graceDays: 14 });

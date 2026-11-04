@@ -20,6 +20,13 @@
  * public/_headers allows them, so a page shows no CSP violation either way. The other headers are
  * public/_headers' ones.
  *
+ * The zone has Email Address Obfuscation on: left alone, Cloudflare would turn every address of the
+ * texts into "[email protected]", readable only once its decoder script runs (never in a reader
+ * view, a text browser or a page saved as it came). So every address the page shows and every
+ * mailto link goes out between <!--email_off--> and <!--/email_off--> (emailOff), the comments
+ * Cloudflare leaves the addresses alone between. Comments only: the style, the script and their
+ * hashes in the policy stay as they are.
+ *
  * PC, phone and TV: one column of at most 46 em, the type 16 px on a phone up to about 27 px on a
  * 1080p TV, tables stacked as cards on a narrow screen (each cell with its column's name: no
  * sideways scroll). Keyboard and remote: Tab and the links as everywhere; ▲ ▼ walk the links in
@@ -243,9 +250,28 @@ function safeUrl(url: string): boolean {
   return /^(?:https?:\/\/[^\s]+|mailto:[^\s]+|\/(?!\/)[^\s]*|#[^\s]*)$/i.test(url);
 }
 
+/** The comments Cloudflare's Email Address Obfuscation leaves the addresses alone between. */
+export const EMAIL_OFF = '<!--email_off-->';
+export const EMAIL_ON = '<!--/email_off-->';
+
+/** An email address as Cloudflare's obfuscation finds one in a page's text (a trailing '.' or ',' is not part of it). */
+const ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+
+/** HTML kept as it is by Cloudflare's obfuscation (any marker inside dropped: they do not nest). */
+function emailOff(html: string): string {
+  return EMAIL_OFF + html.replaceAll(EMAIL_OFF, '').replaceAll(EMAIL_ON, '') + EMAIL_ON;
+}
+
+/** Text as HTML, escaped, each address in it kept from the obfuscation. */
+function textHtml(s: string): string {
+  return escapeHtml(s).replace(ADDRESS, (m) => emailOff(m));
+}
+
 function anchor(url: string, inner: string): string {
   const external = /^https?:/i.test(url);
-  return `<a href="${escapeHtml(url)}"${external ? ' rel="noopener noreferrer"' : ''}>${inner}</a>`;
+  const a = `<a href="${escapeHtml(url)}"${external ? ' rel="noopener noreferrer"' : ''}>${inner}</a>`;
+  // A mailto link whole (its href and its words): Cloudflare would rewrite the href too.
+  return /^mailto:/i.test(url) ? emailOff(a) : a;
 }
 
 /** The index of the `]` that closes the `[` at `open`, or -1. */
@@ -270,11 +296,17 @@ function closeEmphasis(s: string, from: number, mark: string): number {
 /** One paragraph's (or cell's, or heading's) text as inline HTML. */
 export function renderInline(s: string): string {
   let out = '';
+  // The plain text not written yet: written escaped, its addresses kept from the obfuscation, before any markup.
+  let text = '';
+  const emit = (html: string): void => {
+    out += textHtml(text) + html;
+    text = '';
+  };
   let i = 0;
   while (i < s.length) {
     const c = s[i];
     if (c === '\\' && i + 1 < s.length && /[\\`*_{}[\]()#+\-.!|<>~]/.test(s[i + 1])) {
-      out += escapeHtml(s[i + 1]);
+      text += s[i + 1];
       i += 2;
       continue;
     }
@@ -284,18 +316,18 @@ export function renderInline(s: string): string {
       const fence = '`'.repeat(n);
       const end = s.indexOf(fence, i + n);
       if (end !== -1) {
-        out += `<code>${escapeHtml(s.slice(i + n, end).replace(/\n/g, ' '))}</code>`;
+        emit(`<code>${textHtml(s.slice(i + n, end).replace(/\n/g, ' '))}</code>`);
         i = end + n;
         continue;
       }
-      out += escapeHtml(fence);
+      text += fence;
       i += n;
       continue;
     }
     if (c === '<') {
       const m = /^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i.exec(s.slice(i));
       if (m !== null) {
-        out += anchor(m[1], escapeHtml(m[1].replace(/^mailto:/i, '')));
+        emit(anchor(m[1], textHtml(m[1].replace(/^mailto:/i, ''))));
         i += m[0].length;
         continue;
       }
@@ -307,7 +339,7 @@ export function renderInline(s: string): string {
         if (close !== -1) {
           const url = s.slice(end + 2, close).trim();
           const inner = renderInline(s.slice(i + 1, end));
-          out += safeUrl(url) ? anchor(url, inner) : inner;
+          emit(safeUrl(url) ? anchor(url, inner) : inner);
           i = close + 1;
           continue;
         }
@@ -318,14 +350,15 @@ export function renderInline(s: string): string {
       const end = closeEmphasis(s, i + mark.length, mark);
       if (end !== -1) {
         const tag = mark === '**' ? 'strong' : 'em';
-        out += `<${tag}>${renderInline(s.slice(i + mark.length, end))}</${tag}>`;
+        emit(`<${tag}>${renderInline(s.slice(i + mark.length, end))}</${tag}>`);
         i = end + mark.length;
         continue;
       }
     }
-    out += escapeHtml(c);
+    text += c;
     i++;
   }
+  emit('');
   return out;
 }
 
@@ -520,7 +553,7 @@ export function legalDocument(page: LegalPage, version: string): string {
   const other = CHROME[w.otherLang];
   const r = renderMarkdown(page.source);
   const sibling: Doc = page.doc === 'terms' ? 'privacy' : 'terms';
-  const toc = r.toc.length > 0 ? `<nav class="toc" aria-labelledby="toc-h"><h2 id="toc-h">${escapeHtml(w.contents)}</h2><ul>${r.toc.map((x) => `<li><a href="#${x.id}">${escapeHtml(x.text)}</a></li>`).join('')}</ul></nav>` : '';
+  const toc = r.toc.length > 0 ? `<nav class="toc" aria-labelledby="toc-h"><h2 id="toc-h">${escapeHtml(w.contents)}</h2><ul>${r.toc.map((x) => `<li><a href="#${x.id}">${textHtml(x.text)}</a></li>`).join('')}</ul></nav>` : '';
   // The contents go right after the title (the first heading).
   const body = r.html.replace(/(<h1 [^>]*>[\s\S]*?<\/h1>)/, `$1\n${toc}`);
   const title = r.title !== '' ? r.title : page.doc === 'terms' ? w.terms : w.privacy;
