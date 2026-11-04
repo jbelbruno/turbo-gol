@@ -143,9 +143,15 @@ cd server && npm run typecheck && npm test     # backend: types + unit tests
 (cd nodes && npm ci && npm run typecheck && npm test)   # community nodes (about 95 s)
 ```
 
-Online changes should also pass the end-to-end smokes against `wrangler dev`
-(`node server/test/smoke.mjs`, `smoke-p2p.mjs`, `smoke-accounts.mjs`; the accounts smoke signs in
-through the dev sign-in, so it needs `DEV_AUTH=1` in your `server/.dev.vars`).
+Online changes should also pass the end-to-end smokes against your `wrangler dev`:
+`node server/test/smoke.mjs --api=http://127.0.0.1:8787`, then `smoke-p2p.mjs` and
+`smoke-accounts.mjs` the same way. Each needs its target, `--api=<base url>` or `API`: there is no
+default, so a script never reaches somebody else's Worker. `smoke.mjs` and `smoke-accounts.mjs`
+sign in through the dev sign-in (Casual is for accounts), so they need `DEV_AUTH=1` in your
+`server/.dev.vars`. On another port, start the Worker with
+`npx wrangler dev --port <P> --ip 127.0.0.1 --local-upstream 127.0.0.1:<P>` (without
+`--local-upstream` it hands out its socket URLs on 8787) and give the smokes
+`--api=http://127.0.0.1:<P>` ([server/README.md](server/README.md), "Run locally").
 
 Pull request checklist:
 
