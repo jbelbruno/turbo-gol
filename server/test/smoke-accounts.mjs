@@ -27,7 +27,7 @@
 //   -> wrong password 403 -> joins -> both lobby sockets get the state (two members, A host) -> B
 //   switches team -> A starts -> both get their P2P room result -> both leave the room locks -> an
 //   experimental lobby (a guest cannot create or join it, the casual and ranked queues refuse rules,
-//   the list tags it, a server match with the rules is refused, every room welcome carries them, a
+//   the list tags it, a net 'server' is read as P2P with the rules kept, every room welcome carries them, a
 //   ready with the stock fingerprint is refused with physics_mismatch, the rules fingerprint on both
 //   starts the match, nothing is rated) -> B renames with its Bearer (no password to re-key) and its
 //   dev name still signs in to it -> the devices list -> logout: the refresh cookie no longer works.
@@ -398,8 +398,13 @@ if (ex.status === 200) {
   check(bj.status === 200, 'B (signed in) joins it', bj.status);
   const xb = await openLobby(bj.json);
   check(await waitFor(() => xb.states.at(-1)?.members.length === 2) && same(xb.states.at(-1).settings.physics, RULES), 'B sees the rules before the match');
+  // Lobbies are P2P only since the modes redesign: a net 'server' (an older page) is read as P2P,
+  // silently, so the rules stay and nothing is refused (there is no server lobby match to refuse).
+  const [statesBefore, errorsBefore] = [xa.states.length, xa.errors.length];
   xa.ws.send(JSON.stringify({ t: 'settings', settings: { net: 'server' } }));
-  check(await waitFor(() => xa.errors.some((e) => e.code === 'experimental_p2p_only')), 'a server match with the rules is refused', xa.errors.at(-1)?.code);
+  await waitFor(() => xa.states.length > statesBefore, 2000);
+  const afterNet = xa.states.at(-1)?.settings;
+  check(xa.errors.length === errorsBefore && afterNet?.net === 'p2p' && same(afterNet?.physics, RULES), "net 'server' is read as P2P: the rules stay, nothing refused", { net: afterNet?.net, errors: xa.errors.slice(errorsBefore).map((e) => e.code) });
   // Round 1: B's arena runs the standard physics (a modified page): refused at its ready.
   xa.ws.send(JSON.stringify({ t: 'start' }));
   check(await waitFor(() => xa.matches.length > 0 && xb.matches.length > 0, 8000), 'start: both get their P2P room', { a: xa.matches[0]?.kind, b: xb.matches[0]?.kind });
