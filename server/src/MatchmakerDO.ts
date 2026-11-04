@@ -255,7 +255,8 @@ const RECENT_MAX = 5_000;
  *   'solo:<matchId>'     a NODE solo match's search (SoloInfo) for its first SOLO_UNPLAYED_MS (a
  *                        MatchDO's is in its 'room:' row already): one write, one delete;
  *   'arrivals'           the estimator's ring (queuePlan.ts ArrivalsRow, no id), written with the
- *                        counters, never per request.
+ *                        counters, never per request; written again without the arrivals past
+ *                        their hour (the sweep, or the idle alarm), deleted once none is left.
  * The counters themselves stay at one write per STATS_FLUSH_MS at most; when the queues empty
  * with counts not written yet (a formation that ends after they emptied included: countFormed),
  * the alarm writes them once the 60 s are up (armIdle), and it also wakes the hub to forget a
@@ -1061,6 +1062,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     try {
       this.pruneRecent(now);
       this.pruneSolos(now);
+      this.pruneArrivals(now);
       this.maybeFlushStats(now);
       await this.statsChain;
     } catch (e) {
@@ -1103,13 +1105,15 @@ export class MatchmakerDO extends DurableObject<Env> {
 
   /**
    * Nobody is queued (no sweep runs): the alarm for the earliest of the idle work (alarm()): the
-   * counters not written yet, once STATS_FLUSH_MS has passed since the last write; the next dropped
-   * search to forget (RECENT_MS); the next node solo row to forget (SOLO_UNPLAYED_MS). Nothing
-   * pending: no alarm.
+   * counters not written yet, once STATS_FLUSH_MS has passed since the last write; the oldest
+   * arrival's hour (the 'arrivals' row is written again without it, no sooner than that minute);
+   * the next dropped search to forget (RECENT_MS); the next node solo row to forget
+   * (SOLO_UNPLAYED_MS). Nothing pending: no alarm.
    */
   private armIdle(now: number): void {
     let at = Infinity;
     if (this.statsPending()) at = Math.max(now, this.statsFlushedAt + STATS_FLUSH_MS);
+    if (this.arrivals.length > 0) at = Math.min(at, Math.max(now, this.arrivals[0].at + ARRIVALS_WINDOW_MS + 1, this.statsFlushedAt + STATS_FLUSH_MS));
     for (const e of this.recent.values()) at = Math.min(at, e.until);
     for (const id of this.soloRows) {
       const s = this.solos.get(id);
@@ -1276,6 +1280,19 @@ export class MatchmakerDO extends DurableObject<Env> {
   private arrive(a: Arrival): void {
     this.arrivals.push(a);
     while (this.arrivals.length > ARRIVALS_MAX || (this.arrivals.length > 0 && a.at - this.arrivals[0].at > ARRIVALS_WINDOW_MS)) this.arrivals.shift();
+    this.arrivalsDirty = true;
+  }
+
+  /**
+   * The arrivals past ARRIVALS_WINDOW_MS leave the ring, and the 'arrivals' row follows at the next
+   * write (with no new search for a while, the sweep or the idle alarm: armIdle), so the stored
+   * ring too holds only the last hour, give or take that write's minute.
+   */
+  private pruneArrivals(now: number): void {
+    let n = 0;
+    while (n < this.arrivals.length && now - this.arrivals[n].at > ARRIVALS_WINDOW_MS) n++;
+    if (n === 0) return;
+    this.arrivals.splice(0, n);
     this.arrivalsDirty = true;
   }
 
@@ -1734,12 +1751,17 @@ export class MatchmakerDO extends DurableObject<Env> {
     this.writeArrivals(now);
   }
 
-  /** The estimator's ring as its row (ArrivalsRow), when it changed since the last one. */
+  /** The estimator's ring as its row (ArrivalsRow), when it changed since the last one; an empty ring deletes the row. */
   private writeArrivals(now: number): void {
     if (!this.arrivalsDirty) return;
     this.arrivalsDirty = false;
     const row = encodeArrivals(this.arrivals, now);
-    this.statsChain = this.statsChain.then(() => this.ctx.storage.put(ARRIVALS_KEY, row)).catch((e) => console.error('matchmaker: arrivals write failed', e));
+    this.statsChain = this.statsChain
+      .then(async () => {
+        if (row.a.length === 0) await this.ctx.storage.delete(ARRIVALS_KEY);
+        else await this.ctx.storage.put(ARRIVALS_KEY, row);
+      })
+      .catch((e) => console.error('matchmaker: arrivals write failed', e));
   }
 
   /** Add `delta` to its day's stored row (one write after the other: a read-modify-write each). */
@@ -2220,8 +2242,10 @@ export class MatchmakerDO extends DurableObject<Env> {
     void this.formCasual(now);
     void this.formRankedAll(now);
     for (const [id, m] of this.matched) if (m.until <= now) this.matched.delete(id);
-    // The counters: at most every STATS_FLUSH_MS. With nobody queued no sweep follows: the alarm
-    // writes what is left once the minute is up, and forgets the dropped searches on time.
+    // The counters (and the arrivals row, without the ones past their hour): at most every
+    // STATS_FLUSH_MS. With nobody queued no sweep follows: the alarm writes what is left once the
+    // minute is up, and forgets the dropped searches and the old arrivals on time.
+    this.pruneArrivals(now);
     this.maybeFlushStats(now);
     if (this.queued()) this.scheduleSweep();
     else this.armIdle(now);

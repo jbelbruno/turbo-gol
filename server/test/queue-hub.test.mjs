@@ -369,6 +369,7 @@ test('an unplayed solo match gives its search its clock back once: a second one 
 test('a dropped search that expires while the hub is evicted: the alarm wakes it at its 10 min, forgets it and counts one drop (written: nothing stays past 10 min)', async () => {
   const w = await makeHubWorld();
   const a = pid();
+  const t0 = w.time();
   await w.join(a);
   w.advance(41 * SEC);
   await w.hub().sweep(); // drops A; the counters are written (the first write) and the queues are empty
@@ -380,7 +381,7 @@ test('a dropped search that expires while the hub is evicted: the alarm wakes it
   await pause(5);
   assert.equal(w.storage().map.has('recent:' + a), false, 'forgotten at 10 min');
   assert.equal(w.storage().map.get('stats:2026-11-04').dropped.casual, 1, 'counted and written');
-  assert.equal(w.hub().alarmAt, null, 'nothing left: no alarm');
+  assert.equal(w.hub().alarmAt, t0 + Q.ARRIVALS_WINDOW_MS + 1, 'what is left: its arrival\'s hour (the arrivals row)');
   await w.evict();
   await w.hub().alarm();
   await pause(5);
@@ -410,6 +411,51 @@ test('the estimate outlives an eviction: the arrivals ring is one row written wi
   assert.deepEqual([b.json.wait.estimateKind, b.json.wait.estimateMs], ['humans', 2 * MIN], '30 others in the hour: one every 2 min');
 });
 
+test('the stored arrivals keep only the last hour: an idle hub writes the row again as its arrivals pass their hour, and deletes it after the last one (no new search needed)', async () => {
+  const w = await makeHubWorld();
+  const t0 = w.time();
+  await w.join(pid());
+  await w.join(pid()); // a pair: two arrivals; the first write (the row with them)
+  w.advance(20 * MIN);
+  await w.join(pid());
+  await w.join(pid()); // two more, written with that pair's counts
+  noSweep(w);
+  await pause(5);
+  const entries = () => (w.storage().map.get('arrivals')?.a.length ?? 0) / 3;
+  assert.equal(entries(), 4);
+  assert.equal(w.storage().alarm, t0 + Q.ARRIVALS_WINDOW_MS + 1, 'armed for the oldest arrival\'s hour');
+  await w.evict(); // idle: nothing else wakes it
+  w.advance(w.storage().alarm - w.time());
+  await w.hub().alarm();
+  await pause(5);
+  assert.equal(entries(), 2, 'the first two are past their hour: the row is written without them');
+  assert.equal(w.storage().alarm, t0 + 20 * MIN + Q.ARRIVALS_WINDOW_MS + 1, 'then for the next one\'s');
+  await w.evict();
+  w.advance(w.storage().alarm - w.time());
+  await w.hub().alarm();
+  await pause(5);
+  assert.equal(w.storage().map.has('arrivals'), false, 'none left: the row is deleted');
+  assert.equal(w.hub().alarmAt, null, 'nothing left to wake for');
+  assert.equal((await w.daily(1)).days[0].formed.casual['2'], 2, 'the counters were written meanwhile');
+  // With somebody queued the whole time (a ranked search past the hour), the sweep does it.
+  const v = await makeHubWorld();
+  await v.join(pid());
+  await v.join(pid());
+  v.advance(MIN);
+  const r = pid();
+  const ranked = { kind: 'ranked', mode: '1v1' };
+  await v.join(r, ranked);
+  v.advance(MIN);
+  await v.hub().sweep(); // the minute is up: the row with all three
+  await pause(5);
+  assert.equal(v.storage().map.get('arrivals').a.length, 3 * 3);
+  await hold(v, [[r, ranked]], 58 * MIN + 30 * SEC); // 60.5 min after the pair, 59.5 after the ranked search
+  await v.hub().sweep();
+  noSweep(v);
+  await pause(5);
+  assert.deepEqual(v.storage().map.get('arrivals').a, [0, 1, 0], 'only the ranked search is left (its kind 1, home SA)');
+});
+
 test('a leave or a release with nobody queued runs no pass: the idle alarm is armed by the request itself, and a regional room release reads no KV', async () => {
   const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true });
   await w.join(pid());
@@ -437,13 +483,14 @@ test('a leave or a release with nobody queued runs no pass: the idle alarm is ar
 test('a release with nobody queued arms the idle alarm itself: an unplayed solo match\'s search, back in `recent`, is forgotten on time at its 10 min', async () => {
   const w = await makeHubWorld();
   const a = pid();
+  const t0 = w.time();
   await w.join(a);
   w.advance(Q.SOLO_AFTER_MS);
-  const solo = await w.join(a); // the first formation writes the counters: nothing pending, no alarm
+  const solo = await w.join(a); // the first formation writes the counters: nothing pending
   noSweep(w);
   await pause(5);
   assert.equal(solo.json.humans, 1);
-  assert.equal(w.storage().alarm, null);
+  assert.equal(w.storage().alarm, t0 + Q.ARRIVALS_WINDOW_MS + 1, 'only its arrival\'s hour');
   w.advance(45 * SEC);
   await w.release(solo.json.matchId, [a]);
   await pause(5);

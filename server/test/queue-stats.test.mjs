@@ -132,7 +132,7 @@ test('the queues empty with counts not written (a search-then-cancel loop): no w
   await pause(5);
   assert.equal(storage().writes('stats:').length, 2, 'one write for the ten cycles');
   assert.deepEqual([storage().map.get(key).searches.casual, storage().map.get(key).cancelled.casual], [12, 10]);
-  assert.equal(w.hub().alarmAt, null, 'nothing left: no alarm');
+  assert.equal(w.hub().alarmAt, firstAt + Q.ARRIVALS_WINDOW_MS + 1, 'what is left: the oldest arrival\'s hour (the arrivals row)');
   // Evicted now, nothing is lost: it is all in storage.
   await w.evict();
   assert.deepEqual((await w.daily(1)).days[0].cancelled.casual, 10);
