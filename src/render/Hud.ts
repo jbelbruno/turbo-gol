@@ -202,10 +202,11 @@ export class Hud {
   private readonly scoreRed: HTMLElement;
   private readonly clock: HTMLElement;
   private readonly scoreBox: HTMLElement;
-  /** The search strip under the scorebug (setSearch), and what it shows. */
+  /** The search strip under the scorebug (setSearch), and what it shows: a search's, or a waiting lobby's (room play). */
   private readonly searchStrip: HTMLElement;
   private lastSearch: string | null = null;
   private lastSearchWarn = false;
+  private lastSearchKind: 'search' | 'room' = 'search';
   /** The network bars by the clock (online; netBars). */
   private readonly netBarsEl: HTMLElement;
   private lastBars = -1;
@@ -363,7 +364,8 @@ export class Hud {
     this.root.appendChild(top);
 
     // The search strip under the scorebug (setSearch): a match against the bots while a search
-    // runs ("Finding CASUAL · 1:23 · Bots in 3:37 at most · Pause: cancel"), or why it ended.
+    // runs ("Finding CASUAL · 1:23 · Bots in 3:37 at most · Pause: cancel"), or why it ended; a
+    // lone host's local play while the lobby waits ("Lobby ABC 234 · waiting for players · ...").
     this.searchStrip = el('div', 'hud-search');
     this.searchStrip.setAttribute('role', 'status');
     this.searchStrip.hidden = true;
@@ -536,14 +538,18 @@ export class Hud {
    * The search strip under the scorebug while the player plays waiting for a match (the modes
    * redesign: Game's wait play, at 2 Hz): `text` (null hides it), `warn` for a line that says
    * something is wrong (no network, the search ended). Written on a change only.
+   * `kind` 'room': the same strip for a lone host playing while the lobby waits (Game's room play:
+   * "Lobby ABC 234 · waiting for players · Pause: back to the lobby"), `data-kind` on it.
    */
-  setSearch(text: string | null, warn = false): void {
-    if (text === this.lastSearch && warn === this.lastSearchWarn) return;
+  setSearch(text: string | null, warn = false, kind: 'search' | 'room' = 'search'): void {
+    if (text === this.lastSearch && warn === this.lastSearchWarn && kind === this.lastSearchKind) return;
     this.lastSearch = text;
     this.lastSearchWarn = warn;
+    this.lastSearchKind = kind;
     this.searchStrip.hidden = text === null;
     this.searchStrip.textContent = text ?? '';
     this.searchStrip.classList.toggle('hud-search-warn', warn);
+    this.searchStrip.dataset.kind = kind;
   }
 
   /** Show / hide the debug readouts (speed, fps, draw calls, GPU time). F3 toggles this. */

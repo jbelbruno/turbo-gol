@@ -609,6 +609,8 @@ export default {
   'lobby.joinedBack': '{name} joined your lobby',
   // The HUD's strip while the host plays; {code} as 'ABC 234'
   'lobby.hudWaiting': 'Lobby {code} · waiting for players',
+  // After lobby.hudWaiting on that strip: the pause menu's BACK TO THE LOBBY (on a phone, its pause button)
+  'lobby.hudBack': 'Pause: back to the lobby',
 
   // A lost server match (plan PR 12: src/ui/screens/match/lost.ts)
   'lost.title': 'Your connection dropped',

@@ -21,6 +21,12 @@
  *
  * A refused create or join is a failed online step (Menu.failure, src/net/outcome.ts): its text and
  * its one action. Built per screen; the lobby callbacks are set when the screen is first made.
+ *
+ * A host alone (the modes redesign, step 2: spec §3.8) gets, under the action bar, "While you wait
+ * for someone to join: VS BOTS · TRAIN": the Game's room play (src/game/roomPlay.ts, through
+ * installRoomPlay), an unlimited match against the bots or free play while the lobby stays open
+ * and listed. Not while a search runs (it wins). The lobby callbacks tell the Game first: someone
+ * came in (back to the Sala), the lobby went (the menus), a reconnection (it goes on).
  */
 import { h, setChildren, copyText, navButton } from '../dom';
 import type { LobbyMember, LobbyState } from '../../net/account';
@@ -50,6 +56,29 @@ import { hasLink, joinLink, linkCode, lobbyFormat, shareWay, shortLink, spacedCo
  * stacked MODOS would sit above the Sala, and Back would come back to it.
  */
 export const toList = (menu: Menu): void => menu.open('modes', true, 'lobbies');
+
+/**
+ * The Game's side of a lone host's local play while the lobby waits (Game.ts room play,
+ * src/game/roomPlay.ts): the Sala's two buttons, and the lobby callbacks' news (a hidden tab runs
+ * these too: the lobby socket lives).
+ */
+export interface RoomPlayHost {
+  /** VS BOTS · TRAIN show now: a lone host, the lobby open, no search or other session up, nothing local on. */
+  offered(): boolean;
+  /** Start one (it checks again: nothing starts when it is not offered any more). */
+  start(kind: 'bots' | 'training'): void;
+  /** The lobby's state or status changed (someone came in: back to the Sala; reconnecting: it goes on). */
+  changed(): void;
+  /** The lobby closed (`reason`: LobbyClient's): true when the host was playing and the Game took the player to the menus, its close text included. */
+  closed(reason: string): boolean;
+}
+
+let roomPlay: RoomPlayHost | null = null;
+
+/** The Game's room play (once, at boot); the Sala reads it when it renders. */
+export function installRoomPlay(host: RoomPlayHost): void {
+  roomPlay = host;
+}
 
 const touch = (): boolean => document.documentElement.classList.contains('tg-touch');
 const tv = (): boolean => document.documentElement.classList.contains('tg-tv');
@@ -337,15 +366,29 @@ export function lobbyScreen(menu: Menu): Screen {
   const bar = h('div.mn-sala-bar', { 'data-nav-row': true }, go, more);
   // A host alone: START waits for a second player (lobbies are P2P), and this line says so.
   const need = h('p.mn-sala-need', { id: 'mn-sala-need', role: 'status', hidden: true });
+  // ...and under the bar, local play while the lobby waits (Game.ts room play; MODOS' "While you
+  // wait" look). A search running hides it (it wins); a TV without a controller asks for one first.
+  const playBtn = (kind: 'bots' | 'training'): HTMLButtonElement =>
+    h(
+      'button.mn-act-practice',
+      { type: 'button', 'data-nav': true, 'data-key': 'sala-play-' + kind, onclick: () => menu.beforeMatch(() => roomPlay?.start(kind)) },
+      icon(kind === 'bots' ? 'bot' : 'training'),
+      h('u', null, t(kind === 'bots' ? 'search.waitBots' : 'search.waitTraining')),
+    );
+  const waitRow = h('div.mn-act-wait.mn-sala-wait', { 'data-nav-row': true, hidden: true }, h('span.mn-act-wait-label', null, t('lobby.waitLine')), playBtn('bots'), playBtn('training'));
+  // The three in one foot, fixed at the bottom of the stage (lobby.css): when the Sala scrolls (a
+  // phone held sideways or upright, a TV), the teams go under it and the lines stay in sight.
+  const foot = h('div.mn-sala-foot', null, need, bar, waitRow);
   const el = h(
     'section.mn-sala',
     { 'data-tablero': true },
     h('div.mn-sala-head', null, h('div.mn-sala-title', null, name, info, rulesLine), h('div.mn-sala-codebox', { 'data-nav-row': true }, code, share)),
     status,
     teams,
-    need,
-    bar,
+    foot,
   );
+  // Its height for the teams' rows (lobby.css scroll-margin): a row the arrows focus scrolls in above it, not under it.
+  const footSize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => el.style.setProperty('--mn-sala-foot', `${foot.offsetHeight}px`)) : null;
   let shown = false;
 
   const state = (): LobbyState | null => lobby.state;
@@ -354,6 +397,8 @@ export function lobbyScreen(menu: Menu): Screen {
   const busy = (): boolean => lobby.reconnecting || state()?.status !== 'open';
   /** The host is alone: a P2P match needs another player (the server refuses a lone start: need_players). */
   const alone = (): boolean => lobby.isHost && (state()?.members.length ?? 0) < 2;
+  /** VS BOTS · TRAIN while the lobby waits (the Game says: a lone host with no search or other play on). */
+  const playOffered = (): boolean => roomPlay !== null && roomPlay.offered();
 
   const copyCode = (): void => {
     const s = state();
@@ -483,6 +528,7 @@ export function lobbyScreen(menu: Menu): Screen {
     if (s === null) {
       setChildren(teams, h('p.mn-empty', null, lobby.status === 'connecting' || lobby.reconnecting ? t('custom.joining') : t('custom.notInLobby')));
       go.hidden = true;
+      waitRow.hidden = true;
       return;
     }
     go.hidden = false;
@@ -519,8 +565,10 @@ export function lobbyScreen(menu: Menu): Screen {
     need.textContent = needText;
     if (needText !== '') go.setAttribute('aria-describedby', 'mn-sala-need');
     else go.removeAttribute('aria-describedby');
-    // The controller's place across re-renders (by data-key), else the screen's own.
-    const again = focusedKey !== null ? el.querySelector<HTMLElement>(`[data-key="${focusedKey}"]`) : null;
+    waitRow.hidden = !playOffered();
+    // The controller's place across re-renders (by data-key, never a button just hidden), else the screen's own.
+    const found = focusedKey !== null ? el.querySelector<HTMLElement>(`[data-key="${focusedKey}"]`) : null;
+    const again = found !== null && found.closest('[hidden]') === null ? found : null;
     if (again !== null && document.activeElement !== again && !touch()) again.focus({ preventScroll: true });
     else if (focusedKey !== null && again === null) menu.refocus();
     menu.refit();
@@ -532,11 +580,14 @@ export function lobbyScreen(menu: Menu): Screen {
       menu.prefs.lobbyMode = s.settings.mode;
       menu.savePrefs();
     }
+    // A host playing while the lobby waits: someone came in brings the Sala back first (room play).
+    roomPlay?.changed();
     if (shown) render();
   };
   lobby.onStatus = () => {
     // Back from a reconnection: the network is too, so the region pill asks again now.
     if (!lobby.reconnecting) menu.populationNow();
+    roomPlay?.changed(); // reconnecting: the host's play goes on (the strip says so)
     if (shown) render();
   };
   lobby.onMatch = (r) => menu.host.playLobbyMatch(r);
@@ -546,6 +597,8 @@ export function lobbyScreen(menu: Menu): Screen {
     else menu.toast(message, 'error');
   };
   lobby.onClosed = (reason) => {
+    // A host playing while the lobby waited: the Game ends it and takes the player to the list, with this text.
+    if (roomPlay !== null && roomPlay.closed(reason)) return;
     menu.toast(lobbyCloseText(reason), reason === 'kicked' ? 'error' : 'info');
     if (menu.top()?.id === 'lobby') toList(menu);
     else menu.refreshChrome();
@@ -601,6 +654,7 @@ export function lobbyScreen(menu: Menu): Screen {
         });
       }
       shown = true;
+      footSize?.observe(foot);
       if (lobby.me?.inGame) lobby.back(); // back from the lobby's match
       render();
       if (freshLobby) {
@@ -610,6 +664,11 @@ export function lobbyScreen(menu: Menu): Screen {
     },
     hide: () => {
       shown = false;
+      footSize?.disconnect();
+    },
+    // A search started or ended elsewhere (the pill's ✕, a failure): VS BOTS · TRAIN follow it.
+    tick: () => {
+      if (shown && state() !== null && waitRow.hidden === playOffered()) render();
     },
     back: () => {
       if (!lobby.inLobby) return false;
