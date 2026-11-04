@@ -352,7 +352,7 @@ test('CUENTAS Y COLAS: counts as numbers only (ids, lists and booleans left out)
   assert.deepEqual(M.countRows({ total: 3, byWays: { password: 2, 'password+google': 1 }, trusted: [{ found: true }], operators: null, name: 'x' }), [['total', 3], ['byWays.password', 2], ['byWays.password+google', 1]]);
   assert.deepEqual(M.queueDayRow({ date: '2026-11-04', searches: { casual: 3, ranked: 1 }, cancelled: { casual: 1 }, dropped: {}, formed: { casual: { 1: 2, 2: 1 }, ranked: { 2: 1 } }, onNode: 2, onCloud: 2, crossRegion: 1 }), { date: '2026-11-04', searches: 4, cancelled: 1, dropped: 0, formed: 4, onNode: 2, onCloud: 2, crossRegion: 1 });
   assert.equal(M.queueDayRow({ searches: {} }), null);
-  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats']);
+  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts']);
 });
 
 // ---- AccountClient's /nodes/* calls ---------------------------------------------------------------
@@ -436,8 +436,13 @@ test('the admin calls: the overview, a wallet, the frozen list, the actions and 
 
 test('the panel paints server text as text only: no innerHTML, no outerHTML, no insertAdjacentHTML; the only href is the viewer\'s, from a checked id', () => {
   assert.doesNotMatch(SCREEN, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
-  assert.equal([...SCREEN.matchAll(/h\('a\./g)].length, 1, "one link: the review's");
+  assert.equal([...SCREEN.matchAll(/h\('a\./g)].length, 2, "two links, both the public viewer's: the review's and a match's (PARTIDAS)");
   assert.match(SCREEN, /const href = replayHref\(match\);/);
+  assert.match(SCREEN, /const href = a\.viewer \? replayHref\(base\.matchId\) : null;/);
+  // The raw replay is saved from a blob of its bytes: the one other href, a link made, clicked and removed, never painted.
+  assert.equal([...SCREEN.matchAll(/\.href = /g)].length, 1);
+  assert.match(SCREEN, /link\.href = url;\s*link\.download = `\$\{matchId\}\.tgr`;/);
+  assert.match(SCREEN, /if \(!\/\^\[0-9a-f\]\{64\}\$\/\.test\(matchId\)\) return false;/, 'a checked id names the file');
   assert.match(SCREEN, /h\('a\.mn-btn', \{ href, target: '_blank', rel: 'noopener'/);
   assert.doesNotMatch(SCREEN, /href: /);
 });
@@ -464,4 +469,110 @@ test('the wizard: the password first, always for an account with one, then the t
   assert.match(SCREEN, /lineOk: installLineMatches\(r\.install\.linux, ask\)/);
   assert.match(SCREEN, /const id = \(await sha256Hex\(r\.token\)\)\.slice\(0, 12\);/, "the overview's short id of the token (registry.ts tokenIdOf)");
   assert.equal(es['nodesAdmin.wiz.warn'], 'Solo para máquinas del proyecto: un token de esta cuenta da confianza total. El servidor de otra persona va por Mis servidores, nunca por aquí.');
+});
+
+// ---- PARTIDAS, HISTORIAL, ALERTAS (the history, PR 4) -------------------------------------------------
+
+const HID = (c) => c.repeat(64);
+const seat = (slot, team, o = {}) => ({ slot, team, bot: false, name: 'P' + slot, id: String(slot).repeat(16), hidden: false, ...o });
+const settledMatch = (c, at, o = {}) => ({ matchId: HID(c), nodeId: 'n'.repeat(16), nodeName: 'sp1', region: 'SA', mode: '2v2', ranked: true, transport: 'wss', placedAt: at - 1000, reportedAt: at - 10, settledAt: at, result: 'rated', reason: 'rules', score: { blue: 1, red: 0 }, verified: true, verifiedBy: 'v', verifierName: 'sp1', verdict: { ok: true, code: 'ok' }, strike: null, replay: true, points: null, frozen: false, adminReason: null, seats: [seat(0, 0), seat(1, 1)], delistedAt: null, listed: true, published: true, ...o });
+const openMatch = (c, at, o = {}) => ({ matchId: HID(c), nodeId: 'n'.repeat(16), nodeName: null, region: 'EU', mode: '1v1', ranked: false, transport: 'wss', state: 'assigned', placedAt: at, deadline: at + 1, started: false, reportedAt: null, queuedAt: null, verifying: false, verifierName: null, replay: false, leaves: 0, seats: [], ...o });
+
+test('the history read leniently: pages with their cursor, names unavailable said apart, an event kind this client does not know left out; the overview\'s voids of 24 h', () => {
+  assert.deepEqual(N.historyPageOf(null), { matches: [], next: null, names: 'shown' });
+  const h = N.historyPageOf({ matches: [{ matchId: 'x' }], next: '12.' + HID('a'), names: 'unavailable' });
+  assert.deepEqual([h.matches[0].seats, h.next, h.names], [[], '12.' + HID('a'), 'unavailable']);
+  assert.deepEqual(N.openMatchesOf({ matches: [{ matchId: 'x' }] }), { total: 1, matches: [{ matchId: 'x', seats: [] }], names: 'shown' });
+  const e = N.eventsPageOf({ events: [{ id: 2, kind: 'online' }, { id: 1, kind: 'something_new' }], next: '' });
+  assert.deepEqual([e.events.map((x) => x.id), e.next], [[2], null]);
+  assert.deepEqual(N.alertsPageOf({ alerts: [{ id: 1, line: 'ALERT x', kind: 'alert' }, { id: 2 }], webhook: false }), { alerts: [{ id: 1, line: 'ALERT x', kind: 'alert' }], next: null, webhook: false });
+  assert.deepEqual(N.overviewOf({}).voids24h, [], 'a server of before');
+  assert.deepEqual(N.NODE_EVENT_KINDS.length, 19);
+});
+
+test('PARTIDAS: the open matches first, newest first, then the settled ones as their pages came, each once; tones by state', () => {
+  const rows = M.matchRows({ total: 2, names: 'shown', matches: [openMatch('a', 10), openMatch('b', 20, { state: 'verifying' })] }, [settledMatch('c', 30), settledMatch('a', 5), settledMatch('d', 3, { result: 'void' })]);
+  assert.deepEqual(
+    rows.map((r) => [r.matchId[0], r.open, r.state, r.tone, r.at]),
+    [
+      ['b', true, 'verifying', 'warn', 20],
+      ['a', true, 'assigned', 'muted', 10],
+      ['c', false, 'rated', 'ok', 30],
+      ['d', false, 'void', 'bad', 3],
+    ],
+  );
+  assert.equal(rows[1].nodeName, 'n'.repeat(16), 'a node without a name by its id');
+  assert.deepEqual(M.matchRows(null, []), []);
+});
+
+test("a match's detail offers what the server would take: void (with or without a strike) and verify now for an open one; the viewer once published, delist while listed, the raw download while kept, for a settled one", () => {
+  assert.deepEqual(M.matchActions({ open: true, match: openMatch('a', 1) }), { viewer: false, delist: false, download: false, void: true, verify: false });
+  assert.deepEqual(M.matchActions({ open: true, match: openMatch('a', 1, { state: 'verifying', replay: true }) }), { viewer: false, delist: false, download: true, void: true, verify: true });
+  assert.equal(M.matchActions({ open: true, match: openMatch('a', 1, { state: 'verifying', verifying: true }) }).verify, false, 'a verifier has it');
+  assert.deepEqual(M.matchActions({ open: false, match: settledMatch('a', 1) }), { viewer: true, delist: true, download: true, void: false, verify: false });
+  assert.deepEqual(M.matchActions({ open: false, match: settledMatch('a', 1, { published: false }) }), { viewer: false, delist: true, download: true, void: false, verify: false }, 'listed, its hour not released yet');
+  assert.deepEqual(M.matchActions({ open: false, match: settledMatch('a', 1, { delistedAt: 5, listed: false, published: false }) }), { viewer: false, delist: false, download: false, void: false, verify: false }, 'delisted: nothing (the server answers 404 to the download too)');
+  assert.deepEqual(M.matchActions({ open: false, match: settledMatch('a', 1, { result: 'void', listed: false, published: false, replay: false }) }), { viewer: false, delist: false, download: false, void: false, verify: false });
+  for (const a of ['voidMatch', 'voidStrike']) assert.deepEqual(M.confirmNeeds(a), { reason: true, typeName: false }, a);
+  assert.deepEqual(M.confirmNeeds('download'), { reason: false, typeName: false });
+});
+
+test('a seat named as the public replays name it: a hidden name as "Jugador N" (its slot + 1), a purged account said so, a bot, else the name', () => {
+  assert.deepEqual(M.seatName(seat(0, 0)), { kind: 'name', name: 'P0', n: 1 });
+  assert.deepEqual(M.seatName(seat(2, 1, { name: null, hidden: true })), { kind: 'hidden', name: '', n: 3 });
+  assert.deepEqual(M.seatName(seat(3, 1, { name: null, id: null })), { kind: 'gone', name: '', n: 4 });
+  assert.equal(M.seatName(seat(1, 0, { bot: true, name: null, id: null })).kind, 'bot');
+  assert.equal(M.seatName(seat(1, 0, { name: null })).kind, 'hidden', 'names unavailable: its id stays, its name does not');
+  assert.equal(es['nodesAdmin.match.hidden'].replace('{n}', '3'), 'Jugador 3');
+});
+
+test('HISTORIAL and ALERTAS: every event kind and match state has its words in both languages (Spanish translated), a tone each; a page appended once', () => {
+  for (const k of N.NODE_EVENT_KINDS) {
+    const key = `nodesAdmin.event.${k}`;
+    assert.equal(typeof en[key], 'string', key);
+    assert.equal(typeof es[key], 'string', key);
+    assert.notEqual(es[key], en[key], key);
+    assert.ok(['ok', 'warn', 'muted', 'bad'].includes(M.eventTone(k)), k);
+  }
+  assert.equal(M.eventTone('strike'), 'bad');
+  assert.equal(M.eventTone('online'), 'ok');
+  for (const s of ['assigned', 'reporting', 'verifying', 'rated', 'unrated', 'void']) assert.equal(typeof es[`nodesAdmin.match.state.${s}`], 'string', s);
+  for (const t of ['matches', 'history', 'alerts']) assert.equal(typeof es[`nodesAdmin.tab.${t}`], 'string', t);
+  assert.deepEqual(es['nodesAdmin.tab.matches'] + es['nodesAdmin.tab.history'] + es['nodesAdmin.tab.alerts'], 'PartidasHistorialAlertas');
+  assert.deepEqual(M.appendPage([{ id: 3 }, { id: 2 }], [{ id: 2 }, { id: 1 }], (x) => x.id), [{ id: 3 }, { id: 2 }, { id: 1 }]);
+});
+
+test('the history calls on ownCall: events, history, alerts and matches with their query (only what is given, encoded); the raw replay as bytes, its 404 with its code', async () => {
+  const bytes = new Uint8Array([0x54, 0x47, 0x52, 0x31]);
+  const c = client({
+    '/nodes/admin/events': (_, path) => res(200, { events: [{ id: 1, kind: 'online', nodeId: 'n', at: 1 }], next: '1', path }),
+    '/nodes/admin/history': () => res(200, { matches: [], next: null }),
+    '/nodes/admin/alerts': () => res(200, { alerts: [], next: null, webhook: true }),
+    '/nodes/admin/matches': () => res(200, { total: 0, matches: [] }),
+    '/nodes/admin/replay': (_, path) => (path.endsWith(HID('a')) ? { ...res(200, null), arrayBuffer: async () => bytes.buffer.slice(0) } : res(404, { error: 'no_replay' })),
+    '/nodes/admin/match/void': () => res(200, { voided: true }),
+  });
+  assert.equal((await c.a.nodesEvents({ node: 'abababababababab', before: '9' })).events.length, 1);
+  assert.equal(c.calls.at(-1).path, '/nodes/admin/events?node=abababababababab&before=9');
+  await c.a.nodesHistory({ match: HID('a') });
+  assert.equal(c.calls.at(-1).path, '/nodes/admin/history?match=' + HID('a'));
+  await c.a.nodesHistory({ before: '12.' + HID('b'), node: undefined });
+  assert.equal(c.calls.at(-1).path, '/nodes/admin/history?before=12.' + HID('b'));
+  await c.a.nodesAlerts();
+  assert.equal(c.calls.at(-1).path, '/nodes/admin/alerts');
+  assert.equal((await c.a.nodesMatches()).total, 0);
+  assert.deepEqual(await c.a.nodesReplay(HID('a')), bytes);
+  assert.deepEqual([c.calls.at(-1).method, c.calls.at(-1).auth], ['GET', 'Bearer jwt-1']);
+  await assert.rejects(c.a.nodesReplay(HID('b')), (e) => e instanceof AC.AccountError && e.code === 'no_replay' && e.status === 404);
+  await c.a.nodesAction('match/void', { matchId: HID('a'), reason: 'x', strike: true });
+  assert.deepEqual(c.calls.at(-1).body, { matchId: HID('a'), reason: 'x', strike: true });
+  for (const x of c.calls) assert.ok(x.path.startsWith('/nodes/admin/'), x.path);
+});
+
+test("the history's reads are their tab's (opened, ACTUALIZAR, MÁS), never the 15 s refresh's; the download is confirmed first", () => {
+  const tick = SCREEN.slice(SCREEN.indexOf('const load = async'), SCREEN.indexOf('/** A POST of the panel'));
+  assert.doesNotMatch(tick, /nodesHistory|nodesEvents|nodesAlerts|nodesMatches|nodesReplay/);
+  assert.match(SCREEN, /if \(id === 'matches' && matches === null\) void loadMatches\(\);/);
+  assert.match(SCREEN, /confirmSheet\('download', short, t\('nodesAdmin\.match\.download'\), \(\) => download\(base\.matchId\)\)/);
+  assert.match(SCREEN, /confirmSheet\('delist', short, t\('nodesAdmin\.match\.delist'\), \(reason\) => act\(\(\) => acc\.nodesAction\('delist', \{ matchId, reason \}\)/);
 });

@@ -4,15 +4,16 @@
  * a hidden page, held by reauth_required until the password, a minute apart while the nodes are
  * paused, slower after a 429), the KPIs of RESUMEN, the rows of NODOS, TOKENS and REGIONES, what
  * each node may be asked (the server's guards, so a button that would only be refused is not
- * offered), what a confirmation asks for, and the wizard's follow-up of its token and its node.
+ * offered), what a confirmation asks for, the wizard's follow-up of its token and its node, and the
+ * history's rows (PARTIDAS: what a match offers; HISTORIAL and ALERTAS: tones, pages).
  * Menu and Screen are types only here: Menu.ts imports CSS.
  */
 import { REGION_IDS, statusTone } from '../../net/nodes';
-import type { AdminNode, NodeFailure, NodeStatus, Overview, RegionView, Tone, TokenView } from '../../net/nodes';
+import type { AdminNode, HistoryMatch, MatchSeat, NodeEventKind, NodeFailure, NodeStatus, OpenMatch, OpenMatches, Overview, RegionView, Tone, TokenView } from '../../net/nodes';
 
-export type AdminTab = 'summary' | 'nodes' | 'tokens' | 'regions' | 'release' | 'points' | 'stats';
-/** The panel's tabs in their order (Partidas, Historial and Alertas come with the history, PR 4). */
-export const ADMIN_TABS: readonly AdminTab[] = ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats'];
+export type AdminTab = 'summary' | 'nodes' | 'tokens' | 'regions' | 'release' | 'points' | 'stats' | 'matches' | 'history' | 'alerts';
+/** The panel's tabs in their order (Partidas, Historial and Alertas: the history, PR 4). */
+export const ADMIN_TABS: readonly AdminTab[] = ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts'];
 
 /** The overview is asked again this often (ADMIN_REFRESH): under the 30 a minute of the maintainer routes, with room for the actions. */
 export const ADMIN_REFRESH_MS = 15_000;
@@ -208,16 +209,17 @@ export function nodeActions(n: AdminNode): NodeActions {
   };
 }
 
-export type ConfirmAction = 'status' | 'ban' | 'force' | 'drain' | 'reprobe' | 'retire' | 'revokeToken' | 'update' | 'grant' | 'revoke' | 'unfreeze' | 'delist';
+export type ConfirmAction = 'status' | 'ban' | 'force' | 'drain' | 'reprobe' | 'retire' | 'revokeToken' | 'update' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'voidMatch' | 'voidStrike' | 'download';
 
 /**
  * What a confirmation sheet asks for (prompt 1, B6): a reason for a retirement, a ban, a drain, a
- * delist, an active forced past its verified matches and every points action; the node's name typed
- * for a retirement, a ban and a drain.
+ * delist, a match voided (with or without a strike), an active forced past its verified matches and
+ * every points action; the node's name typed for a retirement, a ban and a drain. A raw replay's
+ * download asks for nothing: its sheet only says it is posted to the team's channel.
  */
 export function confirmNeeds(a: ConfirmAction): { reason: boolean; typeName: boolean } {
   const typeName = a === 'retire' || a === 'ban' || a === 'drain';
-  const reason = typeName || a === 'delist' || a === 'force' || a === 'grant' || a === 'revoke' || a === 'unfreeze';
+  const reason = typeName || a === 'delist' || a === 'voidMatch' || a === 'voidStrike' || a === 'force' || a === 'grant' || a === 'revoke' || a === 'unfreeze';
   return { reason, typeName };
 }
 
@@ -331,4 +333,104 @@ export function queueDayRow(d: unknown): { date: string; searches: number; cance
   if (typeof o.date !== 'string') return null;
   const num = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
   return { date: o.date, searches: countSum(o.searches), cancelled: countSum(o.cancelled), dropped: countSum(o.dropped), formed: countSum(o.formed), onNode: num(o.onNode), onCloud: num(o.onCloud), crossRegion: num(o.crossRegion) };
+}
+
+// ---- PARTIDAS, HISTORIAL, ALERTAS (the history, PR 4) ---------------------------------------------------
+
+/** Where a match stands: held and not settled (assigned, reporting, verifying), or how it settled. */
+export type MatchState = OpenMatch['state'] | HistoryMatch['result'];
+
+/** A match's state as a colour: rated ok, being verified warn, void bad, the rest muted. */
+export function matchTone(state: MatchState): Tone {
+  if (state === 'rated') return 'ok';
+  if (state === 'verifying') return 'warn';
+  if (state === 'void') return 'bad';
+  return 'muted';
+}
+
+export interface MatchRow {
+  key: string;
+  matchId: string;
+  open: boolean;
+  nodeName: string;
+  region: string;
+  mode: string;
+  ranked: boolean;
+  state: MatchState;
+  tone: Tone;
+  /** When it was placed (an open one) or settled. */
+  at: number;
+}
+
+/** PARTIDAS' rows: the open matches first (newest first), then the settled ones as the history pages came (newest first), each once. */
+export function matchRows(open: OpenMatches | null, settled: readonly HistoryMatch[]): MatchRow[] {
+  const seen = new Set<string>();
+  const out: MatchRow[] = [];
+  const add = (m: OpenMatch | HistoryMatch, isOpen: boolean): void => {
+    if (seen.has(m.matchId)) return;
+    seen.add(m.matchId);
+    const state: MatchState = isOpen ? (m as OpenMatch).state : (m as HistoryMatch).result;
+    out.push({ key: m.matchId, matchId: m.matchId, open: isOpen, nodeName: m.nodeName ?? m.nodeId, region: m.region, mode: m.mode, ranked: m.ranked, state, tone: matchTone(state), at: isOpen ? (m as OpenMatch).placedAt : (m as HistoryMatch).settledAt });
+  };
+  for (const m of [...(open?.matches ?? [])].sort((a, b) => b.placedAt - a.placedAt)) add(m, true);
+  for (const m of settled) add(m, false);
+  return out;
+}
+
+/**
+ * What a match's detail offers, as the server would answer it: an open one may be voided (with or
+ * without a strike) and, waiting for its verification with no verifier on it, verified now; a
+ * settled one's replay opens in the public viewer once published, is delisted while listed, and
+ * downloads raw (audited) while one was uploaded and no delist took it.
+ */
+export function matchActions(m: { open: true; match: OpenMatch } | { open: false; match: HistoryMatch }): { viewer: boolean; delist: boolean; download: boolean; void: boolean; verify: boolean } {
+  if (m.open) {
+    const x = m.match;
+    return { viewer: false, delist: false, download: x.replay, void: true, verify: x.state === 'verifying' && !x.verifying };
+  }
+  const x = m.match;
+  const kept = x.delistedAt === null;
+  return { viewer: x.published && kept, delist: x.listed && kept, download: x.replay && kept, void: false, verify: false };
+}
+
+/** How a seat is named: a bot, a name its player hides ('Jugador N', its slot + 1), a purged account, or its name. */
+export function seatName(s: MatchSeat): { kind: 'bot' | 'hidden' | 'gone' | 'name'; name: string; n: number } {
+  const n = s.slot + 1;
+  if (s.bot) return { kind: 'bot', name: '', n };
+  if (s.name !== null) return { kind: 'name', name: s.name, n };
+  return { kind: s.id === null && !s.hidden ? 'gone' : 'hidden', name: '', n };
+}
+
+/** A node event's colour: what went wrong bad, what took it out of play for a while warn, its way back ok, the rest muted. */
+export function eventTone(kind: NodeEventKind): Tone {
+  switch (kind) {
+    case 'strike':
+    case 'pause':
+    case 'verify_failed':
+    case 'probe_failed':
+    case 'unreachable':
+    case 'trust_removed':
+    case 'link_4408':
+      return 'bad';
+    case 'offline':
+    case 'link_quiet':
+    case 'late_messages':
+    case 'drain':
+    case 'retire':
+    case 'update_sent':
+      return 'warn';
+    case 'online':
+    case 'reachable':
+    case 'link_back':
+    case 'registered':
+      return 'ok';
+    default:
+      return 'muted';
+  }
+}
+
+/** A page appended to the ones before (MÁS), each item once by its key. */
+export function appendPage<T>(before: readonly T[], page: readonly T[], key: (x: T) => string | number): T[] {
+  const seen = new Set(before.map(key));
+  return [...before, ...page.filter((x) => !seen.has(key(x)))];
 }

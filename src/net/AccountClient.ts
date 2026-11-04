@@ -30,11 +30,11 @@
  */
 import { legacyPasswordKey, normalizeEmail, passwordIssue, passwordKey, usernameIssue } from './account';
 import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
-import { mineAnswerOf, overviewOf as nodeOverviewOf } from './nodes';
-import type { AdminWallet, FrozenList, MineAnswer, Overview, TokenAnswer, TokenAsk } from './nodes';
+import { alertsPageOf, eventsPageOf, historyPageOf, mineAnswerOf, openMatchesOf, overviewOf as nodeOverviewOf } from './nodes';
+import type { AdminWallet, AlertsPage, EventsPage, FrozenList, HistoryPage, MineAnswer, OpenMatches, Overview, TokenAnswer, TokenAsk } from './nodes';
 
 /** The maintainers' POST /nodes/admin/* actions (server/src/nodeRoutes.ts ADMIN_ROUTES). */
-export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist';
+export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'match/void' | 'match/verify';
 import { DEAD_LINK_CODES, keepAttempt, keepLastSignIn, keepLink, localResendAt, pageStore, readAttempt, readLastSignIn, readLink } from './emailAuth';
 import type { AccountLink, LastSignIn, LegacyPhase, StoredAttempt } from './emailAuth';
 import type { FetchLike, ResponseLike, StorageLike } from './NetClient';
@@ -357,6 +357,12 @@ const RESUME_MS = 10 * 60_000;
 const PROVIDER_TRY_KEY = STORAGE_PREFIX + 'auth.provider';
 /** That marker counts this long: a provider's round trip. */
 const PROVIDER_TRY_MS = 10 * 60_000;
+
+/** A history read's query: only the values given, each encoded. */
+function queryOf(q: Record<string, string | undefined>): string {
+  const parts = Object.entries(q).flatMap(([k, v]) => (v === undefined || v === '' ? [] : [`${k}=${encodeURIComponent(v)}`]));
+  return parts.length > 0 ? '?' + parts.join('&') : '';
+}
 
 export class AccountClient {
   /** The signed-in account's Bearer session, null for a guest. */
@@ -922,6 +928,11 @@ export class AccountClient {
    * claim must never reach it.
    */
   private async ownCall(path: string, body?: unknown): Promise<unknown> {
+    return this.jsonOrFail<unknown>(await this.ownResponse(path, body));
+  }
+
+  /** ownCall's answer before it is read: its 401 handled the same way (another account's session never asks). */
+  private async ownResponse(path: string, body?: unknown): Promise<ResponseLike> {
     const owner = this.account?.playerId ?? null;
     const refused = (): AccountError => new AccountError(t('auth.signInFirst'), 401, 'unauthorized');
     const first = owner === null ? null : await this.sessionForQueue();
@@ -933,7 +944,7 @@ export class AccountClient {
       res = await this.call(path, body, s.session);
       if (res.status === 401) throw refused();
     }
-    return this.jsonOrFail<unknown>(res);
+    return res;
   }
 
   /** The experimental routes' answer, parsed leniently (ownCall). */
@@ -1472,6 +1483,39 @@ export class AccountClient {
     const r = (await this.ownCall('/nodes/tokens', ask)) as Partial<TokenAnswer> | null;
     if (typeof r?.token !== 'string' || typeof r.install?.linux !== 'string') throw new AccountError(t('error.server'), 200, 'protocol');
     return { token: r.token, expiresAt: typeof r.expiresAt === 'number' ? r.expiresAt : this.now() + 3_600_000, ttlMinutes: typeof r.ttlMinutes === 'number' ? r.ttlMinutes : 60, install: { linux: r.install.linux } };
+  }
+
+  /** GET /nodes/admin/events: what happened to the nodes, newest first, a page at a time (`before`: the last page's `next`), one node's or all. */
+  async nodesEvents(q: { node?: string; before?: string } = {}): Promise<EventsPage> {
+    return eventsPageOf(await this.ownCall('/nodes/admin/events' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/history: the settled matches, newest first, a page at a time; one node's, or the one `match`. */
+  async nodesHistory(q: { node?: string; match?: string; before?: string } = {}): Promise<HistoryPage> {
+    return historyPageOf(await this.ownCall('/nodes/admin/history' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/alerts: the ALERT lines the control plane posted, newest first, a page at a time. */
+  async nodesAlerts(q: { before?: string } = {}): Promise<AlertsPage> {
+    return alertsPageOf(await this.ownCall('/nodes/admin/alerts' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/matches: the matches the control plane holds and has not settled. */
+  async nodesMatches(): Promise<OpenMatches> {
+    return openMatchesOf(await this.ownCall('/nodes/admin/matches'));
+  }
+
+  /**
+   * GET /nodes/admin/replay?matchId=: the match's raw replay (TGR1, as the node uploaded it), for
+   * `verify <file>` by hand. Every download is an ALERT in the team's channel; 404 no_replay once it
+   * is delisted, pruned or gone.
+   */
+  async nodesReplay(matchId: string): Promise<Uint8Array> {
+    const res = await this.ownResponse('/nodes/admin/replay?matchId=' + encodeURIComponent(matchId));
+    if (!res.ok) return this.fail(res);
+    const bytes = (res as ResponseLike & { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer;
+    if (typeof bytes !== 'function') throw new AccountError(t('error.server'), res.status, 'protocol');
+    return new Uint8Array(await bytes.call(res));
   }
 
   /** GET /nodes/admin/account-stats: the accounts' anonymous counts (numbers only). Shares 10 a minute with queueStats and the deletions on request. */

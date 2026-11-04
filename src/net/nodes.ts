@@ -1,7 +1,8 @@
 /**
  * The community nodes as the game's pages see them, without a session (prompt 1, part B2): the
  * answers of /nodes/mine, /nodes/tokens and the maintainers' /nodes/admin/* (server/src/
- * nodeOverview.ts, NodeRegistryDO.ts), the refusals in words (by code, never by message), and the
+ * nodeOverview.ts, NodeRegistryDO.ts; the history's events, matches and alert lines, PR 4), the
+ * refusals in words (by code, never by message), and the
  * pure checks the panel and the wizard run before a request: the DNS name of a host, the token's
  * form, a node's state as a tone, an address masked. The calls themselves are AccountClient's
  * (nodesMine, nodes*), on its ownCall. PERFIL's CONTROL DE NODOS (screens/nodesAdmin.ts) and the
@@ -83,6 +84,8 @@ export interface AdminNode extends MineNode {
   retiredReason: string | null;
   trustRemovedAt: number | null;
   linkCuts: { count24h: number; lastAt: number | null };
+  /** When it was last heard as of its last online / offline transition: what the server knows after a restart (lastSeen is memory only). */
+  seenAt?: number | null;
 }
 
 export type TokenState = 'unused' | 'used' | 'expired' | 'revoked';
@@ -148,6 +151,173 @@ export interface Overview {
   flags: FlagView[];
   alerts: { webhook: boolean };
   warnings: OverviewWarning[];
+  /** The last 24 h's voids by node and reason (the history, PR 4); [] from a server without it. */
+  voids24h: Array<{ nodeId: string; name: string | null; reason: string; count: number }>;
+}
+
+// ---- the history (PR 4: GET /nodes/admin/events, /history, /alerts, /matches, /replay) ------------
+
+/** A seat of a match as the panel lists it: a bot's, or a human's (a name its player hides is null, as a purged account's name and id are). */
+export interface MatchSeat {
+  slot: number;
+  team: 0 | 1;
+  bot: boolean;
+  name: string | null;
+  id: string | null;
+  /** Its player hides the name in the public replays (the panel says "Jugador N"). */
+  hidden: boolean;
+}
+
+/** A settled match (server/src/nodeStore.ts MatchHistory, as GET /nodes/admin/history serves it). */
+export interface HistoryMatch {
+  matchId: string;
+  nodeId: string;
+  nodeName: string | null;
+  region: string;
+  mode: string;
+  ranked: boolean;
+  transport: string;
+  placedAt: number;
+  reportedAt: number | null;
+  settledAt: number;
+  result: 'rated' | 'unrated' | 'void';
+  reason: string | null;
+  score: { blue: number; red: number } | null;
+  verified: boolean;
+  verifiedBy: string | null;
+  verifierName: string | null;
+  verdict: { ok: boolean; code: string } | null;
+  strike: string | null;
+  replay: boolean;
+  points: number | null;
+  frozen: boolean;
+  adminReason: string | null;
+  seats: MatchSeat[];
+  delistedAt: number | null;
+  /** In the public replays' list; `published`: served there now (its hour released), replay.html?id= opens it. */
+  listed: boolean;
+  published: boolean;
+}
+
+/** A match the control plane holds and has not settled (GET /nodes/admin/matches). */
+export interface OpenMatch {
+  matchId: string;
+  nodeId: string;
+  nodeName: string | null;
+  region: string;
+  mode: string;
+  ranked: boolean;
+  transport: string;
+  state: 'assigned' | 'reporting' | 'verifying';
+  placedAt: number;
+  deadline: number;
+  started: boolean;
+  reportedAt: number | null;
+  queuedAt: number | null;
+  /** A verifier has it now (verifierName). */
+  verifying: boolean;
+  verifierName: string | null;
+  replay: boolean;
+  leaves: number;
+  seats: MatchSeat[];
+}
+
+/** 'unavailable': AccountsDO could not say whose names are hidden, so none is shown. */
+export type NamesState = 'shown' | 'unavailable';
+
+export interface HistoryPage {
+  matches: HistoryMatch[];
+  next: string | null;
+  names: NamesState;
+}
+
+export interface OpenMatches {
+  total: number;
+  matches: OpenMatch[];
+  names: NamesState;
+}
+
+/** What happened to a node (nodes/control-plane/registry.ts NodeEventKind). */
+export type NodeEventKind =
+  | 'registered'
+  | 'token_used'
+  | 'status_change'
+  | 'strike'
+  | 'pause'
+  | 'verify_failed'
+  | 'probe_failed'
+  | 'unreachable'
+  | 'reachable'
+  | 'offline'
+  | 'online'
+  | 'drain'
+  | 'retire'
+  | 'trust_removed'
+  | 'link_quiet'
+  | 'link_back'
+  | 'link_4408'
+  | 'late_messages'
+  | 'update_sent';
+
+export const NODE_EVENT_KINDS: readonly NodeEventKind[] = ['registered', 'token_used', 'status_change', 'strike', 'pause', 'verify_failed', 'probe_failed', 'unreachable', 'reachable', 'offline', 'online', 'drain', 'retire', 'trust_removed', 'link_quiet', 'link_back', 'link_4408', 'late_messages', 'update_sent'];
+
+export interface NodeEvent {
+  id: number;
+  nodeId: string;
+  nodeName: string | null;
+  at: number;
+  kind: NodeEventKind;
+  /** The server's line (English), shown beside the panel's words. */
+  detail: string | null;
+  /** The maintainer whose call it was ('name (account id)'), or null. */
+  actor: string | null;
+}
+
+export interface EventsPage {
+  events: NodeEvent[];
+  next: string | null;
+}
+
+/** An ALERT line the object posted to the team's channel (or would have, without the webhook). */
+export interface AlertLine {
+  id: number;
+  at: number;
+  kind: 'alert' | 'audit';
+  line: string;
+}
+
+export interface AlertsPage {
+  alerts: AlertLine[];
+  next: string | null;
+  webhook: boolean;
+}
+
+const cursorOf = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+const namesOf = (v: unknown): NamesState => (v === 'unavailable' ? 'unavailable' : 'shown');
+
+/** GET /nodes/admin/history's body, leniently. */
+export function historyPageOf(b: unknown): HistoryPage {
+  const o = (b ?? {}) as { matches?: unknown; next?: unknown; names?: unknown };
+  return { matches: arr<HistoryMatch>(o.matches).map((m) => ({ ...m, seats: arr<MatchSeat>(m.seats) })), next: cursorOf(o.next), names: namesOf(o.names) };
+}
+
+/** GET /nodes/admin/matches's body, leniently. */
+export function openMatchesOf(b: unknown): OpenMatches {
+  const o = (b ?? {}) as { total?: unknown; matches?: unknown; names?: unknown };
+  const matches = arr<OpenMatch>(o.matches).map((m) => ({ ...m, seats: arr<MatchSeat>(m.seats) }));
+  return { total: typeof o.total === 'number' ? o.total : matches.length, matches, names: namesOf(o.names) };
+}
+
+/** GET /nodes/admin/events's body, leniently (a kind this client does not know is left out). */
+export function eventsPageOf(b: unknown): EventsPage {
+  const o = (b ?? {}) as { events?: unknown; next?: unknown };
+  return { events: arr<NodeEvent>(o.events).filter((e) => NODE_EVENT_KINDS.includes(e?.kind)), next: cursorOf(o.next) };
+}
+
+/** GET /nodes/admin/alerts's body, leniently. */
+export function alertsPageOf(b: unknown): AlertsPage {
+  const o = (b ?? {}) as { alerts?: unknown; next?: unknown; webhook?: unknown };
+  return { alerts: arr<AlertLine>(o.alerts).filter((a) => typeof a?.line === 'string'), next: cursorOf(o.next), webhook: o.webhook !== false };
 }
 
 /** POST /nodes/tokens's answer: the token (shown once, never kept), when it dies and the install line, composed and checked by the server. */
@@ -216,6 +386,7 @@ export function overviewOf(b: unknown): Overview {
     flags: arr(o.flags),
     alerts: o.alerts ?? { webhook: true },
     warnings: arr(o.warnings),
+    voids24h: arr(o.voids24h),
   };
 }
 
@@ -268,9 +439,14 @@ export const NODE_ERROR_CODES = [
   'not_retirable',
   'offline',
   'not_wss',
-  // matches
+  // matches and the history
   'bad_match_id',
   'no_replay',
+  'no_match',
+  'already_settled',
+  'not_verifying',
+  'in_flight',
+  'bad_cursor',
   // points
   'bad_account',
   'unknown_item',

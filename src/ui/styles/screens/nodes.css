@@ -170,6 +170,11 @@ dd > .mn-na-raw {
   gap: 0.25rem;
 }
 
+/* A match (PARTIDAS): its id, node, region, mode, state and time; a phone keeps the node row's columns. */
+.mn-na-match {
+  grid-template-columns: minmax(0, 2fr) repeat(5, minmax(0, 1fr));
+}
+
 html[data-layout='phone'] .mn-na-row,
 html[data-layout='portrait'] .mn-na-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
