@@ -53,7 +53,9 @@ test('settings is a cog: one closed outline of eight teeth round a hole', () => 
   assert.equal(roots.length, 16, 'and two at its root');
   assert.equal(tips.length + roots.length, radii.length, 'no corner between the two circles');
   assert.ok(Math.max(...radii) + 1 <= 12, 'the 2-unit stroke stays in the box');
-  assert.match(subpaths[1], /^12 9a3 3 /, 'a centre hole of radius 3');
+  const [x0, y0] = tokens.slice(0, 2).map(Number);
+  assert.ok(Math.hypot(x - x0, y - y0) < 1e-9, `the last tooth ends where the first starts (z adds no edge): ${x}, ${y}`);
+  assert.equal(subpaths[1], '12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6', 'a whole centre hole of radius 3');
 });
 
 test('the sections, the devices and the common actions have an icon', () => {
