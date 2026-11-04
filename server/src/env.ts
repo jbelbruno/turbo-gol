@@ -336,10 +336,49 @@ export function isHex(v: unknown, len: number): v is string {
 }
 
 /**
- * POST /api/queue `kind`: casual in a peer-to-peer room (phase 2, the default), casual in a Durable
- * Object match (phase 1), or ranked (accounts only; a server-authoritative MatchDO match, rated).
+ * POST /api/queue `kind` as the wire carries it: 'server' (Casual, the default) or 'ranked'
+ * (accounts only; rated). 'p2p' is what pages from before the modes redesign (November 2026)
+ * send for Casual: it is read as 'server' (publicQueueKind), there is no P2P queue any more. A
+ * custom lobby's start (MatchmakerDO /custom) still names its kind 'p2p'.
  */
 export type QueueKind = 'p2p' | 'server' | 'ranked';
+/** The two public queues: Casual ('server') and ranked. */
+export type PublicQueueKind = 'server' | 'ranked';
+
+/** A valid wire `kind` (absent included) as the public queue it means: ranked, else Casual. */
+export function publicQueueKind(v: QueueKind | undefined): PublicQueueKind {
+  return v === 'ranked' ? 'ranked' : 'server';
+}
+
+/**
+ * The region whose MatchmakerDO ('mm:' + QUEUE_HUB) holds every public queue, every region's
+ * waiters together (the build spec's §1.8): the MatchDO and the community node releases already
+ * reach it. Custom lobbies keep their own region's matchmaker (P2P rooms only).
+ */
+export const QUEUE_HUB = 'SA';
+
+/** The queue hub's instance region: REGION_OVERRIDE when set (dev, tests), else QUEUE_HUB. */
+export function queueHubOf(env: Pick<Env, 'REGION_OVERRIDE'>): string {
+  return env.REGION_OVERRIDE ? env.REGION_OVERRIDE : QUEUE_HUB;
+}
+
+/**
+ * The client-version marker a page of the modes redesign sends on POST /api/queue, POST
+ * /api/lobbies and POST /api/lobbies/join (src/net/queueWait.ts QUEUE_API). A request without it
+ * is a page cached from before the deploy: 426 reload_required (RELOAD_TEXT), so it reloads into
+ * the new rules and their re-accept sheet.
+ */
+export function hasClientApi(body: unknown, api: number): boolean {
+  if (typeof body !== 'object' || body === null) return false;
+  const v = (body as { api?: unknown }).api;
+  return typeof v === 'number' && Number.isFinite(v) && v >= api;
+}
+
+/** The 426 reload_required text of a page from before the deploy (new pages show their own). */
+export const RELOAD_TEXT = 'Hay una versión nueva del juego: recarga la página';
+
+/** A lobby start with one member (LobbyDO 'need_players', MatchmakerDO /custom 400): lobbies are P2P only. */
+export const NEED_PLAYERS_TEXT = 'Hace falta otro jugador para iniciar';
 /** What a match / room lock points at: a RoomDO signaling room or a MatchDO match (ranked ones included). */
 export type RoomKind = 'p2p' | 'server';
 /** A matchmaker lock: one of the Worker's own rooms, or a match on a community node (NodeRegistryDO). */
