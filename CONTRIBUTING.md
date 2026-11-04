@@ -84,7 +84,8 @@ Origin, or one that forges a loopback Origin) can `POST /api/dev/signin` with an
 A deployed fork therefore has no way to create accounts until it brings one of its own: Cloudflare
 Email Service on its own domain (`MAIL_LIVE`, `MAIL_FROM` and `MAIL_LINK_ORIGIN`, once the email
 accounts ship), or a Discord or Google OAuth application of its own ([docs/online/ACCOUNTS.md](docs/online/ACCOUNTS.md)).
-Guests, Casual, lobbies and training work without either.
+Guests, lobbies and training work without either; Casual and ranked need an account (`DEV_AUTH=1`
+locally).
 
 The physics engine is prebuilt (`src/sim/wasm/rocketsim.wasm` is committed). You only need the
 Emscripten SDK if you change the C++ wrapper or the physics library: see `native/README.md`.

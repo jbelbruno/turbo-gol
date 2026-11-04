@@ -18,18 +18,24 @@ font (Barlow Condensed, SIL Open Font License) for the titles.
 - **Modes**: matches against bots (three difficulties, team AI with rotations), free practice and
   nine training packs (shooting, saving, aerials).
 - **Online**:
-  - casual play on a peer-to-peer rollback mesh over WebRTC (GGPO-style, inputs only);
-  - server-hosted matches with client prediction;
-  - several playlists at once and region choice;
-  - custom lobbies: public list, join by code, password, team picks.
+  - lobbies (public or private) on a peer-to-peer rollback mesh over WebRTC (GGPO-style, inputs
+    only);
+  - Casual and ranked always on servers (Durable Objects or community nodes) with client
+    prediction; while you wait, a local bots match or training, and you jump in when the match is
+    found;
+  - Casual pools every format: 2 or more players start at once with bots in the free seats, a lone
+    player gets an online bots match after 5 minutes; your region first, then every region;
+  - lobbies: CREATE PUBLIC LOBBY or CREATE PRIVATE LOBBY, public list, join by code, password, team
+    picks.
 - **Accounts and ranked**: an email confirmed with a code, plus a password (optional Google /
   Discord); one email, one account. Accounts made with a username before keep it until the cutoff
   the owner announces. Ranked play gives a rating
   per playlist (Weng-Lin / OpenSkill model), with placement games, tiers, leaderboards and abandon
-  penalties. Guests can play everything except ranked.
+  penalties. Guests can play against the AI, train and play in lobbies; Casual and ranked need an
+  account.
 - **Experimental features** (signed-in players, Settings > Experimental): the Super low graphics
   quality, and physics presets (gravity, ball and car speed, boost, jumps, bumps...) for free play
-  and custom P2P lobbies. They never count for rank or stats ([docs/experimental.md](docs/experimental.md)).
+  and lobbies. They never count for rank or stats ([docs/experimental.md](docs/experimental.md)).
 - **Controls**: keyboard + mouse and gamepad at the same time, every action rebindable, camera and
   sensitivity settings.
 - **Cheap to host**: the backend runs on Cloudflare Workers + Durable Objects with spend caps in the
