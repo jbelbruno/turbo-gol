@@ -30,6 +30,7 @@ const en = (await import('../src/locales/en.ts')).default;
 const es = (await import('../src/locales/es.ts')).default;
 const SCREEN = readFileSync(new URL('../src/ui/screens/nodesAdmin.ts', import.meta.url), 'utf8');
 const NODES = readFileSync(new URL('../src/net/nodes.ts', import.meta.url), 'utf8');
+const NODES_CSS = readFileSync(new URL('../src/ui/styles/screens/nodes.css', import.meta.url), 'utf8');
 
 // ---- src/net/nodes.ts --------------------------------------------------------------------------------
 
@@ -445,6 +446,50 @@ test('the panel paints server text as text only: no innerHTML, no outerHTML, no 
   assert.match(SCREEN, /if \(!\/\^\[0-9a-f\]\{64\}\$\/\.test\(matchId\)\) return false;/, 'a checked id names the file');
   assert.match(SCREEN, /h\('a\.mn-btn', \{ href, target: '_blank', rel: 'noopener'/);
   assert.doesNotMatch(SCREEN, /href: /);
+});
+
+test('a pad or a keyboard reaches every read-only block: RESUMEN\'s warnings, commands and flags, a used token, the region and release cards, the verifiers and the queue, the counts and the queue days, a node\'s facts and a wallet\'s are stops of their own', () => {
+  // The Menu scrolls only a focused [data-nav] into view: what has none below a view's last control is out of reach.
+  assert.match(SCREEN, /const readOnly = \(key: string\): Record<string, unknown> => \(\{ class: 'mn-na-read', 'data-nav': true, tabindex: '0', 'data-key': key \}\);/);
+  for (const re of [
+    /h\('div\.mn-na-alert', readOnly\('na-warn-' \+ w\.kind \+ of\)/,
+    /h\('div\.mn-cmd', readOnly\('na-flag-set'\), cmds\.set\), h\('div\.mn-cmd', readOnly\('na-flag-clear'\), cmds\.clear\)/,
+    /'div\.mn-na-flag',\s*readOnly\('na-flag-' \+ f\.name\)/,
+    /revocable\(tk, now\) \? \{ 'data-key': 'na-token-' \+ tk\.id \} : readOnly\('na-token-' \+ tk\.id\)/,
+    /'div\.mn-prof-node',\s*readOnly\('na-region-' \+ r\.region\)/,
+    /h\('p', readOnly\('na-verifier-' \+ v\.nodeId\)/,
+    /h\('p', readOnly\(`na-queue-\$\{q\.version\}-\$\{q\.wasmSha256\.slice\(0, 8\)\}`\)/,
+    /h\('p\.mn-note', readOnly\('na-verifiers-none'\)/,
+    /h\('p\.mn-note', readOnly\('na-queue-none'\)/,
+    /h\('div\.mn-prof-node', readOnly\('na-release-' \+ r\.version\)/,
+    /h\('div\.mn-cmd', readOnly\('na-cli-show'\)/,
+    /h\('div\.mn-cmd', readOnly\('na-cli-rollback'\)/,
+    /h\('dl\.mn-prof-node-facts', readOnly\('na-stats-accounts'\)/,
+    /h\('div\.mn-na-day', readOnly\('na-day-' \+ d\.date\)/,
+    /h\('div\.mn-prof-node', readOnly\('na-detail-' \+ n\.nodeId\)/,
+    /'dl\.mn-prof-node-facts',\s*readOnly\('na-wallet-facts'\)/,
+    /h\('div\.mn-cmd', readOnly\('na-wiz-cmd'\), tk\.line\)/,
+  ])
+    assert.match(SCREEN, re);
+  // Every command line is one (the install line, the flags', the channel's), and no flag or queue day is left out.
+  assert.equal([...SCREEN.matchAll(/h\('div\.mn-cmd', /g)].length, [...SCREEN.matchAll(/h\('div\.mn-cmd', readOnly\(/g)].length);
+  assert.doesNotMatch(SCREEN, /'div\.mn-na-flag',\s*null|h\('div\.mn-na-day', null/);
+  // ▼ from a block that wide goes to its own control under it, not to the one nearest its middle.
+  assert.match(SCREEN, /onNavTo\(card, 'down', \(\) => revealButton\);/);
+  assert.match(SCREEN, /onNavTo\(line, 'down', \(\) => copy\);/);
+  // Their ring inside them and no heel, as the board's rows: they stack closer than the heel's 15 px.
+  assert.match(NODES_CSS, /\.mn-na-read \{\s*--ring-offset: calc\(-1 \* var\(--focus-w\)\);\s*--ring-shadow: inset 0 0 0 calc\(var\(--focus-w\) \+ var\(--focus-gap\)\) var\(--ink\);\s*--ring-heel: none;\s*\}/);
+});
+
+test('a tablet\'s node rows drop the four extra columns as a phone\'s do (a state\'s tag never runs into the next cell); a frozen wallet\'s reason gets a line of its own', () => {
+  // 820 x 1180, up to 130 %: nine columns there cut the region and spilled "Suspendido" over 3/12.
+  for (const [sel, decl] of [['.mn-na-row', 'grid-template-columns: auto minmax\\(0, 1fr\\) auto;'], ['.mn-na-name', 'grid-column: span 2;'], ['.mn-na-x', 'display: none;']]) {
+    const list = ['phone', 'portrait', 'tablet'].map((l) => `html\\[data-layout='${l}'\\] \\${sel}`).join(',\\s*');
+    assert.match(NODES_CSS, new RegExp(`(?:^|\\})\\s*(?:/\\*[\\s\\S]*?\\*/\\s*)?${list}\\s*\\{\\s*${decl}\\s*\\}`), sel);
+  }
+  // The frozen list's row (account, reason, date): the reason, as long as a match id, under the other two.
+  assert.match(SCREEN, /navButton\('mn-na-row', \[h\('code\.mn-na-name', null, f\.account\), h\('code\.mn-na-raw', null, f\.reason\), h\('span\.mn-na-c', null, when\(f\.at\)\)\]/);
+  assert.match(NODES_CSS, /\.mn-na-row > \.mn-na-raw \{\s*grid-column: 1 \/ -1;\s*order: 1;\s*\}/);
 });
 
 test('nothing of the admin is kept: no localStorage, sessionStorage or IndexedDB in the panel or src/net/nodes.ts', () => {
