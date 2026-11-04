@@ -16,6 +16,18 @@
   margin-top: 1rem;
 }
 
+/* menu.css' shared controls (px until plan PR 15) at the class's type roles, as on PERFIL. */
+.mn-na .mn-note,
+.mn-na .mn-section-title,
+.mn-na .mn-field-label,
+.mn-na small {
+  font-size: var(--t-small);
+}
+
+.mn-na .mn-tag {
+  font-size: var(--t-label);
+}
+
 .mn-na-alert {
   display: flex;
   gap: 0.5rem;
