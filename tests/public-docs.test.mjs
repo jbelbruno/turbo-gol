@@ -65,3 +65,12 @@ test("the trusted node's manual and plan give placeholders, not its provider, ke
   for (const f of docs) if (/\bKVM ?2\b|campinas/i.test(read(f))) hits.push(`${f}: the node's plan or site`);
   assert.deepEqual(hits, []);
 });
+
+test("a doc names only the project's public mailboxes (the legal texts' privacy address and the mail sender), never the maintainer account's own", () => {
+  // The maintainer account's sign-in address stays out of every public page: knowing it is half of
+  // a password-guessing or a phishing run against the account that registers trusted nodes.
+  const PUBLIC = new Set(['privacy', 'privacidad', 'no-reply']);
+  const hits = [];
+  for (const f of docs) for (const m of read(f).matchAll(/([A-Za-z0-9._%+-]+)@turbo-gol\.com\b/gi)) if (!PUBLIC.has(m[1].toLowerCase())) hits.push(`${f}: ${m[1]}@…`);
+  assert.deepEqual(hits, []);
+});

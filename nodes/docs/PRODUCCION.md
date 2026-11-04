@@ -426,9 +426,9 @@ aviso.
   (`control-plane/controlPlane.ts:859-861`). Entra con su correo y su contraseña, o con un
   proveedor vinculado, y sus rutas de tokens y de mantenimiento piden una contraseña reciente:
   escrita en los últimos 15 minutos, al entrar o con CONFIRMAR CON LA CONTRASEÑA en PERFIL
-  (Discord no alcanza, y un código por correo tampoco). Contraseña fuerte y única, el buzón del proyecto
-  (`proyecto@turbo-gol.com`) y no uno personal, y la cuenta conserva su contraseña y al menos dos
-  formas de entrar (no se puede desvincular por debajo de eso) y no se puede borrar. Un `ALERT`
+  (Discord no alcanza, y un código por correo tampoco). Contraseña fuerte y única, un buzón propio
+  del proyecto que no se publica en ningún lado (no uno personal), y la cuenta conserva su
+  contraseña y al menos dos formas de entrar (no se puede desvincular por debajo de eso) y no se puede borrar. Un `ALERT`
   por cada inicio de sesión y cada confirmación con contraseña, con el método y el país (nunca la
   IP ni el correo), otro por cada token y cada registro (P24), y un tope de 2 nodos para esa
   cuenta (P20).
