@@ -2319,3 +2319,26 @@ test('match void and verify: a maintainer voids a match not settled (its outbox 
   assert.deepEqual(o.voids24h, [{ nodeId: node.nodeId, reason: 'admin_void', count: 2, name: 'sao-paulo-1' }]);
   assert.equal(typeof o.nodes[0].seenAt, 'number', 'when it was last seen, kept at its transitions');
 });
+
+test('the open matches: what the control plane holds and has not settled, newest first, with where each stands and its seats (a hidden name left out); a settled one leaves the list', async () => {
+  const { h, env } = await watched();
+  const place = async (over) => (await call(h, 'POST', '/internal/place', { body: placeBody(over) })).json.placement.matchId;
+  const first = await place({ ranked: true });
+  clock += 1000;
+  const second = await place();
+  env.ACCOUNTS.answer = (name, path, body) => (path === '/replay-hidden' ? json200({ ids: body.ids.filter((x) => x === A), names: [] }) : json200({ ok: true }));
+  const r = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual([r.status, r.headers.get('cache-control'), r.json.total, r.json.names], [200, 'no-store', 2, 'shown']);
+  assert.deepEqual(r.json.matches.map((m) => [m.matchId, m.state, m.ranked, m.nodeName, m.replay, m.verifying]), [
+    [second, 'assigned', false, 'sao-paulo-1', false, false],
+    [first, 'assigned', true, 'sao-paulo-1', false, false],
+  ]);
+  assert.deepEqual(r.json.matches[0].seats.map((s) => [s.slot, s.bot, s.name, s.id, s.hidden]), [
+    [0, false, null, A, true],
+    [1, false, 'P1', B, false],
+  ]);
+  await settleByHand(h);
+  h.obj.cp.matches.get(first).state = 'done';
+  const after = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual(after.json.matches.map((m) => m.matchId), [second]);
+});

@@ -197,11 +197,14 @@ const READ_AUDITS_KEY = 'read_audits';
 const FLAGS_TTL_MS = 60_000;
 /** The longest egress cap a token's install line takes, in GB a month. */
 const EGRESS_CAP_MAX_GB = 1_000_000;
-/** A page of the maintainers' history: node events, settled matches, ALERT lines; the open matches at most. */
+/**
+ * A page of the maintainers' history: node events, settled matches, ALERT lines; and the open
+ * matches listed at most (their 6 seats each are asked of AccountsDO in batches of 256: 5 calls).
+ */
 export const EVENTS_PAGE = 100;
 export const HISTORY_PAGE = 50;
 export const ALERTS_PAGE = 100;
-export const OPEN_MATCHES_MAX = 500;
+export const OPEN_MATCHES_MAX = 200;
 /** A node event's detail, and an ALERT line in the ring, are kept to this many characters (one line). */
 const EVENT_DETAIL_MAX = 300;
 const ALERT_LINE_MAX = 2000;
