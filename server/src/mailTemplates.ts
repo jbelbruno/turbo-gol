@@ -448,22 +448,28 @@ const TEMPLATES: { [K in MailKind]: (d: Extract<MailData, { kind: K }>, x: Tools
   },
 
   legacy_reminder(d, x) {
+    // Its accounts have a password of before (salted with the name) and a verified address: the
+    // username sign-in refuses an account with an address, and the email sign-in reads only the
+    // current key, so neither takes that password. The reset link stores it as the current key.
     const day = x.date(d.at, 'day');
+    const forgot = { url: `${x.origin}/account#forgot` };
     if (x.lang === 'es')
       return {
-        subject: `Tu usuario de Turbogol deja de servir para entrar el ${day}`,
+        subject: 'Elige tu contraseña de Turbogol para entrar con tu correo',
         blocks: [
           p(`Hola, ${d.name}:`),
-          p(`Desde el ${day} ya no se puede entrar con usuario. Tu cuenta ya tiene este correo: para seguir con tu misma contraseña, entra una vez antes de esa fecha con tu usuario y tu contraseña. También puedes crear una contraseña nueva con este enlace, que caduca en 30 minutos:`),
-          x.link('reset', d.token, 'Crear una contraseña nueva'),
+          p(`Desde el ${day} ya no se entra con usuario. Tu cuenta tiene este correo, así que entra con el correo, pero tu contraseña de antes todavía no sirve con él. Elige tu contraseña con este enlace (puede ser la misma de siempre). Caduca en 30 minutos:`),
+          x.link('reset', d.token, 'Elegir mi contraseña'),
+          p('Después entras con este correo y esa contraseña. Si el enlace caducó, pide otro en ', forgot, ' con este correo.'),
         ],
       };
     return {
-      subject: `Your Turbogol username stops signing in on ${day}`,
+      subject: 'Choose your Turbogol password to sign in with your email',
       blocks: [
         p(`Hi ${d.name},`),
-        p(`From ${day}, you can't sign in with a username. Your account already has this email: to keep your password, sign in once with your username and password before then. You can also create a new password with this link, which expires in 30 minutes:`),
-        x.link('reset', d.token, 'Create a new password'),
+        p(`From ${day}, you can't sign in with a username. Your account has this email, so it signs in with the email, but your old password doesn't work with it yet. Choose your password with this link (it can be the same one). It expires in 30 minutes:`),
+        x.link('reset', d.token, 'Choose my password'),
+        p('Then sign in with this email and that password. If the link has expired, ask for another at ', forgot, ' with this email.'),
       ],
     };
   },
