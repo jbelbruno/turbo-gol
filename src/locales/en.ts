@@ -1176,7 +1176,7 @@ export default {
   'error.lobby.password_attempts': 'Someone is trying passwords on your lobby: joining with the password is paused for a few minutes',
   // Matchmaking: Casual and Competitive searches (POST /api/queue, /api/rejoin, the guest session)
   'error.queue.rate_limited': 'Too many attempts, wait a minute',
-  'error.queue.account_required': 'Sign in to play Competitive',
+  'error.queue.account_required': 'Sign in to play Casual and Competitive',
   // {time}: what is left of the lock, in the page language ('5 min', '24 hr')
   'error.queue.ranked_ban': 'Competitive locked for leaving matches: {time}',
   // The server still holds a match of this player that the game could not free

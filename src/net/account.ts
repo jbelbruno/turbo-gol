@@ -604,16 +604,21 @@ export type RankedResultAnswer =
       banUntil: number;
     };
 
-/** GET /api/population?region=: players waiting / playing in that region's matchmaker (cached a few seconds). */
+/**
+ * GET /api/population?region=: players waiting / playing, from the queue hub (every public queue
+ * since November 2026; cached a few seconds).
+ */
 export interface PopulationAnswer {
   region: string;
-  /** Waiting per queue: casual (p2p + server) and ranked, by playlist. */
+  /** Waiting in that region: Casual by the format each prefers (the pool is shared), ranked by playlist. */
   casual: Record<Playlist, number>;
   ranked: Record<Playlist, number>;
   /** Players holding a match / room lock (playing right now). */
   playing: number;
   /** Open public lobbies (custom matches) in the region. */
   lobbies: number;
+  /** Players searching now in every region, per queue (absent from servers before the modes redesign). */
+  searching?: { casual: number; ranked: number };
 }
 
 // ---- custom lobbies -----------------------------------------------------------------------------

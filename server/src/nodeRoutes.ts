@@ -71,6 +71,12 @@
  *                                     10 a minute per account (limits.ts accountStats), no-store, no CORS. The node
  *                                     operators' ids come from the object (/internal/operators) and go on to AccountsDO
  *                                     only; without the node settings the node counts are null
+ *   GET      /nodes/admin/queue-stats?days=N  the public queues' anonymous daily counters (queueStats.ts QueueDay:
+ *                                     totals only, no id, name, address or region), newest first, today's
+ *                                     included; days 1 to 90 (default 30). The queue hub's (MatchmakerDO
+ *                                     'mm:SA' GET /daily-stats). The same gate, limit (accountStats, one count
+ *                                     with the account counts), no-store and no CORS as account-stats; like it,
+ *                                     answered with or without the node settings and with nodes_off set
  * The KV flag nodes_off (server/README.md, "Kill switches") stops every route here that would reach
  * the object, and the cron's call: 503 'nodes_off', the object never asked. The releases and the
  * shop aliases go on.
@@ -93,7 +99,7 @@ import { accountsCall, requireAccount, requireFresh, requirePrimary, shopClaim, 
 import { STATS_OPERATORS_MAX, STATS_TRUSTED_MAX } from './AccountsDO';
 import type { SessionClaims } from './auth';
 import { INTERNAL_HEADER, internalSecret } from './auth';
-import { JSON_MAX_BYTES, error, flag, isHex, json, limitKey, nodesConfigured, trustedOperatorIds, withTimeout } from './env';
+import { JSON_MAX_BYTES, error, flag, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
 import type { Env, NodesEnv } from './env';
 import { NODE_ROUTES, OPERATORS_ROUTE, nodesStub } from './nodeApi';
 import { accountGate, edgeCache, overLimit, sitePrefix, subjectsOf, widePrefix } from './limits';
@@ -238,6 +244,8 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
   }
   // The account counts live in AccountsDO: a fork without nodes has them too, without the node columns.
   if (method === 'GET' && path === ACCOUNT_STATS_PATH) return env.JWT_SECRET ? accountStats(c, env) : error(404, 'not_found');
+  // The queue counters live in the queue hub: a fork without nodes has them too; nodes_off does not stop them.
+  if (method === 'GET' && path === QUEUE_STATS_PATH) return env.JWT_SECRET ? queueStats(c, env) : error(404, 'not_found');
   if (!nodesConfigured(env) || !env.JWT_SECRET) return error(404, 'not_found');
   const who = limitKey(c.ip);
   if (method === 'POST' && path === '/nodes/register') {
@@ -336,6 +344,29 @@ async function accountStats(c: NodeRouteContext, env: Env): Promise<Response> {
   if ((await overLimit(c.limit, accountGate('GET', ACCOUNT_STATS_PATH), subjectsOf(c.ip, s))) !== null) return error(429, 'rate_limited');
   const operatorIds = nodesConfigured(env) ? await operatorIdsOf(env) : null;
   const res = await accountsCall(env, '/account-stats', { operatorIds, trusted: [...trusted].slice(0, STATS_TRUSTED_MAX) });
+  const out = new Response(res.body, res);
+  out.headers.set('cache-control', 'no-store');
+  return out;
+}
+
+const QUEUE_STATS_PATH = '/nodes/admin/queue-stats';
+
+/**
+ * GET /nodes/admin/queue-stats?days=N: the public queues' daily counters (queueStats.ts), from the
+ * queue hub's GET /daily-stats, behind the same maintainer gate and limit as account-stats.
+ */
+async function queueStats(c: NodeRouteContext, env: Env): Promise<Response> {
+  const s = requirePrimary({ session: await c.session() });
+  if (s instanceof Response) return s;
+  if (!trustedOperatorIds(env).has(s.sub)) return error(403, 'not_trusted', 'only the project reads the queue counters');
+  const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
+  if (fresh instanceof Response) return fresh;
+  if ((await overLimit(c.limit, accountGate('GET', QUEUE_STATS_PATH), subjectsOf(c.ip, s))) !== null) return error(429, 'rate_limited');
+  const days = c.url.searchParams.get('days');
+  const hub = queueHubOf(env);
+  const res = await env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + hub)).fetch('https://matchmaker/daily-stats' + (days !== null ? '?days=' + encodeURIComponent(days) : ''), {
+    headers: { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET), 'x-region': hub },
+  });
   const out = new Response(res.body, res);
   out.headers.set('cache-control', 'no-store');
   return out;

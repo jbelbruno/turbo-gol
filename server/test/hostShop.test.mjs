@@ -461,32 +461,32 @@ test('Worker: a queue seats the session\'s car and account age, never a car from
   const { env, mm } = makeEnv();
   const since = Math.floor((Date.now() - 10 * DAY - 60_000) / 1000);
   const joins = () => mm.calls.filter((c) => c.path === '/join').map((c) => c.body);
-  await call(env, 'POST', '/api/queue', { token: await accountToken('a1b2c3d4e5f60718', { car: 'tero', since }), body: { mode: '1v1', kind: 'server', car: 'condor' } });
+  await call(env, 'POST', '/api/queue', { token: await accountToken('a1b2c3d4e5f60718', { car: 'tero', since }), body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
   let j = joins().at(-1);
   assert.deepEqual([j.playerId, j.car, j.account, j.accountAgeDays], ['a1b2c3d4e5f60718', 'tero', true, 10]);
-  await call(env, 'POST', '/api/queue', { token: await accountToken('b1b2c3d4e5f60718'), body: { mode: '1v1', kind: 'server', car: 'condor' } });
+  await call(env, 'POST', '/api/queue', { token: await accountToken('b1b2c3d4e5f60718'), body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
   j = joins().at(-1);
   assert.deepEqual([j.car, j.account, j.accountAgeDays], [undefined, true, undefined], 'an account on the default car (and a token from before `since`)');
+  // A guest never reaches the hub (Casual and ranked are for accounts: 403), whatever its token carries.
   const guest = (await createSession(SECRET, '0123456789abcdef', 'Invitado')).token;
-  await call(env, 'POST', '/api/queue', { token: guest, body: { mode: '1v1', kind: 'server', car: 'condor' } });
-  j = joins().at(-1);
-  assert.deepEqual(Object.keys(j).filter((k) => ['car', 'account', 'accountAgeDays'].includes(k)), [], 'a guest: none of them');
-  // A guest token that carries a car claim (forged or stale) still seats the default car.
+  const before = joins().length;
+  const g = await call(env, 'POST', '/api/queue', { token: guest, body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
+  assert.deepEqual([g.status, g.json.error], [403, 'account_required']);
   const forged = await signJwt(SECRET, { sub: '0123456789abcdef', name: 'X', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60, car: 'tero' });
-  await call(env, 'POST', '/api/queue', { token: forged, body: { mode: '1v1', kind: 'server' } });
-  assert.equal(joins().at(-1).car, undefined);
+  assert.equal((await call(env, 'POST', '/api/queue', { token: forged, body: { api: 2, mode: '1v1', kind: 'server' } })).status, 403);
+  assert.equal(joins().length, before, 'no guest join reached the matchmaker');
 });
 
 test('Worker: a lobby\'s host and each admitted member take the car of their session (LobbyDO keeps it with the seat)', async () => {
   const { env, lobby } = makeEnv();
-  const settings = { name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
+  const settings = { api: 2, name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
   assert.equal((await call(env, 'POST', '/api/lobbies', { token: await accountToken('a1b2c3d4e5f60718', { car: 'tero' }), body: { ...settings, car: 'condor' } })).status, 200);
   const create = lobby.calls.find((c) => c.path === '/internal/create');
   assert.deepEqual([create.body.host.car, create.body.host.guest], ['tero', false]);
-  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: await accountToken('b1b2c3d4e5f60718', { car: 'pampero' }), body: { code: 'ABCDEF', car: 'condor' } })).status, 200);
+  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: await accountToken('b1b2c3d4e5f60718', { car: 'pampero' }), body: { api: 2, code: 'ABCDEF', car: 'condor' } })).status, 200);
   assert.equal(lobby.calls.filter((c) => c.path === '/internal/admit').at(-1).body.car, 'pampero');
   const guest = (await createSession(SECRET, '0123456789abcdef', 'Invitado')).token;
-  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: guest, body: { code: 'ABCDEF', car: 'condor' } })).status, 200);
+  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: guest, body: { api: 2, code: 'ABCDEF', car: 'condor' } })).status, 200);
   assert.equal('car' in lobby.calls.filter((c) => c.path === '/internal/admit').at(-1).body, false);
 });
 

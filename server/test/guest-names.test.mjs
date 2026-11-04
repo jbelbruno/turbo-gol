@@ -176,7 +176,8 @@ async function lobbyOn(ctx = new FakeLobbyCtx()) {
   return h;
 }
 
-const SETTINGS = { mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
+// api: 2, the modes redesign's client marker (without it: 426 reload_required).
+const SETTINGS = { api: 2, mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
 
 function workerEnv() {
   const lobby = fakeNs(() => ({ ok: true }));
@@ -246,7 +247,7 @@ test("verifySession: an older guest session named 'Admin' comes back as its Invi
 
 test("every route reads the session's name: an older guest session joins a lobby as its Invitado NNNN", async () => {
   const w = workerEnv();
-  const r = await call(w.env, 'POST', '/api/lobbies/join', { token: await oldGuestToken('Admin'), body: { code: 'ABCDEF' } });
+  const r = await call(w.env, 'POST', '/api/lobbies/join', { token: await oldGuestToken('Admin'), body: { api: 2, code: 'ABCDEF' } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   const admit = w.lobby.calls.find((c) => c.path === '/internal/admit');
   assert.equal(admit.body.name, guestNameOf(GUEST_ID));

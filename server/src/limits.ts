@@ -37,7 +37,9 @@
  *
  *   route                               rule             by       isolate  edge     why
  *   POST /api/guest                     guest            network      120  RL_120   every guest can queue and open rooms (Turnstile is the gate)
- *   POST /api/queue                     queue            session       20  RL_60    a long poll of 25 s: ~3 a minute in play; checked before the KV flags
+ *   POST /api/queue                     queue            session       20  RL_60    a long poll of 25 s: ~3 a minute in play, plus the first
+ *                                                                                    answer of a search at once and the client's early re-POSTs
+ *                                                                                    (at most one per 5 s); checked before the KV flags
  *   POST /api/rejoin                    rejoin           session       10  RL_60    each one mints a ticket; a reconnecting client asks a few times
  *                                       rejoinNet        network     1200  RL_1200
  *   POST /api/leave                     leave            session       30  RL_60    the menu's BACK and every match's end
@@ -116,6 +118,8 @@
  *                                                                                    of every account in the AccountsDO each
  *   POST /api/admin/account-delete      accountStats     account       10  RL_10    a maintainer's deletion on request (accountRoutes.ts, the
  *                                                                                    legal draft's P4): the same rule, one count for the two
+ *   GET  /nodes/admin/queue-stats       accountStats     account       10  RL_10    a maintainer's queue counters (nodeRoutes.ts, the queue
+ *                                                                                    hub's daily rows): the same rule and count as the two above
  *   POST /api/dev/signin                dev              network      120  RL_120   the dev-only sign-in and the stub's outbox (accountRoutes.ts
  *   GET  /api/dev/mail                                                               devRoute): counted only while their gate is open (DEV_AUTH=1
  *                                                                                    on a loopback host); closed, they are an unknown route
@@ -246,7 +250,8 @@ export type LimitName = keyof typeof LIMITS;
 /**
  * The account routes' rules (accountRoutes.ts), checked by index.ts before the route runs so the
  * single AccountsDO is never asked for a request over its limit; nodeRoutes.ts checks the account
- * counts' (GET /nodes/admin/account-stats) the same way. [] for every other route.
+ * counts' (GET /nodes/admin/account-stats) and the queue counters' (GET /nodes/admin/queue-stats)
+ * the same way. [] for every other route.
  */
 export function accountGate(method: string, path: string): readonly LimitName[] {
   if (method === 'POST') {
@@ -338,7 +343,7 @@ export function accountGate(method: string, path: string): readonly LimitName[] 
   if (path === '/api/ranked/result') return ['rankedResult', 'rankedResultNet'];
   if (path === '/api/leaderboard') return ['leaderboardYou', 'leaderboardNet'];
   if (path === '/api/auth/sessions') return ['sessions'];
-  if (path === '/nodes/admin/account-stats') return ['accountStats'];
+  if (path === '/nodes/admin/account-stats' || path === '/nodes/admin/queue-stats') return ['accountStats'];
   if (path === '/api/dev/mail') return ['dev'];
   const o = /^\/api\/auth\/oauth\/(?:google|discord)\/(start|callback)$/.exec(path);
   if (o) return [o[1] === 'start' ? 'oauthStart' : 'oauthCallback', 'signInSite'];

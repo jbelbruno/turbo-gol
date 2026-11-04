@@ -43,7 +43,8 @@ const M = await import('../src/MatchmakerDO.ts');
 const API = await import('../src/nodeApi.ts');
 const worker = (await import('../src/index.ts')).default;
 const { ROOM_PROTOCOL } = await import('../src/RoomDO.ts');
-const { INTERNAL_HEADER, internalSecret, createSession } = await import('../src/auth.ts');
+const { INTERNAL_HEADER, internalSecret, signJwt } = await import('../src/auth.ts');
+const Q = await import('../src/queuePlan.ts');
 const { RPC_TIMEOUT_MS } = await import('../../nodes/shared/controlProtocol.ts');
 
 const SECRET = 'node-matchmaker-test-secret';
@@ -95,11 +96,11 @@ function makeNs(handler = () => ({ ok: true })) {
       newUniqueId: () => ({ toString: hex64 }),
       idFromString: (s) => s,
       idFromName: (n) => n,
-      get: (id) => ({
+      get: (id, opts) => ({
         fetch: async (url, init) => {
           const u = new URL(url);
           const body = init && init.body ? JSON.parse(init.body) : null;
-          calls.push({ id: String(id), path: u.pathname, body });
+          calls.push({ id: String(id), path: u.pathname, body, ...(opts !== undefined ? { opts } : {}) });
           const r = handler(u.pathname, body);
           return r instanceof RealResponse ? r : new RealResponse(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
         },
@@ -222,7 +223,7 @@ async function makeMm({ flags = { nodes_on: '1' }, configured = true, region = '
   const join = (playerId, kind = 'server', mode = '1v1', extra = {}) =>
     call('/join', { playerId, name: 'P-' + playerId.slice(0, 4), mode, kind, ...(kind === 'ranked' ? { ratings: { [mode]: { mu: 25, sigma: 8 } } } : {}), ...extra });
   const poll = (playerId) => call('/poll?playerId=' + playerId);
-  /** Two humans of a 1v1 queue: the first waits, the second forms the match; the first collects its result by joining again. */
+  /** Two Casual humans (any format: 2 humans play a 2v2 with a bot each): the first waits, the second forms the match; the first collects its result by joining again. */
   const pair = async (a, b, kind = 'server') => {
     const first = await join(a, kind);
     assert.equal(first.json.status, 'waiting', JSON.stringify(first.json));
@@ -331,11 +332,13 @@ test('askNodes: to nodes-v1 near São Paulo with the internal header; a GET with
 
 // ---- with the nodes off: exactly as without them ------------------------------------------------------
 
-test('nodes_on absent: a server match is a MatchDO, the node registry is never asked, and the room cap answers 503 as before', async () => {
+test('nodes_on absent: a Casual match is a MatchDO, the node registry is never asked, and at the room cap the pair waits (busy, no 503)', async () => {
   const h = await makeMm({ flags: {} });
   const [qa, qb] = await h.pair(A, B);
   assert.equal(qa.json.status, 'matched');
-  assert.deepEqual(Object.keys(qa.json).sort(), ['matchId', 'status', 'ticket', 'wsUrl']);
+  assert.deepEqual(Object.keys(qa.json).sort(), ['host', 'humans', 'matchId', 'mode', 'status', 'ticket', 'wsUrl']);
+  assert.deepEqual([qa.json.mode, qa.json.host, qa.json.humans], ['2v2', 'SA', 2], 'the hub\'s extras: 2 humans play a 2v2');
+  assert.deepEqual(created(h)[0].opts, { locationHint: 'sam' }, 'hosted SA: the MatchDO is asked for near São Paulo');
   assert.equal(qa.json.wsUrl, '/ws/' + qa.json.matchId);
   assert.equal(qb.json.matchId, qa.json.matchId);
   assert.equal(created(h).length, 1);
@@ -352,8 +355,11 @@ test('nodes_on absent: a server match is a MatchDO, the node registry is never a
 
   const full = await makeMm({ flags: {}, rooms: M.MAX_ACTIVE_ROOMS });
   const cap = await full.join(A);
-  assert.deepEqual([cap.status, cap.json.error], [503, 'capacity']);
+  assert.deepEqual([cap.status, cap.json.status], [200, 'waiting'], 'no 503 capacity');
+  const busy = await full.join(B);
+  assert.deepEqual([busy.json.status, busy.json.wait.busy], ['waiting', true]);
   assert.equal(full.nodes.calls.length, 0);
+  assert.equal(created(full).length, 0);
 });
 
 test('nodes not configured (a fork, a test env): nodes_on is not even read and nothing reaches a node', async () => {
@@ -363,7 +369,8 @@ test('nodes not configured (a fork, a test env): nodes_on is not even read and n
   assert.equal(created(h).length, 1);
   assert.deepEqual(h.flags.reads, [], 'no KV read');
   const full = await makeMm({ flags: { nodes_on: '1' }, configured: false, rooms: M.MAX_ACTIVE_ROOMS });
-  assert.equal((await full.join(A)).status, 503);
+  assert.equal((await full.join(A)).json.status, 'waiting');
+  assert.equal((await full.join(B)).json.wait.busy, true);
 });
 
 // ---- placement ------------------------------------------------------------------------------------
@@ -382,7 +389,8 @@ test('a match placed on a node: node: true, the node’s own wss:// URL and tick
   assert.equal(created(h).length, 0, 'no MatchDO');
   const places = h.nodes.of('/internal/place');
   assert.equal(places.length, 1);
-  assert.deepEqual(places[0].body, { mode: '1v1', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: A, name: 'P-a1b2' }, { playerId: B, name: 'P-0123' }] }, 'no transports, no account fields');
+  assert.deepEqual(places[0].body, { mode: '2v2', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: A, name: 'P-a1b2' }, { playerId: B, name: 'P-0123' }] }, 'no transports, no account fields');
+  assert.deepEqual([qa.json.mode, qa.json.host, qa.json.humans], ['2v2', 'SA', 2]);
   const st = await h.stats();
   assert.deepEqual([st.rooms, st.active, st.nodeLocks], [0, 2, 0 + 2], 'MAX_ACTIVE_ROOMS does not count it');
   // A fresh node lock: 409 as a server match with node: true (the client rejoins it).
@@ -395,45 +403,45 @@ test('a match placed on a node: node: true, the node’s own wss:// URL and tick
   assert.equal((await h.stats()).nodeLocks, 0);
 });
 
-test('a lone p2p human after the fill wait goes to a node too (D11); its answer keeps the phase 1 shape', async () => {
+test('a lone Casual human after 5:00 goes to a node too (hosted SA): its solo match in the format it prefers, in the phase 1 shape', async () => {
   const h = await makeMm();
   assert.equal((await h.join(C, 'p2p')).json.status, 'waiting');
-  h.setTime(h.time() + M.P2P_FILL_WAIT + 1);
-  const r = await h.join(C, 'p2p');
+  h.setTime(h.time() + Q.SOLO_AFTER_MS - 1);
+  assert.equal((await h.join(C, 'p2p')).json.status, 'waiting', 'not before 5:00');
+  h.setTime(h.time() + 1);
+  const r = await h.join(C, 'p2p', '1v1', { prefer: '3v3' });
   assert.equal(r.json.status, 'matched');
-  assert.deepEqual([r.json.kind, r.json.node], [undefined, true]);
-  assert.deepEqual(h.nodes.of('/internal/place')[0].body.humans, [{ playerId: C, name: 'P-fedc' }]);
+  assert.deepEqual([r.json.kind, r.json.node, r.json.mode, r.json.humans], [undefined, true, '3v3', 1]);
+  const place = h.nodes.of('/internal/place')[0].body;
+  assert.deepEqual([place.mode, place.humans], ['3v3', [{ playerId: C, name: 'P-fedc' }]]);
   assert.equal(h.room.calls.length + created(h).length, 0);
 });
 
-test('a two-human p2p room never goes to a node; a custom lobby never asks for a placement either (D10)', async () => {
+test('two Casual humans (an older page\'s p2p kind too) go to a node, never to a P2P room; a lobby start never asks for a placement (D10)', async () => {
   const h = await makeMm();
   assert.equal((await h.join(A, 'p2p')).json.status, 'waiting');
   const r = await h.join(B, 'p2p');
-  assert.equal(r.json.kind, 'p2p');
-  const custom = await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: C, name: 'Carla', team: 0, guest: false }], matchLengthSeconds: 1200 }); // signed in: a guest's server match is 300 s at most
+  assert.deepEqual([r.json.kind, r.json.node], [undefined, true]);
+  const custom = await h.call('/custom', { kind: 'server', mode: '1v1', members: [{ playerId: C, name: 'Carla', team: 0, guest: false }, { playerId: 'c0ffee00c0ffee00', name: 'Dani', team: 1, guest: false }], matchLengthSeconds: 1200 });
   assert.equal(custom.status, 200);
-  assert.equal(custom.json.results[C].wsUrl.startsWith('/ws/'), true);
+  assert.equal(custom.json.results[C].kind, 'p2p', 'lobbies are P2P only');
   assert.equal(custom.json.results[C].node, undefined);
-  assert.equal(created(h).length, 1);
-  assert.equal(h.nodes.of('/internal/place').length, 0);
+  assert.equal(created(h).length, 0);
+  assert.equal(h.nodes.of('/internal/place').length, 1, 'the Casual pair only');
 });
 
-test('an experimental lobby never reaches a node: with the nodes on, its rules go to a RoomDO, a server start with rules is refused, a queue join with rules too', async () => {
+test('an experimental lobby never reaches a node: with the nodes on, its rules go to a RoomDO (a server pick too), a lone start is need_players, a queue join with rules is refused', async () => {
   const h = await makeMm();
   const rules = { v: 1, name: 'Low gravity', values: { gravity: 50, ballDrag: 50 } };
   const members = [{ playerId: A, name: 'Ana', team: 0, guest: false }, { playerId: B, name: 'Beto', team: 1, guest: false }];
-  let r = await h.call('/custom', { kind: 'server', mode: '1v1', members, matchLengthSeconds: 300, physics: rules });
-  assert.equal(r.status, 400);
-  assert.equal(r.json.error, 'experimental_p2p_only');
-  r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members: members.slice(0, 1), matchLengthSeconds: 300, physics: rules });
-  assert.equal(r.json.error, 'experimental_p2p_only', 'a lone human with rules: no MatchDO / node fallback');
+  let r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members: members.slice(0, 1), matchLengthSeconds: 300, physics: rules });
+  assert.equal(r.json.error, 'need_players', 'a lone human with rules: no MatchDO / node fallback');
   r = await h.join(C, 'server', '1v1', { physics: rules });
   assert.equal(r.status, 400);
   assert.equal(r.json.error, 'experimental_lobby_only');
   r = await h.join(C, 'ranked', '1v1', { physics: rules });
   assert.equal(r.json.error, 'experimental_lobby_only');
-  r = await h.call('/custom', { kind: 'p2p', mode: '1v1', members, matchLengthSeconds: 300, physics: rules });
+  r = await h.call('/custom', { kind: 'server', mode: '1v1', members, matchLengthSeconds: 300, physics: rules });
   assert.equal(r.status, 200);
   assert.equal(r.json.results[A].kind, 'p2p');
   assert.deepEqual(h.room.calls.find((c) => c.path === '/internal/create').body.physics, rules);
@@ -538,10 +546,14 @@ test('no node free: a MatchDO; hosts 0 also stops asking for a minute, a busy no
   assert.equal(created(h).length, 4);
 });
 
-test('a matchmaker outside the nodes’ regions never asks for a placement', async () => {
-  const h = await makeMm({ region: 'dev' });
-  assert.equal(await pairOnNode(h), false);
+test('a match hosted outside SA never asks for a placement: its MatchDO is created with its region\'s hint', async () => {
+  const h = await makeMm();
+  assert.equal((await h.join(A, 'server', '1v1', { home: 'EU' })).json.status, 'waiting');
+  const r = await h.join(B, 'server', '1v1', { home: 'EU' });
+  assert.deepEqual([r.json.status, r.json.node, r.json.host], ['matched', undefined, 'EU']);
   assert.equal(h.nodes.calls.length, 0);
+  assert.deepEqual(created(h)[0].opts, { locationHint: 'weur' });
+  assert.equal(created(h)[0].body.region, 'SA', 'its release comes back to the hub');
 });
 
 // ---- the room cap and do_disabled (D9) ----------------------------------------------------------------
@@ -560,19 +572,25 @@ test('at MAX_ACTIVE_ROOMS a node match still forms; without a node the waiters s
   assert.deepEqual(errors, [], 'waiting for a node is no failure');
   assert.equal(created(w).length, 0);
   assert.equal(w.nodes.of('/internal/place').length, 1);
-  assert.equal((await w.stats()).queues['1v1:server'], 2);
+  assert.equal((await w.stats()).queues.casual, 2);
+  assert.equal((await w.join(B)).json.wait.busy, true, 'the cap: busy');
   w.nodes.place = (body) => ({ body: { placement: placementOf(body), hosts: 1 } });
   w.setTime(w.time() + 5_000); // the queue's retry back-off
   const r = await w.join(A);
   assert.deepEqual([r.json.status, r.json.node], ['matched', true]);
 });
 
-test('the cap with a canary: a player outside it gets today’s 503; one in it waits for a node', async () => {
+test('the cap with a canary: a pair with a player outside it waits busy (no node, no 503); a pair inside it waits for a node', async () => {
   const h = await makeMm({ flags: { nodes_on: A }, rooms: M.MAX_ACTIVE_ROOMS });
   const c = await h.join(C);
-  assert.deepEqual([c.status, c.json.error], [503, 'capacity']);
-  assert.equal((await h.join(A)).json.status, 'waiting');
-  assert.equal((await h.join(C, 'p2p')).json.status, 'waiting', 'p2p has its own cap');
+  assert.deepEqual([c.status, c.json.status], [200, 'waiting']);
+  const a = await h.join(A);
+  assert.deepEqual([a.json.status, a.json.wait.busy], ['waiting', true], 'C is outside the canary: a MatchDO, and none is free');
+  assert.equal(h.nodes.calls.length, 0);
+  await h.call('/leave', { playerId: C });
+  const g = await makeMm({ flags: { nodes_on: `${A},${B}` }, rooms: M.MAX_ACTIVE_ROOMS });
+  assert.equal((await g.join(A)).json.status, 'waiting');
+  assert.deepEqual([(await g.join(B)).json.node], [true], 'both in the canary: a node, the cap does not count it');
 });
 
 test('do_disabled with the nodes on: no MatchDO is created; the humans wait for a node and get one when it is free', async () => {
@@ -610,7 +628,7 @@ test('do_disabled where no node can host (hosts 0, a region the nodes do not ser
   const ra = await h.join(A, 'server', '1v1', off);
   assert.deepEqual([ra.status, ra.json.error], [503, 'do_disabled']);
   assert.equal((await h.join(C, 'ranked', '1v1', off)).status, 503);
-  assert.equal((await h.stats()).queues['1v1:server'], 0, 'nobody left waiting');
+  assert.equal((await h.stats()).queues.casual, 0, 'nobody left waiting');
   assert.deepEqual([created(h).length, h.nodes.of('/internal/place').length], [0, 1]);
   // A minute later a node may be back: they wait for one again.
   h.setTime(h.time() + M.NO_HOSTS_BACKOFF_MS);
@@ -618,44 +636,43 @@ test('do_disabled where no node can host (hosts 0, a region the nodes do not ser
   assert.equal((await h.join(A, 'server', '1v1', off)).json.status, 'waiting');
   assert.equal((await h.join(B, 'server', '1v1', off)).json.node, true);
 
-  const dev = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' }, region: 'dev' });
-  assert.equal((await dev.join(A, 'server', '1v1', off)).status, 503, 'a region the nodes do not serve');
-  assert.equal(dev.nodes.calls.length, 0);
+  // Waiters of another region: with do_disabled their match is hosted SA (node only), never a MatchDO.
+  const eu = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
+  assert.equal((await eu.join(A, 'server', '1v1', { ...off, home: 'EU' })).json.status, 'waiting');
+  const reu = await eu.join(B, 'server', '1v1', { ...off, home: 'EU' });
+  assert.deepEqual([reu.json.node, reu.json.host], [true, 'SA']);
+  assert.equal(eu.nodes.of('/internal/place')[0].body.region, 'SA');
+  assert.equal(created(eu).length, 0);
 
-  // At the cap without do_disabled: once no node can host, new joiners get today's 503 and the
+  // At the cap without do_disabled: once no node can host, newcomers wait (no 503) and the
   // waiters wait for a free room without asking again.
   const full = await makeMm({ rooms: M.MAX_ACTIVE_ROOMS });
   full.nodes.place = () => ({ body: { placement: null, hosts: 0 } });
   assert.equal((await full.join(A)).json.status, 'waiting');
   assert.equal((await full.join(B)).json.status, 'waiting');
   const c = await full.join(C);
-  assert.deepEqual([c.status, c.json.error], [503, 'capacity']);
+  assert.deepEqual([c.status, c.json.status, c.json.wait.busy], [200, 'waiting', true], 'held with the group at the cap');
   const fullReads = full.flags.reads.filter((n) => n === 'do_disabled').length;
   full.setTime(full.time() + 5_000);
-  assert.equal((await full.join(A)).json.status, 'waiting');
+  assert.equal((await full.join(A)).json.wait.busy, true);
   assert.equal(full.nodes.of('/internal/place').length, 1);
   assert.equal(full.flags.reads.filter((n) => n === 'do_disabled').length, fullReads, 'no formation tried at the cap');
 });
 
-test('a lone p2p human that finds no node and no room backs off alone: a second human still gets a P2P room at once', async () => {
-  for (const [flags, hosts] of [[{ nodes_on: A }, 1], [{ nodes_on: '1' }, 1], [{ nodes_on: '1' }, 0]]) {
+test('a group that finds no node and no MatchDO (the cap) backs off: no placement asked again within RETRY_AFTER_MS (busy meanwhile); hosts 0 stops asking for a minute', async () => {
+  for (const [flags, hosts] of [[{ nodes_on: `${A},${B}` }, 1], [{ nodes_on: '1' }, 1], [{ nodes_on: '1' }, 0]]) {
     const label = JSON.stringify({ flags, hosts });
     const h = await makeMm({ flags, rooms: M.MAX_ACTIVE_ROOMS });
     h.nodes.place = () => ({ body: { placement: null, hosts } });
-    assert.equal((await h.join(A, 'p2p')).json.status, 'waiting', label);
-    h.setTime(h.time() + M.P2P_FILL_WAIT + 1);
-    assert.equal((await h.join(A, 'p2p')).json.status, 'waiting', label + ': no node and no room');
+    assert.equal((await h.join(A)).json.status, 'waiting', label);
+    const b = await h.join(B);
+    assert.deepEqual([b.json.status, b.json.wait.busy], ['waiting', true], label + ': no node and no room');
     h.setTime(h.time() + 1_000);
-    assert.equal((await h.join(A, 'p2p')).json.status, 'waiting', label);
+    assert.equal((await h.join(A)).json.status, 'waiting', label);
     assert.equal(h.nodes.of('/internal/place').length, 1, label + ': not asked again within its back-off');
-    if (hosts === 1) {
-      h.setTime(h.time() + 5_000);
-      assert.equal((await h.join(A, 'p2p')).json.status, 'waiting', label);
-      assert.equal(h.nodes.of('/internal/place').length, 2, label + ': asked again after it');
-    }
-    h.setTime(h.time() + 100);
-    const c = await h.join(C, 'p2p');
-    assert.deepEqual([c.json.status, c.json.kind], ['matched', 'p2p'], label + ': C is not held back');
+    h.setTime(h.time() + 5_000);
+    assert.equal((await h.join(A)).json.status, 'waiting', label);
+    assert.equal(h.nodes.of('/internal/place').length, hosts === 1 ? 2 : 1, label + (hosts === 1 ? ': asked again after it' : ': hosts 0: not for a minute'));
   }
 });
 
@@ -691,7 +708,7 @@ test('a node lock is checked with the registry: assigned or reporting holds it; 
   h.nodes.status = () => ({ body: { state: 'verifying', left: false } });
   assert.equal((await h.join(A)).json.status, 'waiting', 'verifying: the match is over for the player');
   h.nodes.status = () => ({ status: 404, body: { error: 'no_match' } });
-  assert.equal((await h.join(B, 'p2p')).json.status, 'waiting', 'unknown to the control plane: freed');
+  assert.equal((await h.join(B, 'p2p')).json.status, 'matched', 'unknown to the control plane: freed (and A was waiting: they pair again)');
   assert.equal(h.room.calls.length, 0, 'no room is told of a node lock');
   await h.call('/leave', { playerId: A });
   await h.call('/leave', { playerId: B });
@@ -839,7 +856,7 @@ test('a /leave while the match is being placed takes the player out: the node ma
   const st = await h.stats();
   assert.deepEqual([st.active, st.nodeLocks, st.forming, st.matched], [1, 1, 0, 1], 'only B holds the match');
   assert.equal((await h.join(A)).json.status, 'waiting', 'a fresh waiter: no 409');
-  assert.equal((await h.stats()).queues['1v1:server'], 1);
+  assert.equal((await h.stats()).queues.casual, 1);
 
   // The node does not take that leave (offline): D12, the lock stays and the next queue gets the match.
   const g = await makeMm();
@@ -874,7 +891,7 @@ test('a /leave while the nodes are asked for a match none takes: no MatchDO is c
     assert.equal((await formingB).json.status, 'waiting', label);
     assert.equal(created(h).length, 0, label + ': no MatchDO');
     const st = await h.stats();
-    assert.deepEqual([st.queues['1v1:server'], st.active, st.forming], [1, 0, 0], label + ': B alone in the queue');
+    assert.deepEqual([st.queues.casual, st.active, st.forming], [1, 0, 0], label + ': B alone in the queue');
     if (opts.flags === undefined && opts.rooms === undefined) {
       // A leave is no failure: no retry back-off, B forms with the next human at once (without A).
       h.nodes.place = () => ({ body: { placement: null, hosts: 1 } });
@@ -884,43 +901,16 @@ test('a /leave while the nodes are asked for a match none takes: no MatchDO is c
   }
 });
 
-test('a /leave while its P2P room is being created frees that lock and tells the room (no no-show strike); a MatchDO’s lock stays, as for a leave without its id', async () => {
-  const h = await makeMm({ flags: {} });
-  const gate = deferred();
-  const calls = [];
-  h.env.ROOM = {
-    newUniqueId: () => ({ toString: hex64 }),
-    idFromString: (s) => s,
-    get: (id) => ({
-      fetch: async (url, init) => {
-        const path = new URL(url).pathname;
-        calls.push({ id: String(id), path, body: JSON.parse(init.body) });
-        if (path === '/internal/create') await gate.promise;
-        return new RealResponse(JSON.stringify(path === '/internal/leave' ? { ok: true, noShow: true } : { ok: true }));
-      },
-    }),
-  };
-  await h.join(A, 'p2p');
-  const formingB = h.join(B, 'p2p');
-  await formingOf(h, 2);
-  assert.equal((await h.call('/leave', { playerId: A })).json.left, true);
-  gate.resolve();
-  const rb = await formingB;
-  assert.equal(rb.json.kind, 'p2p');
-  assert.deepEqual(calls.filter((c) => c.path === '/internal/leave').map((c) => [c.id, c.body]), [[rb.json.roomId, { playerId: A }]]);
-  const st = await h.stats();
-  assert.deepEqual([st.active, st.noShows], [1, 0], 'A unlocked, no strike: the ticket never reached it');
-  assert.equal((await h.join(A, 'p2p')).json.status, 'waiting');
-
+test('a /leave while its MatchDO is being created: its lock stays, as for a leave without its id, and the next queue gets that match', async () => {
   const g = await makeMm({ flags: {} });
   const mGate = deferred();
   const realNs = g.env.MATCH;
   g.env.MATCH = {
     ...realNs,
-    get: (id) => ({
+    get: (id, opts) => ({
       fetch: async (url, init) => {
         if (new URL(url).pathname === '/internal/create') await mGate.promise;
-        return realNs.get(id).fetch(url, init);
+        return realNs.get(id, opts).fetch(url, init);
       },
     }),
   };
@@ -935,22 +925,20 @@ test('a /leave while its P2P room is being created frees that lock and tells the
   assert.equal(g.match.calls.filter((c) => c.path === '/internal/leave').length, 0);
 });
 
-test('the sweep does not wait for a slow node placement: the other queues’ timed formations go on meanwhile', async () => {
+test('a slow node placement does not hold up the other formations: a pair of another region forms its MatchDO meanwhile', async () => {
   const h = await makeMm();
   const gate = deferred();
   holdPlace(h, gate);
-  assert.equal((await h.join(A)).json.status, 'waiting'); // 1v1 server: bots after BOT_FILL_MS
-  assert.equal((await h.join(B, 'p2p', '2v2')).json.status, 'waiting');
-  assert.equal((await h.join(C, 'p2p', '2v2')).json.status, 'waiting');
-  h.setTime(h.time() + M.P2P_FILL_WAIT + 1); // both due: the next sweep places A (held open) and forms B and C's room
-  // The room is issued (B and C out of `forming`) while A alone is still being placed.
-  const roomFirst = async () => {
-    const s = await h.stats();
-    return s.p2pRooms === 1 && s.forming === 1 && s.nodeLocks === 0;
-  };
-  assert.ok(await until(roomFirst), 'the 2v2 room formed while A is placed');
+  assert.equal((await h.join(A)).json.status, 'waiting');
+  const formingAB = h.join(B); // hosted SA: its placement is held open
+  await formingOf(h, 2);
+  assert.equal((await h.join(C, 'server', '1v1', { home: 'EU' })).json.status, 'waiting');
+  const d = await h.join('c0ffee00c0ffee00', 'server', '1v1', { home: 'EU' });
+  assert.deepEqual([d.json.status, d.json.host, d.json.node], ['matched', 'EU', undefined], 'the EU pair formed while A and B are placed');
+  assert.equal((await h.stats()).forming, 2);
   gate.resolve();
-  assert.ok(await until(async () => (await h.stats()).nodeLocks === 1));
+  assert.equal((await formingAB).json.node, true);
+  assert.equal((await h.stats()).nodeLocks, 2);
 });
 
 test('a fresh matchmaker: joins that land while its first nodes_on read is in flight wait for it, never use the default off', async () => {
@@ -1014,31 +1002,31 @@ async function post(env, path, body, token) {
   return { status: res.status, json: await res.json() };
 }
 
-const tokenOf = async (playerId) => (await createSession(SECRET, playerId, 'P-' + playerId.slice(0, 4))).token;
+/** An account session (Casual and ranked are for accounts: a guest gets 403 account_required). */
+const tokenOf = (playerId) => signJwt(SECRET, { sub: playerId, name: 'P-' + playerId.slice(0, 4), iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, acct: 1 });
 
 test('Worker /api/queue: a node match keeps the node’s wss:// URL; a MatchDO match still gets the Worker’s /ws/ one', async () => {
   const id = hex64();
   const onNode = workerEnv({ joinAnswer: { status: 'matched', matchId: id, ticket: 'node-ticket', wsUrl: `${NODE_URL}/m/${id}`, node: true } });
-  let r = await post(onNode.env, '/api/queue', { mode: '1v1', kind: 'server' }, await tokenOf(A));
+  let r = await post(onNode.env, '/api/queue', { api: 2, mode: '1v1', kind: 'server' }, await tokenOf(A));
   assert.equal(r.status, 200);
   assert.deepEqual(r.json, { status: 'matched', matchId: id, ticket: 'node-ticket', wsUrl: `${NODE_URL}/m/${id}`, node: true, region: 'SA' });
   const onDo = workerEnv({ joinAnswer: { status: 'matched', matchId: id, ticket: 't', wsUrl: '/ws/' + id } });
-  r = await post(onDo.env, '/api/queue', { mode: '1v1', kind: 'server' }, await tokenOf(A));
+  r = await post(onDo.env, '/api/queue', { api: 2, mode: '1v1', kind: 'server' }, await tokenOf(A));
   assert.equal(r.json.wsUrl, 'wss://turbo-gol.com/ws/' + id);
   assert.equal(r.json.node, undefined);
 });
 
-test('Worker /api/queue with do_disabled: 503 as before unless the nodes are on for this player; then only a p2p queue is refused (D9)', async () => {
-  const server = { mode: '1v1', kind: 'server' };
-  const p2p = { mode: '1v1', kind: 'p2p', p2pProtocol: ROOM_PROTOCOL };
+test('Worker /api/queue with do_disabled: 503 as before unless the nodes are on for this player; then Casual (an older p2p kind too) waits for a node (D9)', async () => {
+  const server = { api: 2, mode: '1v1', kind: 'server' };
+  const p2p = { api: 2, mode: '1v1', kind: 'p2p', p2pProtocol: ROOM_PROTOCOL };
   const cases = [
     [{ do_disabled: '1' }, true, A, server, 503],
     [{ do_disabled: '1' }, true, A, p2p, 503],
     [{ do_disabled: '1', nodes_on: '1' }, false, A, server, 503], // not configured: nodes_on means nothing
     [{ do_disabled: '1', nodes_on: '1', vm_disabled: '1' }, true, A, server, 503],
     [{ do_disabled: '1', nodes_on: '1' }, true, A, server, 200],
-    [{ do_disabled: '1', nodes_on: '1' }, true, A, { mode: '1v1', kind: 'ranked' }, 403], // on to the account check: a guest
-    [{ do_disabled: '1', nodes_on: '1' }, true, A, p2p, 503],
+    [{ do_disabled: '1', nodes_on: '1' }, true, A, p2p, 200], // 'p2p' is Casual: no RoomDO any more
     [{ do_disabled: '1', nodes_on: A }, true, A, server, 200],
     [{ do_disabled: '1', nodes_on: A }, true, C, server, 503],
     [{ nodes_on: A }, true, C, p2p, 200],
@@ -1143,14 +1131,14 @@ test("a node match's cars: the placement takes each human's car, account and age
     { playerId: A, name: 'P-a1b2', account: true, accountAgeDays: 12, car: 'tero' },
     { playerId: B, name: 'P-0123', account: true },
   ]);
-  assert.deepEqual(qa.json.cars, ['tero', null], 'by slot (the placement put A in slot 0)');
+  assert.deepEqual(qa.json.cars, ['tero', null, null, null], 'by slot (the placement put A in slot 0; two humans play a 2v2)');
   assert.deepEqual(qb.json.cars, qa.json.cars, 'every seat gets the whole match');
   assert.equal(qa.json.node, true);
   await h.call('/release', { matchId: qa.json.matchId, playerIds: [A, B] });
   // Nobody on another car: the result is exactly what it was before cars.
   const [pa] = await h.pair(A, B);
   assert.equal('cars' in pa.json, false);
-  assert.deepEqual(Object.keys(pa.json).sort(), ['matchId', 'node', 'status', 'ticket', 'wsUrl']);
+  assert.deepEqual(Object.keys(pa.json).sort(), ['host', 'humans', 'matchId', 'mode', 'node', 'status', 'ticket', 'wsUrl']);
 });
 
 test("Worker /api/rejoin of a node match passes the match's cars on; a `cars` of another shape is dropped and the ticket still counts", async () => {
@@ -1172,6 +1160,6 @@ test("Worker /api/rejoin of a node match passes the match's cars on; a `cars` of
   assert.equal(API.rejoinTicketOf({ ticket: 't', wsUrl: '/m/x', cars: ['tero'] }), null, 'cars never make a ticket of what is none');
   // A queue answer from the matchmaker keeps its cars too.
   const onNode = workerEnv({ joinAnswer: { status: 'matched', matchId: id, ticket: 'n', wsUrl: `${NODE_URL}/m/${id}`, node: true, cars: ['tero', null] } });
-  r = await post(onNode.env, '/api/queue', { mode: '1v1', kind: 'server' }, token);
+  r = await post(onNode.env, '/api/queue', { api: 2, mode: '1v1', kind: 'server' }, token);
   assert.deepEqual(r.json.cars, ['tero', null]);
 });
