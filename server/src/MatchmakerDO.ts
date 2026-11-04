@@ -6,7 +6,7 @@
  * regions' instances keep the custom lobbies' P2P rooms (/custom) and the locks of matches formed
  * there before the deploy.
  *
- *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, doDisabled?, car?, account?, accountAgeDays? }
+ *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, car?, account?, accountAgeDays? }
  *                                            -> QueueResult (matched right away; with the hub's extras mode, host,
  *                                               humans: src/net/queueWait.ts QueueMatchedExtra) or 'waiting' with
  *                                               { waiting, region: home, wait: QueueWait } and fresh: true when this
@@ -33,11 +33,12 @@
  *                                               and its ticket refused: one player can never sit in two rooms). No
  *                                               capacity refusal any more: at a cap the waiters wait (wait.busy). A lock
  *                                               on a node match answers 409 with kind 'server' and node: true (it is
- *                                               rejoined like a server match). `doDisabled` (the Worker read do_disabled
- *                                               set and let the queue through, D9): where no node can host now, 503
- *                                               'do_disabled' as without the nodes, instead of waiting for nothing
+ *                                               rejoined like a server match). With do_disabled set the Worker lets a
+ *                                               queue through only for a player the nodes are on for (D9): it waits for
+ *                                               a node, busy while none can take its match; never a 503 from here
  *   GET  /poll?playerId=...                  -> same, answers when matched or after 25 s (also while the player's match
- *                                               is being formed: a node placement can take seconds)
+ *                                               is being formed: a node placement can take seconds); a waiter's due
+ *                                               formation (its 5:00) runs before the 'waiting' answer
  *   GET  /population?home=R                  -> the hub's numbers for home R: casual waiters by preferred format, ranked
  *                                               waiters by playlist, live locks, and `searching` across every region
  *   GET  /daily-stats?days=N                 -> { days: QueueDay[] } (queueStats.ts), newest first, today's in-memory
@@ -154,10 +155,11 @@
  * and answered with the node's own wss:// URL and node: true; it never counts toward
  * MAX_ACTIVE_ROOMS. Not placed (no node free, an error, no answer in NODE_CALL_TIMEOUT_MS), a
  * MatchDO is created, unless do_disabled is set or the cap is reached: then the humans wait in the
- * queue for a node. In the back-off after hosts 0 or a failed call (per host region) there is no
- * node to wait for: the waiters wait for a free MatchDO as without the nodes, and with do_disabled
- * the joins answer 503 (no MatchDO is created for them either). With do_disabled every group the
- * nodes are on for is hosted SA (node only). Custom lobbies never go to a node. With the nodes off
+ * queue for a node. In the back-off after hosts 0 or a failed call (per host region) no node is
+ * asked: the waiters wait for a free MatchDO as without the nodes, and with do_disabled they wait,
+ * busy, until the back-off is over and a node takes them (the build spec's §1.8: those groups
+ * wait; the Worker answers 503 do_disabled only to a player the nodes are off for, §2.1). With
+ * do_disabled every group the nodes are on for is hosted SA (node only). Custom lobbies never go to a node. With the nodes off
  * for a player (or not configured: a fork, the tests) everything is as without them.
  *
  * Experimental rules (the owner's rule: every ranked or counted match, P2P included, runs the
@@ -462,8 +464,6 @@ interface JoinBody {
   kind?: unknown;
   /** kind 'ranked': { [mode]: { mu, sigma } } from AccountsDO (the Worker fills it, never the client). */
   ratings?: unknown;
-  /** true: the Worker read do_disabled set (it lets only a server / ranked queue of a player the nodes are on for through). */
-  doDisabled?: unknown;
   /** Never accepted: experimental rules exist only in custom lobbies (400 experimental_lobby_only). */
   physics?: unknown;
   /** From the session (index.ts seatFields), never the client's body: the account's car (absent: the default car) ... */
@@ -1144,9 +1144,9 @@ export class MatchmakerDO extends DurableObject<Env> {
       const held = await this.guardCheck(playerId, net, now);
       if (held !== null) return held;
     }
-    // D9 lets this queue wait for a node; where none can host now (nodesHere) there is nothing to
-    // wait for, and it is refused as without the nodes.
-    const doDisabled = body.doDisabled === true;
+    // do_disabled (D9): the Worker lets a queue through only for a player the nodes are on for, and
+    // that queue waits for a node (the build spec's §1.8), busy while none can take its match (also
+    // in the back-off after hosts 0); it is never refused here.
 
     // Left while its match was being formed (leave): nothing of that formation reaches it. Its
     // poll waits for the formation's end (withdraw), then it queues anew.
@@ -1191,7 +1191,6 @@ export class MatchmakerDO extends DurableObject<Env> {
       this.stat(now).cancelled[statsKindOf(waiter.kind)]++;
       waiter = null;
     }
-    if (doDisabled && !this.nodesHere([playerId], now)) return this.refuseDoDisabled(waiter);
     let fresh = false;
     if (waiter) {
       waiter.lastSeen = now;
@@ -1233,8 +1232,6 @@ export class MatchmakerDO extends DurableObject<Env> {
     else await this.formCasual(now, playerId);
     const r = this.matched.get(playerId);
     if (r) return this.deliver(playerId, r);
-    // That formation may have just found no node here (hosts 0): refused now, not after a poll.
-    if (doDisabled && !this.nodesHere([playerId], now)) return this.refuseDoDisabled(this.findWaiter(playerId));
     this.scheduleSweep();
     const still = this.findWaiter(playerId) ?? (this.forming.get(playerId) as Waiter | undefined) ?? waiter;
     return json(this.waitingResult(still, fresh));
@@ -1322,12 +1319,6 @@ export class MatchmakerDO extends DurableObject<Env> {
   private forgetSolo(matchId: string): void {
     this.solos.delete(matchId);
     if (this.soloRows.delete(matchId)) void this.ctx.storage.delete(SOLO_PREFIX + matchId);
-  }
-
-  /** 503 do_disabled for a server / ranked join with no node to wait for (join): its waiter, if any, is dropped. */
-  private refuseDoDisabled(waiter: Waiter | null): Response {
-    if (waiter) this.dropWaiter(waiter);
-    return error(503, 'do_disabled');
   }
 
   private deliver(playerId: string, m: { result: AnyQueueResult; delivered: boolean }): Response {
@@ -2344,10 +2335,11 @@ export class MatchmakerDO extends DurableObject<Env> {
 
   /**
    * A formation that did not happen. NoRoom: no node now and no MatchDO allowed (they wait for one,
-   * busy at a cap), or one of them left; anything else is a failure (logged). They go back to their
-   * lists by their join times (not one that left, nor a guest the dormant guard refused, whose next
-   * join is told) and wait out RETRY_AFTER_MS before they are tried again, except after a leave (the
-   * others may form at once).
+   * busy: a cap, or do_disabled with no node free or in the back-off after hosts 0), or one of
+   * them left; anything else is a failure (logged). They go back to their lists by their join
+   * times (not one that left, nor a guest the dormant guard refused, whose next join is told) and
+   * wait out RETRY_AFTER_MS before they are tried again, except after a leave (the others may form
+   * at once).
    */
   private formFailed(e: unknown, humans: readonly Waiter[], now: number): void {
     if (!(e instanceof NoRoom)) console.error('matchmaker: form failed', e);
@@ -2356,9 +2348,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     for (const h of humans) if (refused.includes(h.playerId)) this.answerWaiting(h);
     this.requeue(back);
     if (!(e instanceof NoRoom) || e.code !== 'left') for (const h of back) h.noRoomUntil = now + RETRY_AFTER_MS;
-    if (e instanceof NoRoom && e.code === 'capacity') for (const h of back) h.busy = true;
-    // do_disabled where no node can host now (hosts 0): their next join is refused, so answer now.
-    if (e instanceof NoRoom && e.code === 'do_disabled' && !this.nodesHere(humans.map((h) => h.playerId), now)) for (const h of back) this.answerWaiting(h);
+    if (e instanceof NoRoom && (e.code === 'capacity' || e.code === 'do_disabled')) for (const h of back) h.busy = true;
     this.scheduleSweep();
   }
 
@@ -2495,8 +2485,8 @@ export class MatchmakerDO extends DurableObject<Env> {
   /**
    * ... and a node may take their match now: it is hosted in SA (the only region with nodes),
    * outside that region's back-off after hosts 0 or a failed call (NO_HOSTS_BACKOFF_MS). Otherwise
-   * there is no node to wait for: the cap applies as without the nodes, and with do_disabled their
-   * joins are refused (join; formMatch creates no MatchDO for them either).
+   * no node is asked: the cap applies as without the nodes, and with do_disabled their groups wait,
+   * busy (formMatch creates no MatchDO for them: NoRoom do_disabled), until a node can take them.
    */
   private nodesHere(playerIds: readonly string[], now: number, host: string = QUEUE_HUB): boolean {
     return this.nodesFor(playerIds) && host === QUEUE_HUB && now >= (this.noHostsUntil.get(host) ?? 0);

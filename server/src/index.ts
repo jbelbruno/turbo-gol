@@ -88,8 +88,8 @@
  * (non-browser client) is let through to the ticket check.
  * Flags (KV FLAGS): matchmaking_off, do_disabled -> 503. do_disabled also stops /api/queue, so no
  * new room is created while its sockets would be refused; for a player the nodes are on for, its
- * Casual and ranked matches wait for a node instead (where none can host now, the matchmaker
- * refuses them itself: doDisabled in its /join). nodes_on (absent: off; '1':
+ * Casual and ranked matches wait for a node instead (busy while none can take them, also in the
+ * hub's back-off after hosts 0: never a 503 for that player). nodes_on (absent: off; '1':
  * everyone; a list of account ids: a canary) lets matches go to community nodes, vm_disabled turns
  * them off again (env.ts nodesMode; the matchmaker decides per match, MatchmakerDO.ts). nodes_off
  * stops every /nodes/* route that would reach the NodeRegistryDO (503 before the object; the cron's
@@ -460,9 +460,8 @@ async function queue(request: Request, env: Env): Promise<Response> {
   if (!hasClientApi(body, QUEUE_API)) return reloadRequired();
   if (await flag(env, 'matchmaking_off')) return error(503, 'matchmaking_off');
   // No new rooms while their sockets would be refused. With the nodes on for this player (D9) the
-  // queue goes on: its match waits for a node, and no MatchDO is created for it.
-  const doDisabled = await flag(env, 'do_disabled');
-  if (doDisabled && !(nodesConfigured(env) && nodesAllowed(await nodesMode(env), [session.sub]))) return error(503, 'do_disabled');
+  // queue goes on: its match waits for a node, and no MatchDO is created for it. 503 only here.
+  if ((await flag(env, 'do_disabled')) && !(nodesConfigured(env) && nodesAllowed(await nodesMode(env), [session.sub]))) return error(503, 'do_disabled');
   // The owner's rule: every ranked or counted match runs the standard physics. Experimental rules
   // exist only in custom P2P lobbies; a queue never accepts or carries them.
   if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules exist only in custom P2P lobbies, never in the casual or ranked queues');
@@ -494,15 +493,14 @@ async function queue(request: Request, env: Env): Promise<Response> {
   let res = await hub.stub.fetch('https://matchmaker/join', {
     method: 'POST',
     headers,
-    // doDisabled: where no node can host now, the matchmaker refuses this queue as above (503).
     // home / prefer / local / visible: the waiter's region, its solo format, its local play, its tab.
+    // With do_disabled set this player's match waits for a node in the hub (busy while none can take it).
     body: JSON.stringify({
       playerId: session.sub,
       name: session.name,
       modes,
       kind,
       ratings,
-      doDisabled: doDisabled ? true : undefined,
       home,
       prefer: preferOf(body.prefer, modes),
       local: body.local === 'bots' || body.local === 'training' ? body.local : undefined,

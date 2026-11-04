@@ -615,38 +615,41 @@ test('do_disabled with the nodes on: no MatchDO is created; the humans wait for 
   assert.equal((await h.join(B, 'server', '1v1', off)).json.node, true);
 });
 
-test('do_disabled where no node can host (hosts 0, a region the nodes do not serve): 503 as without the nodes, not a wait for nothing', async () => {
+test('do_disabled with the nodes on, where no node can host (hosts 0): the groups wait busy through the back-off, never a 503 (§1.8, §2.1) nor a MatchDO; a node takes them once it is over', async () => {
   const h = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
-  const off = { doDisabled: true };
   h.nodes.place = () => ({ body: { placement: null, hosts: 0 } });
-  assert.equal((await h.join(A, 'server', '1v1', off)).json.status, 'waiting', 'no hosts known yet');
+  assert.equal((await h.join(A)).json.status, 'waiting', 'no hosts known yet');
   let polled = null;
   const pollA = h.poll(A).then((r) => (polled = r));
-  const rb = await h.join(B, 'server', '1v1', off); // its placement finds hosts 0
-  assert.deepEqual([rb.status, rb.json.error], [503, 'do_disabled']);
-  assert.ok(await until(() => polled !== null, 500), 'answered at once: the next join is refused');
-  assert.equal(polled.json.status, 'waiting');
-  // A newcomer is refused before any formation: none is tried with A, still queued (no do_disabled read).
-  const reads = () => h.flags.reads.filter((n) => n === 'do_disabled').length;
-  const before = reads();
+  const rb = await h.join(B); // its placement finds hosts 0
+  assert.deepEqual([rb.status, rb.json.status, rb.json.wait.busy, rb.json.wait.estimateKind], [200, 'waiting', true, 'none'], 'waits, busy: no node can take it now');
+  await pause(30);
+  assert.equal(polled, null, 'A\'s long-poll goes on: nothing is refused');
+  // Through the back-off: a newcomer and the waiters wait (no 503), no node is asked, no MatchDO.
   h.setTime(h.time() + 5_000);
-  assert.equal((await h.join(C, 'server', '1v1', off)).status, 503);
-  assert.equal(reads(), before, 'no formation tried');
-  const ra = await h.join(A, 'server', '1v1', off);
-  assert.deepEqual([ra.status, ra.json.error], [503, 'do_disabled']);
-  assert.equal((await h.join(C, 'ranked', '1v1', off)).status, 503);
-  assert.equal((await h.stats()).queues.casual, 0, 'nobody left waiting');
-  assert.deepEqual([created(h).length, h.nodes.of('/internal/place').length], [0, 1]);
-  // A minute later a node may be back: they wait for one again.
-  h.setTime(h.time() + M.NO_HOSTS_BACKOFF_MS);
+  const rc = await h.join(C);
+  assert.deepEqual([rc.status, rc.json.status, rc.json.wait.busy], [200, 'waiting', true], 'held with the group');
+  const ra = await h.join(A);
+  assert.deepEqual([ra.status, ra.json.status, ra.json.wait.busy], [200, 'waiting', true]);
+  assert.equal((await h.stats()).queues.casual, 3, 'all three still queued');
+  assert.deepEqual([created(h).length, h.nodes.of('/internal/place').length], [0, 1], 'never a MatchDO; no node asked in the back-off');
+  // A minute later a node may be back: the three (polling meanwhile) get one.
   h.nodes.place = (body) => ({ body: { placement: placementOf(body), hosts: 1 } });
-  assert.equal((await h.join(A, 'server', '1v1', off)).json.status, 'waiting');
-  assert.equal((await h.join(B, 'server', '1v1', off)).json.node, true);
+  let last = [];
+  for (let i = 0; i < 3; i++) {
+    h.setTime(h.time() + 20_000);
+    last = [];
+    for (const id of [A, B, C]) last.push(await h.join(id));
+  }
+  assert.deepEqual(last.map((r) => [r.json.status, r.json.node]), [['matched', true], ['matched', true], ['matched', true]]);
+  await pollA;
+  assert.deepEqual([polled.json.status, polled.json.node], ['matched', true], 'the first long-poll got the match too');
+  assert.equal(created(h).length, 0);
 
   // Waiters of another region: with do_disabled their match is hosted SA (node only), never a MatchDO.
   const eu = await makeMm({ flags: { nodes_on: '1', do_disabled: '1' } });
-  assert.equal((await eu.join(A, 'server', '1v1', { ...off, home: 'EU' })).json.status, 'waiting');
-  const reu = await eu.join(B, 'server', '1v1', { ...off, home: 'EU' });
+  assert.equal((await eu.join(A, 'server', '1v1', { home: 'EU' })).json.status, 'waiting');
+  const reu = await eu.join(B, 'server', '1v1', { home: 'EU' });
   assert.deepEqual([reu.json.node, reu.json.host], [true, 'SA']);
   assert.equal(eu.nodes.of('/internal/place')[0].body.region, 'SA');
   assert.equal(created(eu).length, 0);
@@ -1047,8 +1050,8 @@ test('Worker /api/queue with do_disabled: 503 as before unless the nodes are on 
       assert.equal(r.json.error, 'do_disabled', label);
       assert.equal(w.mmCalls.length, 0, label + ': the matchmaker never hears of it');
     }
-    // The matchmaker refuses it itself where no node can host (doDisabled).
-    if (status === 200) assert.equal(w.mmCalls[0].body.doDisabled, flags.do_disabled ? true : undefined, label);
+    // The 503 is the Worker's alone: the hub refuses nothing for do_disabled (its groups wait for a node, busy).
+    if (status === 200) assert.equal('doDisabled' in w.mmCalls[0].body, false, label);
     assert.equal(w.nodes.calls.length, 0, label);
   }
 });
