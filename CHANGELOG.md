@@ -488,6 +488,11 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- The community servers' public list (`/nodes/status`) shows only the servers in service (on
+  probation or active), never one pending, suspended, banned or retired, and names who runs each one
+  only for the project's servers: any other host is "Anfitrión" and a number, in the list and in the
+  points ranking, never its username or the start of its account id. It goes out with the legal
+  texts that describe it.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%
