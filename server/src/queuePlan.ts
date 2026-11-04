@@ -10,6 +10,7 @@
  *                 region of the one who waited longest)
  *   locationHintOf the Durable Object location hint of a host region
  *   estimateWait  the rough time to a match that a waiting answer shows (QueueWait)
+ *   arrivalOf     a cancelled search's own arrival in that ring (taken out: no arrival)
  *   encodeArrivals / decodeArrivals  the estimator's arrivals ring as one compact storage row
  *
  * Nothing here reads a clock, storage or the network: every input is an argument.
@@ -144,7 +145,7 @@ export function locationHintOf(region: string): DurableObjectLocationHint {
   return LOCATION_HINTS[normalizeHome(region)];
 }
 
-/** One new search (never a restored one): the estimator's arrival rate. Memory only, no id. */
+/** One new search (never a restored one, and taken out again if it is cancelled): the estimator's arrival rate. No id. */
 export interface Arrival {
   at: number;
   kind: 'casual' | 'ranked';
@@ -168,6 +169,26 @@ export function countArrivals(arrivals: readonly Arrival[], kind: Arrival['kind'
     here = Math.max(0, here - 1);
   }
   return { here, all };
+}
+
+/**
+ * Where a search's own arrival is in the ring (-1: not there, e.g. older than the window): the
+ * hub takes a cancelled search's arrival out (a search that is cancelled was no pairing chance for
+ * anybody, and without this one player's search-and-cancel loop reads as many players in every
+ * estimate, its own included). The ring has no id, so the arrival is the one of the search's kind
+ * at its start, to the second (a stored ring keeps whole seconds), its home first (a later POST may
+ * have changed the waiter's), the newest such. Pure.
+ */
+export function arrivalOf(arrivals: readonly Arrival[], search: Arrival): number {
+  const sec = Math.floor(search.at / 1000);
+  let found = -1;
+  for (let i = arrivals.length - 1; i >= 0; i--) {
+    const a = arrivals[i];
+    if (a.kind !== search.kind || Math.floor(a.at / 1000) !== sec) continue;
+    if (a.home === search.home) return i;
+    if (found < 0) found = i;
+  }
+  return found;
 }
 
 /** The estimate's rounding: up to 30 s steps below 5 minutes, 1 minute steps above. */

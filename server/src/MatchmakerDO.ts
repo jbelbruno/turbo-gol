@@ -184,7 +184,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
 import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, error, flag, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
 import type { GameModeId, LockKind, NodesMode, PublicQueueKind, QueueKind, RoomKind } from './env';
-import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
+import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, arrivalOf, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
 import type { Arrival, PlanGroup } from './queuePlan';
 import { STATS_FLUSH_MS, STATS_PREFIX, addFormed, dayOf, daysBefore, emptyDay, emptyRow, expiredDay, mergeDays, parseDay, statsDays } from './queueStats';
 import type { LocalPlay, QueueDay, StatsKind } from './queueStats';
@@ -1221,6 +1221,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (waiter && waiter.kind !== kind) {
       this.dropWaiter(waiter);
       this.stat(now).cancelled[statsKindOf(waiter.kind)]++;
+      this.unarrive(waiter.kind, waiter.joinedAt, waiter.home);
       waiter = null;
     }
     let fresh = false;
@@ -1280,6 +1281,17 @@ export class MatchmakerDO extends DurableObject<Env> {
   private arrive(a: Arrival): void {
     this.arrivals.push(a);
     while (this.arrivals.length > ARRIVALS_MAX || (this.arrivals.length > 0 && a.at - this.arrivals[0].at > ARRIVALS_WINDOW_MS)) this.arrivals.shift();
+    this.arrivalsDirty = true;
+  }
+
+  /**
+   * A cancelled search (a /leave, a change of kind: every `cancelled` count) is no arrival: its own
+   * one leaves the ring (arrivalOf), and the 'arrivals' row follows at the next write.
+   */
+  private unarrive(kind: PublicQueueKind, joinedAt: number, home: RegionId): void {
+    const i = arrivalOf(this.arrivals, { at: joinedAt, kind: statsKindOf(kind), home });
+    if (i < 0) return;
+    this.arrivals.splice(i, 1);
     this.arrivalsDirty = true;
   }
 
@@ -1448,6 +1460,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (waiter) {
       this.dropWaiter(waiter);
       this.stat(now).cancelled[statsKindOf(waiter.kind)]++;
+      this.unarrive(waiter.kind, waiter.joinedAt, waiter.home);
       left = true;
     }
     const forming = this.forming.get(playerId);
@@ -1455,14 +1468,20 @@ export class MatchmakerDO extends DurableObject<Env> {
       const again = this.cancels.has(playerId);
       this.cancels.add(playerId);
       this.answerWaiting(forming);
-      if (!again && waiter === null) this.stat(now).cancelled[statsKindOf(forming.kind)]++;
+      if (!again && waiter === null) {
+        this.stat(now).cancelled[statsKindOf(forming.kind)]++;
+        this.unarrive(forming.kind, forming.joinedAt, forming.home);
+      }
       left = true;
     }
     // An explicit leave is no drop: its search is not continued by a later join.
     const back = this.recent.get(playerId);
     if (back !== undefined) {
       this.forgetRecent(playerId);
-      if (back.stale && !left) this.stat(now).cancelled[statsKindOf(back.kind)]++;
+      if (back.stale && !left) {
+        this.stat(now).cancelled[statsKindOf(back.kind)]++;
+        this.unarrive(back.kind, back.joinedAt, back.home);
+      }
     }
     const act = this.active.get(playerId);
     const named = typeof body.matchId === 'string' ? body.matchId : null;

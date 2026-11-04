@@ -390,14 +390,14 @@ test('a dropped search that expires while the hub is evicted: the alarm wakes it
 
 test('the estimate outlives an eviction: the arrivals ring is one row written with the counters (no id); 30 searches in the hour still read "humans ~2 min" after it', async () => {
   const w = await makeHubWorld();
-  for (let i = 0; i < 30; i++) {
-    const p = pid();
-    await w.join(p);
-    await w.leave(p);
+  for (let i = 0; i < 15; i++) {
+    await w.join(pid());
+    w.advance(SEC);
+    assert.equal((await w.join(pid())).json.status, 'matched', `pair ${i}`);
     w.advance(SEC);
   }
   await pause(5);
-  // The first leave wrote the counters (and the ring with them); the other 29 cycles waited for the minute.
+  // The first formation wrote the counters (and the ring with them); the other 14 waited for the minute.
   assert.equal(w.storage().writes('arrivals').length, 1, 'never per request');
   w.advance(60 * SEC);
   await w.hub().alarm(); // the end of the minute: the rest
@@ -409,6 +409,41 @@ test('the estimate outlives an eviction: the arrivals ring is one row written wi
   await w.evict();
   const b = await w.join(pid());
   assert.deepEqual([b.json.wait.estimateKind, b.json.wait.estimateMs], ['humans', 2 * MIN], '30 others in the hour: one every 2 min');
+});
+
+test('a cancelled search is no arrival: 14 searches cancelled (leaves, a change of kind, a dropped one left) read as nobody else, "bots 300000"; a search that formed still counts', async () => {
+  const w = await makeHubWorld();
+  const x = pid();
+  for (let i = 0; i < 12; i++) {
+    await w.join(x);
+    await w.leave(x);
+    w.advance(SEC);
+  }
+  await w.join(x);
+  w.advance(SEC);
+  await w.join(x, { kind: 'ranked', mode: '1v1' }); // a change of kind cancels the Casual search
+  await w.leave(x); // and this one the ranked search
+  const y = pid();
+  await w.join(y, { home: 'EU' });
+  w.advance(41 * SEC);
+  noSweep(w);
+  await w.hub().sweep(); // Y dropped (a locked phone) ...
+  noSweep(w);
+  await w.leave(y); // ... then cancelled
+  const day = (await w.daily(1)).days[0];
+  assert.deepEqual([day.searches.casual, day.cancelled.casual, day.cancelled.ranked], [14, 14, 1], 'every one counted as a search and as a cancel');
+  const z = await w.join(pid());
+  assert.deepEqual([z.json.wait.estimateKind, z.json.wait.estimateMs], ['bots', Q.SOLO_AFTER_MS], 'no other arrival in the hour');
+  // A search that formed a match is a real arrival, and a waiting one too: the stored row, once
+  // the minute is up, holds Z, the one it paired with and the newest waiter, nothing cancelled.
+  assert.equal((await w.join(pid())).json.status, 'matched');
+  assert.equal((await w.join(pid())).json.status, 'waiting');
+  w.advance(MIN);
+  noSweep(w);
+  await w.hub().sweep();
+  noSweep(w);
+  await pause(5);
+  assert.equal(w.storage().map.get('arrivals').a.length, 3 * 3);
 });
 
 test('the stored arrivals keep only the last hour: an idle hub writes the row again as its arrivals pass their hour, and deletes it after the last one (no new search needed)', async () => {

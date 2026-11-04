@@ -233,6 +233,22 @@ test('countArrivals: other players of the kind in the last hour, here and everyw
   assert.deepEqual(Q.countArrivals(arr, 'ranked', 'EU', NOW, null), { here: 0, all: 1 });
 });
 
+test('arrivalOf: a cancelled search\'s own arrival, by kind and start to the second (a stored ring keeps whole seconds), its home first; -1 when it is not in the ring', () => {
+  const at = Date.UTC(2026, 10, 4, 12, 0, 7, 450);
+  const arr = [
+    { at: at - 1_000, kind: 'casual', home: 'SA' },
+    { at: Math.floor(at / 1000) * 1000, kind: 'casual', home: 'EU' }, // as decodeArrivals gives it back
+    { at, kind: 'ranked', home: 'SA' },
+    { at, kind: 'casual', home: 'SA' },
+  ];
+  assert.equal(Q.arrivalOf(arr, { at, kind: 'casual', home: 'SA' }), 3, 'the same home first');
+  assert.equal(Q.arrivalOf(arr, { at, kind: 'casual', home: 'EU' }), 1, 'whole seconds match');
+  assert.equal(Q.arrivalOf(arr, { at, kind: 'casual', home: 'NA' }), 3, 'its home changed since: the newest of that second');
+  assert.equal(Q.arrivalOf(arr, { at, kind: 'ranked', home: 'EU' }), 2, 'by kind');
+  assert.equal(Q.arrivalOf(arr, { at: at - 61 * MIN, kind: 'casual', home: 'SA' }), -1, 'not in the ring (past the hour)');
+  assert.equal(Q.arrivalOf([], { at, kind: 'casual', home: 'SA' }), -1);
+});
+
 test('pickRegionalRankedGroup: own region first; another region only among the waiters of 120 s (both widened)', () => {
   const r = (id, home, agoMs, mu = 25) => ({ playerId: id, home, joinedAt: NOW - agoMs, mu });
   assert.equal(M.pickRegionalRankedGroup([r('a', 'SA', 119_000), r('b', 'EU', 200_000)], 2, NOW), null, 'one side not widened');
