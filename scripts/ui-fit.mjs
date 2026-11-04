@@ -39,7 +39,9 @@
 // account with Settings › Experimental on ('training:lab': the LAB tile, HOW TO PLAY as a row), the
 // board with 100 sample rows and yours among them or under them, then as a guest (window.__board),
 // the profile as a guest, an account, a community node operator and a password of before with no
-// email (its banner, sign-in PR 9) (window.__profile). 'summary': a
+// email (its banner, sign-in PR 9) (window.__profile); PERFIL's CONTROL DE NODOS (prompt 1, PR 2) runs
+// its samples (window.__nodesAdmin: each tab, a node's detail, the manual review, the wizard's three
+// steps; on a TV only its note). 'summary': a
 // pack's summary over the training HUD (TrainingHud.showSummary, sample results), which fails it
 // off screen, text out of its box or under 14 px on a phone (12 elsewhere), a button something
 // covers (the touch controls) or under 44 px for a finger, and AGAIN without the focus (but on a
@@ -135,7 +137,7 @@ const SIZES = [
   { name: '820x1180', w: 820, h: 1180, mobile: true, layout: 'tablet' },
 ].filter((s) => typeof args.sizes !== 'string' || args.sizes.split(',').some((x) => s.name.startsWith(x)));
 // MODOS by its tabs: 'modes:<tab>' opens it on that tab (Menu.open's tab).
-const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'final', 'touch', 'sala', 'tv'];
+const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'nodes-admin', 'nodes-admin:nodes', 'nodes-admin:tokens', 'nodes-admin:regions', 'nodes-admin:release', 'nodes-admin:points', 'nodes-admin:stats', 'nodes-admin:detail', 'nodes-admin:review', 'nodes-admin:wizard', 'nodes-admin:checklist', 'nodes-admin:token', 'final', 'touch', 'sala', 'tv'];
 // The Salas' samples (window.__sala, plan PR 12): [kind, members]; 'qr' on a TV only.
 const SALA_KINDS = [['members', 1], ['members', 2], ['members', 3], ['members', 4], ['members', 5], ['members', 6], ['reconnecting', 4], ['qr', 4], ['codecells', 0], ['join', 4], ['pill', 4], ['lost', 0]];
 // PR 14's samples (window.__tvSignIn): the keypad's where no fine pointer, 'tv*' on a TV, the rest everywhere.
@@ -560,7 +562,7 @@ try {
       }
       const [id, tab] = screen.split(':');
       // PR 13's states are samples on the screen itself (the tab is a sample's kind there, not Menu.open's).
-      const sampled = id === 'training' || id === 'leaderboard' || id === 'profile' || id === 'garage';
+      const sampled = id === 'training' || id === 'leaderboard' || id === 'profile' || id === 'garage' || id === 'nodes-admin';
       // GARAJE's samples (plan PR 8, window.__garage): put away before another screen (its sheet too).
       if (id !== 'garage') await page.eval('(window.__garage?.(null), true)');
       // An account with Settings › Experimental on (training:lab): its view's switch, set on the page.
@@ -569,6 +571,7 @@ try {
       if (id === 'leaderboard') await page.eval(`(window.__board(${JSON.stringify(tab ?? null)}), true)`);
       if (id === 'profile') await page.eval(`(window.__profile(${JSON.stringify(tab ?? null)}), true)`);
       if (id === 'garage') await page.eval(`(window.__garage(${JSON.stringify(tab ?? null)}), true)`);
+      if (id === 'nodes-admin') await page.eval(`(window.__nodesAdmin(${JSON.stringify(tab ?? 'summary')}), true)`);
       await sleep(input === own ? 400 : 200); // a mount and a screen's own first render (__uiFit runs the fit it queued)
       if (id === 'modes' && input === own && (tab === 'casual' || tab === 'ranked')) {
         // Idle with FIND MATCH (or SIGN IN) focused, then searching every format (the longest

@@ -1,0 +1,227 @@
+/* CONTROL DE NODOS (src/ui/screens/nodesAdmin.ts; prompt 1, B7), shared with the community's servers
+   of prompt 2: the KPIs, the node rows (columns go on a phone), the tags by state, mn-cmd (an install
+   line to select and copy), the wizard's checklist and follow-up. The tiles and facts are PERFIL's
+   (profile.css .mn-prof-node, .mn-prof-node-facts). Colours, font sizes and radii as tokens only;
+   never --mn-gold / --rank-gold (ranks only). */
+.mn-screen.mn-na {
+  max-width: 72rem;
+  font-size: var(--t-body);
+}
+
+.mn-na-who {
+  margin: 0 0 0.75rem;
+}
+
+.mn-na .mn-section {
+  margin-top: 1rem;
+}
+
+.mn-na-alert {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0 0 0.75rem;
+  padding: 0.625rem 0.875rem;
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-radius: var(--r-tile);
+}
+
+.mn-na-alert p {
+  margin: 0;
+  color: var(--text);
+}
+
+.mn-na-tools,
+.mn-na-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.mn-kpis,
+.mn-na-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.mn-na-grid {
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+}
+
+.mn-kpi {
+  display: grid;
+  padding: 0.75rem 1rem;
+  background: var(--surface-1-94);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-tile);
+}
+
+.mn-kpi b {
+  font: 700 var(--t-title) / 1.1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.mn-kpi span,
+.mn-kpi small,
+.mn-na-c {
+  font-size: var(--t-small);
+  color: var(--text-2);
+}
+
+.mn-na-flag,
+.mn-na-token {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding-block: 0.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.mn-na-flag p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.mn-na-raw,
+.mn-cmd {
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  overflow-wrap: anywhere;
+}
+
+.mn-na-raw {
+  color: var(--text-2);
+}
+
+dd > .mn-na-raw {
+  display: block;
+}
+
+/* An install line: monospaced, selected whole by a press, wrapped anywhere. */
+.mn-cmd {
+  margin: 0.375rem 0;
+  padding: 0.625rem 0.75rem;
+  white-space: pre-wrap;
+  user-select: all;
+  background: var(--surface-0);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-key);
+}
+
+.mn-tag-warn {
+  color: var(--warn);
+  background: var(--warn-tint);
+}
+
+.mn-tag-bad {
+  color: var(--danger);
+  background: var(--danger-tint);
+}
+
+.mn-na-rows,
+.mn-na-items,
+.mn-na-checks,
+.mn-na-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mn-na-form {
+  max-width: 40rem;
+}
+
+/* A node: its dot and name, region, state, load, lag, egress, version, seen, project or community. */
+.mn-na-row,
+.mn-na-check {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(8, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: var(--surface-1-94);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-tile);
+}
+
+.mn-na-name {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.mn-na-name > span,
+.mn-na-c {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mn-na-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+html[data-layout='phone'] .mn-na-row,
+html[data-layout='portrait'] .mn-na-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+html[data-layout='phone'] .mn-na-name,
+html[data-layout='portrait'] .mn-na-name {
+  grid-column: span 2;
+}
+
+html[data-layout='phone'] .mn-na-x,
+html[data-layout='portrait'] .mn-na-x {
+  display: none;
+}
+
+.mn-na-check {
+  grid-template-columns: auto 1fr;
+}
+
+.mn-na-check[aria-pressed='true'],
+.mn-na-follow[data-step='active'],
+.mn-na-follow[data-step='probation'] {
+  color: var(--ok);
+}
+
+.mn-na-follow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: 700;
+}
+
+.mn-na-cmdbox {
+  display: grid;
+  justify-items: start;
+}
+
+.mn-na-day {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(6, 1fr);
+  gap: 0.5rem;
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.mn-na-head {
+  color: var(--text-2);
+}
+
+@media (hover: hover) {
+  .mn-na-row:hover,
+  .mn-na-check:hover {
+    border-color: var(--edge-hi);
+  }
+}
