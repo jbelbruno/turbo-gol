@@ -694,6 +694,9 @@ test(`the notice of version ${VERSION_A} (the official text) and its English tra
   // The public list as feat/nodes-public-list builds it (publicList.ts).
   assert.ok(es[0].includes('se ve como «Anfitrión» y un número'));
   assert.ok(en[0].includes('shows as "Anfitrión" and a number'));
+  // The bots' level: the player's for the 5:00 match (PR #108, Terms 7.1) and a lobby host's (PR #107, Terms 7.4).
+  assert.ok(es[0].includes('- En CASUAL puedes elegir la dificultad de los bots de tu partida contra bots de los 5 minutos, y en una sala la elige su anfitrión.'));
+  assert.ok(en[0].includes("- In CASUAL you can pick the bots' difficulty of your bots match after 5 minutes, and in a lobby its host picks it."));
   // Message 2: the 7 days, the same-day effect, the apology again, then the full texts.
   assert.ok(es[1].includes('Esta versión acorta el aviso de los cambios importantes de 30 a 7 días (Términos, sección 18.2)'));
   // The promise this version skips is the 30 days of the version before it (2026-11-04-2's 18.2).
