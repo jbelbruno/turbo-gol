@@ -264,10 +264,13 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // (before 164,239 B), the cap that plus about 0.6 KB. Its review round 2 adds the search hero's
 // estimate on a TV (home.css), VS AI's line while searching on a phone held sideways and a TV, the
 // sentence-case lines and the sideways sizes of "While you search", and the strip's right bound
-// (wait.css): 167,626 B (before 166,895 B), the cap that plus about 0.6 KB.
+// (wait.css): 167,626 B (before 166,895 B), the cap that plus about 0.6 KB. The final review adds
+// a finger's pause without the strip and with room for QUIT's three lines, a TV's wait choices and
+// CREATE PRIVATE LOBBY in the type scale (wait.css), and a computer's toasts in the hint bar's band
+// (components.css): 168,281 B (before 167,626 B), the cap that plus about 0.6 KB.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 168_226;
+const CSS_BUDGET = 168_881;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;
