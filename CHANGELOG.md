@@ -7,6 +7,12 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
+  /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
+  notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
+  pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
+  version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
+  the maintainer can delete one on request with a certificate (docs/legal/README.md).
 - PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS, the maintainers' panel of the community nodes
   (never on a TV): a summary (nodes online by region, matches, the verification queue, the outbox,
   the trusted slots, the channel, the warnings and the KV switches, read only), every node with its
@@ -15,12 +21,6 @@ All notable changes to Turbogol are documented here. The format follows
   unfreeze) and the account and queue counts. It refreshes every 15 s and asks for the password once
   when the server wants it again. ADD A PROJECT SERVER asks the machine's data, a checklist and the
   password, then shows the install line the server composed (COPY) and follows the node to active.
-- The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
-  /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
-  notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
-  pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
-  version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
-  the maintainer can delete one on request with a certificate (docs/legal/README.md).
 - Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
   without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
   link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
