@@ -415,7 +415,17 @@ test('maintainer: /nodes/tokens and /nodes/admin/* refuse a level-1 or stale ses
   Object.assign(env, { NODE_REPLAYS: {}, NODE_RELEASES: {}, NODE_CONTROL_PRIVATE_KEY: 'k', NODE_CONTROL_PUBLIC_KEY: 'k', NODES_PUBLIC_BASE: ORIGIN });
   const project = await account(obj, 'Proyecto', { email: 'proyecto@example.com', discord: 'd-proyecto' });
   env.NODE_TRUSTED_OPERATORS = project;
-  const routes = [['GET', '/nodes/admin/nodes'], ['GET', '/nodes/admin/account-stats'], ['POST', '/nodes/tokens']];
+  // The panel's routes too (the overview, the wallet and frozen reads, retire, a token's revoke): the same gate.
+  const routes = [
+    ['GET', '/nodes/admin/nodes'],
+    ['GET', '/nodes/admin/account-stats'],
+    ['POST', '/nodes/tokens'],
+    ['GET', '/nodes/admin/overview'],
+    ['GET', '/nodes/admin/wallet?account=0123456789abcdef'],
+    ['GET', '/nodes/admin/frozen'],
+    ['POST', '/nodes/admin/retire'],
+    ['POST', '/nodes/admin/tokens/revoke'],
+  ];
   const ask = (session) => Promise.all(routes.map(([m, p]) => req(env, m, p, { ip: ip(0), bearer: session, body: m === 'POST' ? { region: 'SA' } : undefined })));
   const session = (extra) => AUTH.signJwt(SECRET, { typ: 's', sub: project, name: 'Proyecto', iat: nowS(), exp: nowS() + 600, acct: 1, ...extra });
   // Discord's press: level 1.

@@ -237,8 +237,10 @@ function namespace(answer = () => new RealResponse('{"ok":true}')) {
     get: (id) => ({
       fetch: async (url, init) => {
         if (ns.gate) await ns.gate;
-        const path = new URL(url).pathname;
-        const body = JSON.parse(init.body);
+        // A GET (accountsCall without a payload) has no body: its query is part of the path here.
+        const u = new URL(url);
+        const path = u.pathname + u.search;
+        const body = init?.body === undefined ? null : JSON.parse(init.body);
         calls.push({ name: id.name, path, body });
         const r = ns.answer(id.name, path, body);
         if (r instanceof Error) throw r;
@@ -438,7 +440,7 @@ test('tokens: a trusted operator only, a known region, 10 a day; the answer carr
   assert.equal(t.status, 200);
   assert.match(t.json.token, /^tgn1_/);
   assert.equal(t.json.ttlMinutes, 60);
-  assert.equal(t.json.install.linux, `curl -fsSL ${BASE}/nodes/releases/install.sh | sudo bash -s -- --control ${BASE} --token ${t.json.token}`);
+  assert.equal(t.json.install.linux, `curl -fsSL ${BASE}/nodes/releases/install.sh | sudo bash -s -- --control ${BASE} --token ${t.json.token} --name sao-paulo-1`);
   assert.equal(t.headers.get('cache-control'), 'no-store');
   const rec = h.obj.cp.registry.tokenList()[0];
   assert.equal(rec.operatorName, 'Proyecto Señor', 'the name comes URL-encoded');
@@ -1274,7 +1276,13 @@ test('the maintainers’ routes: a trusted account only; the list, status, drain
   const [v] = list.json.nodes;
   assert.deepEqual([v.nodeId, v.publicUrl, v.operator, v.status, v.online, v.matches, v.lastSeen], [node.nodeId, NODE_URL, { id: PROJECT, name: 'Proyecto Señor' }, 'active', true, 1, clock]);
   await h.ctx.settle();
-  assert.deepEqual(posted(), [`**ALERT** \`${actor}: listed the nodes (1, with their addresses)\``], 'a read too: the list holds the addresses');
+  const read = `**ALERT** \`${actor}: read the nodes (1, with their addresses) (a maintainer's reads come here once per 30 min, every one is in the logs)\``;
+  assert.deepEqual(posted(), [read], 'a read too: the list holds the addresses');
+  // The same read again within the window: in the logs, not in the channel.
+  assert.equal((await run('GET', 'nodes')).status, 200);
+  await h.ctx.settle();
+  assert.deepEqual(posted(), [read], 'one read line per window');
+  assert.ok(lines.at(-1).endsWith(`${actor}: read the nodes (1, with their addresses)`), lines.at(-1));
   // The match ends: no work left on the node's build, so an update is not deferred.
   await send(h, ws, { t: 'report', id: 'r1', report: { kind: 'lost', matchId: placement.matchId, reason: 'tick_error' } });
   // status
@@ -1303,7 +1311,7 @@ test('the maintainers’ routes: a trusted account only; the list, status, drain
   node.fail = null;
   await h.ctx.settle();
   assert.deepEqual(posted(), [
-    `**ALERT** \`${actor}: listed the nodes (1, with their addresses)\``,
+    read,
     `**ALERT** \`${actor}: node sao-paulo-1 (${node.nodeId}) active -> suspended: disk full\``,
     `**ALERT** \`${actor}: node sao-paulo-1 (${node.nodeId}) suspended -> active\``,
     `**ALERT** \`${actor}: node sao-paulo-1 (${node.nodeId}) told to drain: kernel update\``,
@@ -1472,6 +1480,310 @@ test("the maintainers' inventory routes: grant, revoke and unfreeze go to Accoun
   ]);
 });
 
+// ---- the maintainers' panel (prompt 1, PR 1): tokens, retire, guards, trust, the overview, reads --------
+
+const ADMIN = { 'x-operator-id': PROJECT, 'x-operator-name': encodeURIComponent('Proyecto Señor') };
+const ACTOR = 'admin Proyecto Señor (a1b2c3d4e5f60718)';
+const { REGIONS } = await import('../../src/net/account.ts');
+const { KV_FLAGS } = await import('../src/env.ts');
+
+/** A community operator's node (STRANGER's), registered with a token the registry mints directly: the token route is the project's. */
+async function communityNode(h, { ip = '198.51.100.40', publicUrl = 'wss://juan.turbo-gol.test' } = {}) {
+  const { token } = await h.obj.cp.registry.createToken({ id: STRANGER, name: 'Juan' }, 'SA', clock);
+  const keys = await generateEd25519();
+  const r = await call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': ip } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  return { ...r.json, key: await importPrivateKey(keys.privateKey), publicUrl };
+}
+
+test('panel tokens: publicHost, roles, matches and egressCapGB checked, then composed into a shell-safe install line; at the cap no token at all (409, an ALERT); the registration stays on the pinned host, never an IP address', async () => {
+  const env = makeEnv({ NODE_TRUSTED_MAX_NODES: '3', NODE_ALERT_WEBHOOK: HOOK });
+  const h = await boot(env);
+  const ask = (body) => call(h, 'POST', '/nodes/tokens', { body: { region: 'EU', ...body }, headers: ADMIN });
+  const t = await ask({ name: 'frankfurt-1', publicHost: 'DE1.Turbo-Gol.test', roles: ['host', 'verify'], matches: 12, egressCapGB: 2000 });
+  assert.equal(t.status, 200, JSON.stringify(t.json));
+  assert.equal(
+    t.json.install.linux,
+    `curl -fsSL ${BASE}/nodes/releases/install.sh | sudo bash -s -- --control ${BASE} --token ${t.json.token} --name frankfurt-1 --roles host,verify --transport wss --public-host de1.turbo-gol.test --matches 12 --egress-cap-gb 2000`,
+  );
+  assert.match(t.json.install.linux, /^[A-Za-z0-9 .:/|,_-]+$/, 'nothing a shell reads as more than words');
+  const rec = h.obj.cp.registry.tokenList().at(-1);
+  assert.deepEqual([rec.publicHost, rec.roles, rec.region, rec.name], ['de1.turbo-gol.test', ['host', 'verify'], 'EU', 'frankfurt-1']);
+  assert.match((await ask({ roles: 'verify,host', matches: 'auto' })).json.install.linux, / --roles host,verify --matches auto$/);
+  for (const [body, code] of [
+    [{ publicHost: '203.0.113.7' }, 'bad_public_host'],
+    [{ publicHost: '[2001:db8::1]' }, 'bad_public_host'],
+    [{ publicHost: 'de1.turbo-gol.test:8443' }, 'bad_public_host'],
+    [{ publicHost: 'https://de1.turbo-gol.test' }, 'bad_public_host'],
+    [{ publicHost: 'localhost' }, 'bad_public_host'],
+    [{ publicHost: 'de1.localhost' }, 'bad_public_host'],
+    [{ publicHost: 'box.local' }, 'bad_public_host'],
+    [{ publicHost: 'node.internal' }, 'bad_public_host'],
+    [{ publicHost: 'de1.turbo-gol.test;reboot' }, 'bad_public_host'],
+    [{ publicHost: 'de1.turbo-gol.test', roles: ['verify'] }, 'bad_roles'],
+    [{ roles: ['host', 'admin'] }, 'bad_roles'],
+    [{ roles: [] }, 'bad_roles'],
+    [{ matches: 0 }, 'bad_matches'],
+    [{ matches: 201 }, 'bad_matches'],
+    [{ matches: '12' }, 'bad_matches'],
+    [{ egressCapGB: 0 }, 'bad_egress_cap'],
+    [{ egressCapGB: 1.5 }, 'bad_egress_cap'],
+    [{ name: 'Proyecto Señor' }, 'bad_name'],
+    [{ name: '$(id)' }, 'bad_name'],
+  ]) {
+    const r = await ask(body);
+    assert.deepEqual([r.status, r.json.error], [400, code], JSON.stringify(body));
+  }
+  assert.equal(h.obj.cp.registry.tokenList().length, 2, 'none of them made a token');
+  // The registration: the pinned token on another host, or on an IP address, is refused and stays good.
+  const keys = await generateEd25519();
+  const register = (token, publicUrl) =>
+    call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host', 'verify'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': '203.0.113.50' } });
+  assert.deepEqual((await register(t.json.token, 'wss://de2.turbo-gol.test')).json.error, 'public_host_mismatch');
+  assert.deepEqual((await register(t.json.token, 'wss://203.0.113.9')).json.error, 'public_host_mismatch');
+  const free = await ask({});
+  assert.deepEqual((await register(free.json.token, 'wss://203.0.113.9')).json.error, 'ip_not_supported', 'an IP address, for every registration');
+  const de = await register(t.json.token, 'wss://de1.turbo-gol.test');
+  assert.equal(de.status, 200, JSON.stringify(de.json));
+  assert.deepEqual([de.json.region, de.json.name, h.obj.cp.registry.node(de.json.nodeId).publicHost], ['EU', 'frankfurt-1', 'de1.turbo-gol.test']);
+  // Three nodes (the var): a fourth token is refused before it exists, and costs none of the 10 a day.
+  await registerNode(h, { publicUrl: 'wss://sp2.turbo-gol.test' });
+  await registerNode(h, { ip: '203.0.113.2', publicUrl: 'wss://sp3.turbo-gol.test' });
+  const before = h.obj.cp.registry.tokenList().length;
+  const full = await ask({ name: 'kuala-lumpur-1' });
+  assert.deepEqual([full.status, full.json.error], [409, 'too_many_nodes']);
+  assert.equal(h.obj.cp.registry.tokenList().length, before, 'no token');
+  // Retiring one (never connected: offline) frees its slot.
+  assert.equal((await call(h, 'POST', '/nodes/admin/retire', { body: { nodeId: de.json.nodeId, reason: 'test' }, headers: ADMIN })).status, 200);
+  assert.equal((await ask({ name: 'kuala-lumpur-1' })).status, 200);
+  await h.ctx.settle();
+  assert.ok(posted().includes(`**ALERT** \`admin Proyecto Señor (${PROJECT}): no token created, the operator already has its 3 nodes\``), posted().join('\n'));
+});
+
+test('retire: only a node offline, or drained with no open match; its socket closes (4403) and every login is refused; out of the cap, /nodes/mine, the operator counts, placement, the cron and the watch; kept in the panel; audited', async () => {
+  const { h, env, node, ws } = await watched();
+  const run = (what, body) => call(h, 'POST', '/nodes/admin/' + what, { body, headers: ADMIN });
+  assert.deepEqual((await run('retire', { nodeId: node.nodeId })).json.error, 'reason_required');
+  let r = await run('retire', { nodeId: node.nodeId, reason: 'moved' });
+  assert.deepEqual([r.status, r.json.error], [409, 'not_retirable'], 'online and not drained');
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+  assert.ok(placement);
+  assert.equal((await run('drain', { nodeId: node.nodeId, reason: 'moving' })).status, 200);
+  await send(h, ws, { t: 'heartbeat', data: beat({ draining: true, active: 1 }) });
+  r = await run('retire', { nodeId: node.nodeId, reason: 'moved' });
+  assert.deepEqual([r.status, r.json.error], [409, 'not_retirable'], 'drained, one match open');
+  await send(h, ws, { t: 'report', id: 'r1', report: { kind: 'lost', matchId: placement.matchId, reason: 'tick_error' } });
+  await send(h, ws, { t: 'heartbeat', data: beat({ draining: true, active: 0 }) });
+  r = await run('retire', { nodeId: node.nodeId, reason: 'moved to a new machine' });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual([r.json.retiredAt, r.json.retiredReason, r.json.slots], [clock, 'moved to a new machine', { used: 0, max: 2 }]);
+  assert.deepEqual(ws.closed, { code: 4403, reason: 'retired' });
+  // Its next login: refused as a banned node's is.
+  await h.obj.fetch(new Request('https://nodes/nodes/connect', { headers: { [INTERNAL_HEADER]: secret, Upgrade: 'websocket' } }));
+  const again = h.ctx.sockets.at(-1);
+  await h.obj.webSocketMessage(again, JSON.stringify({ t: 'auth', nodeId: node.nodeId, sig: await sign(node.key, authMessage(node.nodeId, again.of('challenge')[0].nonce)) }));
+  assert.deepEqual([again.of('error'), again.closed], [[{ t: 'error', code: 'retired' }], { code: 4403, reason: 'retired' }]);
+  // Off the operator's books, still in the panel.
+  assert.deepEqual((await call(h, 'GET', '/nodes/mine', { headers: ADMIN })).json.nodes, []);
+  assert.deepEqual((await call(h, 'GET', '/internal/operators')).json.operators, []);
+  const ov = (await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).json;
+  assert.deepEqual([ov.nodes.length, ov.nodes[0].retiredAt, ov.nodes[0].retiredReason, ov.operator.slotsUsed], [1, r.json.retiredAt, 'moved to a new machine', 0]);
+  assert.equal((await call(h, 'POST', '/internal/place', { body: placeBody() })).json.placement, null, 'no match');
+  assert.deepEqual((await call(h, 'POST', '/internal/health')).json, { probed: 0, problems: 0 }, 'the cron probes it no more');
+  for (let i = 0; i < 6; i++) {
+    clock += MIN;
+    await h.obj.alarm();
+  }
+  assert.deepEqual((await run('status', { nodeId: node.nodeId, status: 'active' })).json.error, 'retired');
+  assert.deepEqual((await run('retire', { nodeId: node.nodeId, reason: 'again' })).json.error, 'already_retired');
+  await h.ctx.settle();
+  const out = posted();
+  assert.ok(out.includes(`**ALERT** \`${ACTOR}: node sao-paulo-1 (${node.nodeId}) (active, trusted) retired: moved to a new machine\``), out.join('\n'));
+  assert.ok(!out.some((p) => / offline for /.test(p)), 'a retired node switched off never alarms');
+  // Through a deploy: retired still.
+  const back = await boot(env, new FakeCtx(h.ctx.db));
+  assert.equal(back.obj.cp.registry.node(node.nodeId).retiredReason, 'moved to a new machine');
+});
+
+test('status guards: active for a node that is not trusted needs { force: true, reason }; a pending node is never set in service; a ban needs a reason', async () => {
+  const h = await boot(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }));
+  const juan = await communityNode(h);
+  const run = (body) => call(h, 'POST', '/nodes/admin/status', { body: { nodeId: juan.nodeId, ...body }, headers: ADMIN });
+  for (const status of ['probation', 'active']) assert.deepEqual([(await run({ status })).status, (await run({ status })).json.error], [409, 'not_reachable'], status);
+  h.obj.cp.registry.markReachable(juan.nodeId, clock);
+  assert.equal(h.obj.cp.registry.node(juan.nodeId).status, 'probation');
+  assert.deepEqual((await run({ status: 'active' })).json.error, 'force_required');
+  assert.deepEqual((await run({ status: 'active', force: true })).json.error, 'force_required', 'a forced one needs its reason');
+  assert.deepEqual((await run({ status: 'active', reason: 'trust me' })).json.error, 'force_required');
+  assert.deepEqual((await run({ status: 'banned' })).json.error, 'reason_required');
+  assert.equal(h.obj.cp.registry.node(juan.nodeId).status, 'probation', 'none of them changed it');
+  const forced = await run({ status: 'active', force: true, reason: 'verified by hand' });
+  assert.deepEqual([forced.status, forced.json.status], [200, 'active']);
+  assert.equal((await run({ status: 'banned', reason: 'cheating' })).json.status, 'banned');
+  await h.ctx.settle();
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) active -> banned: cheating\``));
+});
+
+test('trust lost at a deploy: a trusted node whose account left NODE_TRUSTED_OPERATORS starts in probation, 0 of 20, with one ALERT, once; the overview marks it; active again only forced', async () => {
+  const MAINT = 'b1b2c3d4e5f60718';
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${MAINT}`, NODE_ALERT_WEBHOOK: HOOK });
+  const h = await boot(env);
+  const { node, ws } = await liveNode(h);
+  assert.equal(h.obj.cp.registry.node(node.nodeId).status, 'active');
+  ws.close(1012, 'deploy');
+  await h.ctx.settle();
+  posts.length = 0;
+  const moved = { ...env, NODE_TRUSTED_OPERATORS: MAINT };
+  const h2 = await boot(moved, new FakeCtx(h.ctx.db));
+  const n = h2.obj.cp.registry.node(node.nodeId);
+  assert.deepEqual([n.trusted, n.status, n.statusReason, n.counters.probationVerified, n.trustRemovedAt], [false, 'probation', 'trust_removed', 0, clock]);
+  await h2.ctx.settle();
+  assert.deepEqual(posted().filter((p) => p.includes('lost its trust')), [
+    `**ALERT** \`node sao-paulo-1 (${node.nodeId}) of Proyecto Señor (${PROJECT}) lost its trust (the operator is no longer in NODE_TRUSTED_OPERATORS): active -> probation, 0 of 20 verified matches\``,
+  ]);
+  const maint = { 'x-operator-id': MAINT, 'x-operator-name': 'Mantenedor' };
+  const ov = (await call(h2, 'GET', '/nodes/admin/overview', { headers: maint })).json;
+  assert.deepEqual([ov.nodes[0].trustRemovedAt, ov.nodes[0].trusted], [clock, false]);
+  assert.ok(ov.warnings.some((w) => w.kind === 'trust_removed' && w.nodeId === node.nodeId));
+  assert.deepEqual((await call(h2, 'POST', '/nodes/admin/status', { body: { nodeId: node.nodeId, status: 'active' }, headers: maint })).json.error, 'force_required');
+  // The next start: the row says untrusted already, nothing again.
+  posts.length = 0;
+  const h3 = await boot(moved, new FakeCtx(h.ctx.db));
+  await h3.ctx.settle();
+  assert.deepEqual(posted(), []);
+  assert.equal(h3.obj.cp.registry.node(node.nodeId).status, 'probation');
+});
+
+test('revoking a token: by the short id the overview lists (never the token); it registers nothing after; a used one 409, an unknown one 404; audited', async () => {
+  const h = await boot(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }));
+  const t = await tokenFor(h);
+  const ov = await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN });
+  const text = JSON.stringify(ov.json);
+  assert.ok(!text.includes(t.json.token) && !text.includes('tgn1_'), 'no token in the overview');
+  const [view] = ov.json.tokens;
+  assert.deepEqual([view.id.length, view.state, view.region, view.name, view.usedBy, view.publicHost], [12, 'unused', 'SA', 'sao-paulo-1', null, null]);
+  const revoke = (id) => call(h, 'POST', '/nodes/admin/tokens/revoke', { body: { id }, headers: ADMIN });
+  assert.deepEqual((await revoke(view.id)).json, { id: view.id, revoked: true, already: false });
+  assert.deepEqual((await revoke(view.id)).json, { id: view.id, revoked: true, already: true });
+  const keys = await generateEd25519();
+  const r = await call(h, 'POST', '/nodes/register', { body: { token: t.json.token, publicKey: keys.publicKey, roles: ['host'], publicUrl: NODE_URL, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': '198.51.100.60' } });
+  assert.deepEqual([r.status, r.json.error], [403, 'token_revoked']);
+  assert.equal((await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).json.tokens[0].state, 'revoked');
+  const used = await registerNode(h);
+  const usedId = (await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).json.tokens.find((x) => x.usedBy === used.nodeId).id;
+  assert.deepEqual([(await revoke(usedId)).status, (await revoke(usedId)).json.error], [409, 'token_used']);
+  assert.deepEqual([(await revoke('f'.repeat(12))).status, (await revoke('f'.repeat(12))).json.error], [404, 'no_token']);
+  assert.deepEqual((await revoke('nope')).json.error, 'bad_token_id');
+  await h.ctx.settle();
+  assert.equal(posted().filter((p) => p.includes(`: token ${view.id} (SA, sao-paulo-1) revoked`)).length, 1, 'once: the second revoke changed nothing');
+});
+
+test('the overview: every node in full (specs, last probe, link cuts, pins), the slots, tokens, regions, verifiers, queue, outbox, the eight KV flags (read once a minute) and the warnings', async () => {
+  const kv = { nodes_on: '1', replays_off: 'true', vm_disabled: '0' };
+  let kvReads = 0;
+  const FLAGS = {
+    get: async (k) => {
+      kvReads++;
+      return kv[k] ?? null;
+    },
+  };
+  const NODE_RELEASES = bucket({ 'channel.json': JSON.stringify({ stable: '0.3.0', minimum: '0.2.0' }) });
+  const { h, node, ws } = await watched({ FLAGS, NODE_RELEASES });
+  const two = await liveNode(h, { ip: '203.0.113.2', publicUrl: 'wss://sp2.turbo-gol.test' });
+  await send(h, two.ws, { t: 'hello', data: helloOf(two.node, { specs: { ...SPECS, node: '22' } }) });
+  await h.obj.webSocketClose(two.ws, 1006, '', false);
+  const mark = lines.length;
+  const res = await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const o = res.json;
+  assert.deepEqual([o.build, o.channel, o.verifying], [CLIENT_BUILD, { stable: '0.3.0', minimum: '0.2.0' }, 0]);
+  assert.deepEqual(o.operator, { id: PROJECT, name: 'Proyecto Señor', slotsUsed: 2, slotsMax: 2 });
+  const v = o.nodes.find((x) => x.nodeId === node.nodeId);
+  assert.deepEqual(
+    [v.publicUrl, v.operator, v.status, v.online, v.specs, v.capacityMax, typeof v.reachableAt, v.lastProbe.ok, v.lastProbe.error, v.probeFailures, v.strikeTimes, v.pauseTimes, v.publicHost, v.retiredAt, v.trustRemovedAt, v.linkCuts],
+    [NODE_URL, { id: PROJECT, name: 'Proyecto Señor' }, 'active', true, SPECS, 4, 'number', true, null, 0, [], [], null, null, null, { count24h: 0, lastAt: null }],
+  );
+  assert.deepEqual(o.nodes.find((x) => x.nodeId === two.node.nodeId).linkCuts, { count24h: 1, lastAt: clock }, 'its link closed once');
+  assert.deepEqual(o.tokens.map((t) => [t.state, t.operatorId]), [['used', PROJECT], ['used', PROJECT]]);
+  assert.deepEqual(o.regions.map((r) => r.region), REGIONS.map((r) => r.id));
+  const sa = o.regions.find((r) => r.region === 'SA');
+  assert.deepEqual([sa.hostsOnline, sa.slots, sa.active, sa.matches, sa.unplaced, sa.rankedReady, typeof sa.regionFactor], [1, 4, 0, 0, 0, true, 'number']);
+  const eu = o.regions.find((r) => r.region === 'EU');
+  assert.deepEqual([eu.hostsOnline, eu.slots, eu.rankedReady], [0, 0, false]);
+  assert.deepEqual(o.verifiers.find((x) => x.nodeId === node.nodeId), { nodeId: node.nodeId, name: 'sao-paulo-1', region: 'SA', version: '0.2.0', node: '24', status: 'active', online: true, verifying: 0 });
+  assert.deepEqual([o.verifyQueue, o.outbox], [[], { rows: 0, byPath: [] }]);
+  assert.deepEqual(o.flags.map((f) => f.name), [...KV_FLAGS]);
+  assert.deepEqual(o.flags.find((f) => f.name === 'nodes_on'), { name: 'nodes_on', raw: '1', set: true, meaning: "every player: their Casual and ranked matches may go to a node" });
+  assert.deepEqual(o.flags.filter((f) => f.set).map((f) => f.name), ['nodes_on', 'replays_off']);
+  assert.deepEqual(o.alerts, { webhook: true });
+  assert.deepEqual(o.warnings.map((w) => w.kind).sort(), ['trusted_off_channel', 'trusted_off_channel', 'verifier_node_versions']);
+  assert.deepEqual(o.warnings.find((w) => w.kind === 'verifier_node_versions').nodes.map((x) => x.node).sort(), ['22', '24']);
+  // Ten reads in five minutes: one line in the channel, ten in the logs; the flags read once a minute.
+  assert.equal(kvReads, KV_FLAGS.length);
+  for (let i = 1; i < 10; i++) {
+    clock += 30_000;
+    assert.equal((await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).status, 200);
+  }
+  assert.ok(kvReads <= KV_FLAGS.length * 5, `${kvReads} KV reads`);
+  await h.ctx.settle();
+  const reads = () => posted().filter((p) => p.includes(': read '));
+  assert.deepEqual(reads(), [`**ALERT** \`${ACTOR}: read the overview (2 nodes, with their addresses, and 2 tokens) (a maintainer's reads come here once per 30 min, every one is in the logs)\``]);
+  assert.equal(lines.slice(mark).filter((l) => l.includes(`${ACTOR}: read the overview`)).length, 10);
+  // The other reads share the window, the Worker's (account-stats) too; actions are posted each time.
+  await call(h, 'GET', '/nodes/admin/nodes', { headers: ADMIN });
+  assert.equal((await call(h, 'POST', '/internal/read-audit', { body: { what: 'account-stats' }, headers: ADMIN })).status, 200);
+  assert.equal((await call(h, 'POST', '/internal/read-audit', { body: { what: 'account-stats' }, headers: { 'x-operator-id': STRANGER } })).status, 403);
+  assert.equal((await call(h, 'POST', '/internal/read-audit', { body: { what: 'everything' }, headers: ADMIN })).status, 400);
+  await call(h, 'POST', '/nodes/admin/update', { headers: ADMIN });
+  await h.ctx.settle();
+  assert.equal(reads().length, 1);
+  assert.equal(posted().filter((p) => p.includes('were told the channel again')).length, 1);
+  // A new window after 30 minutes, kept through a restart in meta.
+  clock += 30 * MIN;
+  assert.equal((await call(h, 'POST', '/internal/read-audit', { body: { what: 'queue-stats' }, headers: ADMIN })).status, 200);
+  await h.ctx.settle();
+  assert.equal(reads().at(-1), `**ALERT** \`${ACTOR}: read the queue counters (a maintainer's reads come here once per 30 min, every one is in the logs)\``);
+  ws.close(1012, 'deploy');
+  const after = await boot(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }), new FakeCtx(h.ctx.db));
+  posts.length = 0;
+  await call(after, 'GET', '/nodes/admin/overview', { headers: ADMIN });
+  await after.ctx.settle();
+  assert.deepEqual(posted().filter((p) => p.includes(': read ')), [], 'the window outlived the deploy');
+});
+
+test('the points tab: a wallet (AccountsDO /shop and /items) and the frozen wallets (/host-frozen), as AccountsDO answers; the reads share the window; grant, revoke and unfreeze carry their reason into the audit line', async () => {
+  const { h, env } = await watched();
+  const reason = 'verification_failed:' + 'f'.repeat(64);
+  env.ACCOUNTS.answer = (name, path, body) => {
+    const j = (v, status = 200) => new RealResponse(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
+    if (path === `/shop?userId=${A}`) return j({ items: [{ id: 'tero', cost: 300, claimable: false }], wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason } });
+    if (path === `/items?userId=${A}`) return j({ items: ['badge-host'], car: 'pampero', cars: ['pampero'] });
+    if (path === '/host-frozen') return j({ frozen: [{ account: A, reason, at: 1234 }], more: false });
+    if (path.startsWith('/shop?') || path.startsWith('/items?')) return j({ error: 'no_user' }, 404);
+    return j(path === '/host-unfreeze' ? { unfrozen: true } : { granted: true, items: [body?.item] });
+  };
+  assert.deepEqual((await call(h, 'GET', '/nodes/admin/wallet?account=nope', { headers: ADMIN })).json.error, 'bad_account');
+  assert.equal(env.ACCOUNTS.calls.length, 0);
+  const w = await call(h, 'GET', `/nodes/admin/wallet?account=${A}`, { headers: ADMIN });
+  assert.equal(w.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(w.json, { account: A, wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason }, items: ['badge-host'], car: 'pampero', catalog: [{ id: 'tero', cost: 300, claimable: false }] });
+  assert.deepEqual(env.ACCOUNTS.calls.map((c) => [c.path, c.body]).sort(), [[`/items?userId=${A}`, null], [`/shop?userId=${A}`, null]]);
+  const none = await call(h, 'GET', `/nodes/admin/wallet?account=${B}`, { headers: ADMIN });
+  assert.deepEqual([none.status, none.json], [404, { error: 'no_user' }]);
+  const fz = await call(h, 'GET', '/nodes/admin/frozen', { headers: ADMIN });
+  assert.deepEqual([fz.status, fz.json, fz.headers.get('cache-control')], [200, { frozen: [{ account: A, reason, at: 1234 }], more: false }, 'no-store']);
+  assert.equal((await call(h, 'POST', '/nodes/admin/unfreeze', { body: { account: A, reason: 'replay\nchecked by hand' }, headers: ADMIN })).status, 200);
+  assert.equal((await call(h, 'POST', '/nodes/admin/grant', { body: { account: A, item: 'tero' }, headers: ADMIN })).status, 200);
+  await h.ctx.settle();
+  assert.deepEqual(posted().map((p) => p.replace(/ -> (\d+) .*`$/, ' -> $1`')), [
+    `**ALERT** \`${ACTOR}: read the wallet of account ${A} (a maintainer's reads come here once per 30 min, every one is in the logs)\``,
+    `**ALERT** \`${ACTOR}: unfreeze for account ${A} (replay checked by hand) -> 200\``,
+    `**ALERT** \`${ACTOR}: grant tero for account ${A} -> 200\``,
+  ]);
+});
+
 // ---- the control socket under a flood of anonymous upgrades -----------------------------------------
 
 /** Open /nodes/connect from `ip` (the Worker's x-client-ip) and hand back the socket; nothing is answered yet. */
@@ -1554,7 +1866,7 @@ test('the same hello again writes no row; a node past 30 hellos in 10 minutes ha
   assert.ok(writes() <= D.HELLOS_PER_WINDOW, 'one row write per hello taken at most');
 });
 
-test('publicUrl changes: four an hour per node, the fifth closes its socket; the probe never fetches a private or loopback address', async () => {
+test('publicUrl changes: four an hour per node, the fifth closes its socket; never onto an IP address; the probe never fetches a private or loopback address', async () => {
   const h = await boot(makeEnv());
   const { node, ws } = await liveNode(h);
   const fetched = [];
@@ -1563,16 +1875,27 @@ test('publicUrl changes: four an hour per node, the fifth closes its socket; the
     fetched.push(new URL(String(url)).host);
     return realFetch(url, init);
   };
+  let again;
   try {
-    for (const publicUrl of ['wss://10.0.0.5', 'wss://[fd00::5]', 'wss://localhost:8443', 'wss://169.254.169.254', 'wss://a2.turbo-gol.test']) {
+    // An IP address, public or not: its link closes before anything is probed (a Worker cannot probe one).
+    for (const publicUrl of ['wss://10.0.0.5', 'wss://[fd00::5]', 'wss://169.254.169.254', 'wss://203.0.113.80']) {
+      const s = publicUrl === 'wss://10.0.0.5' ? ws : await connect(h, node);
       clock += 1000;
-      await send(h, ws, { t: 'hello', data: helloOf(node, { publicUrl }) });
+      await send(h, s, { t: 'hello', data: helloOf(node, { publicUrl }) });
+      assert.deepEqual(s.closed, { code: 1008, reason: 'address not allowed' }, publicUrl);
+    }
+    assert.ok(alerts().some((l) => l.includes('said hello on wss://10.0.0.5, an address it may not move to (an IP address): its link is closed')));
+    assert.equal(h.obj.cp.registry.node(node.nodeId).publicUrl, NODE_URL, 'the address it had');
+    again = await connect(h, node);
+    for (const publicUrl of ['wss://localhost:8443', 'wss://box.local', 'wss://a2.turbo-gol.test', 'wss://a3.turbo-gol.test', 'wss://a4.turbo-gol.test']) {
+      clock += 1000;
+      await send(h, again, { t: 'hello', data: helloOf(node, { publicUrl }) });
       await sleep(5);
     }
   } finally {
     globalThis.fetch = realFetch;
   }
-  assert.deepEqual(ws.closed, { code: 1008, reason: 'too many address changes' });
+  assert.deepEqual(again.closed, { code: 1008, reason: 'too many address changes' }, 'the refused ones were not counted');
   assert.deepEqual(fetched.filter((x) => !x.endsWith('.turbo-gol.test')), [], 'never a private or loopback target');
   assert.ok(lines.some((l) => /probe sao-paulo-1 failed: Error: refused target/.test(l)), 'the refusal is the probe failure');
 });

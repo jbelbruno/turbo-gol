@@ -227,8 +227,10 @@ runuser -u turbogol -- node /opt/turbogol-node/launcher.mjs register --control h
   --public-url wss://<host> --name sao-paulo-1 --matches <n>
 ```
 
-El registro "Ubuntu" quedó `banned` con `/nodes/admin/status`: no recibe partidas ni alertas, pero
-cuenta para el tope de 2 nodos de la cuenta del proyecto.
+El registro "Ubuntu" quedó `banned` con `/nodes/admin/status`: no recibe partidas ni alertas, y no
+ocupa lugar en el tope de la cuenta del proyecto (`NODE_TRUSTED_MAX_NODES`, 4), porque un nodo
+baneado de una cuenta de confianza no cuenta. Retirarlo (`POST /nodes/admin/retire`) lo saca
+además de `/nodes/mine`.
 
 ## Después de instalar
 

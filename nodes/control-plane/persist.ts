@@ -11,7 +11,10 @@
  *            tickLagP99Ms, egressGB, cpuLoad): a reconnecting node sends them again within one
  *            heartbeat, and writing them would mean one write per node every 5 s. `trusted` is
  *            recomputed from the trusted operators at every load, so taking an operator out of
- *            NODE_TRUSTED_OPERATORS revokes its nodes at the next start.
+ *            NODE_TRUSTED_OPERATORS revokes its nodes at the next start; the row's own `trusted`
+ *            (rowWasTrusted) tells Registry.restore which ones just lost it (back to probation).
+ *            Fields added since the first rows (publicHost, retiredAt, retiredReason,
+ *            trustRemovedAt, ...) default in nodeFromRow: an old row loads as it was.
  *   matches  without the verification dispatch in flight (inFlight, lastTry, verifiedBy): it does
  *            not survive a restart, the queue sends the job again. A match caught in 'reporting'
  *            (a state that only lasts across the replay read in ControlPlane.onReport) loads as
@@ -124,7 +127,16 @@ export function nodeFromRow(row: NodeRow, trustedOps: ReadonlySet<string>): Node
     capacityMax: d.capacityMax ?? d.capacity.matches,
     pauseTimes: d.pauseTimes ?? [],
     counters: { ...d.counters, probationVerified: d.counters.probationVerified ?? 0 },
+    publicHost: d.publicHost ?? null,
+    retiredAt: d.retiredAt ?? null,
+    retiredReason: d.retiredReason ?? null,
+    trustRemovedAt: d.trustRemovedAt ?? null,
   };
+}
+
+/** The row was written while its node was trusted (its own `trusted`, not the one nodeFromRow recomputes). */
+export function rowWasTrusted(row: NodeRow): boolean {
+  return readData<{ trusted?: unknown }>(row.data, 'node').trusted === true;
 }
 
 export function matchToRow(m: MatchEntry): MatchRow {

@@ -2425,6 +2425,15 @@ export class AccountStore {
   }
 
   /**
+   * GET /host-frozen (a maintainer, through the NodeRegistryDO): the wallets frozen now (`at` past
+   * `cleared_at`), newest first, at most `limit`; `more` when there are others. Read only.
+   */
+  frozenWallets(limit: number): { frozen: Array<{ account: string; reason: string; at: number }>; more: boolean } {
+    const rows = this.sql.exec('SELECT user_id, reason, at FROM host_freeze WHERE at > cleared_at ORDER BY at DESC, user_id LIMIT ?', limit + 1).toArray();
+    return { frozen: rows.slice(0, limit).map((r) => ({ account: str(r.user_id), reason: str(r.reason), at: num(r.at) })), more: rows.length > limit };
+  }
+
+  /**
    * Verified matches the account's nodes hosted for someone else (nodes/control-plane/ledger.ts
    * countsAsHosted: verified and worth points): one the operator played alone counts for nothing,
    * not even toward the free badge.

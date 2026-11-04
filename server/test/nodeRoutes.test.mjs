@@ -552,6 +552,53 @@ test('admin: 401 without a session, 403 for a guest and for any other account, f
   assert.equal((await ask('GET', 'nodes', auth)).status, 429, 'the 31st in a minute');
 });
 
+/** A third project account: the panel's routes below spend its limits, not the other two's. */
+const PANEL = 'c1b2c3d4e5f60718';
+
+test('the panel routes (overview, wallet, frozen, retire, tokens/revoke): the maintainer gate in order (413, 401, account_required, tv_session, not_trusted, reauth_required), then forwarded with the operator headers and a read’s query; other methods 404; no CORS', async () => {
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${PANEL}` });
+  env.NODES.handler = (r) => new RealResponse(JSON.stringify({ path: new URL(r.url).pathname, search: new URL(r.url).search, method: r.method }), { headers: { 'content-type': 'application/json' } });
+  const now = () => Math.floor(Date.now() / 1000);
+  const token = (sub, extra = {}) => signJwt(SECRET, { sub, name: 'Proyecto', iat: now(), exp: now() + 3600, acct: 1, aat: now(), aal: 2, ...extra });
+  const routes = [
+    ['GET', 'overview'],
+    ['GET', 'wallet?account=0123456789abcdef'],
+    ['GET', 'frozen'],
+    ['POST', 'retire'],
+    ['POST', 'tokens/revoke'],
+  ];
+  const ask = (m, w, auth, headers = {}) => req(env, m, '/nodes/admin/' + w, { body: m === 'POST' ? '{"nodeId":"abababababababab","reason":"x"}' : undefined, headers: { ...(auth ? { authorization: 'Bearer ' + auth } : {}), ...headers } });
+  const guest = (await createSession(SECRET, PANEL, 'Proyecto')).token;
+  const refusals = [
+    [null, 401, 'unauthorized'],
+    [guest, 403, 'account_required'],
+    [await token(PANEL, { tv: 1 }), 403, 'tv_session'],
+    [await accountToken(PLAYER, 'Jugador'), 403, 'not_trusted'],
+    [await token(PANEL, { aat: now() - 16 * 60 }), 403, 'reauth_required'],
+    [await token(PANEL, { aal: 1 }), 403, 'reauth_required'],
+  ];
+  for (const [m, w] of routes) {
+    for (const [auth, status, code] of refusals) {
+      const res = await ask(m, w, auth);
+      const body = await jsonOf(res);
+      assert.deepEqual([res.status, body.error], [status, code], `${m} ${w}: ${code}`);
+      if (code === 'reauth_required') assert.equal(body.level, 2);
+    }
+    assert.equal((await ask(m, w, await token(PANEL), { 'content-length': '4097' })).status, 413, `${w}: 413 first`);
+  }
+  assert.equal(env.NODES.seen.length, 0, 'nothing refused reached the object');
+  const auth = await token(PANEL);
+  for (const [m, w] of routes) {
+    const res = await ask(m, w, auth, { 'x-operator-id': PLAYER });
+    const [path, query] = w.split('?');
+    assert.deepEqual([res.status, await jsonOf(res)], [200, { path: '/nodes/admin/' + path, search: query ? '?' + query : '', method: m }], w);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+    assert.equal(env.NODES.seen.at(-1).headers['x-operator-id'], PANEL);
+  }
+  for (const [m, w] of [['POST', 'overview'], ['GET', 'retire'], ['GET', 'tokens/revoke'], ['POST', 'wallet'], ['GET', 'tokens'], ['POST', 'tokens/revoke/x']]) assert.equal((await ask(m, w, auth)).status, 404, `${m} ${w}`);
+  assert.equal(env.NODES.seen.length, routes.length);
+});
+
 test('the cron: one call to the object, with the internal header; never a throw; nothing at all without the node settings', async () => {
   const run = async (env) => {
     const waits = [];
@@ -640,7 +687,7 @@ test('end to end: a trusted account mints a token, the installer registers with 
   const t = await req(env, 'POST', '/nodes/tokens', { body: JSON.stringify({ region: 'SA', name: 'sao-paulo-1' }), headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (await accountToken(PROJECT)) } });
   assert.equal(t.status, 200);
   const token = await jsonOf(t);
-  assert.equal(token.install.linux, `curl -fsSL ${ORIGIN}/nodes/releases/install.sh | sudo bash -s -- --control ${ORIGIN} --token ${token.token}`);
+  assert.equal(token.install.linux, `curl -fsSL ${ORIGIN}/nodes/releases/install.sh | sudo bash -s -- --control ${ORIGIN} --token ${token.token} --name sao-paulo-1`);
   const keys = await generateEd25519();
   const build = { version: '0.2.0', protocol: 1, wasmSha256: 'a'.repeat(64) };
   const capacity = { matches: 4, cpuMsPerMatchSecond: 1, memMBPerMatch: 20, uplinkMbps: null, source: 'bench' };
