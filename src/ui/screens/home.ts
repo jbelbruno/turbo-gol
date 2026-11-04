@@ -50,7 +50,7 @@ import { icon } from '../components/icons';
 import { plate as createPlate } from '../components/plate';
 import { rankBadge, tierById } from '../badges';
 import { carName, playerName, regionName, tierName } from '../names';
-import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, homeDomOrder, nextCard, plateRank, queueParts, roomsLocked, subParts } from './homeModel';
+import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, homeDomOrder, nextCard, nextLineKey, plateRank, queueParts, roomsLocked, subParts } from './homeModel';
 import type { HeroInput, HeroKind, HeroState, HomeTile, QueuePick } from './homeModel';
 import { waitLines } from './searchModel';
 import { estimateText } from './searchText';
@@ -354,7 +354,7 @@ export function homeScreen(menu: Menu): Screen {
       h('span', null, t(card.account === 'tvSignIn' ? 'tvsign.tile' : 'home.nextAccount')),
     );
     const x = h('button.mn-btn.mn-home-next-x', { type: 'button', 'data-nav': true, 'data-key': 'next-close', 'aria-label': t('home.nextClose'), title: t('home.nextClose'), onclick: () => drop() }, icon('close'));
-    setChildren(nextBox, h('div.mn-home-next-text', null, h('b', null, t('home.nextTitle')), h('span', null, t('home.nextLine'))), h('div.mn-home-next-acts', null, rooms, account, x));
+    setChildren(nextBox, h('div.mn-home-next-text', null, h('b', null, t('home.nextTitle')), h('span', null, t(nextLineKey(card)))), h('div.mn-home-next-acts', null, rooms, account, x));
     return true;
   };
 

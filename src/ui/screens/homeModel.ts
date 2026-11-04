@@ -159,6 +159,15 @@ export function nextCard(i: { guest: boolean; aiMatchEnded: boolean; dismissed: 
   return { rooms: i.roomsOpen, account: i.tv ? 'tvSignIn' : 'create' };
 }
 
+/**
+ * The "next" card's line: "Join a public lobby, or make an account..." while it offers SEE LOBBIES;
+ * a TV whose rooms are locked (no SEE LOBBIES, only the phone's sign-in, which opens them) says
+ * that sign-in instead. Pure.
+ */
+export function nextLineKey(card: NextCard): 'home.nextLine' | 'home.nextLineTv' {
+  return card.rooms ? 'home.nextLine' : 'home.nextLineTv';
+}
+
 /** The subtitle's separator, and a TV's before the region (the owner's TV artboard: "Casual · 2v2 - Sudamérica"). */
 export const HERO_SEP = ' · ';
 export const HERO_SEP_TV = ' - ';

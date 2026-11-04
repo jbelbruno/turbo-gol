@@ -135,6 +135,7 @@ export default {
   'home.instant': 'AL INSTANTE',
   'home.nextTitle': '¿Y ahora, con gente?',
   'home.nextLine': 'Entra a una sala pública, o crea una cuenta para jugar Casual.',
+  'home.nextLineTv': 'Inicia sesión con el teléfono para entrar a las salas y jugar Casual.',
   'home.nextRooms': 'VER SALAS',
   'home.nextAccount': 'CREAR CUENTA',
   'home.nextClose': 'Cerrar',

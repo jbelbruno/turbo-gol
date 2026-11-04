@@ -116,6 +116,18 @@ test("the 'next' card: a guest after an offline match's FINAL, once per page; SE
   assert.deepEqual(M.nextCard({ ...i, tv: true, roomsOpen: false }), { rooms: false, account: 'tvSignIn' });
 });
 
+test("final review: a TV guest whose rooms are locked reads the phone's sign-in, never 'Join a public lobby' over a card without SEE LOBBIES", async () => {
+  const i = { guest: true, aiMatchEnded: true, dismissed: false, tv: true, roomsOpen: false };
+  assert.equal(M.nextLineKey(M.nextCard(i)), 'home.nextLineTv');
+  assert.equal(M.nextLineKey(M.nextCard({ ...i, roomsOpen: true })), 'home.nextLine', 'SEE LOBBIES is there');
+  assert.equal(M.nextLineKey(M.nextCard({ ...i, tv: false, roomsOpen: true })), 'home.nextLine', 'a PC or a phone guest');
+  assert.equal(es['home.nextLineTv'], 'Inicia sesión con el teléfono para entrar a las salas y jugar Casual.');
+  assert.equal(en['home.nextLineTv'], 'Sign in with your phone to join lobbies and play Casual.');
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /h\('span', null, t\(nextLineKey\(card\)\)\)/, "the card's line is the model's");
+  assert.doesNotMatch(home, /t\('home\.nextLine'\)/);
+});
+
 test("the hero's copy by role (home.ts): SIEMPRE HAY PARTIDO for Casual only, Casual's subtitle without formats, a guest's AL INSTANTE", async () => {
   const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
   assert.match(home, /tag = needPad \? padSlot : s\.queue\.kind === 'casual' \? \{ text: t\('home\.alwaysMatch'\) \} : null;/, 'no tag for a ranked play hero');
