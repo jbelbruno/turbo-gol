@@ -102,3 +102,21 @@ export function pauseSearchEntry(s: WaitState): 'cancelSearch' | 'searchAgain' |
   if (!isLocal(s)) return null;
   return s.searching ? 'cancelSearch' : 'searchAgain';
 }
+
+/**
+ * PARTIDO ENCONTRADO's line, in parts (Game.matchFound joins them: "Casual · 2v2 · Sudamérica"): the
+ * matched answer's format and host region (`extra`: the hub's `mode` / `host`) when it says the
+ * format; else today's line (spec §3.5), the search's own formats and region (`autoRegion`: the
+ * connection's when it picked none), for the 409 rejoin path or an older server. `isRegion` tells a
+ * region id. Pure.
+ */
+export function foundParts<M extends string, R extends string>(
+  req: { kind: 'casual' | 'ranked'; modes: readonly M[]; region: R | null },
+  extra: { mode?: M; host?: string } | null,
+  autoRegion: R | null,
+  isRegion: (v: unknown) => v is R,
+): { kind: 'casual' | 'ranked'; modes: M[]; region: R | null } {
+  const own = req.region ?? autoRegion;
+  if (extra === null || extra.mode === undefined) return { kind: req.kind, modes: req.modes.slice(), region: own };
+  return { kind: req.kind, modes: [extra.mode], region: isRegion(extra.host) ? extra.host : own };
+}

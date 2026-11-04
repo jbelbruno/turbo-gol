@@ -157,3 +157,52 @@ test("the Game's wiring (Game.ts cannot load under node): onFound plays the cue 
   const found = await readFile(new URL('../src/ui/screens/match/found.ts', import.meta.url), 'utf8');
   assert.match(found, /\n  tab\(\): void \{/);
 });
+
+// ---- round 2 ------------------------------------------------------------------------------------
+
+const REGION_IDS = ['SA', 'NA', 'EU', 'AS', 'OC', 'AF'];
+const isRegion = (v) => typeof v === 'string' && REGION_IDS.includes(v);
+
+test("PARTIDO ENCONTRADO's line: the answer's format and host; without its format (a 409 rejoin, an older server) today's line with the search's formats", () => {
+  const casual = { kind: 'casual', modes: ['2v2'], region: null };
+  assert.deepEqual(W.foundParts(casual, { mode: '3v3', host: 'EU', humans: 5 }, 'SA', isRegion), { kind: 'casual', modes: ['3v3'], region: 'EU' }, 'Casual · 3v3 · Europa');
+  assert.deepEqual(W.foundParts(casual, { mode: '2v2', host: 'node:sao-paulo-1' }, 'SA', isRegion), { kind: 'casual', modes: ['2v2'], region: 'SA' }, 'a host that is no region: the search\'s own');
+  assert.deepEqual(W.foundParts(casual, {}, 'SA', isRegion), { kind: 'casual', modes: ['2v2'], region: 'SA' }, 'no mode: the formats, not a bare "Casual · Sudamérica"');
+  assert.deepEqual(W.foundParts(casual, null, null, isRegion), { kind: 'casual', modes: ['2v2'], region: null });
+  const ranked = { kind: 'ranked', modes: ['1v1', '3v3'], region: 'NA' };
+  assert.deepEqual(W.foundParts(ranked, { host: 'EU' }, 'SA', isRegion), { kind: 'ranked', modes: ['1v1', '3v3'], region: 'NA' }, "today's line whole: the search's region too");
+  assert.deepEqual(W.foundParts(ranked, { mode: '1v1', host: 'NA' }, 'SA', isRegion), { kind: 'ranked', modes: ['1v1'], region: 'NA' });
+});
+
+/** A method of Game.ts, from its signature to its closing brace. */
+function method(src, signature) {
+  const at = src.indexOf(signature);
+  assert.ok(at >= 0, signature);
+  return src.slice(at, src.indexOf('\n  }\n', at));
+}
+
+test('every way out of the unlimited bots match puts the timed match back (useMatch(timedMatch)): QUIT, the menus, the hand-off, a new match', async () => {
+  const game = await readFile(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
+  for (const sig of ['private quitWaitBots(): void {', 'private showMenu(keepSearch = false): void {', 'private waitToMatch(force = false): void {', 'startMatch(): void {']) {
+    assert.match(method(game, sig), /this\.useMatch\(this\.timedMatch\);/, sig);
+  }
+  assert.match(method(game, 'private showMenu(keepSearch = false): void {'), /if \(this\.match === this\.waitMatch\) \{\s*this\.useMatch\(this\.timedMatch\);\s*this\.resetToKickoff\(\);/);
+  assert.match(method(game, 'private useMatch(m: Match): void {'), /this\.match\.reset\(\);\s*this\.match = m;\s*m\.reset\(\);/, 'the other one reset');
+});
+
+test("the Game's round-2 wiring: no search over a busy other session, the sheet dropped once wait play starts, the clocks from the server, the band's line from foundParts", async () => {
+  const game = await readFile(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
+  const search = method(game, 'private menuSearch(req: SearchRequest): void {');
+  assert.match(search, /if \(this\.session !== null && this\.session\.busy\) this\.session\.cancel\(\);\s*\/\/[^\n]*\n\s*if \(this\.session !== null && this\.session !== online && this\.session\.state !== 'idle'\) return;/, "startOnline's guard, before anything is set");
+  assert.ok(search.indexOf("this.session.state !== 'idle') return;") < search.indexOf('this.searchReq ='), 'nothing of the search is set when refused');
+  assert.match(method(game, 'private setWait(next: WaitState): void {'), /if \(isLocal\(next\)\) this\.menu\.waitPlayStarted\(\);/);
+  const menu = await readFile(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /waitPlayStarted\(\): void \{\s*this\.waitSheetDue = false;/);
+  assert.match(menu, /const step = waitSheetStep\(\{/, "Menu's rule is searchModel.ts' (tests/search-model.test.mjs)");
+  // The clock: the menus' and the HUD's from the server's waitedMs once it came.
+  assert.match(method(game, 'private searchClock(): number {'), /return searchStart\(this\.searchSince, online\?\.wait \?\? null, online\?\.waitAt \?\? 0\);/);
+  assert.match(method(game, 'private menuSearchView(): SearchView {'), /since: this\.searchClock\(\),/);
+  assert.match(method(game, 'private waitHudText(): { text: string | null; warn: boolean } {'), /since: this\.searchClock\(\)/);
+  assert.match(method(game, 'private menuSearchView(): SearchView {'), /queueing: online !== null && online\.state === 'queue',\s*postedAt: online\?\.postedAt \?\? 0,\s*waitRegion: online\?\.waitRegion \?\? null,/);
+  assert.match(method(game, 'matchFound(): void {'), /const p = foundParts\(req, extra, this\.menu\.regionId, isRegion\);/);
+});

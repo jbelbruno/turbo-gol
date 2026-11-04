@@ -213,9 +213,9 @@ import type { Menu, MenuConfig, MenuHost, SearchRequest, SearchView } from '../u
 import { finalScreen, installFinalSample, type FinalScreen } from '../ui/screens/match/final';
 import { goalScorer, type FinalKind, type FinalPlayer, type FinalView } from '../ui/screens/match/finalModel';
 import { MatchFound } from '../ui/screens/match/found';
-import { waitLines, type QueueTimes } from '../ui/screens/searchModel';
+import { searchStart, waitLines, type QueueTimes } from '../ui/screens/searchModel';
 import { hudSearchLine } from '../ui/screens/searchText';
-import { WAIT_OFF, entered, enterFailed, handOff, isLocal, nextLevelKeeps, pauseSearchEntry, queueLocal, quitWait, searchAgain, searchDied, startWait, type WaitState } from './waitPlay';
+import { WAIT_OFF, entered, enterFailed, foundParts, handOff, isLocal, nextLevelKeeps, pauseSearchEntry, queueLocal, quitWait, searchAgain, searchDied, startWait, type WaitState } from './waitPlay';
 import { playerName, regionName } from '../ui/names';
 import type { NetStatsView } from '../net/NetStats';
 import { P2PSession, kickoffSeedOf, type P2PGameHooks } from '../net/p2p/P2PSession';
@@ -1574,6 +1574,8 @@ export class Game implements P2PGameHooks {
     const online = this.online;
     if (online === null) return;
     if (this.session !== null && this.session.busy) this.session.cancel();
+    // Another session still up and not busy (a P2P room's 'ended'): no search over it (startOnline's rule).
+    if (this.session !== null && this.session !== online && this.session.state !== 'idle') return;
     const client = online.client;
     client.queueModes = req.modes.slice();
     client.region = req.region;
@@ -1592,6 +1594,16 @@ export class Game implements P2PGameHooks {
     this.menuReturnAt = -1;
     this.setSession(online);
     online.quickMatch(mode, '', req.kind === 'ranked' ? 'ranked' : 'server');
+  }
+
+  /**
+   * When the running search started, for its every clock (the menus', the HUD's): the server's once
+   * an answer said it (searchModel.ts searchStart: `waitedMs`, a restored search's too), else the
+   * local start.
+   */
+  private searchClock(): number {
+    const online = this.online !== null && this.session === this.online ? this.online : null;
+    return searchStart(this.searchSince, online?.wait ?? null, online?.waitAt ?? 0);
   }
 
   /** A menu search is queueing (not yet matched): local play keeps it (wait play). */
@@ -1615,11 +1627,14 @@ export class Game implements P2PGameHooks {
       kind: req?.kind ?? null,
       modes: req?.modes ?? [],
       text: busy ? (s?.statusText ?? '') : '',
-      since: this.searchSince,
+      since: this.searchClock(),
       region: req?.region ?? null,
       wait: online?.wait ?? null,
       waitAt: online?.waitAt ?? 0,
       answers: online?.waitingAnswers ?? 0,
+      queueing: online !== null && online.state === 'queue',
+      postedAt: online?.postedAt ?? 0,
+      waitRegion: online?.waitRegion ?? null,
       retrying: online?.retrying ?? false,
       error: error !== null && error.length > 0 ? error : null,
       // 426 reload_required (a stale page: P2PSession STATUS.reload, OnlineSession's netErrorText):
@@ -2846,6 +2861,8 @@ export class Game implements P2PGameHooks {
     this.wait = next;
     if (this.online !== null) this.online.client.queueLocal = queueLocal(next);
     this.waitHudAt = 0;
+    // Playing while waiting: a "While you search" still owed never pops up later in the menus.
+    if (isLocal(next)) this.menu.waitPlayStarted();
   }
 
   /**
@@ -2985,7 +3002,7 @@ export class Game implements P2PGameHooks {
     if (!isLocal(w) || req === null) return { text: null, warn: false };
     if (!w.searching) return w.ended !== null ? { text: t('search.ended', { why: w.ended }), warn: true } : { text: null, warn: false };
     const online = this.online;
-    const lines = waitLines({ kind: req.kind, since: this.searchSince, wait: online?.wait ?? null, waitAt: online?.waitAt ?? 0, retrying: online?.retrying ?? false, times: this.queueTimes }, performance.now());
+    const lines = waitLines({ kind: req.kind, since: this.searchClock(), wait: online?.wait ?? null, waitAt: online?.waitAt ?? 0, retrying: online?.retrying ?? false, times: this.queueTimes }, performance.now());
     return { text: hudSearchLine(req.kind, lines), warn: lines.override === 'retrying' };
   }
 
@@ -4574,10 +4591,9 @@ export class Game implements P2PGameHooks {
     const req = this.searchReq;
     if (req === null) return;
     const extra = this.online !== null && this.session === this.online ? this.online.client.lastMatched : null;
-    const host = extra?.host;
-    const region = isRegion(host) ? host : (req.region ?? this.menu.regionId);
-    const modes = extra?.mode !== undefined ? [extra.mode] : req.kind === 'ranked' ? req.modes : [];
-    const line = [t(req.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...modes, region !== null ? regionName(region) : null].filter((x) => x !== null).join(' · ');
+    // The answer's format and host; without its format (a 409 rejoin, an older server) today's line.
+    const p = foundParts(req, extra, this.menu.regionId, isRegion);
+    const line = [t(p.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...p.modes, p.region !== null ? regionName(p.region) : null].filter((x) => x !== null).join(' · ');
     this.found.show(line);
     if (!this.foundCued) this.audio.play('matchFound');
     this.foundCued = false;

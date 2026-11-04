@@ -125,3 +125,38 @@ test('the texts of the lines exist in both languages, as the owner wrote them (e
   assert.equal(es['wait.title'], 'Mientras buscas');
   assert.equal(es['wait.menu'], 'QUEDARME EN EL MENÚ');
 });
+
+test("the clock from the server once it said so: the answer's waitedMs counted back from its arrival (a restored search), else the local start; the clock and the 5:00 box then agree", () => {
+  assert.equal(S.searchStart(1000, null, 0), 1000, 'no answer yet: the local start');
+  // A reload 80 s into a search: the hub restored it, its answer came at 50_000.
+  const w = wait({ waitedMs: 80_000, botsInMs: 220_000 });
+  const since = S.searchStart(49_000, w, 50_000);
+  assert.equal(since, -30_000);
+  const l = S.waitLines(view({ since, wait: w, waitAt: 50_000 }), 60_000);
+  assert.equal(l.elapsedMs, 90_000, '1:30 on the clock');
+  assert.equal(l.bots.left, 210_000, '3:30 in the box: the two add up to 5:00');
+  assert.equal(l.elapsedMs + l.bots.left, 300_000);
+  // A search the hub restarted (an eviction, a long drop): the clock starts again with it.
+  assert.equal(S.searchStart(1000, wait({ waitedMs: 0 }), 200_000), 200_000);
+});
+
+test("'· 1 in South America' names the answer's region (the hub's normalized home), never the client's guess; an unknown one names none", () => {
+  assert.equal(S.answerRegion('EU'), 'EU');
+  assert.equal(S.answerRegion('SA'), 'SA');
+  assert.equal(S.answerRegion('AN'), null, 'not one of ours: no name rather than a wrong one');
+  assert.equal(S.answerRegion(null), null);
+  assert.equal(S.answerRegion(undefined), null);
+});
+
+test('"While you search": on the first waiting answer, or ~1 s after the first POST left without one; dropped when the search ended or matched, or on MODOS; held under a sheet', () => {
+  const s = { queueing: true, onModes: false, answers: 0, postedAt: 0, now: 10_000, menusFree: true };
+  assert.equal(S.WAIT_SHEET_AFTER_MS, 1_000);
+  assert.equal(S.waitSheetStep(s), 'wait', 'the first POST has not left (the terms, the session)');
+  assert.equal(S.waitSheetStep({ ...s, postedAt: 9_500 }), 'wait', 'half a second: its answer may still come');
+  assert.equal(S.waitSheetStep({ ...s, postedAt: 9_000 }), 'open', 'a second without an answer (a reloaded page: the hub long-polls it)');
+  assert.equal(S.waitSheetStep({ ...s, answers: 1 }), 'open', 'the first answer');
+  assert.equal(S.waitSheetStep({ ...s, answers: 1, menusFree: false }), 'wait', 'a sheet up (the terms): after it');
+  assert.equal(S.waitSheetStep({ ...s, answers: 1, queueing: false }), 'drop', 'matched or ended first: none');
+  assert.equal(S.waitSheetStep({ ...s, postedAt: 1, queueing: false }), 'drop');
+  assert.equal(S.waitSheetStep({ ...s, answers: 1, onModes: true }), 'drop', "MODOS' panel has the choice");
+});

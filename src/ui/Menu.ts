@@ -124,6 +124,7 @@ import { OUTCOME_ACTION } from '../net/outcome';
 import type { Outcome } from '../net/outcome';
 import type { RejoinRecord } from '../game/rejoinStore';
 import type { QueueWait } from '../net/queueWait';
+import { waitSheetStep } from './screens/searchModel';
 import type { QueueTimes } from './screens/searchModel';
 import { openWaitSheet } from './screens/waitSheet';
 import { openTvSignIn } from './screens/tvSignIn';
@@ -155,6 +156,12 @@ export interface SearchView {
   waitAt?: number;
   /** Waiting answers of this search so far (Menu's "While you search" opens on the first). */
   answers?: number;
+  /** The search still queues (no match found yet): "While you search" is for such a one only. */
+  queueing?: boolean;
+  /** performance.now() when its first POST left (0: none yet): "While you search" opens about 1 s after it, answered or not. */
+  postedAt?: number;
+  /** The region the last waiting answer counts `searchingHere` in (the hub's), null when it said none. */
+  waitRegion?: string | null;
   /** The search's requests fail and are tried again (the network is away). */
   retrying?: boolean;
   /** The last failure (shown once as a toast), null when none. */
@@ -469,7 +476,7 @@ export class Menu {
   private lastTry: (() => void) | null = null;
   private visibleNow = false;
   private searching = false;
-  /** A search started from Inicio's hero or the FINAL: "While you search" opens on its first waiting answer. */
+  /** A search started from Inicio's hero or the FINAL: "While you search" opens on its first waiting answer, or ~1 s after its first POST (searchModel.ts waitSheetStep). */
   private waitSheetDue = false;
   /** The lobby pill is up (renderLobbyPill). */
   private lobbyPillUp = false;
@@ -670,6 +677,15 @@ export class Menu {
     this.waitSheetDue = opts.sheet === true;
     this.host.search(req);
     this.renderSearch(performance.now());
+  }
+
+  /**
+   * The player plays while waiting (the bots match or training over the search: Game.setWait): a
+   * "While you search" still owed (its answer came while the menus were hidden, a pack started from
+   * them first) is dropped, so it never pops up once the player is back in the menus.
+   */
+  waitPlayStarted(): void {
+    this.waitSheetDue = false;
   }
 
   /**
@@ -1793,15 +1809,21 @@ export class Menu {
       this.refocus();
     }
     this.searchPill.set(v, now);
-    // "While you search": on the first waiting answer of a search the hero or the FINAL started
-    // (after the terms and the sign-in), over the menus only; a search matched or ended first shows none.
+    // "While you search": on the first waiting answer of a search the hero or the FINAL started,
+    // or about 1 s after its first POST left without one (after the terms and the sign-in), over the
+    // menus only; a search matched or ended first shows none, nor one gone to MODOS (its panel has
+    // the same choice), nor one whose player already plays while waiting (waitPlayStarted).
     if (this.waitSheetDue) {
-      // Gone to MODOS meanwhile: its searching panel has the same choice.
-      if (!v.active || this.top()?.id === 'modes') this.waitSheetDue = false;
-      else if ((v.answers ?? 0) > 0 && this.visibleNow && this.modalEl === null && !this.settingsUp()) {
-        this.waitSheetDue = false;
-        openWaitSheet(this);
-      }
+      const step = waitSheetStep({
+        queueing: v.active && v.queueing === true,
+        onModes: this.top()?.id === 'modes',
+        answers: v.answers ?? 0,
+        postedAt: v.postedAt ?? 0,
+        now,
+        menusFree: this.visibleNow && this.modalEl === null && !this.settingsUp(),
+      });
+      if (step !== 'wait') this.waitSheetDue = false;
+      if (step === 'open') openWaitSheet(this);
     }
     if (v.active !== this.searching) {
       this.searching = v.active;
