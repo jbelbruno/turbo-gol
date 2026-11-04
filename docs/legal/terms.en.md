@@ -215,7 +215,10 @@ cannot:**
    (on a tie, the region of whoever waited longest): with a South American majority it goes to the
    project's server in São Paulo when it has room; otherwise, and for the other regions, to a
    Cloudflare server: we ask Cloudflare to place it near that region, but Cloudflare decides
-   where.
+   where. If in an emergency we turn off matches on Cloudflare servers, every CASUAL or
+   COMPETITIVE match is played on the project's server in São Paulo, whatever its region, and
+   waits until it has room (or, if that server is not available either, you cannot search for a
+   match).
 
 ## 8. COMPETITIVE: abandons and verification
 

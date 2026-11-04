@@ -253,8 +253,11 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
   le llegan las partidas de CASUAL y de COMPETITIVO cuya mayoría de jugadores es de Sudamérica
   (si empatan, decide la región de quien esperó más), también las de CASUAL contra bots de quien
   busca desde Sudamérica y esperó 5 minutos sin rivales. Si no puede, se juegan en servidores de
-  Cloudflare. Las partidas de salas no pasan por ahí. **Nadie fuera del proyecto puede registrar un servidor todavía.** Aunque el juego hable de
-  alojar servidores, hoy no puedes registrar uno.
+  Cloudflare. Si en una emergencia apagamos las partidas en servidores de Cloudflare, le llegan
+  todas las de CASUAL y de COMPETITIVO, de cualquier región, y esperan hasta que tenga lugar
+  (Términos 7.6). Las partidas de salas no pasan por ahí. **Nadie fuera del proyecto puede
+  registrar un servidor todavía.** Aunque el juego hable de alojar servidores, hoy no puedes
+  registrar uno.
 - **Cuando la red se abra a otras personas** (lo anunciaremos), quien opere un servidor verá tu
   nombre, tu identificador de jugador (el mismo en todas tus partidas), tus controles, lo que pasa
   en la partida y tu dirección IP. Las condiciones para anfitriones (sección 12 de los Términos) les
@@ -320,7 +323,7 @@ Damos datos a una autoridad solo cuando la ley nos obliga, con un pedido formal.
 |---|---|---|
 | **Estados Unidos y la red de Cloudflare** | Todo lo que guardamos en Cloudflare. Cloudflare decide en qué centro de datos corre y guarda cada cosa. En octubre de 2026 los servidores de las partidas se midieron en Miami y en Atlanta. Para una partida de CASUAL o COMPETITIVO le pedimos a Cloudflare que la corra cerca de la región de la mayoría de sus jugadores (Términos 7.6), y Cloudflare decide. Las repeticiones se guardan en un almacenamiento de Cloudflare que no tiene región en Sudamérica. Cada pedido pasa por el centro de Cloudflare más cercano a ti | Alojar el juego |
 | **Estados Unidos (Cloudflare, por su cuenta)** | Las señales de Turnstile | Mejorar su detección de bots |
-| **Brasil** | Tu IP y la partida, en el servidor del proyecto en São Paulo | Jugar con poco retraso en Sudamérica |
+| **Brasil** | Tu IP y la partida, en el servidor del proyecto en São Paulo | Jugar con poco retraso en Sudamérica (en una emergencia, cualquier partida de CASUAL o COMPETITIVO: sección 4.4) |
 | **Estados Unidos (Discord y Google)** | Que iniciaste sesión en Turbogol. Nosotros no les mandamos datos del juego | Tu inicio de sesión |
 | **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las cuentas de anfitrión y las repeticiones |
 | **Estados Unidos (Google)** | Lo que nos escribes | Leer y responder tus pedidos |

@@ -217,7 +217,10 @@ otros jugadores, **no puedes:**
    juega en la región de la mayoría de sus jugadores (si empatan, la de quien esperó más): con
    mayoría de Sudamérica va al servidor del proyecto en São Paulo cuando tiene lugar; si no, y para
    las demás regiones, a un servidor de Cloudflare: le pedimos que lo ponga cerca de esa región,
-   pero el lugar lo decide Cloudflare.
+   pero el lugar lo decide Cloudflare. Si en una emergencia apagamos las partidas en servidores de
+   Cloudflare, toda partida de CASUAL o COMPETITIVO se juega en el servidor del proyecto en São
+   Paulo, sea de la región que sea, y espera hasta que tenga lugar (o, si ese servidor tampoco está
+   disponible, no se puede buscar partida).
 
 ## 8. COMPETITIVO: abandonos y verificación
 

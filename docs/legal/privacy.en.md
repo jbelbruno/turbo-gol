@@ -250,8 +250,10 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
   it gets the CASUAL and COMPETITIVE matches whose players are mostly from South America (on a tie,
   the region of whoever waited longest decides), and also the CASUAL bots matches of whoever
   searches from South America and waited 5 minutes with no rivals. If it cannot, they are played on
-  Cloudflare servers. Lobby matches do not go through it. **Nobody outside the project can register a server yet.** Even if the game talks
-  about hosting servers, today you cannot register one.
+  Cloudflare servers. If in an emergency we turn off matches on Cloudflare servers, it gets every
+  CASUAL and COMPETITIVE match, from any region, and they wait until it has room (Terms 7.6).
+  Lobby matches do not go through it. **Nobody outside the project can register a server yet.**
+  Even if the game talks about hosting servers, today you cannot register one.
 - **When the network opens to other people** (we will announce it), whoever operates a server will
   see your name, your player identifier (the same in all your matches), your controls, what happens
   in the match and your IP address. The conditions for hosts (section 12 of the Terms) forbid them
@@ -315,7 +317,7 @@ We give data to an authority only when the law requires us to, with a formal req
 |---|---|---|
 | **The United States and Cloudflare's network** | Everything we store at Cloudflare. Cloudflare decides in which data center each thing runs and is stored. In October 2026 the match servers were measured in Miami and in Atlanta. For a CASUAL or COMPETITIVE match we ask Cloudflare to run it near the region of most of its players (Terms 7.6), and Cloudflare decides. Replays are stored in Cloudflare storage that has no region in South America. Each request goes through the Cloudflare data center nearest to you | Hosting the game |
 | **The United States (Cloudflare, on its own account)** | The Turnstile signals | Improving its bot detection |
-| **Brazil** | Your IP and the match, on the project's server in São Paulo | Playing with low lag in South America |
+| **Brazil** | Your IP and the match, on the project's server in São Paulo | Playing with low lag in South America (in an emergency, any CASUAL or COMPETITIVE match: section 4.4) |
 | **The United States (Discord and Google)** | That you signed in to Turbogol. We do not send them game data | Your sign-in |
 | **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures and to what it does with servers, host accounts and replays |
 | **The United States (Google)** | What you write to us | Reading and answering your requests |
