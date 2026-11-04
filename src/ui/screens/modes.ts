@@ -331,8 +331,7 @@ export function modesScreen(menu: Menu): Screen {
         setText(formatLabel, t(tab === 'casual' ? 'modes.formatPrefer' : 'modes.format'));
       }
     }
-    // VS AI's intro while a search runs: its PLAY is the wait's unlimited match.
-    setText(intro, t(tab === 'ai' && running !== null ? 'friendly.introWaiting' : TAB_INTRO[tab]));
+    setText(intro, t(TAB_INTRO[tab]));
     // A TV guest's rooms: the check warmed again every 4 minutes while SALAS is up (its buttons
     // unlock with it; a warm token is renewed before it goes, so they lock again only if that fails).
     if (tab === 'lobbies' && tvGuest() && now - warmAt >= REWARM_MS) {
@@ -444,7 +443,8 @@ export function modesScreen(menu: Menu): Screen {
           break;
         case 'play':
           sum = `${t('modes.vsAi')} · ${aiMode} · ${difficultyName(aiDifficulty)}`;
-          lineText = t('modes.vsAiSub');
+          // While a search runs, PLAY is the wait's unlimited match (ended by the match found).
+          lineText = t(running !== null ? 'friendly.introWaiting' : 'modes.vsAiSub');
           label = t('friendly.play');
           break;
         case 'lobbies': {
