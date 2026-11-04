@@ -6,7 +6,7 @@
 // nodes_off set and without the node settings. Run from server/: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Q, S, accountToken, guestToken, makeHubWorld, pid, signJwt, worker, SECRET, ORIGIN } from './helpers/hub.mjs';
+import { Q, S, accountToken, guestToken, makeHubWorld, pid, placementOf, signJwt, worker, SECRET, ORIGIN } from './helpers/hub.mjs';
 
 const { accountGate } = await import('../src/limits.ts');
 const SEC = 1_000;
@@ -136,6 +136,31 @@ test('the queues empty with counts not written (a search-then-cancel loop): no w
   // Evicted now, nothing is lost: it is all in storage.
   await w.evict();
   assert.deepEqual((await w.daily(1)).days[0].cancelled.casual, 10);
+});
+
+test('a formation whose node placement runs past midnight counts on the day it formed, with no write of the day before again', async () => {
+  const w = await makeHubWorld({ flags: { nodes_on: '1' }, nodes: true, now: Date.UTC(2026, 10, 4, 23, 59, 58) });
+  let open;
+  const gate = new Promise((r) => (open = r));
+  w.control.place = async (body) => {
+    await gate;
+    return { placement: placementOf(body), hosts: 1 };
+  };
+  const [a, b] = [pid(), pid()];
+  await w.join(a);
+  const pairing = w.join(b); // its placement waits for the gate
+  await pause(5);
+  w.advance(7 * SEC); // 00:00:05: another search starts the new day, which writes 2026-11-04 at once
+  await w.join(pid(), { home: 'EU' });
+  await pause(5);
+  const writes = w.storage().writes('stats:').length;
+  open();
+  assert.equal((await pairing).json.node, true);
+  await pause(5);
+  assert.equal(w.storage().writes('stats:').length, writes, 'no write back to the day before (and none of the new day yet: the minute is not up)');
+  const days = (await w.daily(2)).days;
+  assert.deepEqual(days.map((d) => [d.date, d.formed.casual['2']]), [['2026-11-05', 1], ['2026-11-04', 0]], 'counted the day it formed');
+  assert.deepEqual(days.map((d) => d.searches.casual), [1, 2]);
 });
 
 test('the 90-day sweep: at the first count after a start, and at the day change (which writes the day before); a day with no search writes nothing', async () => {

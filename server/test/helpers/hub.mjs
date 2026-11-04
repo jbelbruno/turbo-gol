@@ -127,7 +127,7 @@ export function fakeNodes() {
           const u = new URL(url);
           const body = init && init.body ? JSON.parse(init.body) : null;
           calls.push({ path: u.pathname, body });
-          const answer = u.pathname === '/internal/place' ? n.place(body) : u.pathname === '/internal/status' ? { state: 'assigned', left: false } : { recorded: true };
+          const answer = u.pathname === '/internal/place' ? await n.place(body) : u.pathname === '/internal/status' ? { state: 'assigned', left: false } : { recorded: true };
           return new RealResponse(JSON.stringify(answer), { headers: { 'content-type': 'application/json' } });
         },
       }),

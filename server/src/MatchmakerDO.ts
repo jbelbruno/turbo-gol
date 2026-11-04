@@ -1723,9 +1723,14 @@ export class MatchmakerDO extends DurableObject<Env> {
       .catch((e) => console.error('matchmaker: stats sweep failed', e));
   }
 
-  /** One formed match in the counters (by its humans' waits, regions and local play). */
+  /**
+   * One formed match in the counters (by its humans' waits at `now`, the pass that planned it, and
+   * their regions and local play). The day and the write go by the clock when it formed (this.now():
+   * a node placement can take seconds, past a midnight another event already saw).
+   */
   private countFormed(kind: StatsKind, humans: readonly Waiter[], formed: FormedMatch, now: number): void {
-    addFormed(this.stat(now), {
+    const at = this.now();
+    addFormed(this.stat(at), {
       kind,
       humans: humans.length,
       waits: humans.map((h) => now - h.joinedAt),
@@ -1733,7 +1738,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       onNode: formed.node,
       whileLocal: humans.some((h) => h.local !== undefined),
     });
-    this.maybeFlushStats(now);
+    this.maybeFlushStats(at);
   }
 
   /**
