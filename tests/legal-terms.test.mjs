@@ -525,6 +525,8 @@ test("the deploy day's notice for Discord (docs/legal/avisos/2026-11-04-2.md): t
   assert.ok(msgs[0].startsWith('**Cambian los modos de juego y los Términos (versión 2026-11-04-2)**\n'), 'the title is its first line, in bold');
   // What the code does: São Paulo takes the match when it has room (MatchmakerDO formMatch).
   assert.match(msgs[0], /todas las que tienen mayoría de jugadores de Sudamérica, cuando hay lugar,/);
+  // A lobby open at the deploy closes (its old page's rejoin gets 426 reload_required): say so.
+  assert.match(msgs[0], /Las salas que estaban abiertas en el momento de la actualización se cierran: después de recargar, crea la sala de nuevo\./);
   // The link in < > (no embed), the only contact the public one.
   assert.match(msgs[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
   assert.doesNotMatch(msgs.join('\n'), /(?<!<)https?:\/\//, 'every link between < and >');
