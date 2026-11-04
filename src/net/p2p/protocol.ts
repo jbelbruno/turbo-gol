@@ -18,6 +18,7 @@
 import { PACKED_INPUT_BYTES } from '../../sim/types';
 import type { RulesSnapshot } from '../../game/physicsRules';
 import type { CarId } from '../../game/cosmetics';
+import type { Difficulty } from '../../ai/Bot';
 
 /**
  * Signaling protocol version (RoomWelcome.protocol; a mismatch tells the client to reload).
@@ -38,8 +39,12 @@ import type { CarId } from '../../game/cosmetics';
  *      mutator fingerprint its arena reads back; the room refuses a peer whose fingerprint is not
  *      the room's (error ROOM_ERROR_PHYSICS_MISMATCH, its socket closed: the others play on with
  *      the team AI in that slot). Standard physics did not change (the golden stock trace).
+ *   6: the bots' level is the room's: RoomWelcome.botDifficulty (always present; the lobby host
+ *      picks it, LobbySettings.bots) instead of a constant medium on every peer. A page from before
+ *      would run medium bots next to peers running another level and desync: it is refused at the
+ *      welcome (P2P_ERROR_RELOAD) and reloads; a welcome without a level this page can read too.
  */
-export const P2P_PROTOCOL_VERSION = 5;
+export const P2P_PROTOCOL_VERSION = 6;
 
 /**
  * Error code of a P2P protocol mismatch, on both paths: POST /api/queue { kind: 'p2p' } without
@@ -127,6 +132,11 @@ export interface RoomWelcome {
    * with them (botPhysicsOf). A room with physics has no server fallback and records nothing.
    */
   physics: RulesSnapshot | null;
+  /**
+   * The level every peer's BotTeams run at (protocol 6: the lobby host's pick). Part of the shared
+   * simulation: RoomClient refuses a welcome without a level it knows (P2P_ERROR_RELOAD).
+   */
+  botDifficulty: Difficulty;
 }
 
 export type RoomServerMessage =

@@ -184,3 +184,25 @@ test('the Sala across a reload: read once; as it was inside the server grace, jo
   assert.equal(R.takeLobbyStay(now, s), null);
   assert.equal(R.takeLobbyStay(now, null), null, 'no storage: nothing');
 });
+
+const ACC = await import('../src/net/account.ts');
+
+test("the lobby's bots level: Hard when the settings name none (a new lobby, a Worker of before); the host's SETTINGS row and the Sala's line say it, in both languages", async () => {
+  assert.equal(ACC.LOBBY_BOTS_DEFAULT, 'hard');
+  assert.equal(ACC.lobbyBots({}), 'hard');
+  assert.equal(ACC.lobbyBots({ bots: undefined }), 'hard');
+  for (const d of ['easy', 'medium', 'hard']) assert.equal(ACC.lobbyBots({ bots: d }), d);
+  const en = (await import('../src/locales/en.ts')).default;
+  const es = (await import('../src/locales/es.ts')).default;
+  for (const msgs of [en, es]) {
+    assert.match(msgs['custom.info'], /^\{mode\} · \{length\} · \{bots\} · \{visibility\}\{lock\}$/);
+    assert.match(msgs['custom.infoBots'], /\{level\}/);
+  }
+  assert.deepEqual([en['custom.settingBots'], es['custom.settingBots']], ['Bot difficulty', 'Dificultad de los bots']);
+  assert.deepEqual([en['custom.infoBots'], es['custom.infoBots']], ['Bots: {level}', 'Bots: {level}']);
+  // The SETTINGS dialog has the row, and the public list's row never shows the level (custom.ts).
+  const custom = readFileSync(new URL('../src/ui/screens/custom.ts', import.meta.url), 'utf8');
+  assert.match(custom, /cycler<Difficulty>\(t\('custom\.settingBots'\)/);
+  const row = custom.slice(custom.indexOf('const row = (l: LobbySummary)'), custom.indexOf('const empty = ()'));
+  assert.ok(row.length > 0 && !/bots/i.test(row), 'a public row knows nothing of the bots');
+});

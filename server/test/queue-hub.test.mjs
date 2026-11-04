@@ -216,6 +216,28 @@ test('alone at 5:00 with the tab visible: a solo match in its prefer (it on blue
   assert.equal((await w.stats()).soloRooms, 1);
 });
 
+test("the bots' level of a Casual MatchDO match: the KV flag bot_level (hard when unset or junk), pooled and solo alike; a ranked match carries none (RoomHost's medium for a leaver's car)", async () => {
+  for (const [flags, want] of [[{}, 'hard'], [{ bot_level: 'easy' }, 'easy'], [{ bot_level: ' MEDIUM ' }, 'medium'], [{ bot_level: 'expert' }, 'hard'], [{ bot_level: '' }, 'hard']]) {
+    const w = await makeHubWorld({ flags });
+    await w.join(pid());
+    assert.equal((await w.join(pid())).json.status, 'matched');
+    assert.equal(w.created()[0].body.botDifficulty, want, JSON.stringify(flags));
+  }
+  const s = await makeHubWorld({ flags: { bot_level: 'medium' } });
+  const a = pid();
+  await s.join(a);
+  s.advance(Q.SOLO_AFTER_MS);
+  assert.equal((await s.join(a)).json.humans, 1, 'the 5:00 solo match');
+  assert.equal(s.created()[0].body.botDifficulty, 'medium');
+  // Ranked: no level whatever the flag says (a flip must never change how the counted mode plays).
+  const r = await makeHubWorld({ flags: { bot_level: 'easy' } });
+  await r.join(pid(), { kind: 'ranked', mode: '1v1' });
+  assert.equal((await r.join(pid(), { kind: 'ranked', mode: '1v1' })).json.status, 'matched');
+  const create = r.created()[0].body;
+  assert.equal(create.ranked, true);
+  assert.equal('botDifficulty' in create, false);
+});
+
 test('a hidden tab keeps its clock past 5:00 and gets no solo match; its first visible POST forms it at once', async () => {
   const w = await makeHubWorld();
   const a = pid();

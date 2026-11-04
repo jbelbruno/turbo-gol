@@ -10,8 +10,10 @@
  *                            welcome of another P2P_PROTOCOL_VERSION fails with code
  *                            P2P_ERROR_RELOAD (the page is stale: the session says "reload"), one
  *                            whose `physics` is missing or not rules this build reads (strict:
- *                            parseLobbyRules) with P2P_ERROR_BAD_PHYSICS; the welcome handed on
- *                            carries the parsed rules (null = standard physics)
+ *                            parseLobbyRules) with P2P_ERROR_BAD_PHYSICS, one without a bots level
+ *                            this build knows (`botDifficulty`, protocol 6) with P2P_ERROR_RELOAD;
+ *                            the welcome handed on carries the parsed rules (null = standard
+ *                            physics) and the level
  *   senders                  signal(to, data), ready(physicsFp), unreachable(slot, atTick), hashReport(...),
  *                            requestTurn() (the room's 'turn' answer goes to onTurn(iceServers))
  *   log                      every message in / out but ping / pong (signals: type only) goes to
@@ -36,6 +38,7 @@ import type { P2PLogSink } from './DebugLog';
 import { signalKind } from './Mesh';
 import { P2P_ERROR_BAD_PHYSICS, P2P_ERROR_RELOAD, P2P_PROTOCOL_VERSION, ROOM_ERROR_SIGNAL_DROPPED, type IceServer, type RoomClientMessage, type RoomServerMessage, type RoomSlot, type RoomWelcome, type SignalData } from './protocol';
 import { parseLobbyRules } from '../../game/physicsRules';
+import type { Difficulty } from '../../ai/Bot';
 
 export const ROOM_PING_INTERVAL_MS = 2000;
 /** Ping cadence once the match runs (keeps the room socket alive; the offset is no longer used). */
@@ -73,6 +76,11 @@ export function describeSlots(slots: readonly RoomSlot[]): string {
 /** Structural check of a server frame: an object with a string `type` (the fields are checked per case). */
 function isServerMessage(v: unknown): v is RoomServerMessage {
   return typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string';
+}
+
+/** A bots level of src/ai/Bot.ts (the welcome's botDifficulty). */
+function isBotLevel(v: unknown): v is Difficulty {
+  return v === 'easy' || v === 'medium' || v === 'hard';
 }
 
 export class RoomClient {
@@ -305,9 +313,15 @@ export class RoomClient {
           this.fail(P2P_ERROR_BAD_PHYSICS, 'room rules this page cannot read');
           return;
         }
-        const w: RoomWelcome = { ...msg, physics };
+        // The bots' level is part of the shared simulation too: a peer that guessed it would desync.
+        const bots: unknown = (msg as { botDifficulty?: unknown }).botDifficulty;
+        if (!isBotLevel(bots)) {
+          this.fail(P2P_ERROR_RELOAD, `room bots level ${JSON.stringify(bots ?? null)} this page cannot read`);
+          return;
+        }
+        const w: RoomWelcome = { ...msg, physics, botDifficulty: bots };
         this.welcome = w;
-        this.log.push('room.welcome', `${w.roomId.slice(0, 8)} ${w.mode} seed ${w.seed} you ${w.you.slot} slots [${describeSlots(w.slots)}] ice ${w.iceServers.length}${physics === null ? '' : ` rules "${physics.name}" ${JSON.stringify(physics.values)}`}`);
+        this.log.push('room.welcome', `${w.roomId.slice(0, 8)} ${w.mode} seed ${w.seed} you ${w.you.slot} slots [${describeSlots(w.slots)}] ice ${w.iceServers.length} bots ${bots}${physics === null ? '' : ` rules "${physics.name}" ${JSON.stringify(physics.values)}`}`);
         // A coarse first offset (biased by the one-way latency): only until the first pong.
         if (typeof msg.now === 'number' && this.samples === 0) {
           const t = this.now();

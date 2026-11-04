@@ -352,8 +352,9 @@ test('nodes_on absent: a Casual match is a MatchDO, the node registry is never a
   assert.equal(h.nodes.calls.length, 0, 'no call to the NodeRegistryDO');
   const st = await h.stats();
   assert.deepEqual([st.rooms, st.active, st.nodeLocks], [1, 2, 0]);
-  // do_disabled is read before the MatchDO is created (a group let in for the nodes may outlive them: no MatchDO under it).
-  assert.deepEqual([...new Set(h.flags.reads)].sort(), ['do_disabled', 'nodes_on', 'vm_disabled']);
+  // do_disabled is read before the MatchDO is created (a group let in for the nodes may outlive them: no MatchDO under it);
+  // bot_level is the formation's bots level (env.ts casualBotLevel).
+  assert.deepEqual([...new Set(h.flags.reads)].sort(), ['bot_level', 'do_disabled', 'nodes_on', 'vm_disabled']);
   // A server lock verified with its MatchDO, never with the registry.
   h.setTime(h.time() + M.LOCK_VERIFY_AFTER_MS);
   const r = await h.join(A);
@@ -375,7 +376,7 @@ test('nodes not configured (a fork, a test env): nodes_on is not even read and n
   const [qa] = await h.pair(A, B);
   assert.equal(qa.json.wsUrl, '/ws/' + qa.json.matchId);
   assert.equal(created(h).length, 1);
-  assert.deepEqual(h.flags.reads, [], 'no KV read');
+  assert.deepEqual(h.flags.reads, ['bot_level'], 'no node flag read: only the formation\'s bots level');
   const full = await makeMm({ flags: { nodes_on: '1' }, configured: false, rooms: M.MAX_ACTIVE_ROOMS });
   assert.equal((await full.join(A)).json.status, 'waiting');
   assert.equal((await full.join(B)).json.wait.busy, true);
@@ -397,7 +398,7 @@ test('a match placed on a node: node: true, the node’s own wss:// URL and tick
   assert.equal(created(h).length, 0, 'no MatchDO');
   const places = h.nodes.of('/internal/place');
   assert.equal(places.length, 1);
-  assert.deepEqual(places[0].body, { mode: '2v2', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: A, name: 'P-a1b2' }, { playerId: B, name: 'P-0123' }] }, 'no transports, no account fields');
+  assert.deepEqual(places[0].body, { mode: '2v2', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: A, name: 'P-a1b2' }, { playerId: B, name: 'P-0123' }], botDifficulty: 'hard' }, 'no transports, no account fields; Casual bots at the default level, hard');
   assert.deepEqual([qa.json.mode, qa.json.host, qa.json.humans], ['2v2', 'SA', 2]);
   const st = await h.stats();
   assert.deepEqual([st.rooms, st.active, st.nodeLocks], [0, 2, 0 + 2], 'MAX_ACTIVE_ROOMS does not count it');
@@ -422,7 +423,31 @@ test('a lone Casual human after 5:00 goes to a node too (hosted SA): its solo ma
   assert.deepEqual([r.json.kind, r.json.node, r.json.mode, r.json.humans], [undefined, true, '3v3', 1]);
   const place = h.nodes.of('/internal/place')[0].body;
   assert.deepEqual([place.mode, place.humans], ['3v3', [{ playerId: C, name: 'P-fedc' }]]);
+  assert.equal(place.botDifficulty, 'hard', 'the solo match\'s bots: the Casual default (no node release: node 0.3.0 reads assign.botDifficulty)');
   assert.equal(h.room.calls.length + created(h).length, 0);
+});
+
+test('the KV flag bot_level sets the level a node match is placed with (pooled and solo); junk or unset is hard; ranked never carries one', async () => {
+  const solo = async (flags) => {
+    const h = await makeMm({ flags: { nodes_on: '1', ...flags } });
+    await h.join(C, 'server');
+    h.setTime(h.time() + Q.SOLO_AFTER_MS);
+    assert.equal((await h.join(C, 'server')).json.status, 'matched');
+    return h.nodes.of('/internal/place')[0].body.botDifficulty;
+  };
+  assert.equal(await solo({ bot_level: 'medium' }), 'medium');
+  assert.equal(await solo({ bot_level: ' Easy ' }), 'easy', 'case and spaces ignored');
+  assert.equal(await solo({ bot_level: 'insane' }), 'hard');
+  assert.equal(await solo({}), 'hard');
+  const pooled = await makeMm({ flags: { nodes_on: '1', bot_level: 'easy' } });
+  await pooled.pair(A, B);
+  assert.equal(pooled.nodes.of('/internal/place')[0].body.botDifficulty, 'easy');
+  const ranked = await makeMm({ flags: { nodes_on: '1', bot_level: 'easy' } });
+  await ranked.pair(A, B, 'ranked');
+  const place = ranked.nodes.of('/internal/place')[0].body;
+  assert.equal(place.ranked, true);
+  assert.equal('botDifficulty' in place, false, "ranked: the control plane's default (medium) for a leaver's car, whatever the flag says");
+  assert.equal(ranked.flags.reads.includes('bot_level'), false, 'not even read');
 });
 
 test('two Casual humans (an older page\'s p2p kind too) go to a node, never to a P2P room; a lobby start never asks for a placement (D10)', async () => {

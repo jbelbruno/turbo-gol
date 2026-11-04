@@ -4,9 +4,10 @@
  * screens/lobby.ts), the region (mn-picker: the region sheet), and the public lobbies (every
  * region, the player's own first) in 56 px rows (name, format, players / places, a state slot: OPEN,
  * IN MATCH, FULL; a full or playing row stays focusable and its press says why), or "No public
- * lobbies right now" with CREATE PUBLIC LOBBY. Also the host's SETTINGS dialog (configureLobby) and
- * the labels the Sala shares. Lobbies are always P2P (the modes redesign, November 2026): no
- * connection to pick, none to show.
+ * lobbies right now" with CREATE PUBLIC LOBBY. Also the host's SETTINGS dialog (configureLobby: the
+ * bots' level too, Hard unless the host picks another; the Sala's line shows it to the members, the
+ * public list never) and the labels the Sala shares. Lobbies are always P2P (the modes redesign,
+ * November 2026): no connection to pick, none to show.
  *
  * A TV guest whose anti-bot check is not ready (homeModel.ts roomsLocked: a remote may not pass one
  * that asks) gets the phone's sign-in instead of a join: JOIN WITH CODE shows a lock, its press and a
@@ -21,15 +22,17 @@
  * matchmaker, RoomDO).
  */
 import { h, setChildren } from '../dom';
-import { LOBBY_LENGTHS, PLAYLISTS, lobbyNameIssue } from '../../net/account';
+import { LOBBY_LENGTHS, PLAYLISTS, lobbyBots, lobbyNameIssue } from '../../net/account';
 import type { LobbySettings, LobbyState, LobbySummary, Playlist } from '../../net/account';
+import { DIFFICULTIES } from '../../render/Hud';
+import type { Difficulty } from '../../render/Hud';
 import { AccountError } from '../../net/AccountClient';
 import { isStock, parseLobbyRules, sameValues, snapshotOf, type RulesSnapshot } from '../../game/physicsRules';
 import type { ListedPreset } from '../../game/experimentalStore';
 import { t } from '../../i18n';
 import { lobbyRulesLine, presetName } from '../../render/rulesText';
 import type { Menu } from '../Menu';
-import { lobbyTitle, regionName } from '../names';
+import { difficultyName, lobbyTitle, regionName } from '../names';
 import { icon } from '../components/icons';
 import { picker } from '../components/picker';
 import { slot } from '../components/tile';
@@ -229,10 +232,13 @@ function settingsControls(s: LobbySettings, rules: RulesControls | null = null):
     const edit = rules.onEdit !== null ? secondary(t('custom.editPresets'), rules.onEdit) : null;
     rulesRow = h('div.mn-rules', null, pick.el, note, edit);
   }
+  // The bots' level of the lobby's matches (every peer runs it); a state of an older Worker has none: the default.
+  s.bots = lobbyBots(s);
   return [
     cycler<Playlist>(t('custom.settingMode'), PLAYLISTS.map((p) => ({ value: p, label: p })), () => s.mode, (v) => (s.mode = v)).el,
     cycler<'public' | 'private'>(t('custom.settingVisibility'), [{ value: 'public', label: t('custom.visibilityPublicListed') }, { value: 'private', label: t('custom.visibilityPrivateCode') }], () => s.visibility, (v) => (s.visibility = v)).el,
     cycler<number>(t('custom.settingLength'), LOBBY_LENGTHS.map((l) => ({ value: l, label: lengthLabel(l) })), () => s.matchLengthSeconds, (v) => (s.matchLengthSeconds = v)).el,
+    cycler<Difficulty>(t('custom.settingBots'), DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d) })), () => lobbyBots(s), (v) => (s.bots = v)).el,
     ...(rulesRow !== null ? [rulesRow] : []),
   ];
 }

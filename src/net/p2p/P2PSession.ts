@@ -93,6 +93,7 @@
  * RoomClient, Mesh and RollbackEngine are built per room.
  */
 import { BotTeam } from '../../ai/Team';
+import type { Difficulty } from '../../ai/Bot';
 import { botPhysicsOf } from '../../sim/mutators';
 import { MUTATOR_COUNT, mutatorFingerprint } from '../../sim/mutatorLayout';
 import type { RulesSnapshot } from '../../game/physicsRules';
@@ -215,8 +216,6 @@ export const HASH_REPORT_EVERY_MS = 10_000;
 export const SELF_STALL_MS = 1_000;
 /** ... and a link that dies this soon after such a stall ended was most likely lost to it. */
 export const SELF_STALL_RECENT_MS = GAME_DEAD_MS + 1_000;
-/** Bot difficulty of a P2P room (a room constant: every peer must use the same). */
-export const P2P_BOT_DIFFICULTY = 'medium';
 /** The red team's seed is offset from the room seed so the two teams do not share a noise stream. */
 export const RED_SEED_OFFSET = 1_000_003;
 /** Session checkpoint header: kickoffs, wasScored, isBot per slot. */
@@ -538,6 +537,8 @@ export class P2PSession {
    * the welcome, cleared when the session leaves the room.
    */
   rules: RulesSnapshot | null = null;
+  /** The current room's bots level (RoomWelcome.botDifficulty: every peer the same), null before the first welcome. Debug: window.__game.p2p.botLevel. */
+  botLevel: Difficulty | null = null;
   engine: RollbackEngineLike | null = null;
   mesh: MeshLike | null = null;
   room: RoomLike | null = null;
@@ -1569,8 +1570,10 @@ export class P2PSession {
     // The room's physics profile (the stock one for standard rules): the same integers on every
     // peer give the same profile, so the bots stay deterministic under any rules.
     const physics = botPhysicsOf(this.rules?.values ?? {});
-    this.blueTeam = new BotTeam({ team: Team.Blue, difficulty: P2P_BOT_DIFFICULTY, seed: w.seed, physics });
-    this.redTeam = new BotTeam({ team: Team.Red, difficulty: P2P_BOT_DIFFICULTY, seed: (w.seed + RED_SEED_OFFSET) | 0, physics });
+    // The room's bots level (protocol 6, the lobby host's pick): the same on every peer, as the seed.
+    this.botLevel = w.botDifficulty;
+    this.blueTeam = new BotTeam({ team: Team.Blue, difficulty: w.botDifficulty, seed: w.seed, physics });
+    this.redTeam = new BotTeam({ team: Team.Red, difficulty: w.botDifficulty, seed: (w.seed + RED_SEED_OFFSET) | 0, physics });
     this.teamsDirty = true;
     this.rebuildTeams();
     this.match = new Match({ lengthSeconds: w.matchLengthSeconds });

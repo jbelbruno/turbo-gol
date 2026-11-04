@@ -386,6 +386,7 @@ function welcomeFor(mySlot, slots) {
     iceServers: [{ urls: 'stun:stun.example:3478' }],
     now: 1_000_000,
     physics: null,
+    botDifficulty: 'medium',
   };
 }
 
@@ -1852,6 +1853,49 @@ test("a welcome of another P2P protocol: RoomClient fails with 'reload_required'
   assert.equal(env.session.state, 'idle');
   assert.equal(env.session.statusText, STATUS.reload);
   assert.equal(env.client.leaves, 1, 'the room lock is released on the way out');
+});
+
+// ---- the bots' level (protocol 6: RoomWelcome.botDifficulty, the lobby host's pick) --------------
+
+test("protocol 6: a peer of the build before (protocol 5, a constant medium) is refused with a reload, and so is a welcome without a level this page knows; never a match on a guessed level", () => {
+  // This page meets a room of the build before (or an old page meets ours: the same check on its side).
+  let r = scriptedRoomClient();
+  const old = { ...welcomeFor(0, SLOTS_1V1), protocol: 5 };
+  delete old.botDifficulty;
+  r.deliver(old);
+  assert.deepEqual(r.errors, [P.P2P_ERROR_RELOAD]);
+  assert.equal(r.welcomes.length, 0);
+  assert.equal(r.client.welcome, null);
+  for (const bad of [undefined, null, 'insane', 'Hard', 2]) {
+    r = scriptedRoomClient();
+    const w = welcomeFor(0, SLOTS_1V1);
+    if (bad === undefined) delete w.botDifficulty;
+    else w.botDifficulty = bad;
+    r.deliver(w);
+    assert.deepEqual(r.errors, [P.P2P_ERROR_RELOAD], JSON.stringify(bad ?? 'absent'));
+    assert.equal(r.welcomes.length, 0, 'never handed on');
+  }
+  for (const level of ['easy', 'medium', 'hard']) {
+    r = scriptedRoomClient();
+    r.deliver({ ...welcomeFor(0, SLOTS_1V1), botDifficulty: level });
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.welcomes[0].botDifficulty, level);
+  }
+});
+
+test("the room's bots level drives both BotTeams (every peer reads the same welcome, so the same level); the session shows it (window.__game.p2p.botLevel)", () => {
+  for (const level of ['easy', 'hard']) {
+    const env = makeSession();
+    env.session.joinAssigned('2v2', { kind: 'p2p', roomId: 'room1', ticket: 'TICKET', wsUrl: '/room/room1' });
+    assert.equal(env.session.botLevel, null, 'none before the welcome');
+    env.room.onWelcome({ ...welcomeFor(0, SLOTS_2V2), botDifficulty: level });
+    assert.equal(env.session.botLevel, level);
+    for (const team of [env.session['blueTeam'], env.session['redTeam']]) {
+      assert.equal(team['difficulty'], level);
+      assert.ok(team['bots'].length > 0, 'a bot in each team (slots 1 and 3)');
+      for (const bot of team['bots']) assert.equal(bot.difficulty, level);
+    }
+  }
 });
 
 // ---- experimental rules (a custom lobby's RoomWelcome.physics) ----------------------------------

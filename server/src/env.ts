@@ -1,4 +1,5 @@
 import type { IceServer } from '../../src/net/p2p/protocol';
+import type { Difficulty } from '../../src/ai/Bot';
 import { DEFAULT_MATCH_SECONDS } from '../../src/game/Match';
 
 /**
@@ -410,6 +411,33 @@ async function flagValue(env: Pick<Env, 'FLAGS'>, name: string): Promise<string 
 export async function flag(env: Pick<Env, 'FLAGS'>, name: string): Promise<boolean> {
   const v = await flagValue(env, name);
   return v === '1' || v === 'true' || v === 'on';
+}
+
+// ---- The bots' level ---------------------------------------------------------------------------
+
+/** The bots' levels (src/ai/Bot.ts DIFFICULTY_PARAMS), weakest first. */
+export const BOT_LEVELS: readonly Difficulty[] = ['easy', 'medium', 'hard'];
+
+/**
+ * The bots' level in a Casual match (pooled and the 5:00 solo match, on a MatchDO and on a
+ * community node) when the KV flag bot_level says nothing usable. Ranked sends no level: a leaver's
+ * car is driven at RoomHost's default (medium), whatever the flag says.
+ */
+export const CASUAL_BOT_LEVEL: Difficulty = 'hard';
+
+export function isBotLevel(v: unknown): v is Difficulty {
+  return typeof v === 'string' && (BOT_LEVELS as readonly string[]).includes(v);
+}
+
+/**
+ * The KV flag bot_level: 'easy' | 'medium' | 'hard' (case and spaces ignored); unset, unreadable
+ * or anything else is CASUAL_BOT_LEVEL, never an error. Read once per Casual formation; edge-cached
+ * 60 s like every flag, so a change lands within a minute or two. Set by hand, as every switch:
+ * `npx wrangler kv key put bot_level medium --binding FLAGS --remote` (server/README.md).
+ */
+export async function casualBotLevel(env: Pick<Env, 'FLAGS'>): Promise<Difficulty> {
+  const v = (await flagValue(env, 'bot_level'))?.trim().toLowerCase();
+  return isBotLevel(v) ? v : CASUAL_BOT_LEVEL;
 }
 
 // ---- Community nodes ---------------------------------------------------------------------------

@@ -462,12 +462,14 @@ export default {
   'custom.colHost': 'Host',
   'custom.colState': 'Status',
   'custom.loading': 'Loading lobbies…',
-  // Lobby settings labels (settingMode ... settingLength)
+  // Lobby settings labels (settingMode ... settingBots)
   'custom.settingMode': 'Mode',
   'custom.settingVisibility': 'Visibility',
   'custom.visibilityPublicListed': 'Public (listed)',
   'custom.visibilityPrivateCode': 'Private (code only)',
   'custom.settingLength': 'Duration',
+  // The level of the bots in the lobby's empty slots (Easy, Normal, Hard); every player's game runs the same
+  'custom.settingBots': 'Bot difficulty',
   'custom.nameField': 'Lobby name',
   'custom.passwordOptional': 'Password (optional)',
   // Placeholder of the optional password field
@@ -493,8 +495,10 @@ export default {
   'custom.joining': 'Joining the lobby…',
   'custom.notInLobby': "You're not in a lobby",
   'custom.back': 'BACK',
-  // Lobby summary line, e.g. '2v2 · 5 min · Public' (lobbies are always P2P). {lock} is ' · 🔒' when the lobby has a password, else empty.
-  'custom.info': '{mode} · {length} · {visibility}{lock}',
+  // Lobby summary line, e.g. '2v2 · 5 min · Bots: Hard · Public' (lobbies are always P2P); {bots} is custom.infoBots. {lock} is ' · 🔒' when the lobby has a password, else empty.
+  'custom.info': '{mode} · {length} · {bots} · {visibility}{lock}',
+  // The bots' level in that line; {level} is Easy, Normal or Hard
+  'custom.infoBots': 'Bots: {level}',
   'custom.public': 'Public',
   'custom.private': 'Private',
   // Label next to the lobby's join code
