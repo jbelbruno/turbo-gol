@@ -46,8 +46,11 @@
  *                        autoRegion, regions, oauth, accounts, botFillMs: the server queue's bot fill (BOT_FILL_MS),
  *                        auth: { devSignIn: the dev-only sign-in is open (mail.ts isDevAuth), email: the
  *                        flows that send mail may show (mail.ts emailAvailable), legacy: { phase, until }:
- *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) } }
+ *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) },
+ *                        legal: { terms: TERMS_VERSION or null, deletion: DELETION_OPEN is '1', graceDays } (env.ts legalConfig) }
  *                        (no auth; the client fetches it once per page load before its first POST /api/guest)
+ *   GET  /terminos, /privacidad, /terms, /privacy  the terms and the privacy policy (legalPages.ts), only
+ *                       while TERMS_VERSION is set; 404 not_found before (wrangler.jsonc routes them here first)
  *   POST /api/dev/signin, GET /api/dev/mail  the dev-only sign-in and the stub mailer's outbox (accountRoutes.ts
  *                       devRoute): only with DEV_AUTH=1 on a loopback host, else 404 as any unknown route
  *   GET  /api/health, GET /api/time
@@ -86,7 +89,7 @@
  * call too): the control plane's kill switch. server/README.md lists which flag stops what.
  */
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, SERVER_VERSION, carriesPhysics, error, flag, isHex, isMode, isModeList, isQueueKind, json, nodesAllowed, nodesConfigured, nodesMode, readJson } from './env';
+import { EXPERIMENTAL_REFUSED, SERVER_VERSION, carriesPhysics, error, flag, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
@@ -772,6 +775,8 @@ export default {
         waitUntil: ctx ? (p) => ctx.waitUntil(p) : undefined,
       });
     }
+    // ---- the terms and the privacy policy (legalPages.ts): only while TERMS_VERSION is set, else 404 ----
+    if (path === '/terminos' || path === '/privacidad' || path === '/terms' || path === '/privacy') return (await import('./legalPages')).legalPage(request, env);
     // ---- the game (Workers Assets): everything outside /api, /ws, /room, /lobby and /nodes ----
     if (!path.startsWith('/api/')) return serveAsset(request, env);
     const cors = corsHeaders(request, env);
@@ -784,7 +789,8 @@ export default {
       const cfg: Record<string, unknown> = serverConfig(request, env);
       // auth.legacy (sign-in PR 9, §3.10): the username sign-in's phase and cutoff, 'none' while LEGACY_PASSWORD_UNTIL is unset.
       const auth = { ...(cfg.auth as Record<string, unknown> | undefined), email: await emailAvailable(request, env), legacy: await legacyConfig(env) };
-      return withCors(json({ ...cfg, auth }, 200, { 'cache-control': 'no-store' }), cors);
+      // legal (env.ts legalConfig): the terms version in force (null until the owner publishes) and DELETION_OPEN.
+      return withCors(json({ ...cfg, auth, legal: legalConfig(env) }, 200, { 'cache-control': 'no-store' }), cors);
     }
     // ---- /api/where (edge colo / country / masked ip; no secret needed) ----
     if (path === '/api/where') return withCors(where(request), cors);
@@ -793,7 +799,8 @@ export default {
     try {
       // /api/news/unsubscribe (sign-in PR 13): an account route outside /api/auth/, so the login-CSRF
       // gate leaves its one-click form (RFC 8058: no Origin) through; its JSON form asks for it itself.
-      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe';
+      // /api/admin/account-delete (the legal draft's P4): a maintainer's deletion on request, an account route too.
+      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe' || path === '/api/admin/account-delete';
       // The dev-only routes (accountRoutes.ts devRoute) exist only behind their gate: closed, they are
       // an unknown route (404), never counted by a limit and never near the AccountsDO.
       const dev = path.startsWith('/api/dev/') && isDevAuth(request, env);

@@ -349,6 +349,16 @@ html[data-input='keyboard'] .mn-own-tabs .mn-sec-key {
   gap: 0.5rem;
 }
 
+/* The terms and the privacy policy (hintbar.ts legal, once published: the legal draft's P12) on
+   Inicio's bar only, after About as two more links; About lists them on every screen. */
+.mn-links-legal {
+  display: contents;
+}
+
+.mn:not([data-screen='home']) .mn-links-legal {
+  display: none;
+}
+
 /* As wide as its pills at least: a crowded bar overflows (data-fit shrinks it) rather than the pills
    sliding under the hints. */
 .mn-hint-mid {
@@ -610,6 +620,31 @@ html[data-shell='tabs'] .mn-hint {
 
 html[data-shell='tabs'] .mn-link {
   height: 2rem;
+}
+
+/* Upright, Inicio's line has no room for the terms and the privacy policy too (Spanish, 360 wide):
+   they take a second line of their own (hintbar.ts legal), without their leading separator. */
+html[data-layout='portrait'] .mn[data-screen='home'] .mn-hint-legal {
+  height: 4rem;
+}
+
+html[data-layout='portrait'] .mn[data-screen='home'] .mn-hint-legal .mn-links {
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 0;
+}
+
+html[data-layout='portrait'] .mn[data-screen='home'] .mn-links-legal {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+html[data-layout='portrait'] .mn-links-legal > :first-child {
+  display: none;
 }
 
 html[data-shell='tabs'] .mn-tabbar {

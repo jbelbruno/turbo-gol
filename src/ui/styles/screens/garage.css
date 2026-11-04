@@ -1,5 +1,5 @@
 /* GARAJE (src/ui/screens/garage.ts; plan §1.4.2, PR 8; the owner's hub-garaje-pc): the left column
-   (TU AUTO, PUNTOS DE SERVIDOR, GANA PUNTOS), the stage in the middle where the showroom camera
+   (TU AUTO, PUNTOS DE SERVIDOR, the earn card), the stage in the middle where the showroom camera
    frames the car (measured by the screen) and the right column (AUTOS │ ESTADIOS, the list, the
    detail card). The shell's backdrop steps aside on this screen (data-screen, read by the Menu as it
    mounts: super low's flat page too, the cards stay opaque). Slanted and chamfered shapes are drawn
@@ -185,7 +185,7 @@ html.tg-superlow .mn[data-screen='garage'] {
   height: 1.125rem;
 }
 
-/* GANA PUNTOS: a neutral card, lime while nothing can be redeemed (then CANJEAR is the lime one). */
+/* The earn card (ALOJAR UN SERVIDOR DA PUNTOS): a neutral card, lime while nothing can be redeemed (then CANJEAR is the lime one). */
 .mn-gar-earn {
   position: relative;
   isolation: isolate;
@@ -292,7 +292,7 @@ html.tg-superlow .mn[data-screen='garage'] {
   border-bottom: 3px solid var(--brand);
 }
 
-/* A phone's points line ("0 PTS · Cómo ganar puntos ›"): GANA PUNTOS' and the points card's place. */
+/* A phone's points line ("0 PTS · Cómo se ganan ›"): the earn card's and the points card's place. */
 .mn-gar-compact {
   display: none;
   flex: none;

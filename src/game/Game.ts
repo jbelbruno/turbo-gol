@@ -175,7 +175,10 @@ import { t } from '../i18n';
 import type { Outcome } from '../net/outcome';
 import { sessionValid } from '../net/NetClient';
 import type { NetClient, ServerAssignment } from '../net/NetClient';
-import { AccountClient, oauthErrorText, parseAuthHash } from '../net/AccountClient';
+import { AccountClient, AccountError, oauthErrorText, parseAuthHash } from '../net/AccountClient';
+import { GuestTerms } from '../net/terms';
+import { TermsDeclined, termsGate } from '../ui/screens/terms';
+import { pendingFromProvider } from '../ui/screens/deletion';
 import { TrainingStore } from './trainingStore';
 import { ExperimentalStore, type ExperimentalProblem } from './experimentalStore';
 import { MAX_PRESETS, canonicalValues, type PhysicsValues } from './physicsRules';
@@ -1128,6 +1131,9 @@ export class Game implements P2PGameHooks {
     this.accounts = accounts;
     online.client.sessionProvider = (minValidMs) => accounts.sessionForQueue(minValidMs);
     online.client.onSessionRejected = () => accounts.sessionRejected();
+    // The terms' acceptance before a session goes online (the legal draft's P2, P33): nothing until the owner publishes a version.
+    const guestTerms = new GuestTerms();
+    online.client.beforeSession = (account, signal) => termsGate(this.menu, guestTerms, account, signal);
     this.trainingStore = new TrainingStore({ accountId: () => accounts.account?.playerId ?? null, push: (r) => accounts.pushTraining(r) });
     this.experimental = new ExperimentalStore({
       accountId: () => accounts.account?.playerId ?? null,
@@ -1136,7 +1142,8 @@ export class Game implements P2PGameHooks {
       upsert: (p) => accounts.upsertPreset(p),
       remove: (id) => accounts.deletePreset(id),
     });
-    this.lobby = new LobbyClient({ bearer: async () => (await online.client.ensureGuest()).session });
+    // A lobby says why it did not open when the terms' sheet was closed (LobbyClient words every other session failure).
+    this.lobby = new LobbyClient({ bearer: async () => (await online.client.ensureGuest().catch((e: unknown) => Promise.reject(e instanceof TermsDeclined ? new AccountError(t('legal.declined'), 0, 'terms_declined') : e))).session });
     // The account's cars: its session's car and inventory widen what the pick may hold (the views exist: it may dress the player's car).
     this.garage = new Garage(accounts, this.carPick, () => this.dressLocalCar());
     this.menu = createMenu(this.menuHost(), opts.hudContainer);
@@ -1206,6 +1213,8 @@ export class Game implements P2PGameHooks {
     if (auth !== null) history.replaceState(null, '', location.pathname + location.search);
     // Kept only for a provider's round trip: any other page load forgets it.
     const detour = takeDetour();
+    // Its owner's deletion is pending (the legal draft's P5): the provider this tab started, read before its mark goes.
+    const keepWith = auth?.kind === 'error' && auth.code === 'deletion_pending' ? this.accounts.startedProvider() : null;
     // A provider's round trip that signed nobody in: "continue as" learns nothing from it (its mark goes).
     if (auth?.kind === 'error' && auth.code !== 'no_account') this.accounts.providerAbandoned();
     if (auth?.kind === 'confirm' || (auth?.kind === 'error' && auth.code === 'no_account')) {
@@ -1217,8 +1226,10 @@ export class Game implements P2PGameHooks {
       if (auth === null && this.accounts.hintName === null) return;
       const a = await this.accounts.restore();
       if (auth !== null) {
-        if (auth.kind === 'error') this.menu.toast(oauthErrorText(auth.code), 'error');
-        else if (a !== null) {
+        // deletion_pending: CONSERVAR MI CUENTA signs in with that provider again (deletion.ts), while the deletion screens are open.
+        if (auth.kind === 'error') {
+          if (!(auth.code === 'deletion_pending' && (await pendingFromProvider(this.menu, keepWith)))) this.menu.toast(oauthErrorText(auth.code), 'error');
+        } else if (a !== null) {
           const hello = auth.kind === 'new' ? t('game.welcomeNew', { name: a.name }) : auth.kind === 'linked' ? t('game.accountLinked') : auth.kind === 'reauth' ? t('profile.reauthDone') : t('profile.hello', { name: a.name });
           // Signed in, the identity pending in this browser not linked: the reason with the hello.
           const linkError = auth.kind === 'ok' && auth.linkError !== undefined ? ` ${oauthErrorText(auth.linkError)}` : '';
@@ -1426,7 +1437,7 @@ export class Game implements P2PGameHooks {
       config: async (): Promise<MenuConfig> => {
         if (net === null) return { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null };
         const c = await net.config();
-        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, botFillMs: c.botFillMs ?? null };
+        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null };
       },
       // A guest's only: an account (or a page that was one: its hint) registers no guest.
       prewarmAntiBot: () => {

@@ -915,7 +915,9 @@ test("PERFIL's sign-in routes on '@': an address by email, a username by the leg
   const closed = login.indexOf("if (route.kind === 'closed')");
   assert.ok(closed > 0 && closed < login.indexOf('await acc.'), 'the cutoff answers before any request');
   assert.match(login.slice(closed, login.indexOf('try {', closed)), /user\.error\(legacyClosedText\(\)\);\s*newAccount\.hidden = false;\s*return;/);
-  assert.match(login, /if \(route\.kind === 'email'\) await acc\.signIn\(route\.email, pass\.input\.value\);\s*else await acc\.legacySignIn\(route\.username, pass\.input\.value\);/);
+  // The password typed, sent again with cancelDeletion when the account's deletion is pending and the player keeps it (the legal draft's P5).
+  assert.match(login, /const password = pass\.input\.value;/);
+  assert.match(login, /if \(route\.kind === 'email'\) await acc\.signIn\(route\.email, password, \{ cancelDeletion \}\);\s*else await acc\.legacySignIn\(route\.username, password, \{ cancelDeletion \}\);/);
   assert.match(login, /route\.kind === 'legacy' \? t\('auth\.badLegacyHint'\) : providers\.length > 0 \? t\('auth\.badCredentialsHint', \{ providers \}\) : null/, "bad_credentials' hint by branch");
   assert.match(login, /field\(closed \? t\('auth\.email'\) : t\('auth\.identity'\)/, '"Email or username" while usernames sign in');
 });

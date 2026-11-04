@@ -101,6 +101,7 @@ import {
 } from './protocol';
 import { nodeCarsOf, type CosmeticQueueResult } from './cosmetics';
 import { guestNameOf } from './guestName';
+import { TERMS_VERSION_RE } from './terms';
 import type { CarId } from '../game/cosmetics';
 
 export const GUEST_STORAGE_KEY = STORAGE_PREFIX + 'guest';
@@ -301,6 +302,8 @@ export interface ServerConfig {
   oauth?: string[];
   /** The server queue's bot fill, ms (MatchmakerDO BOT_FILL_MS: the menus' "bots join in"); null from an older Worker. */
   botFillMs?: number | null;
+  /** legal.terms: the terms version in force (src/net/terms.ts), absent until the owner publishes them (Inicio's links then: the legal draft's P12). */
+  terms?: string;
 }
 
 /** POST /api/guest body: no name, the server names every guest (a name sent anyway is ignored). */
@@ -312,6 +315,8 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
   if (typeof v !== 'object' || v === null) return null;
   const o = v as Record<string, unknown>;
   const key = o.turnstileSiteKey;
+  // The terms version only once the owner published one (unpublished, the config is read as before).
+  const terms = typeof o.legal === 'object' && o.legal !== null ? (o.legal as Record<string, unknown>).terms : undefined;
   return {
     turnstileSiteKey: typeof key === 'string' && key.length > 0 ? key : null,
     protocol: typeof o.protocol === 'number' ? o.protocol : 0,
@@ -320,6 +325,7 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
     autoRegion: typeof o.autoRegion === 'string' ? o.autoRegion : '',
     oauth: Array.isArray(o.oauth) ? o.oauth.filter((x): x is string => typeof x === 'string') : [],
     botFillMs: typeof o.botFillMs === 'number' && Number.isFinite(o.botFillMs) && o.botFillMs > 0 ? o.botFillMs : null,
+    ...(typeof terms === 'string' && TERMS_VERSION_RE.test(terms) ? { terms } : {}),
   };
 }
 
@@ -567,6 +573,13 @@ export class NetClient {
   sessionProvider: ((minValidMs?: number) => Promise<GuestSession | null>) | null = null;
   /** The server refused the session (401): an account refreshes it (AccountClient.sessionRejected). */
   onSessionRejected: (() => Promise<unknown>) | null = null;
+  /**
+   * Asked before ensureGuest hands out a session (`account`: the signed-in account's, else the
+   * guest's, stored or new): the terms' acceptance (src/ui/screens/terms.ts termsGate). It resolves
+   * at once while there is nothing to accept; a rejection (NetError 'cancelled': the player closed
+   * the sheet) stops the queue, the lobby or the rejoin that asked. Null: nothing asked.
+   */
+  beforeSession: ((account: boolean, signal?: AbortSignal) => Promise<void>) | null = null;
   /** The Bearer of the last queue / rejoin (an account's or the guest's): leave / ice / cancel use it. */
   lastBearer: string | null = null;
   /** Whose `lastBearer` it is: refreshBearer only swaps in a session of the same player. */
@@ -658,11 +671,14 @@ export class NetClient {
     if (this.sessionProvider !== null) {
       const a = await this.sessionProvider();
       if (a !== null) {
+        if (this.beforeSession !== null) await this.beforeSession(true, signal);
         this.lastBearer = a.session;
         this.lastBearerPlayer = a.playerId;
         return a;
       }
     }
+    // The terms' acceptance (the legal draft's P2, P33) before a guest's session is used or made.
+    if (this.beforeSession !== null) await this.beforeSession(false, signal);
     const g = this.storedGuest();
     if (g !== null) return g;
     // A lobby join, a queue and a sign-up can ask together: one registration (and one widget) at a

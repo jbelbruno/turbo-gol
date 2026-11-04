@@ -5,3 +5,9 @@ declare module '*.wasm' {
   const mod: WebAssembly.Module;
   export default mod;
 }
+
+/** A `.md` import is its text in workerd (rule Text in wrangler.jsonc): docs/legal/*.md, legalPages.ts. */
+declare module '*.md' {
+  const text: string;
+  export default text;
+}

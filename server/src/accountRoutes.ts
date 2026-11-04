@@ -66,7 +66,7 @@
  *     into the pending cookie `__Host-tg_pend` (JWT typ 'pend': { p, id, email, trust, p2? }, HttpOnly,
  *     SameSite=Lax, 30 minutes) and /#auth=confirm asks "do you already have a Turbogol account?":
  *   POST /api/auth/pending    {} (pending cookie)                 -> { provider, email, trust, second, match } | 404 no_pending
- *   POST /api/auth/pending/create { username, news, lang, tz, turnstileToken } (pending cookie) -> AccountSession +
+ *   POST /api/auth/pending/create { username, news, lang, tz, turnstileToken, acceptTerms? } (pending cookie) -> AccountSession +
  *                             refresh cookie | 400 bad_username / name_reserved { suggest } | 409 username_taken /
  *                             name_lookalike { suggest } (the email sign-up's name rules) | email_has_account |
  *                             already_linked | 403 turnstile_failed | 404 no_pending | 429 (new accounts per network:
@@ -201,6 +201,12 @@ export const ACCOUNT_SESSION_TTL_SECONDS = 60 * 60;
  * account without one.
  */
 export const REAUTH_WINDOW_S = 10 * 60;
+/**
+ * The maintainer gate's freshness (nodeRoutes.ts MAINTAINER_FRESH_S, the same value: a test checks;
+ * not imported, since nodeRoutes.ts imports this file): POST /api/admin/account-delete takes a
+ * maintainer whose device typed its password this recently.
+ */
+export const ADMIN_FRESH_S = 15 * 60;
 export const SERVER_KDF_ITERATIONS = 100_000;
 export const REFRESH_COOKIE = '__Host-tg_rt';
 const OAUTH_COOKIE = '__Host-tg_oa';
@@ -1673,7 +1679,7 @@ function timeZoneOf(v: unknown): string {
 async function pendingCreate(c: RouteContext): Promise<Response> {
   const pend = await readPending(c);
   if (pend === null) return noPending();
-  const b = await readJson<{ username?: unknown; news?: unknown; lang?: unknown; tz?: unknown; turnstileToken?: unknown }>(c.request);
+  const b = await readJson<{ username?: unknown; news?: unknown; lang?: unknown; tz?: unknown; turnstileToken?: unknown; acceptTerms?: unknown }>(c.request);
   if (!b) return error(400, 'bad_request');
   const blocked = await c.antiBot(b.turnstileToken);
   if (blocked !== null) return blocked;
@@ -1692,6 +1698,8 @@ async function pendingCreate(c: RouteContext): Promise<Response> {
     lang: b.lang === 'es' || b.lang === 'en' ? b.lang : '',
     tz: timeZoneOf(b.tz),
     news: b.news === true,
+    // The terms version the notice above CREAR showed (the AccountsDO records only the one in force).
+    terms: b.acceptTerms,
   });
   if (!r.ok) return noStore(r.res);
   return withCookies(json(await accountSession(c.env, r.data)), [refreshCookie(refreshTok), clearCookie(PENDING_COOKIE, 'Lax')]);
@@ -2326,11 +2334,46 @@ async function deleteCancel(c: RouteContext): Promise<Response> {
   return noStore(await accountsCall(c.env, '/delete-cancel', { token }));
 }
 
+// ---- deletion on request (the legal draft's P4: Ley 25.326 art. 16.2, 5 business days) -------------
+//
+//   POST /api/admin/account-delete  Bearer { account: <its id or username>, confirm: <its username, typed>,
+//                                   receivedAt?: <ms or YYYY-MM-DD> } -> { certificate } (AccountsDO.ts
+//                                   DeletionCertificate: a reference, the dates and a digest, nothing personal,
+//                                   for the owner to send back within 72 hours) | 400 bad_request / bad_confirm |
+//                                   401 | 403 tv_session / not_trusted / reauth_required { level: 2 } | 404 no_user |
+//                                   409 maintainer_account | 415 / 403 bad_origin (the game's Origin and JSON, R1) |
+//                                   429 | 503 retry. The maintainer gate of /nodes/admin/* (nodeRoutes.ts): a
+//                                   NODE_TRUSTED_OPERATORS account's own session, not a TV's, whose device typed
+//                                   its password in the last MAINTAINER_FRESH_S. The account goes now, with no
+//                                   grace: a suspended one and one without an address too (they cannot use
+//                                   PERFIL's button), through the purge the alarm runs. Open whatever
+//                                   DELETION_OPEN says: answering a request by mail is the law's, not a button's.
+//                                   From the browser's console on turbo-gol.com: docs/legal/README.md.
+
+/** POST /api/admin/account-delete (the legal draft's P4): the maintainer gate, then the AccountsDO's deletion and its certificate. */
+async function adminAccountDelete(c: RouteContext): Promise<Response> {
+  const refused = crossSiteRefusal(c, '/api/admin/account-delete');
+  if (refused !== null) return refused;
+  const s = requirePrimary(c);
+  if (s instanceof Response) return s;
+  if (!trustedOperatorIds(c.env).has(s.sub)) return error(403, 'not_trusted', 'only the project deletes accounts on request');
+  const fresh = requireFresh(c, 2, ADMIN_FRESH_S);
+  if (fresh instanceof Response) return fresh;
+  const b = await readJson<{ account?: unknown; confirm?: unknown; receivedAt?: unknown }>(c.request);
+  if (!b || typeof b.account !== 'string' || b.account.trim().length === 0 || b.account.length > 64 || typeof b.confirm !== 'string' || b.confirm.length > 128) return error(400, 'bad_request');
+  const receivedAt = typeof b.receivedAt === 'number' || (typeof b.receivedAt === 'string' && b.receivedAt.length <= 16) ? b.receivedAt : undefined;
+  return noStore(await accountsCall(c.env, '/admin-delete', { account: b.account, confirm: b.confirm, by: s.sub, receivedAt }));
+}
+
 // ---- the news consent and unsubscribing (sign-in PR 13: §2.11, §3.14; no news is sent yet) ----------
 //
 //   POST /api/me/consent          Bearer (account, not a TV) { kind: 'news', granted } -> { news, terms } | 400
 //                                 bad_consent | 403 tv_session | 409 email_required (a grant needs a verified address)
 //                                 / deletion_pending { purgeAt } | 429. PERFIL's switch, the game's Origin and JSON (R1).
+//                                 Bearer (account, a TV's too) { kind: 'terms', version } -> { news, terms }: the
+//                                 re-accept sheet (the legal draft's P1, P33), the version in force only (400 bad_consent
+//                                 while TERMS_VERSION is unset, as before; 409 terms_changed { version } for another). Accepting the
+//                                 terms changes no credential, so a TV signed in with the phone accepts on its own screen.
 //   POST /api/news/unsubscribe    two forms, one answer, { ok: true } for any id (an unknown or spent one too), so
 //                                 ids cannot be tested; that id's account gets a news withdrawal and a new id:
 //                                 1. the page's (/account#unsub=<id>): JSON { u }, the game's Origin (R1);
@@ -2342,13 +2385,22 @@ async function deleteCancel(c: RouteContext): Promise<Response> {
 //                                 Outside /api/auth/*, so the login-CSRF gate (crossSiteRefusal) does not run
 //                                 before it: its JSON form asks for it itself.
 
-/** POST /api/me/consent { kind: 'news', granted } (§2.11): a full Bearer (not a TV's); the AccountsDO decides every refusal. */
+/**
+ * POST /api/me/consent { kind: 'news', granted } (§2.11): a full Bearer (not a TV's); { kind: 'terms',
+ * version } (the re-accept sheet): any account's Bearer, a TV's too. The AccountsDO decides every refusal.
+ */
 async function meConsent(c: RouteContext): Promise<Response> {
   const refused = crossSiteRefusal(c, '/api/me/consent');
   if (refused !== null) return refused;
+  const b = await readJson<{ kind?: unknown; granted?: unknown; version?: unknown }>(c.request);
+  if (b?.kind === 'terms') {
+    const a = requireAccount(c);
+    if (a instanceof Response) return a;
+    if (typeof b.version !== 'string' || b.version.length === 0 || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+    return noStore(await accountsCall(c.env, '/me-consent', { userId: a.sub, kind: 'terms', version: b.version }));
+  }
   const s = requirePrimary(c);
   if (s instanceof Response) return s;
-  const b = await readJson<{ kind?: unknown; granted?: unknown }>(c.request);
   if (!b || b.kind !== 'news' || typeof b.granted !== 'boolean') return error(400, 'bad_consent', 'Consentimiento inválido');
   return noStore(await accountsCall(c.env, '/me-consent', { userId: s.sub, kind: 'news', granted: b.granted }));
 }
@@ -2580,6 +2632,8 @@ export async function accountRoute(c: RouteContext, url: URL): Promise<Response 
     // Account deletion (sign-in PR 12).
     if (p === '/api/me/delete') return meDelete(c);
     if (p === '/api/auth/delete/cancel') return deleteCancel(c);
+    // Deletion on request, a maintainer's (the legal draft's P4).
+    if (p === '/api/admin/account-delete') return adminAccountDelete(c);
     // The news consent and unsubscribing (sign-in PR 13).
     if (p === '/api/me/consent') return meConsent(c);
     if (p === '/api/news/unsubscribe') return newsUnsubscribe(c, url);

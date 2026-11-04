@@ -34,6 +34,7 @@ import { DEAD_LINK_CODES, keepAttempt, keepLastSignIn, keepLink, localResendAt, 
 import type { AccountLink, LastSignIn, LegacyPhase, StoredAttempt } from './emailAuth';
 import type { FetchLike, ResponseLike, StorageLike } from './NetClient';
 import { claimAnswerOf, itemsAnswerOf, shopAnswerOf } from './cosmetics';
+import { TERMS_VERSION_RE, termsField } from './terms';
 import type { ClaimAnswer, ItemsAnswer, ShopAnswer } from './cosmetics';
 import { STORAGE_PREFIX } from '../brand';
 import { isCarId, type CarId } from '../game/cosmetics';
@@ -184,6 +185,8 @@ export interface CreateOptions {
   news: boolean;
   lang: string;
   tz: string;
+  /** The terms version the notice above CREAR showed (AuthConfig.terms), accepted with the press; absent or null: none shown. */
+  terms?: string | null;
 }
 
 /** How long after a credential proof (a sign-in, a re-authentication) the client counts it fresh: a little under the server's 10 minutes. */
@@ -318,13 +321,20 @@ export function readAccountHint(storage: Pick<StorageLike, 'getItem'> | null): A
  * What GET /api/config's `auth` says about signing in (the sign-in design's §2.1), each false or
  * 'none' from a server without it: `email` the flows that send mail may show (sign-up, forgot, a
  * first password: sign-in PR 7's mailer, its kill flag off), `devSignIn` the dev-only sign-in
- * (§3.15), `legacy` the username sign-in's phase and its cutoff (sign-in PR 9).
+ * (§3.15), `legacy` the username sign-in's phase and its cutoff (sign-in PR 9). From its `legal`
+ * (the legal draft's P12, P1, P5): `terms` the terms version in force, null until the owner publishes
+ * (then nothing of the terms shows: no link, notice or acceptance), and `deletion` PERFIL's BORRAR
+ * CUENTA and its screens are open (DELETION_OPEN).
  */
 export interface AuthConfig {
   email: boolean;
   devSignIn: boolean;
   legacy: LegacyPhase;
   legacyUntil: number | null;
+  terms: string | null;
+  deletion: boolean;
+  /** The days a deletion leaves to cancel it (DELETE_GRACE; 14 from a server that does not say). */
+  graceDays: number;
 }
 
 /** A sign-up's proof of the mailbox: the code typed in the browser that started it, or the mailed link's token. */
@@ -602,7 +612,7 @@ export class AccountClient {
   async createAccount(username: string, opts: CreateOptions): Promise<AccountSession> {
     const u = usernameIssue(username);
     if (u !== null) throw issueError(u, 'bad_username');
-    const res = await this.callAnonymous('/api/auth/pending/create', { username, news: opts.news, lang: opts.lang, tz: opts.tz });
+    const res = await this.callAnonymous('/api/auth/pending/create', { username, news: opts.news, lang: opts.lang, tz: opts.tz, ...termsField(opts.terms) });
     if (res.status === 409 || res.status === 400) {
       const b = (await res.json().catch(() => null)) as { error?: unknown; suggest?: unknown } | null;
       const read: ResponseLike = { ok: false, status: res.status, json: async () => b, text: async () => JSON.stringify(b) };
@@ -1073,7 +1083,7 @@ export class AccountClient {
    */
   authConfig(): Promise<AuthConfig> {
     if (this.authCfg !== null) return this.authCfg;
-    const none: AuthConfig = { email: false, devSignIn: false, legacy: 'none', legacyUntil: null };
+    const none: AuthConfig = { email: false, devSignIn: false, legacy: 'none', legacyUntil: null, terms: null, deletion: false, graceDays: 14 };
     let offline = false;
     const p = (async (): Promise<AuthConfig> => {
       let res: ResponseLike;
@@ -1085,11 +1095,21 @@ export class AccountClient {
       }
       if (!res.ok) return none;
       try {
-        const c = (await res.json()) as { auth?: { email?: unknown; devSignIn?: unknown; legacy?: { phase?: unknown; until?: unknown } } } | null;
+        const c = (await res.json()) as { auth?: { email?: unknown; devSignIn?: unknown; legacy?: { phase?: unknown; until?: unknown } }; legal?: { terms?: unknown; deletion?: unknown; graceDays?: unknown } } | null;
         const a = c?.auth;
         const phase = a?.legacy?.phase;
         const until = a?.legacy?.until;
-        return { email: a?.email === true, devSignIn: a?.devSignIn === true, legacy: phase === 'grace' || phase === 'closed' ? phase : 'none', legacyUntil: typeof until === 'number' && Number.isFinite(until) ? until : null };
+        const terms = c?.legal?.terms;
+        const grace = c?.legal?.graceDays;
+        return {
+          email: a?.email === true,
+          devSignIn: a?.devSignIn === true,
+          legacy: phase === 'grace' || phase === 'closed' ? phase : 'none',
+          legacyUntil: typeof until === 'number' && Number.isFinite(until) ? until : null,
+          terms: typeof terms === 'string' && TERMS_VERSION_RE.test(terms) ? terms : null,
+          deletion: c?.legal?.deletion === true,
+          graceDays: typeof grace === 'number' && Number.isInteger(grace) && grace >= 1 && grace <= 60 ? grace : 14,
+        };
       } catch {
         return none;
       }
@@ -1147,12 +1167,12 @@ export class AccountClient {
    * this device remembers an email sign-in. Name refusals reject with detail.suggest (the form puts
    * it in the field); the proof is never spent by them.
    */
-  async signupFinish(proof: CodeProof, f: { username: string; password: string; news: boolean; email: string }): Promise<AccountSession> {
+  async signupFinish(proof: CodeProof, f: { username: string; password: string; news: boolean; email: string; terms?: string | null }): Promise<AccountSession> {
     const u = usernameIssue(f.username);
     if (u !== null) throw issueError(u, 'bad_username');
     const p = passwordIssue(f.password, { username: f.username, email: f.email });
     if (p !== null) throw issueError(p, 'bad_password');
-    const body = { ...proofBody(proof), username: f.username, password: await passwordKey(f.password), news: f.news, lang: language(), tz: timeZone() };
+    const body = { ...proofBody(proof), username: f.username, password: await passwordKey(f.password), news: f.news, lang: language(), tz: timeZone(), ...termsField(f.terms) };
     const s = await this.settleLink(proof, true, async () => this.jsonOrFail<AccountSession>(await this.call('/api/auth/signup/finish', body)));
     if (!isSession(s)) throw new AccountError(t('error.server'), 200, 'protocol');
     keepAttempt(this.sessionStore, null);
@@ -1368,6 +1388,47 @@ export class AccountClient {
   /** M9's link (/account#keep=<token>): POST /api/auth/delete/cancel { token } calls the deletion off; link_invalid when it cannot any more. */
   async cancelDeletion(token: string): Promise<void> {
     await this.settleLink({ token }, true, async () => this.jsonOrFail<{ ok: true }>(await this.call('/api/auth/delete/cancel', { token })));
+  }
+
+  // ---- the terms of service (the legal draft's P1, P33) and deletion on request (P4) -----------------
+
+  /**
+   * The re-accept sheet's ACEPTAR (POST /api/me/consent { kind: 'terms', version }, a TV's Bearer
+   * too): the account accepts `version`, which its MeInfo keeps (in place: nothing redraws).
+   * Refusals: terms_changed (another version is in force since this page loaded its config),
+   * deletion_pending, bad_consent (no terms in force).
+   */
+  async acceptTerms(version: string): Promise<string | null> {
+    const owner = this.account?.playerId ?? null;
+    const r = (await this.ownCall('/api/me/consent', { kind: 'terms', version })) as { terms?: unknown } | null;
+    const terms = typeof r?.terms === 'string' ? r.terms : null;
+    if (this.me !== null && this.me.playerId === owner) this.me.terms = terms;
+    return terms;
+  }
+
+  /**
+   * A maintainer's deletion on request (POST /api/admin/account-delete, the legal draft's P4), from
+   * the browser's console on turbo-gol.com (docs/legal/README.md): `account` its id or username,
+   * `confirm` its username typed again, `receivedAt` when the request came (ms or YYYY-MM-DD).
+   * Resolves the certificate to send back. Refusals: reauth_required { level: 2 } (PERFIL's
+   * CONFIRMAR CON LA CONTRASEÑA first), not_trusted, bad_confirm, no_user, maintainer_account, retry.
+   */
+  async adminDeleteAccount(account: string, confirm: string, receivedAt?: number | string): Promise<unknown> {
+    const r = (await this.ownCall('/api/admin/account-delete', { account, confirm, ...(receivedAt !== undefined ? { receivedAt } : {}) })) as { certificate?: unknown } | null;
+    if (typeof r?.certificate !== 'object' || r.certificate === null) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r.certificate;
+  }
+
+  /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */
+  startedProvider(): OAuthProvider | null {
+    try {
+      const raw = this.sessionStore.getItem(PROVIDER_TRY_KEY);
+      if (raw === null) return null;
+      const v = JSON.parse(raw) as { p?: unknown; at?: unknown };
+      return (v.p === 'google' || v.p === 'discord') && typeof v.at === 'number' && this.now() - v.at < PROVIDER_TRY_MS ? v.p : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
