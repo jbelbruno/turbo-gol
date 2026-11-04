@@ -199,18 +199,31 @@ dl.mn-na-read {
   gap: 0.25rem;
 }
 
+/* A frozen wallet's row (PUNTOS): its account and date first, the freeze's reason on a line of its
+   own under them (in a column of its own it pushed the account over the next cell). */
+.mn-na-row > .mn-na-raw {
+  grid-column: 1 / -1;
+  order: 1;
+}
+
+/* A phone, upright or held sideways, and a tablet (820 wide, up to 130 %: nine columns there cut the
+   region and spill a state's tag into the next cell): two lines, the lag, egress, version and seen
+   columns dropped (the detail has them). */
 html[data-layout='phone'] .mn-na-row,
-html[data-layout='portrait'] .mn-na-row {
+html[data-layout='portrait'] .mn-na-row,
+html[data-layout='tablet'] .mn-na-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 html[data-layout='phone'] .mn-na-name,
-html[data-layout='portrait'] .mn-na-name {
+html[data-layout='portrait'] .mn-na-name,
+html[data-layout='tablet'] .mn-na-name {
   grid-column: span 2;
 }
 
 html[data-layout='phone'] .mn-na-x,
-html[data-layout='portrait'] .mn-na-x {
+html[data-layout='portrait'] .mn-na-x,
+html[data-layout='tablet'] .mn-na-x {
   display: none;
 }
 

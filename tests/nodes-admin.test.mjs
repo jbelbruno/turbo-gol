@@ -476,6 +476,17 @@ test('a pad or a keyboard reaches every read-only block: RESUMEN\'s warnings, co
   assert.match(NODES_CSS, /\.mn-na-read \{\s*--ring-offset: calc\(-1 \* var\(--focus-w\)\);\s*--ring-shadow: inset 0 0 0 calc\(var\(--focus-w\) \+ var\(--focus-gap\)\) var\(--ink\);\s*--ring-heel: none;\s*\}/);
 });
 
+test('a tablet\'s node rows drop the four extra columns as a phone\'s do (a state\'s tag never runs into the next cell); a frozen wallet\'s reason gets a line of its own', () => {
+  // 820 x 1180, up to 130 %: nine columns there cut the region and spilled "Suspendido" over 3/12.
+  for (const [sel, decl] of [['.mn-na-row', 'grid-template-columns: auto minmax\\(0, 1fr\\) auto;'], ['.mn-na-name', 'grid-column: span 2;'], ['.mn-na-x', 'display: none;']]) {
+    const list = ['phone', 'portrait', 'tablet'].map((l) => `html\\[data-layout='${l}'\\] \\${sel}`).join(',\\s*');
+    assert.match(NODES_CSS, new RegExp(`(?:^|\\})\\s*(?:/\\*[\\s\\S]*?\\*/\\s*)?${list}\\s*\\{\\s*${decl}\\s*\\}`), sel);
+  }
+  // The frozen list's row (account, reason, date): the reason, as long as a match id, under the other two.
+  assert.match(SCREEN, /navButton\('mn-na-row', \[h\('code\.mn-na-name', null, f\.account\), h\('code\.mn-na-raw', null, f\.reason\), h\('span\.mn-na-c', null, when\(f\.at\)\)\]/);
+  assert.match(NODES_CSS, /\.mn-na-row > \.mn-na-raw \{\s*grid-column: 1 \/ -1;\s*order: 1;\s*\}/);
+});
+
 test('nothing of the admin is kept: no localStorage, sessionStorage or IndexedDB in the panel or src/net/nodes.ts', () => {
   for (const src of [SCREEN, NODES]) assert.doesNotMatch(src, /localStorage|sessionStorage|indexedDB/);
 });
