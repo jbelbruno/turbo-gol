@@ -1,11 +1,12 @@
 # Turbogol server (Cloudflare Workers backend)
 
-The online backend of Turbogol: guest sessions, regional matchmaking, an
-authoritative match host that runs the **same RocketSim `.wasm` as the browser** inside a Durable
-Object at 120 Hz, streaming full-state snapshots at 30 Hz over WebSocket (phase 1, "server"
-matches), and the signaling rooms of the **peer-to-peer rollback matches** of lobbies (phase 2,
-"p2p"): the browsers simulate, the Worker only relays WebRTC signals, agrees the start and
-announces drops. Design: `docs/online/PHASE1.md`, `docs/online/PHASE2.md`; decisions:
+The online backend of Turbogol: guest sessions, matchmaking (one queue hub for Casual and ranked,
+and each region's matchmaker for its lobbies' rooms), an authoritative match host that runs the
+**same RocketSim `.wasm` as the browser** inside a Durable Object at 120 Hz, streaming full-state
+snapshots at 30 Hz over WebSocket (phase 1, "server" matches), and the signaling rooms of the
+**peer-to-peer rollback matches** of lobbies (phase 2, "p2p"): the browsers simulate, the Worker
+only relays WebRTC signals, agrees the start and announces drops. Design: `docs/online/PHASE1.md`,
+`docs/online/PHASE2.md` (both historical: the plans as written); decisions:
 `docs/online/DECISIONS.md`; wire protocols: `src/net/protocol.ts` (phase 1) and
 `src/net/p2p/protocol.ts` (phase 2), both shared with the client.
 
@@ -40,9 +41,15 @@ server/
   src/mailTemplates.ts  every mail (M1-M12) in es and en, text and html; src/mailCaps.ts: lanes, caps, the kill flag
   test/auth.test.mjs    JWT unit tests            (node, no server needed)
   test/roomHost.test.mjs RoomHost unit tests       (node, fake sim, no wasm needed)
-  test/room.test.mjs    phase 2 pure logic: start / drop decisions, roster + slot assignment, p2p formation timing, ICE list
-  test/smoke.mjs        phase 1 end-to-end against a running wrangler dev or a deploy (root: `npm run smoke:online` / `npm run smoke:remote`)
-  test/smoke-p2p.mjs    phase 2 end-to-end: two guests -> p2p room -> signaling, start, drops (grace alarm, majority) -> lone-human fallback
+  test/room.test.mjs    phase 2: start / drop decisions, roster + slot assignment, ICE list, and the RoomDO and MatchmakerDO
+                        on fakes (presence, leave, single-use seats, lock verification); the P2P queue's dormant helpers
+  test/queue-*.test.mjs the queue hub on fakes: queue-plan (formats, host region, hints, the estimate), queue-hub (the
+                        pool, the 5:00 match, caps, drops and its storage across an eviction), queue-stats (the counters)
+  test/smoke.mjs        phase 1 end-to-end against a running wrangler dev or a deploy, with two accounts (root:
+                        `npm run smoke:online` / `npm run smoke:remote`)
+  test/smoke-p2p.mjs    phase 2 end-to-end: two guests -> a lobby's P2P room -> signaling, start, drops (grace alarm,
+                        majority), lock release; a lone host's start -> need_players
+  test/smoke-target.test.mjs  every smoke script needs --api or API and exits 2 without one
   test/mail.test.mjs    the mailer, the stub, every template in es and en, the caps; a fake binding, nothing is sent
 ```
 
@@ -52,31 +59,40 @@ server/
 cd server
 npm i
 npm run dev            # wrangler dev --port 8787 (workerd + miniflare, no account needed)
-npm test               # unit tests on node 24 (no wasm): JWT auth, RoomHost on a fake sim, phase 2 room / matchmaker logic
-npm run smoke          # phase 1: guest -> queue -> leave -> WebSocket match vs a bot for 10 s, snapshot / hash checks
-npm run smoke -- --duration=20   # longer capture; prints a SUMMARY line (see "Deploy")
-node test/smoke-p2p.mjs          # phase 2: two guests -> one room -> signal relay, ready/start, unreachable/drop; lone guest -> server fallback (~25 s)
+npm test               # unit tests on node 24 (no wasm): JWT auth, RoomHost on a fake sim, the queue hub, phase 2 rooms
+npm run smoke -- --api=http://127.0.0.1:8787   # phase 1: two dev accounts queue (a 2v2 at once) -> leave -> WebSocket match for 10 s, snapshot / hash checks
+npm run smoke -- --api=http://127.0.0.1:8787 --duration=20   # longer capture; prints a SUMMARY line (see "Deploy")
+node test/smoke-p2p.mjs --api=http://127.0.0.1:8787          # phase 2: two guests -> a lobby room -> signal relay, ready/start, unreachable/drop; a lone host's start -> need_players
 npm run typecheck      # tsc --noEmit -p .   (also: npx tsc --noEmit -p server from the repo root)
 ```
 
+Every smoke script (`smoke.mjs`, `smoke-p2p.mjs`, `smoke-accounts.mjs`, `hardening.mjs`) needs its
+target, `--api=<base url>` or `API` (the flag wins): there is no default, and without one it prints
+how to run it and exits 2, so it never opens a request or a socket on somebody else's
+`127.0.0.1:8787`. Casual is for accounts, so `smoke.mjs`, `hardening.mjs` and `smoke-accounts.mjs`
+sign in dev accounts: the Worker needs `DEV_AUTH=1` (your own `.dev.vars`, or `--var DEV_AUTH:1`).
+
 From the repository root the same things are `npm run dev:api`, `npm run test:server`,
-`npm run smoke:online` and `npm run typecheck:server`; the RoomHost test on the real wasm
-(`tests/net-roomhost-wasm.test.mjs`: host and client sims in one process, hash per snapshot and
+`npm run smoke:online -- --api=<base url>` and `npm run typecheck:server`; the RoomHost test on
+the real wasm (`tests/net-roomhost-wasm.test.mjs`: host and client sims in one process, hash per snapshot and
 replay of the applied inputs between snapshots) runs with the root `npm test`. The Vite dev server
 proxies `/api`, `/ws` and `/room` to `127.0.0.1:8787` (see `vite.config.ts`); `wsUrl` is absolute
 (the Worker's own origin, `ws://127.0.0.1:8787/ws/<id>` or `/room/<id>` in dev), so the browser
 opens the socket straight to the Worker. A second checkout beside the first runs its Worker on
-another port with that port in both flags, and Vite with `TG_API_PORT` set to it:
+another port with that port in both `--port` and `--local-upstream`, and Vite with `TG_API_PORT`
+set to it:
 
 ```sh
-npx wrangler dev --port 8788 --host 127.0.0.1:8788 --persist-to .wrangler/state-8788   # in server/
-TG_API_PORT=8788 npx vite --port 5174 --strictPort                                    # at the root
+npx wrangler dev --port 8788 --ip 127.0.0.1 --local-upstream 127.0.0.1:8788 --persist-to .wrangler/state-8788   # in server/
+TG_API_PORT=8788 npx vite --port 5174 --strictPort                                                             # at the root
+node test/smoke.mjs --api=http://127.0.0.1:8788                                                                 # in server/: a smoke against it
 ```
 
-Without `--host` the Worker still builds every `wsUrl` (matches, P2P rooms, lobbies) on
-`127.0.0.1:8787`, the `dev.host` pinned in `wrangler.jsonc`: the browser would open its sockets
-against the other checkout's Worker, whose `JWT_SECRET` refuses the ticket. From the Claude desktop app the `api` entry in
-`.claude/launch.json` starts this server.
+Without `--local-upstream` (or `--host`, which sets the same in local mode) the Worker still
+builds every `wsUrl` (matches, P2P rooms, lobbies) on `127.0.0.1:8787`, the `dev.host` pinned in
+`wrangler.jsonc`: the browser, or a smoke script, would open its sockets against the other
+checkout's Worker, whose `JWT_SECRET` refuses the ticket. From the Claude desktop app the `api`
+entry in `.claude/launch.json` starts this server.
 
 The Worker also serves the game itself from `../dist` (Workers Assets, see "Deploy"): wrangler
 needs that directory to exist when it starts, so `npm run dev` creates an empty one if there is no
@@ -98,10 +114,10 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `DEV_AUTH` | your own `.dev.vars` only | `1` opens the dev-only routes on a loopback host: the dev sign-in (`POST /api/dev/signin`, PERFIL's ENTRAR (DEV)) and the stub's outbox (`GET /api/dev/mail`: the codes and links the stub "sent"); closed anywhere else whatever its value (404, as any unknown route). With `TG_LAN=1` the Vite proxy makes the network's requests loopback ones, so a script on that network gets in too (CONTRIBUTING.md). Never in `wrangler.jsonc` or any committed file (`test/dev-signin.test.mjs` checks them) |
 | `email_off` | KV `FLAGS` key | `1` / `true` / `on` stops every mail lane, no deploy (see docs/online/MAIL.md) |
 | `VITE_ORIGINS` | var, optional | comma-separated allowed browser origins for CORS and WebSocket `Origin`; empty = any (`*`). Under `wrangler dev` (the Worker reached on a loopback host) a loopback page origin such as the Vite dev server on any port is always accepted, so the committed production list does not block local play |
-| `MATCH_LENGTH_SECONDS` | var | regulation length (300) |
-| `REGION_OVERRIDE` | var | force a matchmaking region (empty = `request.cf.continent`, `dev` locally) |
+| `MATCH_LENGTH_SECONDS` | var | regulation length (180) |
+| `REGION_OVERRIDE` | var | force one matchmaking region for everything: the queue hub, every player's home and every lobby's matchmaker (empty = the hub is `SA`, a player's region is the menu's pick, else `request.cf.continent`, `dev` locally) |
 | `TURN_KEY_ID`, `TURN_KEY_TOKEN` | secrets, optional (both or none) | a Cloudflare Realtime TURN key: the room welcome then appends 10-minute TURN credentials minted per request (`POST .../turn/keys/{id}/credentials/generate-ice-servers`, `{ ttl: 600 }`); unset = STUN only (`stun.cloudflare.com:3478`) |
-| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node, where one can host: see "Community nodes"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
+| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, hosted in SA whatever their region: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
 | `NODES`, `NODE_REPLAYS`, `NODE_RELEASES` | Durable Object, R2, R2 | community nodes: the NodeRegistryDO, the replays the nodes upload, the signed releases and `channel.json` (see "Community nodes") |
 | `NODE_CONTROL_PRIVATE_KEY` | secret, optional | the Ed25519 key (PKCS#8, `npm run keys` in `nodes/`) that signs the players' node tickets; without it no match goes to a node |
 | `NODE_CONTROL_PUBLIC_KEY` | var | its public half, handed to every node at registration; a pair that does not match places nothing (ALERT) |
@@ -117,9 +133,9 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | Route | Body / headers | Result |
 |---|---|---|
 | `POST /api/guest` | `{ turnstileToken? }` (a `name` is ignored) | `GuestSession { playerId, name, session, expiresAt }`; the name is the server's, `Invitado NNNN` (1000-9999 from the player id, `src/net/guestName.ts`), shown in each player's language (`Guest NNNN`); a guest never chooses or changes it |
-| `POST /api/queue` | `{ api: 2, mode or modes, kind?, prefer?, region?, local?, visible? }`, `Authorization: Bearer <session>`; `kind` is `'server'` (Casual, the default; `'p2p'` is read as `'server'`) or `'ranked'` | the first answer of a search at once, then a long-poll up to 25 s: `{ status: 'waiting', waiting, region, wait }` (`wait` is a `QueueWait`, `src/net/queueWait.ts`; call again) or the phase 1 `{ status: 'matched', matchId, ticket, wsUrl: .../ws/<matchId> }` (with the nodes on, `node: true` and the community node's own `wss://` address and ticket) plus `mode`, `host` and `humans`; 403 `account_required` for a guest; 426 `reload_required` without `api: 2` (a page from before 2026-11-04); `409 { error: 'active_match', matchId, kind }` as before, while a match of yours is alive (a node match answers kind `server` with `node: true`) |
+| `POST /api/queue` | `{ api: 2, mode or modes, kind?, prefer?, region?, local?, visible?, first? }`, `Authorization: Bearer <session>`; `kind` is `'server'` (Casual, the default; `'p2p'` is read as `'server'`) or `'ranked'`; `first: true` (a JSON boolean: any other value is ignored, never echoed) marks the first POST of a client's search loop | the first answer of a search at once (a new search, one restored from a drop, or a POST with `first: true`, also while the hub still holds the old waiter, so a reloaded page's search answers with its clock), then a long-poll up to 25 s (about 33 s at most, when that poll's own formation waits on a node placement): `{ status: 'waiting', waiting, region, wait }` (`wait` is a `QueueWait`, `src/net/queueWait.ts`; call again) or the phase 1 `{ status: 'matched', matchId, ticket, wsUrl: .../ws/<matchId> }` (with the nodes on, `node: true` and the community node's own `wss://` address and ticket) plus `mode`, `host` and `humans`; 403 `account_required` for a guest; 426 `reload_required` without `api: 2` (a page from before 2026-11-04); 503 `do_disabled` only for a player the nodes are off for (see "Kill switches"); `409 { error: 'active_match', matchId, kind }` as before, while a match of yours is alive (a node match answers kind `server` with `node: true`) |
 | `POST /api/rejoin` | `{ matchId }`, Bearer | a fresh ticket for a server or node match that still has you in its roster (reconnection; p2p rooms have no rejoin: 410 `p2p_room`; a match you quit with `/api/leave { matchId }`: 410 `left`, or 404 when you were its last human: your quit ended it). A node match answers its node's ticket and `wss://` address with `node: true`, and 503 while the node is out of reach (your lock stays: try again); an id that names no match: 404, and its lock is freed |
-| `POST /api/leave` | `{ matchId?, connected? }`, Bearer | `{ ok, left, released }`, from the queue hub (`mm:SA`) and, when your region is another one, from that region's matchmaker too, where a lobby's P2P room lock lives (`released`: either released): drops you from the queue if you are still waiting (the menu's Esc / BACK calls it, so the 5:00 bots match does not open a match nobody joins). With the `matchId` of your server match (an explicit quit: the client's menu) that lock is freed too and the MatchDO closes your socket (1000 `left`) and hands your car to its bots for good; without a `matchId` a server match is not affected (queueing for a server match again answers `409 active_match` and the client rejoins it). A node match is quit the same way, but its node is told first: when it does not take the leave (out of reach, no answer in 8 s) the lock stays and `released` is false (like every lock, it holds only in its region; a Competitive match is also locked across regions). A leave while your match is being formed still counts: you are not put back in the queue, and a node match formed meanwhile is left (with `connected: false`). `connected: false` (you never got into the match) only goes to a node |
+| `POST /api/leave` | `{ matchId?, connected?, region? }`, Bearer | `{ ok, left, released }`, from the queue hub (`mm:SA`) and, when your region (`region`, else the automatic one) is another one, from that region's matchmaker too, where a lobby's P2P room lock lives (`released`: either released): drops you from the queue if you are still waiting, and forgets a dropped search of yours (the menu's Esc / BACK calls it, so the 5:00 bots match does not open a match nobody joins; a page that goes away sends no leave, so its search is kept as a drop). With the `matchId` of your server match (an explicit quit: the client's menu) that lock is freed too and the MatchDO closes your socket (1000 `left`) and hands your car to its bots for good; without a `matchId` a server match is not affected (queueing for a server match again answers `409 active_match` and the client rejoins it). A node match is quit the same way, but its node is told first: when it does not take the leave (out of reach, no answer in 8 s) the lock stays and `released` is false (a queue match's lock lives in the hub, a lobby room's in its region's matchmaker; a Competitive match is also locked in AccountsDO, across regions). A leave while your match is being formed still counts: you are not put back in the queue, and a node match formed meanwhile is left (with `connected: false`). `connected: false` (you never got into the match) only goes to a node |
 | `GET /ws/:matchId` | `Sec-WebSocket-Protocol: tg1, ticket.<jwt>` (role `player`) | 101 with `Sec-WebSocket-Protocol: tg1`; 400/401/403 before any Durable Object is touched |
 | `GET /room/:roomId` | same, with a role `peer` ticket whose `mid` is the room id | 101 to the RoomDO: first message `RoomWelcome` (JSON; see `src/net/p2p/protocol.ts`) |
 | `GET /api/health` | | `{ ok, version, protocol }` |
@@ -137,11 +153,13 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `GET /nodes/replays/top`, `GET /nodes/replays/mine`, `GET /nodes/replays/stars`, `POST /nodes/replays/<id>/star` | the first public; the rest Bearer account session (a guest: 403) | the stars (`NodeStore replay_stars`, one per account and match, 500 per account): `top` the most starred served matches (30 s per isolate), `mine` the account's own matches (by its seat: `replay_players`, never served as ids), `stars` the ids it starred, `star { on }` sets one and answers `{ stars, starred }`; 404 for a match that is not served, 409 `stars_full`; the count is public, who starred is never served; 30 per account per minute |
 | `GET /nodes/replays/<id>/view` | | one served match's replay for the browser viewer (`replay.html`): the node's upload, its SHA-256 checked against the index, the header rebuilt from the control plane's record (`src/replayIndex.ts`: no account or node id, no start time, hidden names); `x-replay-verified: 1` when a verifier checked it, else `0`; 404 `no_replay` for a void, unlisted, too recent (its hour not released yet), expired, delisted or oversized one (kept 5 minutes at the edge; a day, with an `ALERT` log line, for a listed one that fails the checks); edge- and browser-cached 3 hours; `X-Robots-Tag: noindex`; 120 object calls per network and 600 per IPv6 /48 a minute |
 | `GET /nodes/admin/nodes`, `POST /nodes/admin/status`, `/drain`, `/update`, `/reprobe`, `/grant`, `/revoke`, `/unfreeze`, `/delist` | Bearer account session of a `NODE_TRUSTED_OPERATORS` account; `{ nodeId, status, reason? }`, `{ nodeId, reason? }`, no body, `{ nodeId }`, `{ account, item }`, `{ account, item }`, `{ account }`, `{ matchId, reason? }` | the maintainers' routes (see "Community nodes"): 401, 403 `account_required` for a guest, 403 `not_trusted` for any other account; 30 per account per minute; every call is an `ALERT` naming the account. `grant` / `revoke` / `unfreeze` act on an account's items and wallet in AccountsDO (`account`: its 16-hex id; `item`: a catalog id of `nodes/control-plane/shop.ts`, 400 `unknown_item` otherwise): a grant is a claim that costs nothing, whatever the item's status; a revoke gives a claim's cost back (and the account drives the default car if it was that one); an unfreeze lets a frozen wallet claim again. `delist` takes a match out of the public replays (its index row and R2 object; the view's edge copy purged here, and in every location with `CF_ZONE_ID` and `CF_PURGE_TOKEN`; `docs/replays.md`) |
+| `GET /nodes/admin/queue-stats?days=N` | Bearer account session of a `NODE_TRUSTED_OPERATORS` account: its own session (not a TV's), at level 2 within 15 minutes | the public queues' anonymous daily counters from the hub (`{ days: QueueDay[] }`, `src/queueStats.ts`: totals only, no id, name, address or region), newest first, today's in-memory counts included, `days` 1 to 90 (default 30); 401, 403 `not_trusted` for any other account; 10 per account per minute (one count with `account-stats`); `no-store`, no CORS; answered with or without the node settings and with `nodes_off` set. From the game's console: `await __game.accounts.queueStats(30)` |
 | `GET /nodes/shop`, `POST /nodes/shop/claim` | Bearer account session; `{ item }` (or `itemId`) | aliases of `GET /api/me/shop` and `POST /api/me/shop/claim` (the hosts' shop lives in AccountsDO): answered with or without the node settings; 401, 403 `account_required` for a guest |
 | anything else | `GET` | the game (Workers Assets from `../dist`; unknown paths get `index.html`) |
 
 Rate limits: see "Rate limits" below (`src/limits.ts` holds every one in a single table).
-One active match per playerId (lock in the matchmaker, released when the MatchDO shuts down or,
+One active match per playerId (lock in the queue hub for a Casual or ranked match, in the region's
+matchmaker for a lobby's P2P room; released when the MatchDO shuts down or,
 for a p2p room, when the player's signaling socket closes / its slot is dropped / the room is
 cleaned up; expiring after regulation + 10 min, or the room TTL, as a fallback).
 
@@ -161,9 +179,46 @@ Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms kee
 * Capacity, global in the hub: 20 MatchDO in total (5 kept for ranked; at most 5 solo bots
   matches); at a cap the group waits (`wait.busy`), no 503. Node matches do not count.
 * Waiting answers carry `wait` (src/net/queueWait.ts): searching counts, the estimate, the 5:00
-  countdown, the widening. Daily anonymous counters: GET /nodes/admin/queue-stats.
+  countdown, the widening. A waiter held by a cap reads `busy` with `estimateKind: 'none'` and
+  `estimateMs: null` (Casual keeps `botsInMs`); a humans estimate that would round up to the 5:00
+  reads `'bots'` with `estimateMs = botsInMs`.
+* The first answer: a POST with `first: true` is answered at once (no long-poll), also while the
+  hub still holds that player's waiter, whose clock it continues; every later POST long-polls.
+* Drops: a waiter with no POST for 40 s is dropped; a join of the same player and kind within
+  10 min continues its clock (widening and the 5:00 too), also after the hub was evicted. A solo
+  match released less than 90 s after it formed was never played: its search gets its clock back
+  once (the next join gets a new solo at once); a second unplayed solo ends the search.
+* Storage of `mm:SA`, beside `active:`, `room:` and `stats:` (an idle hub is evicted from memory
+  long before 10 min: production after about 70-140 s with no request, local workerd after about
+  10 s):
+  * `recent:<playerId>`: a dropped search (`joinedAt`, `kind`, `home`, `until`, `stale`, and
+    `soloRetried: true` when it already had an unplayed solo); one write when it drops, one delete
+    when it is restored, left, or past its 10 min;
+  * `solo:<matchId>`: a node solo match's search (`playerId`, `joinedAt`, `home`, `at`, and
+    `retried: true` on a second solo) for its first 90 s; a MatchDO solo keeps the same in its
+    `room:` row until the match is released;
+  * `arrivals`: the estimator's ring of new searches (seconds, kind, home; no id; the last hour, at
+    most 2,000; a cancelled search is taken out again), written with the counters, rewritten without
+    the arrivals past their hour, deleted once none is left;
+  * the alarm (one per object, the earliest need wins): with nobody queued it writes the counts
+    not written yet once their minute is up, forgets a dropped search at its 10 min (counted as
+    dropped then) and a solo row at its 90 s, and rewrites the arrivals row.
+* Daily anonymous counters (`stats:YYYY-MM-DD`, totals only, 90 days): GET
+  /nodes/admin/queue-stats. They are written at most once a minute, so up to one minute of counts
+  (and of new arrivals) lives in memory only: a restart (a deploy, the platform moving the object)
+  or an eviction before that alarm (local workerd evicts after about 10 s) loses it, never a stored
+  day. Production's idle eviction (70-140 s) comes after the alarm, which is at most 60 s after the
+  last write.
+* `do_disabled` with the nodes on for a player: the hub never answers 503 and never creates a
+  MatchDO; every group the nodes are on for is hosted SA, node only, and waits busy until a node
+  takes it (also through the minute of no-hosts back-off). A group whose nodes were turned off while
+  it waited waits busy too, until the Worker's 503 ends each search at its next POST.
 * Lobbies: always P2P (a `'server'` setting is read as P2P), at least 2 members to start; create
-  and join without `api: 2` get 426 `reload_required`.
+  and join without `api: 2` get 426 `reload_required` (a page from before 2026-11-04 shows it as its
+  new-version sheet with RELOAD, in the server's Spanish text: it has no key of its own for it).
+  A lobby forms its room in its own region's matchmaker, which cannot see the hub's waiters (nor
+  the hub that room's lock): the client leaves its search before a lobby match starts, and POST
+  /api/leave goes to both.
 
 Humans alternate teams; slot order is blue humans, blue bots, red humans, red bots; slots
 are the sim's car creation order.
@@ -265,20 +320,22 @@ token (or `wrangler login`) with Workers Scripts and Workers Routes edit rights 
 
 The Worker answers only on the Custom Domain in `routes` (`workers_dev` and `preview_urls` are off);
 the Turnstile widget and `VITE_ORIGINS` must name that host. Turn on "Always Use HTTPS" for the zone:
-the game needs a secure context (WebCrypto for sign-in, `wss://` sockets). Open it and press ONLINE: the guest registration goes through the Turnstile widget, the
-queue fills with bots after 10 s and the match runs in a MatchDO near the edge that created it.
-Then measure, from every location that matters (docs/online/PHASE1.md, "Deploy and
-measurements"):
+the game needs a secure context (WebCrypto for sign-in, `wss://` sockets). Open it, sign in
+(Casual and ranked are for accounts; the sign-in goes through the Turnstile widget) and press
+JUGAR AHORA: two accounts searching together get a 2v2 at once, a lone one its bots match after
+5 minutes, in a MatchDO created with its host region's location hint (or on a community node,
+with the nodes on). Then measure, from every location that matters (docs/online/PHASE1.md,
+"Deploy and measurements"):
 
 ```sh
 curl https://<host>/api/where                                   # edge colo / country / asn seen by Cloudflare
 API=https://<host> npm run smoke:remote -- --duration=20         # SUMMARY edge=.. host=.. rtt_p50=.. snap_p50=.. desyncs=..
 ```
 
-With Turnstile on, the smoke cannot create a guest by itself: pass a browser session as
-`SESSION=<jwt>` (DevTools console on the deployed page after one ONLINE:
-`JSON.parse(localStorage.getItem('turbogol.guest')).session.session`); guest creation and the
-second-guest leave test are then skipped. Live logs: `npx wrangler tail` (your account) or the
+On a deploy there is no dev sign-in: give the smoke two account sessions, `SESSION=<jwt>` and
+`SESSION2=<jwt>` (sign in on the game in two browsers and copy each tab's Bearer: DevTools >
+Network, any `/api/` call); the third-account leave test is then skipped, and with Turnstile on
+the guest check is skipped too. Live logs: `npx wrangler tail` (your account) or the
 dashboard's observability (enabled in `wrangler.jsonc`). Redeploys reset running matches (the sim
 lives in memory): their players get `410 match_reset` and can queue again.
 
@@ -315,9 +372,9 @@ offered to a node first; when none takes it, or the control plane fails or
 does not answer within 8 s, the match goes to a MatchDO as before (after a failure, or when the
 region has no host online, the matchmaker stops asking for a minute, and meanwhile the region
 counts as without the nodes: at the cap the group waits (`wait.busy`) and, with `do_disabled`,
-503 `do_disabled` for Casual and ranked queues instead of a wait for a node). Lobby matches (P2P)
-never go to a node. `nodes_on` and `vm_disabled` are read through KV's 60 s edge cache,
-so a change takes up to about two minutes to reach every matchmaker:
+it waits busy for a node, never a 503 from the hub). Lobby matches (P2P) never go to a node.
+`nodes_on` and `vm_disabled` are read through KV's 60 s edge cache, so a change takes up to about
+two minutes to reach every matchmaker:
 
 ```sh
 npx wrangler kv key put nodes_on "<id1>,<id2>" --binding FLAGS --remote   # a canary: only these accounts
@@ -401,7 +458,7 @@ lands within a minute or two.
 | Flag | What it stops | What goes on |
 |---|---|---|
 | `matchmaking_off` | `POST /api/queue` and `POST /api/lobbies`: 503 `matchmaking_off` (no new match, room or lobby) | matches and lobbies already open, sign-in, the menus |
-| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503); with the nodes on for a player, its Casual and ranked queues wait for a node instead | node matches; sockets already open |
+| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group is hosted SA (node only) whatever its majority's region, and waits busy until a node takes it | node matches; sockets already open |
 | `vm_disabled` | no new match goes to a community node, whatever `nodes_on` says | the control plane and the nodes' sockets; matches already on a node |
 | `replays_off` | the public replays only: `GET /nodes/replays` and `GET /nodes/replays/<id>/view` answer 404, their edge-cached copies too (read once per isolate every 30 s), the object never asked | the nodes, the verifiers' signed replay routes, everything else |
 | `nodes_off` | every `/nodes/*` route that would reach the NodeRegistryDO: registration, the control socket's upgrade, replay uploads and downloads, tokens, `/nodes/mine`, `/nodes/status`, the replay list and view, the maintainers' routes (503 `nodes_off`, the object never asked), and the cron's health check. Set `vm_disabled` with it: sockets already open stay, and the matchmaker still reaches the object directly | the node releases and the installers (edge-cached), the shop aliases (AccountsDO) |
@@ -447,10 +504,11 @@ platform's DDoS protection.
 ## Limits and cost notes
 
 * **Durable Object duration** is billed while a MatchDO is alive: the tick loop keeps it awake for
-  the whole match (~5-6 min). Each incoming WebSocket message is a request (60 input packets/s +
-  4 pings/s per player; outgoing messages are free). A 3v3 is ~400 req/s, below the ~1,000 req/s
-  soft limit per object. Keep the DECISIONS.md quota (max 20 concurrent DO matches) in mind: it is
-  not enforced in code yet (phase 1 measures first).
+  the whole match (~3.5 min with the 180 s regulation, the kickoff and the end). Each incoming
+  WebSocket message is a request (60 input packets/s + 4 pings/s per player; outgoing messages are
+  free). A 3v3 is ~400 req/s, below the ~1,000 req/s soft limit per object. The DECISIONS.md quota
+  (max 20 concurrent DO matches) is enforced by the queue hub since 2026-11-04: 20 in total, 5 kept
+  for ranked, at most 5 solo bots matches; node matches do not count.
 * **Messages 20:1**: for every input packet in, the host sends ~0.5 snapshots out (30 Hz vs 60 pps);
   bandwidth per client ~45 KB/s down (1.5 KB snapshots) and ~2 KB/s up. Snapshot quantisation /
   deltas are phase 2.
