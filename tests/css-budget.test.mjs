@@ -257,9 +257,14 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // inline links): 163,713 B (main 163,571 B), the cap that plus about 0.6 KB. Its review adds
 // Inicio's footer links to the terms and the privacy policy (shell.css: Inicio only, a second line
 // of their own on an upright phone): 164,239 B (before 163,713 B), the cap that plus about 0.6 KB.
+// The modes redesign (PR B) adds Inicio's role templates (home.css: a guest's and a TV guest's grid
+// areas per layout, the "next" card), the TV guest's phone tile area (tiles.css) and the waiting
+// screens (screens/wait.css: MODOS' estimate and "While you wait", SALAS' second button, the Sala's
+// lone-host line, "While you search", the HUD's and the training panel's search strip): 166,861 B
+// (before 164,239 B), the cap that plus about 0.6 KB.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 164_840;
+const CSS_BUDGET = 167_460;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

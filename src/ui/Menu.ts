@@ -123,16 +123,20 @@ import { MODES } from '../sim/constants';
 import { OUTCOME_ACTION } from '../net/outcome';
 import type { Outcome } from '../net/outcome';
 import type { RejoinRecord } from '../game/rejoinStore';
+import type { QueueWait } from '../net/queueWait';
+import type { QueueTimes } from './screens/searchModel';
+import { openWaitSheet } from './screens/waitSheet';
+import { openTvSignIn } from './screens/tvSignIn';
 
 export type SearchKind = 'casual' | 'ranked';
 
+/** A search: Casual and Competitive always play on a server (the modes redesign, November 2026). */
 export interface SearchRequest {
   kind: SearchKind;
+  /** Competitive: its playlists; Casual: its preferred format (one playlist), the pool takes every format. */
   modes: GameMode[];
   /** null = automatic (the continent of the connection). */
   region: RegionId | null;
-  /** Casual only: a P2P room (default) or a server match. Ranked is always the server. */
-  net: 'p2p' | 'server';
 }
 
 export interface SearchView {
@@ -145,8 +149,14 @@ export interface SearchView {
   since: number;
   /** The running search's region (null = automatic). */
   region: RegionId | null;
-  /** The queue it joined (MODOS' bots countdown: which path fills with bots, and when); null when none runs. */
-  net?: 'p2p' | 'server' | null;
+  /** The last waiting answer's `wait` (src/net/queueWait.ts; null: none yet, or an older server). */
+  wait?: QueueWait | null;
+  /** performance.now() when it arrived (0: none yet). */
+  waitAt?: number;
+  /** Waiting answers of this search so far (Menu's "While you search" opens on the first). */
+  answers?: number;
+  /** The search's requests fail and are tried again (the network is away). */
+  retrying?: boolean;
   /** The last failure (shown once as a toast), null when none. */
   error: string | null;
   /** That failure is the server refusing this page's version (426 reload_required): reload to play online. */
@@ -165,8 +175,10 @@ export interface MenuConfig {
   autoRegion: string;
   oauth: string[];
   online: boolean;
-  /** The server queue's bot fill, ms (GET /api/config botFillMs: MODOS' "bots join in"), null when the Worker did not say. */
+  /** The server queue's bot fill, ms (GET /api/config botFillMs), null since the modes redesign (MODOS counts the 5:00 instead). */
   botFillMs: number | null;
+  /** GET /api/config's queue times (the 5:00, the widening per kind), null from an older Worker (searchModel.ts' defaults). */
+  queue?: QueueTimes | null;
   /** GET /api/config legal.terms: the terms version in force, null or absent until the owner publishes them (Inicio's footer links them then). */
   terms?: string | null;
 }
@@ -201,6 +213,13 @@ export interface MenuHost {
   /** Solve the anti-bot check ahead (Inicio shown: NetClient.prewarmAntiBot). */
   prewarmAntiBot?(): void;
   /**
+   * The anti-bot check would pass without asking (NetClient.antiBotReady: a guest session, a warm
+   * quiet token, no sitekey): a TV guest's rooms open (homeModel.ts roomsLocked).
+   */
+  readonly antiBotReady?: boolean;
+  /** A match against the AI reached its FINAL on this page (not a quit): a guest's "next" card on Inicio. */
+  readonly aiMatchEnded?: boolean;
+  /**
    * The guest's name: the server's wire form ('Invitado 4821', shown through names.ts playerName), or
    * game.guestName before the first guest session. A guest never chooses or changes it.
    */
@@ -215,21 +234,29 @@ export interface MenuHost {
    */
   readonly theme: ThemeId;
   setTheme(id: ThemeId): void;
-  /** An offline friendly match against the bots. */
+  /**
+   * An offline friendly match against the bots; while a search queues, the unlimited match of the
+   * wait instead (it keeps the search, the match found ends it: Game.startWaitBots).
+   */
   playFriendly(mode: GameMode, difficulty: Difficulty): void;
   /**
    * Free play or a shot pack; `opts.rules` (a preset id) makes free play experimental for an
-   * unlocked player (packs always run stock physics).
+   * unlocked player (packs always run stock physics). While a search queues it keeps the search
+   * (experimental free play is not offered then: queue matches are stock physics).
    */
   startTraining(id: string, opts?: { rules?: string }): void;
   search(req: SearchRequest): void;
   cancelSearch(): void;
   searchView(): SearchView;
   /**
-   * Free play with the running search alive (MODOS' "While you wait: Free play"): a match found
-   * ends it and plays (Game.practiceToMatch); quitting it comes back to the menus still searching.
+   * Play locally with the running search alive (MODOS' "While you wait: VS BOTS · TRAIN", "While
+   * you search"): an unlimited match against the bots (the VS AI tab's format and difficulty) or
+   * free play; the match found ends it and plays (Game.waitToMatch); quitting comes back to the
+   * menus still searching. Nothing starts when no search queues.
    */
-  practiceWhileSearching(): void;
+  waitPlay(kind: 'bots' | 'training'): void;
+  /** Casual's preferred format changed: a running Casual search carries it at once (NetClient.queuePrefer), no restart. */
+  setQueuePrefer(mode: GameMode): void;
   /** A custom lobby started: join this member's match. */
   playLobbyMatch(result: QueueResult | QueueResultP2p): void;
   /** The server match this tab may join again (rejoinStore.ts: a reload, a lost connection), or null. */
@@ -442,6 +469,8 @@ export class Menu {
   private lastTry: (() => void) | null = null;
   private visibleNow = false;
   private searching = false;
+  /** A search started from Inicio's hero or the FINAL: "While you search" opens on its first waiting answer. */
+  private waitSheetDue = false;
   /** The lobby pill is up (renderLobbyPill). */
   private lobbyPillUp = false;
   /** Settings opened from the menus are up (Menu.openSettings). */
@@ -629,16 +658,26 @@ export class Menu {
   }
 
   /**
-   * Start a search (Inicio's hero, Casual's and Competitive's FIND MATCH): its kind is the queue
-   * JUGAR AHORA repeats (MenuPrefs.lastQueue); the pill, the hints and the screen on top follow at
-   * once (renderSearch).
+   * Start a search (Inicio's hero, Casual's and Competitive's FIND MATCH, the FINAL's PLAY AGAIN):
+   * its kind is the queue JUGAR AHORA repeats (MenuPrefs.lastQueue); the pill, the hints and the
+   * screen on top follow at once (renderSearch). `opts.sheet` (the hero, the FINAL): "While you
+   * search" opens on its first waiting answer (screens/waitSheet.ts; MODOS has the choice inline).
    */
-  startSearch(req: SearchRequest): void {
-    this.lastTry = () => this.beforeMatch(() => this.startSearch(req));
+  startSearch(req: SearchRequest, opts: { sheet?: boolean } = {}): void {
+    this.lastTry = () => this.beforeMatch(() => this.startSearch(req, opts));
     this.prefs.lastQueue = req.kind;
     this.savePrefs();
+    this.waitSheetDue = opts.sheet === true;
     this.host.search(req);
     this.renderSearch(performance.now());
+  }
+
+  /**
+   * The TV's sign-in with the phone (screens/tvSignIn.ts): a TV guest's way into the rooms while its
+   * anti-bot check is not ready (Inicio, SALAS), here so the lobby screens stay loadable under node.
+   */
+  tvSignIn(): void {
+    openTvSignIn(this);
   }
 
   /** Back into the server match this tab lost (MenuHost.rejoinMatch): Inicio's hero, the lost sheet. */
@@ -1499,7 +1538,7 @@ export class Menu {
         }
       })
       .catch(() => {
-        this.cfg = { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null };
+        this.cfg = { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null, queue: null };
         this.refreshChrome();
       });
   }
@@ -1754,6 +1793,16 @@ export class Menu {
       this.refocus();
     }
     this.searchPill.set(v, now);
+    // "While you search": on the first waiting answer of a search the hero or the FINAL started
+    // (after the terms and the sign-in), over the menus only; a search matched or ended first shows none.
+    if (this.waitSheetDue) {
+      // Gone to MODOS meanwhile: its searching panel has the same choice.
+      if (!v.active || this.top()?.id === 'modes') this.waitSheetDue = false;
+      else if ((v.answers ?? 0) > 0 && this.visibleNow && this.modalEl === null && !this.settingsUp()) {
+        this.waitSheetDue = false;
+        openWaitSheet(this);
+      }
+    }
     if (v.active !== this.searching) {
       this.searching = v.active;
       this.root.classList.toggle('mn-searching', v.active);

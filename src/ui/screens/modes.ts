@@ -4,23 +4,29 @@
  * IA (the tile that opened it says which: Menu.open's tab, Screen.setTab). Three columns on a PC:
  * the tabs, the tab's own content, and the action zone aligned at the bottom.
  *
- * - CASUAL / COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY (named by format only). A
- *   format's press picks it and searches (from Inicio, a Casual search of a chosen format is two
- *   presses), and while that kind searches it restarts the search, as the note under the grid
- *   says. Then Region (the region sheet) and, for Casual, Advanced (Connection: auto, P2P, server).
- *   The action zone: the queue, one line, FIND MATCH (focused on a first visit); a guest's
- *   Competitive is SIGN IN (PERFIL as a detour: a sign-in there comes back here, FIND MATCH
- *   focused), a banned player's says why and for how long (duration()) and offers PLAY CASUAL.
- * - The searching panel, as drawn and without "play with bots now": FINDING A MATCH, UNRANKED (or
- *   RANKED), the clock, the queue, where and (over the threshold) how many play, "bots join in"
- *   only when true for the path the search takes (modesModel.ts botsCountdown: the server queue's
- *   botFillMs from /api/config, the P2P queue's P2P_FILL_WAIT_MS), CANCEL SEARCH (keyboard X, pad
- *   Y, the pill's ✕ too) and "While you wait: Free play" (MenuHost.practiceWhileSearching).
- * - SALAS (PR 12): JOIN WITH CODE, the region and the public list (custom.ts lobbyBrowser) in the tab;
- *   the action is CREATE LOBBY AND SHARE (screens/lobby.ts createAndShare), BACK TO LOBBY ABC 234
- *   while the player is in one (kept with KEEP THE LOBBY: the screen no longer comes back by itself).
+ * - CASUAL: FORMAT IF YOU PLAY BOTS, 1v1, 2v2 and 3v3 (Casual pools every format: with other
+ *   people the format follows how many they are, as the note under the grid says); its pick is the
+ *   search's `prefer` and, while Casual searches, changes the running search in place (no restart:
+ *   MenuHost.setQueuePrefer). COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY, whose
+ *   pick restarts a running search, as its note says. A format's press picks it and searches (from
+ *   Inicio a search of a chosen format is two presses). Then Region (the region sheet). Both always
+ *   play on a server (the modes redesign, November 2026: no connection to pick). The action zone:
+ *   the queue, one line, FIND MATCH (focused on a first visit); a guest's Casual and Competitive are
+ *   SIGN IN (PERFIL as a detour: a sign-in there comes back here, FIND MATCH focused), a banned
+ *   player's Competitive says why and for how long (duration()) and offers PLAY CASUAL.
+ * - The searching panel: FINDING A MATCH, UNRANKED (or RANKED), the clock, the queue, where, the
+ *   estimate, how many search (and in your region), the widening, what is wrong when something is
+ *   (the servers full, no network: screens/searchModel.ts waitLines), Casual's 5:00 box to its
+ *   online bots match (modesModel.ts botsCountdown, from the answer's botsInMs), CANCEL SEARCH
+ *   (keyboard X, pad Y, the pill's ✕ too) and "While you wait: VS BOTS · TRAIN" (MenuHost.waitPlay).
+ * - SALAS (PR 12): JOIN WITH CODE, the region and the public list (custom.ts lobbyBrowser) in the
+ *   tab; the action is CREATE PUBLIC LOBBY, then CREATE PRIVATE LOBBY (screens/lobby.ts
+ *   createAndShare), BACK TO LOBBY ABC 234 while the player is in one (kept with KEEP THE LOBBY: the
+ *   screen no longer comes back by itself). A TV guest whose anti-bot check is not ready gets SIGN
+ *   IN WITH YOUR PHONE instead (homeModel.ts roomsLocked; the check is warmed every 4 minutes there).
  * - CONTRA LA IA: mode and difficulty as mn-seg, the Stadium row (components/stadium.ts' sheet: the
- *   theme of every match and of the menus' stage), PLAY.
+ *   theme of every match and of the menus' stage), PLAY (while a search runs: its unlimited match
+ *   against the bots, which the match found ends).
  *
  * Shortcuts (Screen.command): Q / E (keyboard), LB / RB and LT / RT (pad) step the tabs, round: on
  * a stacked screen the section bar is not there (plan §1.5); the hint bar calls them "Modes"
@@ -32,7 +38,6 @@ import { duration, t } from '../../i18n';
 import type { Key } from '../../i18n';
 import { PLAYLISTS } from '../../net/account';
 import type { RegionId } from '../../net/account';
-import { P2P_FILL_WAIT_MS } from '../../net/p2p/protocol';
 import { MODES } from '../../sim/constants';
 import type { GameMode } from '../../sim/constants';
 import { DIFFICULTIES } from '../../render/Hud';
@@ -47,22 +52,23 @@ import { slot } from '../components/tile';
 import { seg } from '../components/seg';
 import { picker } from '../components/picker';
 import { openStadiumPicker } from '../components/stadium';
-import { PLAYING_SHOWN } from '../shell/pills';
-import { lobbyBrowser } from './custom';
+import { lobbyBrowser, tvRoomsLocked } from './custom';
 import { createAndShare } from './lobby';
 import { spacedCode } from './lobbyModel';
-import { FORMATS, MODE_TABS, NET_PICKS, actionKind, botsCountdown, botsSegments, countShown, formatOf, isModeTab, modesOf, queueNet, stepTab } from './modesModel';
-import type { ActionKind, Format, ModeTab, NetPick } from './modesModel';
+import { FORMATS, MODE_TABS, actionKind, botsCountdown, botsSegments, formatOf, formatsOf, isModeTab, modesOf, stepTab } from './modesModel';
+import type { ActionKind, Format, ModeTab } from './modesModel';
+import { waitLines } from './searchModel';
+import { estimateText, overrideText, peopleText, reachText } from './searchText';
 import { dropDetour, keepDetour } from './accountLinksModel';
 
 /** The bots countdown's bar (as drawn). */
 const SEGMENTS = 18;
+/** A TV guest's anti-bot check is warmed again this often while SALAS is up (its token lasts 270 s). */
+const REWARM_MS = 240_000;
 
 const TAB_ICON: Record<ModeTab, IconName> = { casual: 'ball', ranked: 'rank', lobbies: 'friends', ai: 'bot' };
 const TAB_TITLE: Record<ModeTab, Key> = { casual: 'modes.casual', ranked: 'modes.ranked', lobbies: 'modes.lobbies', ai: 'modes.vsAi' };
 const TAB_INTRO: Record<ModeTab, Key> = { casual: 'modes.casualSub', ranked: 'modes.rankedIntro', lobbies: 'custom.subtitle', ai: 'friendly.intro' };
-const NET_LABEL: Record<NetPick, Key> = { auto: 'modes.netAuto', p2p: 'modes.netP2p', server: 'modes.netServer' };
-const NET_HELP: Record<NetPick, Key> = { auto: 'modes.netAutoHelp', p2p: 'modes.netP2pHelp', server: 'modes.netServerHelp' };
 
 const setText = (el: HTMLElement, text: string): void => {
   if (el.textContent !== text) el.textContent = text;
@@ -128,10 +134,13 @@ export function modesScreen(menu: Menu): Screen {
     formatEls.set(f, { el, tag, sub });
   }
   const formats = h('div.mn-formats', null, ...[...formatEls.values()].map((x) => x.el));
-  const note = h('p.mn-modes-note', { hidden: true }, icon('info'), t('search.formatRestarts'));
+  // Competitive: a pick restarts its running search; Casual: the format of its bots match, the
+  // pool takes every format (its own note, always).
+  const noteText = h('span');
+  const note = h('p.mn-modes-note', { hidden: true }, icon('info'), noteText);
+  const formatLabel = h('span.mn-modes-label');
   const region = picker('modes-region', 'globe', t('common.region'), () => menu.openRegionSheet());
-  const advanced = picker('modes-advanced', 'settings', t('modes.advanced'), () => openNet());
-  const queuePart = h('div.mn-modes-queue', null, h('span.mn-modes-label', null, t('modes.format')), formats, note, h('div.mn-modes-rows', null, region.el, advanced.el));
+  const queuePart = h('div.mn-modes-queue', null, formatLabel, formats, note, h('div.mn-modes-rows', null, region.el));
   const lobbies = lobbyBrowser(menu);
   const lobbiesPart = h('div.mn-modes-lobbies', { hidden: true }, lobbies.el);
   const modeSeg = seg<GameMode>('ai-mode', t('friendly.mode'), PLAYLISTS.map((p) => ({ value: p, label: p })), () => aiMode, (v) => (aiMode = v));
@@ -151,11 +160,18 @@ export function modesScreen(menu: Menu): Screen {
   const line = h('p.mn-act-line');
   const go = h('button.mn-btn.mn-btn-primary.mn-act-go', { type: 'button', 'data-nav': true, 'data-key': 'modes-go', 'data-autofocus': true, onclick: () => primary() }, h('span.mn-act-go-label'), icon('next'));
   const goLabel = go.firstElementChild as HTMLElement;
-  const idle = h('div.mn-act-idle', null, summary, line, go);
+  // SALAS' second: CREATE PRIVATE LOBBY (the primary is CREATE PUBLIC LOBBY).
+  const go2 = h('button.mn-btn.mn-act-go2', { type: 'button', 'data-nav': true, 'data-key': 'modes-go2', hidden: true, onclick: () => void createAndShare(menu, 'private') }, h('span', null, t('lobby.createPrivate')));
+  const idle = h('div.mn-act-idle', null, summary, line, go, go2);
   const sTag = h('span.mn-act-tag');
   const sClock = h('div.mn-act-clock');
   const sQueue = h('div.mn-act-queue');
   const sWhere = h('div.mn-act-where');
+  // The estimate (always), how many search, the widening, and what is wrong (searchModel.ts).
+  const sEstimate = h('div.mn-act-est');
+  const sPeople = h('div.mn-act-where.mn-act-people');
+  const sReach = h('div.mn-act-where.mn-act-reach');
+  const sWarn = h('div.mn-act-est.mn-act-warn', { hidden: true });
   const botsTime = h('b.mn-act-bots-time');
   const botsBar = h('span.mn-act-bar', { 'aria-hidden': 'true' }, ...Array.from({ length: SEGMENTS }, () => h('span')));
   const bots = h('div.mn-act-bots', { hidden: true }, h('div.mn-act-bots-row', null, icon('bot'), h('span', null, t('search.bots')), botsTime), botsBar, h('p.mn-act-always', null, t('search.always')));
@@ -176,7 +192,10 @@ export function modesScreen(menu: Menu): Screen {
     h('span', null, t('search.cancel')),
     h('span.mn-act-keys', { 'aria-hidden': 'true' }, h('span.mn-keys-kb', null, glyph('key-x')), h('span.mn-keys-pad', null, glyph('pad-y'))),
   );
-  const practice = h('button.mn-act-practice', { type: 'button', 'data-nav': true, 'data-key': 'modes-practice', onclick: () => host.practiceWhileSearching() }, icon('training'), h('span', null, t('search.whileWaiting'), ' ', h('u', null, t('training.freePlay'))));
+  // "While you wait: VS BOTS · TRAIN": local play with the search alive (the match found ends it).
+  const waitBtn = (kind: 'bots' | 'training', ic: IconName, label: Key): HTMLButtonElement =>
+    h('button.mn-act-practice', { type: 'button', 'data-nav': true, 'data-key': 'modes-wait-' + kind, onclick: () => host.waitPlay(kind) }, icon(ic), h('u', null, t(label)));
+  const practice = h('div.mn-act-wait', { 'data-nav-row': true }, h('span.mn-act-wait-label', null, t('search.whileWaiting')), waitBtn('bots', 'bot', 'search.waitBots'), waitBtn('training', 'training', 'search.waitTraining'));
   const searching = h(
     'div.mn-act-search',
     { hidden: true, role: 'status' },
@@ -184,6 +203,10 @@ export function modesScreen(menu: Menu): Screen {
     sClock,
     sQueue,
     sWhere,
+    sEstimate,
+    sPeople,
+    sReach,
+    sWarn,
     bots,
     cancel,
     practice,
@@ -195,7 +218,9 @@ export function modesScreen(menu: Menu): Screen {
   // ---- state ----
   const kindOf = (x: ModeTab): 'casual' | 'ranked' => (x === 'ranked' ? 'ranked' : 'casual');
   const banLeft = (): number => (acc.signedIn ? (acc.me?.rankedBanUntil ?? 0) - Date.now() : 0);
-  const modesFor = (kind: 'casual' | 'ranked'): GameMode[] => (kind === 'ranked' ? menu.prefs.rankedModes : menu.prefs.casualModes);
+  /** Competitive's playlists, Casual's preferred format. */
+  const modesFor = (kind: 'casual' | 'ranked'): GameMode[] => (kind === 'ranked' ? menu.prefs.rankedModes : [menu.prefs.casualPrefer]);
+  let warmAt = 0;
   /** A region's name: the queue's own, else the automatic one; "Automatic" before the server said which. */
   const regionText = (id: RegionId | null): string => {
     const r = id ?? menu.regionId;
@@ -209,19 +234,25 @@ export function modesScreen(menu: Menu): Screen {
   /** Search `kind` with its playlists (a running one of another queue is replaced: Game.menuSearch). */
   const search = (kind: 'casual' | 'ranked'): void => {
     const modes = modesOf(formatOf(modesFor(kind)));
-    menu.beforeMatch(() => menu.startSearch({ kind, modes, region: menu.prefs.region, net: kind === 'ranked' ? 'server' : queueNet(menu.prefs.net) }));
+    menu.beforeMatch(() => menu.startSearch({ kind, modes, region: menu.prefs.region }));
   };
 
   const pickFormat = (f: Format): void => {
     const kind = kindOf(tab);
+    if (kind === 'casual' && f === 'any') return;
     const modes = modesOf(f);
     if (kind === 'ranked') menu.prefs.rankedModes = modes;
-    else menu.prefs.casualModes = modes;
+    else menu.prefs.casualPrefer = modes[0];
     menu.savePrefs();
     const s = state();
     if (s === 'signIn' || s === 'banned') return render(performance.now());
-    // The same format searching already: nothing to restart.
     const v = searchView();
+    // Casual searching: the pick changes the running search in place (its `prefer`), no restart.
+    if (kind === 'casual' && v.active && v.kind === 'casual') {
+      host.setQueuePrefer(modes[0]);
+      return render(performance.now());
+    }
+    // The same format searching already: nothing to restart.
     if (v.active && v.kind === kind && formatOf(v.modes) === f) return render(performance.now());
     search(kind);
     render(performance.now());
@@ -243,41 +274,18 @@ export function modesScreen(menu: Menu): Screen {
         search('casual');
         break;
       case 'play':
+        // While a search runs: its unlimited match against the bots (MenuHost.playFriendly keeps the search).
         menu.beforeMatch(() => host.playFriendly(aiMode, aiDifficulty));
         return;
       case 'lobbies':
-        void createAndShare(menu); // in a lobby: its screen
+        // In a lobby: its screen; a TV guest whose check is not ready: the phone's sign-in.
+        if (!host.lobby.inLobby && tvRoomsLocked(menu)) menu.tvSignIn();
+        else void createAndShare(menu, 'public');
         return;
       case 'searching':
         break;
     }
     render(performance.now());
-  };
-
-  /** Advanced › Connection: a sheet of the three, the current one marked and focused. */
-  const openNet = (): void => {
-    let close = (): void => undefined;
-    const option = (n: NetPick): HTMLButtonElement => {
-      const on = menu.prefs.net === n;
-      return h(
-        `button.mn-btn.mn-sheet-option.mn-net-option${on ? '.mn-sheet-option-on' : ''}` as 'button',
-        {
-          type: 'button',
-          'data-nav': true,
-          'data-autofocus': on,
-          'aria-current': on ? 'true' : undefined,
-          onclick: () => {
-            menu.prefs.net = n;
-            menu.savePrefs();
-            close();
-            render(performance.now());
-          },
-        },
-        on ? icon('check') : null,
-        h('span.mn-net-text', null, h('b', null, t(NET_LABEL[n])), h('small', null, t(NET_HELP[n]))),
-      );
-    };
-    close = menu.modal({ title: t('modes.connection'), body: h('div.mn-sheet-list', null, ...NET_PICKS.map(option)), actions: [{ label: t('lang.cancel'), onClick: () => true }] });
   };
 
   /** Switch to `id` (a tab's press, Q / E, LB / RB). The focus follows to the new tab when it was on the tabs, else to its action. */
@@ -312,15 +320,26 @@ export function modesScreen(menu: Menu): Screen {
       }
       el.dataset.tab = tab;
       setText(title, t(TAB_TITLE[tab]));
-      setText(intro, t(TAB_INTRO[tab]));
       setHidden(queuePart, !casualLike);
-      setHidden(advanced.el, tab !== 'casual');
       setHidden(lobbiesPart, tab !== 'lobbies');
       setHidden(aiPart, tab !== 'ai');
+      if (casualLike) {
+        // Casual's grid has no ANY (it pools every format).
+        const shown = formatsOf(kindOf(tab));
+        for (const [f, x] of formatEls) setHidden(x.el, !shown.includes(f));
+        setText(formatLabel, t(tab === 'casual' ? 'modes.formatPrefer' : 'modes.format'));
+      }
     }
-    // The tabs' second lines: Competitive's lock for a guest, a ban's time; the searching tab's clock.
+    // VS AI's intro while a search runs: its PLAY is the wait's unlimited match.
+    setText(intro, t(tab === 'ai' && running !== null ? 'friendly.introWaiting' : TAB_INTRO[tab]));
+    // A TV guest's rooms: the check warmed again while SALAS is up (its tiles and buttons unlock with it).
+    if (tab === 'lobbies' && tvRoomsLocked(menu) && now - warmAt >= REWARM_MS) {
+      warmAt = now;
+      host.prewarmAntiBot?.();
+    }
+    // The tabs' second lines: Casual's and Competitive's lock for a guest, a ban's time; the searching tab's clock.
     for (const [id, x] of tabEls) {
-      const lockText = id === 'ranked' && !acc.signedIn ? t('modes.rankedLocked') : '';
+      const lockText = (id === 'ranked' || id === 'casual') && !acc.signedIn ? t('modes.rankedLocked') : '';
       const subKey: Key = id === 'casual' ? 'modes.casualSubShort' : id === 'ranked' ? 'modes.rankedSubShort' : id === 'lobbies' ? 'modes.tabLobbiesSub' : 'modes.tabAiSub';
       setText(x.sub, lockText !== '' ? lockText : t(subKey));
       const busy = running !== null && running === id;
@@ -353,9 +372,10 @@ export function modesScreen(menu: Menu): Screen {
         setText(x.sub, sub);
         setHidden(x.sub, sub === '');
       }
-      setHidden(note, !searchingHere);
+      // Casual's note always (the format of its bots match); Competitive's while it searches (a pick restarts it).
+      setText(noteText, t(kind === 'casual' ? 'modes.formatPreferNote' : 'search.formatRestarts'));
+      setHidden(note, kind === 'ranked' && !searchingHere);
       region.set(menu.regionLabel);
-      advanced.set(t('modes.connectionValue', { net: t(NET_LABEL[menu.prefs.net]) }));
     }
     if (tab === 'ai') {
       modeSeg.refresh();
@@ -382,12 +402,19 @@ export function modesScreen(menu: Menu): Screen {
         setChildren(sTag, slot(t(kind === 'ranked' ? 'search.rankedTag' : 'search.unranked')));
       }
       setText(sClock, clock(now - v.since));
-      setText(sQueue, `${kindName(kind)} · ${formatName(f)}`);
-      const playing = menu.population?.playing ?? null;
-      const where = t('search.where', { format: formatWords(f), region: regionText(v.region) });
-      setText(sWhere, countShown(playing, PLAYING_SHOWN) ? `${where} · ${t('menu.playing', { count: playing ?? 0 })}` : where);
-      const net = kind === 'ranked' ? 'server' : queueNet(menu.prefs.net);
-      const left = botsCountdown({ kind, net: v.net ?? net, since: v.since, now, botFillMs: menu.cfg?.botFillMs ?? null, p2pFillMs: P2P_FILL_WAIT_MS });
+      // Casual pools every format: its name and its region; Competitive its playlists.
+      setText(sQueue, kind === 'ranked' ? `${kindName(kind)} · ${formatName(f)}` : kindName(kind));
+      setText(sWhere, kind === 'ranked' ? t('search.where', { format: formatWords(f), region: regionText(v.region) }) : t('search.whereCasual', { region: regionText(v.region) }));
+      // The estimate, the people (exact counts, the owner's "how many are searching"), the reach, what is wrong.
+      const wl = waitLines({ kind, since: v.since, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, retrying: v.retrying === true, times: menu.cfg?.queue ?? null }, now);
+      setText(sEstimate, estimateText(wl.estimate));
+      setHidden(sPeople, wl.people === null);
+      if (wl.people !== null) setText(sPeople, peopleText(wl.people, regionText(v.region)));
+      setText(sReach, reachText(wl.reach));
+      const warn = overrideText(wl.override);
+      setHidden(sWarn, warn === null);
+      if (warn !== null) setText(sWarn, warn);
+      const left = botsCountdown({ kind, since: v.since, now, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, soloAfterMs: menu.cfg?.queue?.soloAfterMs });
       setHidden(bots, left === null);
       if (left !== null) {
         setText(botsTime, clock(left.left + 999));
@@ -399,10 +426,12 @@ export function modesScreen(menu: Menu): Screen {
       let lineText: string;
       let label: string;
       const kind = kindOf(tab);
-      const queue = `${kindName(kind)} · ${formatName(formatOf(modesFor(kind)))} · ${regionText(menu.prefs.region)}`;
+      // Casual pools every format: its queue is its name and region.
+      const queue = kind === 'ranked' ? `${kindName(kind)} · ${formatName(formatOf(modesFor(kind)))} · ${regionText(menu.prefs.region)}` : `${kindName(kind)} · ${regionText(menu.prefs.region)}`;
+      let second = false;
       switch (s) {
         case 'signIn':
-          sum = t('search.needsAccount');
+          sum = t(kind === 'casual' ? 'search.casualNeedsAccount' : 'search.needsAccount');
           lineText = '';
           label = t('search.signIn');
           break;
@@ -418,9 +447,12 @@ export function modesScreen(menu: Menu): Screen {
           break;
         case 'lobbies': {
           const code = host.lobby.inLobby ? (host.lobby.state?.code ?? host.lobby.code) : null;
+          const tvLocked = code === null && tvRoomsLocked(menu);
           sum = t('modes.lobbies');
-          lineText = code !== null ? '' : t('modes.lobbiesAction');
-          label = code !== null ? t('lobby.backTo', { code: spacedCode(code) }) : t('lobby.createShare');
+          // CREATE PUBLIC LOBBY, then CREATE PRIVATE LOBBY; a TV guest whose check is not ready: the phone's sign-in.
+          lineText = code !== null ? '' : t(tvLocked ? 'modes.lobbiesTvLocked' : 'modes.lobbiesAction');
+          label = code !== null ? t('lobby.backTo', { code: spacedCode(code) }) : t(tvLocked ? 'tvsign.tile' : 'lobby.createPublic');
+          second = code === null && !tvLocked;
           break;
         }
         default:
@@ -432,6 +464,12 @@ export function modesScreen(menu: Menu): Screen {
       setText(line, lineText);
       setHidden(line, lineText === '');
       setText(goLabel, label);
+      if (go2.hidden === second) {
+        // Its focus goes back to the primary, never to the page's body.
+        if (!second && document.activeElement === go2 && !touch()) go.focus({ preventScroll: true });
+        setHidden(go2, !second);
+        menu.refit();
+      }
     }
   };
 
@@ -465,6 +503,7 @@ export function modesScreen(menu: Menu): Screen {
       aiDifficulty = host.difficulty;
       lastTab = null;
       lastState = null;
+      warmAt = 0;
       if (tab === 'lobbies') lobbies.show();
       if (acc.signedIn) void acc.fetchMe().then(() => shown && render(performance.now()), () => undefined);
       render(performance.now());
