@@ -77,7 +77,7 @@ Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en es
 | **Cambias tus opciones** | Tus ajustes de física experimentales (con sus nombres), tus récords de entrenamiento, el interruptor de funciones experimentales, tu auto, «Ocultar mi nombre en repeticiones públicas» y «Novedades por correo» | Que tus opciones te sigan en cualquier dispositivo |
 | **Alojas un servidor de la comunidad** | Ver la sección 4.4 | Hacer funcionar la red de servidores |
 | **Usas el sitio** | En los registros técnicos de Cloudflare: la dirección que pides, la hora, la respuesta y lo que Cloudflare agrega a cada pedido, como tu dirección IP, tu navegador y tu país y ciudad aproximados | Hacer funcionar el servicio y encontrar errores |
-| **Abres la pantalla de inicio, empiezas como invitado, conectas una TV, creas una cuenta, entras con contraseña o pides una contraseña nueva** | Las señales del navegador que lee Cloudflare Turnstile, el control contra bots: tu IP, tu navegador y datos de la conexión. Al abrir la pantalla de inicio corre por adelantado si no tienes una sesión de invitado guardada ni una cuenta abierta, antes de que aceptes los Términos (sección 9.4) | Frenar bots |
+| **Abres la pantalla de inicio, empiezas como invitado, conectas una TV, creas una cuenta, entras con contraseña o pides una contraseña nueva** | Las señales del navegador que lee Cloudflare Turnstile, el control contra bots: tu IP, tu navegador y datos de la conexión. Al abrir la pantalla de inicio corre por adelantado si no tienes una sesión de invitado guardada ni una cuenta abierta, antes de que aceptes los Términos; en una TV también al abrir MODOS > SALAS, y vuelve a correr cada 4 minutos mientras una de las dos sigue abierta (sección 9.4) | Frenar bots |
 | **Abres una página** | Cloudflare Web Analytics, que está activo en nuestro sitio y cuenta las visitas: la página, de qué sitio vienes, tu navegador, tu sistema, el tipo de dispositivo, tu país aproximado y cuánto tarda en cargar. Elegimos la opción de Cloudflare que deja fuera los datos de los visitantes de la Unión Europea, pero no podemos asegurar a quién deja fuera. Cloudflare también recibe reportes de errores de red (sección 9.4) | Medir visitas y velocidad. Encontrar fallas de la red |
 | **Pides novedades** | Tu elección (sí o no), la versión del texto, de dónde vino (alta, PERFIL, un enlace de baja o un pedido de borrado) y la fecha. Un identificador al azar para el enlace de baja, que no lleva nada de tu cuenta. Hoy no mandamos novedades | Mandarte novedades solo si las pediste, y poder probarlo. Si borras tu cuenta, queda 2 años la prueba de lo que pediste o retiraste (qué fue, la versión y la fecha), sin tu nombre ni tu correo |
 | **Nos escribes** | Tu mensaje, tu correo y nuestra respuesta, en un buzón de Google | Responderte y probar que respondimos a tiempo |
@@ -601,7 +601,9 @@ Ninguna de las nuestras la puede leer el código de la página: solo viajan a nu
   cuenta que ya tienes. Sí corre:
   - al abrir la pantalla de inicio, por adelantado, si no tienes una sesión de invitado guardada ni
     una cuenta abierta (para que tu primera partida no espere). Eso pasa antes de que toques «JUGAR
-    COMO INVITADO» o aceptes los Términos;
+    COMO INVITADO» o aceptes los Términos. En una TV pasa también al abrir MODOS > SALAS, y vuelve
+    a correr cada 4 minutos mientras la pantalla de inicio o SALAS sigue abierta (así las salas
+    quedan abiertas para la TV);
   - al empezar como invitado, al crear una cuenta (también desde Discord o Google) y al pedir una
     contraseña nueva;
   - al entrar con contraseña (con tu correo, con tu usuario antiguo o al recuperar una cuenta

@@ -78,7 +78,7 @@ Version 2026-11-04-2. In force from November 4, 2026. The Spanish text is the of
 | **You change your options** | Your experimental physics presets (with their names), your training records, the experimental features switch, your car, "Hide my name in public replays" and "News by email" | So your options follow you to any device |
 | **You host a community server** | See section 4.4 | Run the server network |
 | **You use the site** | In Cloudflare's technical logs: the address you request, the time, the response and what Cloudflare adds to each request, such as your IP address, your browser and your approximate country and city | Run the service and find bugs |
-| **You open the start screen, start as a guest, connect a TV, create an account, sign in with a password or ask for a new password** | The browser signals read by Cloudflare Turnstile, the anti-bot check: your IP, your browser and connection data. When you open the start screen it runs ahead of time if you have no saved guest session and no account signed in, before you accept the Terms (section 9.4) | Stop bots |
+| **You open the start screen, start as a guest, connect a TV, create an account, sign in with a password or ask for a new password** | The browser signals read by Cloudflare Turnstile, the anti-bot check: your IP, your browser and connection data. When you open the start screen it runs ahead of time if you have no saved guest session and no account signed in, before you accept the Terms; on a TV also when you open MODES > LOBBIES, and it runs again every 4 minutes while either stays open (section 9.4) | Stop bots |
 | **You open a page** | Cloudflare Web Analytics, which is active on our site and counts visits: the page, the site you come from, your browser, your system, the device type, your approximate country and how long it takes to load. We chose the Cloudflare option that leaves out the data of visitors from the European Union, but we cannot guarantee whom it leaves out. Cloudflare also receives network error reports (section 9.4) | Measure visits and speed. Find network failures |
 | **You ask for news** | Your choice (yes or no), the version of the text, where it came from (sign-up, PROFILE, an unsubscribe link or a deletion request) and the date. A random identifier for the unsubscribe link, which carries nothing from your account. Today we send no news | Send you news only if you asked for it, and be able to prove it. If you delete your account, the proof of what you asked for or withdrew (what it was, the version and the date) stays for 2 years, without your name or your email |
 | **You write to us** | Your message, your email and our answer, in a Google mailbox | Answer you and prove that we answered in time |
@@ -603,7 +603,9 @@ None of ours can be read by the page's code: they only travel to our server.
   Discord or with Google to an account you already have. It does run:
   - when you open the start screen, ahead of time, if you have no saved guest session and no
     account signed in (so that your first match does not wait). That happens before you press
-    "PLAY AS GUEST" or accept the Terms;
+    "PLAY AS GUEST" or accept the Terms. On a TV it also happens when you open MODES > LOBBIES,
+    and it runs again every 4 minutes while the start screen or LOBBIES stays open (so the lobbies
+    stay open to the TV);
   - when you start as a guest, when you create an account (also from Discord or Google) and when
     you ask for a new password;
   - when you sign in with a password (with your email, with your old username or when you recover
