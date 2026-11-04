@@ -28,20 +28,21 @@ const B = await import('../src/input/bindings.ts');
 const en = (await import('../src/locales/en.ts')).default;
 const es = (await import('../src/locales/es.ts')).default;
 
-const QUEUE = { kind: 'casual', modes: ['2v2'], region: null, net: 'p2p' };
+const QUEUE = { kind: 'casual', modes: ['2v2'], region: null };
 const SEARCH = { kind: 'ranked', modes: ['1v1', '3v3'], region: 'EU', since: 1234 };
 const LOBBY = { code: 'ABC234', count: 2, max: 4 };
 const REJOIN = { kind: 'casual', modes: ['2v2'], leftMs: 192_000 };
 
-test('the hero: new version > back to your match > back to the lobby > searching > offline > play, for all 32 combinations', () => {
-  const order = ['update', 'rejoin', 'lobby', 'search', 'offline'];
-  for (let bits = 0; bits < 32; bits++) {
+test("the hero: new version > back to your match > back to the lobby > searching > offline > a guest's bots > play, for all 64 combinations", () => {
+  const order = ['update', 'rejoin', 'lobby', 'search', 'offline', 'bots'];
+  for (let bits = 0; bits < 64; bits++) {
     const on = (i) => (bits & (1 << i)) !== 0;
-    const input = { updateNeeded: on(0), rejoin: on(1) ? REJOIN : null, lobby: on(2) ? LOBBY : null, search: on(3) ? SEARCH : null, offline: on(4), queue: QUEUE };
+    const input = { updateNeeded: on(0), rejoin: on(1) ? REJOIN : null, lobby: on(2) ? LOBBY : null, search: on(3) ? SEARCH : null, offline: on(4), guest: on(5), queue: QUEUE };
     const want = order.find((_, i) => on(i)) ?? 'play';
-    assert.equal(M.heroState(input).kind, want, `bits ${bits.toString(2).padStart(5, '0')}`);
+    assert.equal(M.heroState(input).kind, want, `bits ${bits.toString(2).padStart(6, '0')}`);
   }
-  const base = { updateNeeded: false, rejoin: null, lobby: null, search: null, offline: false, queue: QUEUE };
+  const base = { updateNeeded: false, rejoin: null, lobby: null, search: null, offline: false, guest: false, queue: QUEUE };
+  assert.deepEqual(M.heroState({ ...base, guest: true }), { kind: 'bots' }, "a guest's JUGAR AHORA plays the bots offline (Casual needs an account)");
   const s = M.heroState({ ...base, search: SEARCH });
   assert.equal(s.search.since, 1234);
   assert.deepEqual(s.search.modes, ['1v1', '3v3']);
@@ -53,34 +54,84 @@ test('the hero: new version > back to your match > back to the lobby > searching
   assert.equal(M.heroState({ ...base, rejoin: REJOIN }).rejoin.leftMs, 192_000);
 });
 
-test('heroQueue: Casual 2v2 automatic P2P the first time; Competitive only signed in and not banned', () => {
+test("heroQueue: Casual's preferred format (2v2 the first time), always on a server; Competitive only signed in and not banned", () => {
   const d = P.parsePrefs(null);
-  assert.deepEqual(M.heroQueue(d, false, false), { kind: 'casual', modes: ['2v2'], region: null, net: 'p2p' });
+  assert.deepEqual(M.heroQueue(d, false, false), { kind: 'casual', modes: ['2v2'], region: null });
   const ranked = { ...d, lastQueue: 'ranked', rankedModes: ['3v3'], region: 'SA' };
-  assert.deepEqual(M.heroQueue(ranked, true, false), { kind: 'ranked', modes: ['3v3'], region: 'SA', net: 'server' });
+  assert.deepEqual(M.heroQueue(ranked, true, false), { kind: 'ranked', modes: ['3v3'], region: 'SA' });
   assert.equal(M.heroQueue(ranked, false, false).kind, 'casual', 'a guest');
   assert.equal(M.heroQueue(ranked, true, true).kind, 'casual', 'banned for abandons');
-  const casual = { ...d, casualModes: ['1v1', '3v3'], net: 'server' };
-  assert.deepEqual(M.heroQueue(casual, true, false), { kind: 'casual', modes: ['1v1', '3v3'], region: null, net: 'server' });
+  const casual = { ...d, casualPrefer: '3v3' };
+  assert.deepEqual(M.heroQueue(casual, true, false), { kind: 'casual', modes: ['3v3'], region: null });
+  assert.equal('net' in M.heroQueue(casual, true, false), false, 'no connection any more');
 });
 
-test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked, an old v1 object keeps the rest', () => {
+test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked; an old object drops its connection and keeps a single Casual pick as casualPrefer', () => {
   for (const raw of [null, '', '{', '[]', 'null', '42']) {
     const p = P.parsePrefs(raw);
     assert.equal(p.lastQueue, 'casual', String(raw));
-    assert.deepEqual(p.casualModes, ['2v2']);
+    assert.equal(p.casualPrefer, '2v2');
     assert.equal(p.region, null);
-    assert.equal(p.net, 'auto');
+    assert.equal(p.waitChoice, 'bots');
+    assert.equal('net' in p, false);
+    assert.equal('casualModes' in p, false);
   }
-  assert.equal(P.parsePrefs(JSON.stringify({ net: 'p2p' })).net, 'p2p', 'a P2P pick stays');
   assert.equal(P.parsePrefs(JSON.stringify({ lastQueue: 'x' })).lastQueue, 'casual');
   assert.equal(P.parsePrefs(JSON.stringify({ lastQueue: 'ranked' })).lastQueue, 'ranked');
-  const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1', '2v2'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
-  assert.deepEqual(old, { region: 'EU', casualModes: ['1v1', '2v2'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null });
+  // casualPrefer: a stored one, else an older page's single casualModes, else 2v2 (ANY of old: the default).
+  assert.equal(P.parsePrefs(JSON.stringify({ casualModes: ['3v3'] })).casualPrefer, '3v3', 'migrated from a single pick');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualModes: ['1v1', '2v2', '3v3'] })).casualPrefer, '2v2', 'an old ANY');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualPrefer: '1v1', casualModes: ['3v3'] })).casualPrefer, '1v1', 'its own pick wins');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualPrefer: 'any' })).casualPrefer, '2v2');
+  // waitChoice: the last pick of "While you search".
+  for (const c of ['bots', 'training', 'menu']) assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: c })).waitChoice, c);
+  assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: 'x' })).waitChoice, 'bots');
+  const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
+  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
   assert.equal(P.PREFS_KEY, 'turbogol.menu.v1', 'the same key: no migration');
   // Each parse is a fresh object: a change to one never reaches the defaults.
-  P.parsePrefs(null).casualModes.push('3v3');
-  assert.deepEqual(P.parsePrefs(null).casualModes, ['2v2']);
+  P.parsePrefs(null).rankedModes.push('3v3');
+  assert.deepEqual(P.parsePrefs(null).rankedModes, ['2v2']);
+});
+
+test('Inicio by role and device: a guest VS AI and LOBBIES first, a TV guest the phone sign-in and no Competitive, an account as before', () => {
+  assert.deepEqual(M.tileOrder({ guest: false, tv: false }), ['casual', 'friends', 'ai', 'ranked']);
+  assert.deepEqual(M.tileOrder({ guest: false, tv: true }), ['casual', 'friends', 'ai', 'ranked'], 'an account, any device');
+  assert.deepEqual(M.tileOrder({ guest: true, tv: false }), ['ai', 'friends', 'casual', 'ranked']);
+  assert.deepEqual(M.tileOrder({ guest: true, tv: true }), ['ai', 'tvsign', 'friends', 'casual']);
+  // A TV guest's rooms wait for a quiet anti-bot check; everyone else's are open.
+  assert.equal(M.roomsLocked({ tv: true, guest: true, antiBotReady: false }), true);
+  assert.equal(M.roomsLocked({ tv: true, guest: true, antiBotReady: true }), false, 'a session or a warm token');
+  assert.equal(M.roomsLocked({ tv: true, guest: false, antiBotReady: false }), false, 'an account');
+  assert.equal(M.roomsLocked({ tv: false, guest: true, antiBotReady: false }), false, 'a PC or a phone guest');
+});
+
+test("the 'next' card: a guest after an offline match's FINAL, once per page; SEE LOBBIES unless a TV's rooms are locked, CREATE ACCOUNT or the TV's phone sign-in", () => {
+  const i = { guest: true, aiMatchEnded: true, dismissed: false, tv: false, roomsOpen: true };
+  assert.deepEqual(M.nextCard(i), { rooms: true, account: 'create' });
+  assert.equal(M.nextCard({ ...i, guest: false }), null, 'an account');
+  assert.equal(M.nextCard({ ...i, aiMatchEnded: false }), null, 'no match against the AI ended yet');
+  assert.equal(M.nextCard({ ...i, dismissed: true }), null, 'closed or used: once per page');
+  assert.deepEqual(M.nextCard({ ...i, tv: true }), { rooms: true, account: 'tvSignIn' });
+  assert.deepEqual(M.nextCard({ ...i, tv: true, roomsOpen: false }), { rooms: false, account: 'tvSignIn' });
+});
+
+test("the hero's copy by role (home.ts): SIEMPRE HAY PARTIDO for Casual only, Casual's subtitle without formats, a guest's AL INSTANTE", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /tag = needPad \? padSlot : s\.queue\.kind === 'casual' \? \{ text: t\('home\.alwaysMatch'\) \} : null;/, 'no tag for a ranked play hero');
+  assert.match(home, /queueParts\(kind, kind === 'ranked' \? modes : \[\], regionOf\(region\), names\)/, 'the Casual sub drops the formats');
+  assert.match(home, /tag = needPad \? padSlot : \{ text: t\('home\.instant'\) \};/);
+  assert.match(home, /case 'bots':\s*menu\.beforeMatch\(\(\) => host\.playFriendly\(host\.mode, host\.difficulty\)\);/);
+  const names = { casual: es['play.casualTitle'], ranked: es['play.rankedTitle'] };
+  assert.deepEqual(M.queueParts('casual', [], 'Sudamérica', names), { queue: 'Casual', region: 'Sudamérica' }, 'Casual · Sudamérica');
+  assert.equal(es['home.instant'], 'AL INSTANTE');
+  assert.equal(es['home.lobbiesSlot'], 'PÚBLICAS');
+  assert.equal(es['modes.friends'], 'SALAS');
+  const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
+  assert.match(css, /\.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero ai friends' 'hero casual ranked';/);
+  assert.match(css, /html\[data-shell='rail'\] \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'ai friends hero' 'casual ranked hero';/);
+  assert.match(css, /html\[data-layout='portrait'\] \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero hero' 'ai friends' 'casual ranked';/);
+  assert.match(css, /html\.tg-tv \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero ai tvsign' 'hero friends casual';/);
 });
 
 test('isOffline: still connecting is not; one failed population poll is not; two are, and so is no Worker', () => {
@@ -162,6 +213,7 @@ const NEW_KEYS = [
   'modes.casual', 'modes.casualSub', 'modes.casualSubShort', 'modes.friends', 'modes.friendsSub', 'modes.friendsSubShort', 'modes.friendsSubTv', 'modes.lobbies',
   'modes.vsAi', 'modes.vsAiSub', 'modes.vsAiSubShort', 'modes.vsAiSlot', 'modes.ranked', 'modes.rankedSub', 'modes.rankedSubShort',
   'modes.signInShort', 'tv.needPad', 'tv.needPadText', 'tv.needPadGo', 'howPlay.title', 'howPlay.kbm', 'howPlay.keyboard', 'howPlay.pad', 'lang.reloadNote',
+  'home.instant', 'home.nextTitle', 'home.nextLine', 'home.nextRooms', 'home.nextAccount', 'home.nextClose', 'home.lobbiesSlot', 'modes.lobbiesTvLocked',
 ];
 
 test("the owner's copy: JUGAR AHORA / JUGAR, Iniciar sesión, partidas de ubicación, the reload note; no reassurance lines", () => {

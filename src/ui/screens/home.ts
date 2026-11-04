@@ -1,27 +1,38 @@
 /**
- * JUGAR's root, Inicio (plan §1.4 "JUGAR (Inicio)", PR 5; the owner's artboards): the player plate
- * (who you are · GARAJE · Dune), then a row of tiles anchored at the bottom over the live stadium:
- * the hero, JUGAR AHORA (JUGAR on a TV), which plays the last queue in one press (Casual 2v2 the
- * first time: homeModel.ts heroQueue), and the four modes, CASUAL, CON AMIGOS, CONTRA LA IA and
- * COMPETITIVO (a guest sees "Iniciar sesión" on its lock), each opening MODOS on its tab
- * (screens/modes.ts). One DOM order on every device; the CSS grid moves the tiles
- * (styles/screens/home.css): the hero at the left on a PC and a TV, at the right on a phone held
- * sideways (the thumb), on top upright.
+ * JUGAR's root, Inicio (plan §1.4 "JUGAR (Inicio)", PR 5; the owner's artboards; the modes
+ * redesign, November 2026): the player plate (who you are · GARAJE · Dune), then a row of tiles
+ * anchored at the bottom over the live stadium: the hero, JUGAR AHORA (JUGAR on a TV), and the mode
+ * tiles, each opening MODOS on its tab (screens/modes.ts). By role and device (homeModel.ts
+ * tileOrder): an account sees CASUAL, SALAS, CONTRA LA IA, COMPETITIVO, its hero repeats the last
+ * queue (Casual the first time); a guest sees CONTRA LA IA, SALAS, CASUAL and COMPETITIVO locked
+ * ("Iniciar sesión"), its hero plays an offline match against the bots at once (AL INSTANTE: no
+ * terms, no anti-bot check, no network); a TV guest sees CONTRA LA IA, INICIAR SESIÓN CON EL
+ * TELÉFONO, SALAS (locked until the anti-bot check is ready: homeModel.ts roomsLocked, the check
+ * warmed again every 4 minutes while Inicio is up) and CASUAL locked. `data-role` on the tiles and
+ * html.tg-tv pick the grid template that draws them in that order (styles/screens/home.css); the
+ * DOM follows the same order (Tab, a screen reader). The hero at the left on a PC and a TV, at the
+ * right on a phone held sideways (the thumb), on top upright.
+ *
+ * After a guest's match against the AI reached its FINAL, a card over the tiles offers the next
+ * step once per page (homeModel.ts nextCard): SEE LOBBIES and CREATE ACCOUNT (a TV: SIGN IN WITH
+ * YOUR PHONE), and a close.
  *
  * The hero follows the player (homeModel.ts heroState): RELOAD NOW after a refused version, back
- * to your match (PR 12), back to the lobby, the running search (its clock and ✕ CANCEL), VS AI
- * when offline, else JUGAR AHORA. A TV without a controller says so in the hero's slot, and a
- * match's start asks for one first (Menu.beforeMatch); so does "How will you play?" on a new PC.
- * The hero renders on a change only (the tick builds a key: 4 Hz, 1 Hz on super low; the Menu
- * ticks it at once when a search starts or ends), its clock on a new second, its name for a
- * screen reader on a state change, never with the clock. The plate and COMPETITIVO's lock follow
- * the account on their own keys; the profile is fetched as the screen shows (the plate's rank,
- * the ban, the chip's rank), and once more when a session restored after that.
+ * to your match (PR 12), back to the lobby, the running search (its clock, the estimate and ✕
+ * CANCEL: screens/searchModel.ts), VS AI when offline, a guest's match against the bots, else
+ * JUGAR AHORA (SIEMPRE HAY PARTIDO for Casual only: Competitive plays no bots). A TV without a
+ * controller says so in the hero's slot, and a match's start asks for one first (Menu.beforeMatch);
+ * so does "How will you play?" on a new PC. A search started here opens "While you search" on its
+ * first answer (Menu.startSearch `sheet`). The hero renders on a change only (the tick builds a key:
+ * 4 Hz, 1 Hz on super low; the Menu ticks it at once when a search starts or ends), its clock on a
+ * new second, its name for a screen reader on a state change, never with the clock. The plate and
+ * the locks follow the account on their own keys; the profile is fetched as the screen shows (the
+ * plate's rank, the ban, the chip's rank), and once more when a session restored after that.
  *
  * In development (or a VITE_UI_FIT=1 build) window.__homeHero(kind | null, { pad, ranked }) forces
  * a hero state with sample data for the layout check (scripts/ui-fit.mjs).
  */
-import { h, clock } from '../dom';
+import { h, clock, setChildren } from '../dom';
 import { t } from '../../i18n';
 import { PLAYLISTS, isRegion } from '../../net/account';
 import type { RegionId } from '../../net/account';
@@ -31,13 +42,23 @@ import type { GameMode } from '../../sim/constants';
 import type { Menu, Screen } from '../Menu';
 import { heroTile, modeTile, slot } from '../components/tile';
 import type { HeroSub, HeroView } from '../components/tile';
+import { icon } from '../components/icons';
 import { plate as createPlate } from '../components/plate';
 import { rankBadge, tierById } from '../badges';
 import { carName, playerName, regionName, tierName } from '../names';
-import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, plateRank, queueParts, subParts } from './homeModel';
-import type { HeroInput, HeroKind, HeroState, QueuePick } from './homeModel';
+import { HERO_SEP, HERO_SEP_TV, heroQueue, heroState, nextCard, plateRank, queueParts, roomsLocked, subParts, tileOrder } from './homeModel';
+import type { HeroInput, HeroKind, HeroState, HomeTile, QueuePick } from './homeModel';
+import { waitLines } from './searchModel';
+import { estimateText } from './searchText';
+import { openProfileTab } from './profile';
 
 const UI_FIT = import.meta.env.DEV || import.meta.env.VITE_UI_FIT === '1';
+
+/** A TV guest's anti-bot check is warmed again this often while Inicio is up (NetClient.WARM_MS keeps a token 270 s). */
+const REWARM_MS = 240_000;
+
+/** The "next" card was closed or used on this page (once per page). */
+let nextDismissed = false;
 
 export function homeScreen(menu: Menu): Screen {
   const host = menu.host;
@@ -47,6 +68,8 @@ export function homeScreen(menu: Menu): Screen {
   const tv = html.classList.contains('tg-tv');
   const lines = !html.classList.contains('tg-superlow');
   const touch = (): boolean => html.classList.contains('tg-touch');
+  const guest = (): boolean => !acc.signedIn;
+  const locked = (): boolean => roomsLocked({ tv, guest: guest(), antiBotReady: host.antiBotReady === true });
   const plate = createPlate({ profile: () => menu.open('profile'), garage: () => menu.open('garage') });
   // A TV's pills by the plate (Screen.pillSlot), fitted as the hint bar fits them there.
   const pills = h('div.mn-home-pills', { 'data-fit': '16' });
@@ -60,21 +83,36 @@ export function homeScreen(menu: Menu): Screen {
     },
   });
   const ranked = modeTile({ cls: 'mn-mtile-ranked', key: 'mode-ranked', icon: 'rank', slot: null, title: t('modes.ranked'), sub: t('modes.rankedSub'), short: t('modes.rankedSubShort'), open: () => menu.open('modes', false, 'ranked') });
-  const tiles = [
-    modeTile({ cls: 'mn-mtile-casual', key: 'mode-casual', icon: 'ball', slot: slot(PLAYLISTS.join(HERO_SEP), { drop: true }), title: t('modes.casual'), sub: t('modes.casualSub'), short: t('modes.casualSubShort'), open: () => menu.open('modes', false, 'casual') }),
-    // A TV has no link to share: a code (PR 14 types it on the phone).
-    modeTile({ cls: 'mn-mtile-friends', key: 'mode-friends', icon: 'friends', slot: slot(t('modes.lobbies'), { drop: true }), title: t('modes.friends'), sub: t('modes.friendsSub'), short: t(tv ? 'modes.friendsSubTv' : 'modes.friendsSubShort'), open: () => menu.open('modes', false, 'lobbies') }),
-    modeTile({ cls: 'mn-mtile-ai', key: 'mode-ai', icon: 'bot', slot: slot(t('modes.vsAiSlot'), { drop: true }), title: t('modes.vsAi'), sub: t('modes.vsAiSub'), short: t('modes.vsAiSubShort'), open: () => menu.open('modes', false, 'ai') }),
-    ranked,
-  ];
-  const el = h('section.mn-home', { 'data-tablero': true }, h('div.mn-home-top', { 'data-nav-row': true }, plate.el, pills), h('div.mn-tiles', null, hero.el, ...tiles.map((x) => x.el)));
+  const casual = modeTile({ cls: 'mn-mtile-casual', key: 'mode-casual', icon: 'ball', slot: null, title: t('modes.casual'), sub: t('modes.casualSub'), short: t('modes.casualSubShort'), open: () => menu.open('modes', false, 'casual') });
+  // SALAS: public or by code (a TV has no link to share: a code; PR 14 types it on the phone). A TV
+  // guest's whose check is not ready opens the phone's sign-in instead.
+  const friends = modeTile({
+    cls: 'mn-mtile-friends',
+    key: 'mode-friends',
+    icon: 'friends',
+    slot: null,
+    title: t('modes.friends'),
+    sub: t('modes.friendsSub'),
+    short: t(tv ? 'modes.friendsSubTv' : 'modes.friendsSubShort'),
+    open: () => (locked() ? menu.tvSignIn() : menu.open('modes', false, 'lobbies')),
+  });
+  const ai = modeTile({ cls: 'mn-mtile-ai', key: 'mode-ai', icon: 'bot', slot: slot(t('modes.vsAiSlot'), { drop: true }), title: t('modes.vsAi'), sub: t('modes.vsAiSub'), short: t('modes.vsAiSubShort'), open: () => menu.open('modes', false, 'ai') });
+  const tvsign = modeTile({ cls: 'mn-mtile-tvsign', key: 'mode-tvsign', icon: 'tv', slot: null, title: t('tvsign.tile'), sub: t('tvsign.tileSub'), short: t('tvsign.tileSub'), open: () => menu.tvSignIn() });
+  const tileEls: Record<HomeTile, HTMLElement> = { casual: casual.el, friends: friends.el, ai: ai.el, ranked: ranked.el, tvsign: tvsign.el };
+  const tilesBox = h('div.mn-tiles', null, hero.el);
+  // "Now, with people?" after a guest's offline match (once per page).
+  const nextBox = h('div.mn-home-next', { hidden: true, 'data-nav-row': true });
+  const el = h('section.mn-home', { 'data-tablero': true }, h('div.mn-home-top', { 'data-nav-row': true }, plate.el, pills), nextBox, tilesBox);
 
   let state: HeroState = { kind: 'play', queue: heroQueue(menu.prefs, false, false) };
   let heroKey = '';
   let clockText = '';
   let plateKey = '';
-  let rankedKey = '';
+  let lockKey = '';
+  let roleKey = '';
+  let nextKey = '';
   let banText = '';
+  let warmAt = 0;
   /** The profile was fetched for this session (the plate, the ban): signed in after the screen showed, it is fetched once more. */
   let fetchedFor = '';
   let forced: HeroState | null = null;
@@ -105,6 +143,7 @@ export function homeScreen(menu: Menu): Screen {
       lobby: !lobby.inLobby ? null : st !== null ? { code: st.code, count: st.members.length, max: MODES[st.settings.mode] * 2 } : { code: lobby.code ?? '', count: null, max: null },
       search: v.active && v.kind !== null ? { kind: v.kind, modes: v.modes, region: v.region, since: v.since } : null,
       offline: menu.offline,
+      guest: guest(),
       queue: heroQueue(menu.prefs, acc.signedIn, banLeft() > 0),
     };
   };
@@ -112,35 +151,54 @@ export function homeScreen(menu: Menu): Screen {
   /** What the hero shows for state `s` (plan PR 5's table); `key` changes with any text but the clock. */
   const heroView = (s: HeroState, needPad: boolean, now: number): HeroView & { key: string } => {
     const padSlot: HeroView['slot'] = { text: t('tv.needPad'), icon: 'pad' };
+    const dot = tv ? HERO_SEP_TV : HERO_SEP;
+    // Casual pools every format: its subtitle names the queue and the region only.
     const queueSub = (kind: 'casual' | 'ranked', modes: readonly GameMode[], region: RegionId | null): { sub: HeroSub; text: string } => {
-      const p = queueParts(kind, modes, regionOf(region), names);
-      const dot = tv ? HERO_SEP_TV : HERO_SEP;
+      const p = queueParts(kind, kind === 'ranked' ? modes : [], regionOf(region), names);
       return { sub: { queue: p.queue, dot, region: p.region }, text: p.region === null ? p.queue : p.queue + dot + p.region };
     };
-    let icon: HeroView['icon'] = 'play';
+    let icon_: HeroView['icon'] = 'play';
     let tag: HeroView['slot'] = null;
-    let title: string;
-    let sub: HeroSub;
-    let subText: string;
+    let title = '';
+    let sub: HeroSub = '';
+    let subText = '';
+    /** The screen reader's name when it differs from the subtitle (a ticking estimate is never part of it). */
+    let label: string | null = null;
     let clockNow: string | null = null;
     const kind: HeroKind = s.kind;
     switch (s.kind) {
       case 'play': {
         const q = queueSub(s.queue.kind, s.queue.modes, s.queue.region);
-        tag = needPad ? padSlot : { text: t('home.alwaysMatch') };
+        // SIEMPRE HAY PARTIDO: Casual only (Competitive plays no bots and has no cap).
+        tag = needPad ? padSlot : s.queue.kind === 'casual' ? { text: t('home.alwaysMatch') } : null;
         title = t(tv ? 'home.playNowTv' : 'home.playNow');
         sub = q.sub;
         subText = q.text;
         break;
       }
+      case 'bots': {
+        // A guest's: the offline match against the bots, at once.
+        subText = t(tv ? 'modes.vsAiSubShort' : 'modes.vsAiSub');
+        const p = subParts(subText);
+        icon_ = 'bot';
+        tag = needPad ? padSlot : { text: t('home.instant') };
+        title = t(tv ? 'home.playNowTv' : 'home.playNow');
+        sub = { queue: p.queue, dot: HERO_SEP, region: p.region };
+        break;
+      }
       case 'search': {
-        const q = queueSub(s.search.kind, s.search.modes, s.search.region);
-        icon = 'search';
+        // BUSCANDO, the clock, then the queue and the estimate ("Casual · Con bots en 3:37 como máximo").
+        const v = host.searchView();
+        const lines2 = waitLines({ kind: s.search.kind, since: s.search.since, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, retrying: v.retrying === true, times: menu.cfg?.queue ?? null }, now);
+        const queue = queueParts(s.search.kind, s.search.kind === 'ranked' ? s.search.modes : [], null, names).queue;
+        const second = lines2.override === 'retrying' ? t('search.retrying') : lines2.override === 'busy' ? t('search.busy') : estimateText(lines2.estimate);
+        icon_ = 'search';
         tag = needPad ? padSlot : null;
         title = t('home.searching');
         clockNow = clock(now - s.search.since);
-        sub = q.sub;
-        subText = q.text;
+        sub = { queue, dot, region: second };
+        subText = queue + dot + second;
+        label = title + '. ' + queue;
         break;
       }
       case 'offline': {
@@ -148,19 +206,19 @@ export function homeScreen(menu: Menu): Screen {
         // part that steps aside on a TV (whose short form is the CONTRA LA IA tile's there).
         subText = t(tv ? 'modes.vsAiSubShort' : 'modes.vsAiSub');
         const p = subParts(subText);
-        icon = 'bot';
+        icon_ = 'bot';
         tag = needPad ? padSlot : { text: t('pill.offline') };
         title = t('modes.vsAi');
         sub = { queue: p.queue, dot: HERO_SEP, region: p.region };
         break;
       }
       case 'lobby':
-        icon = 'friends';
+        icon_ = 'friends';
         title = t('home.backToLobby');
         sub = subText = t('home.lobbySub', { code: s.lobby.code, count: s.lobby.count ?? '—', max: s.lobby.max ?? '—' });
         break;
       case 'update':
-        icon = 'refresh';
+        icon_ = 'refresh';
         title = t('update.reload');
         sub = subText = t('update.title');
         break;
@@ -175,7 +233,7 @@ export function homeScreen(menu: Menu): Screen {
       }
     }
     const pad = tag !== null && needPad;
-    return { kind, icon, slot: tag, title, clock: clockNow, sub, needPad: pad, label: title + '. ' + subText, key: [kind, title, subText, tag?.text ?? '', pad].join('|') };
+    return { kind, icon: icon_, slot: tag, title, clock: clockNow, sub, needPad: pad, label: label ?? title + '. ' + subText, key: [kind, title, subText, tag?.text ?? '', pad].join('|') };
   };
 
   /** The plate, on a change of who and which rank (true when it was written). */
@@ -202,24 +260,76 @@ export function homeScreen(menu: Menu): Screen {
     return true;
   };
 
+  /** A guest's "Iniciar sesión" lock (its short form in a narrow tile: a phone, a tablet, before the lock would stand alone). */
+  const signInLock = (): HTMLElement => slot(t('menu.guestSignIn'), { icon: 'lock', body: true, short: t('modes.signInShort'), drop: true });
+
   /**
-   * COMPETITIVO's lock: a guest's "Sign in", a banned player's lock alone, the time left as its
-   * description (true when the slot was rebuilt).
+   * The tiles' slots by role: COMPETITIVO's lock (a guest's "Sign in", a banned player's lock
+   * alone, the time left as its description), CASUAL's for a guest (its formats for an account),
+   * SALAS' PÚBLICAS or a TV guest's phone lock. True when a slot was rebuilt.
    */
-  const renderRanked = (): boolean => {
+  const renderLocks = (): boolean => {
     const left = acc.signedIn ? banLeft() : 0;
-    const key = !acc.signedIn ? 'guest' : left > 0 ? 'ban' : '';
+    const g = guest();
+    const rankedKey = g ? 'guest' : left > 0 ? 'ban' : '';
     const text = left > 0 ? t('play.rankedBan', { time: clock(left) }) : '';
     if (text !== banText) {
       banText = text;
       if (text !== '') ranked.el.title = text;
       else ranked.el.removeAttribute('title');
     }
-    if (key === rankedKey) return false;
-    rankedKey = key;
-    // A guest's "Iniciar sesión" takes its short form in a narrow tile (a phone, a tablet), before
-    // the lock would stand alone.
-    ranked.setSlot(key === 'guest' ? slot(t('menu.guestSignIn'), { icon: 'lock', body: true, short: t('modes.signInShort'), drop: true }) : key === 'ban' ? slot('', { icon: 'lock' }) : null);
+    const rooms = locked();
+    const key = [rankedKey, g, rooms].join('|');
+    if (key === lockKey) return false;
+    lockKey = key;
+    ranked.setSlot(rankedKey === 'guest' ? signInLock() : rankedKey === 'ban' ? slot('', { icon: 'lock' }) : null);
+    casual.setSlot(g ? signInLock() : slot(PLAYLISTS.join(HERO_SEP), { drop: true }));
+    friends.setSlot(rooms ? slot(t('modes.lobbiesTvLocked'), { icon: 'lock', body: true, drop: true }) : slot(t('home.lobbiesSlot'), { drop: true }));
+    return true;
+  };
+
+  /** The tiles in the role's order (the DOM's, for Tab and a screen reader; the grid template draws the same). True when they moved. */
+  const renderRole = (): boolean => {
+    const g = guest();
+    const key = g ? 'guest' : 'account';
+    if (key === roleKey) return false;
+    roleKey = key;
+    tilesBox.dataset.role = key;
+    const order = tileOrder({ guest: g, tv });
+    const had = tilesBox.contains(document.activeElement);
+    for (const id of Object.keys(tileEls) as HomeTile[]) if (!order.includes(id)) tileEls[id].remove();
+    for (const id of order) tilesBox.appendChild(tileEls[id]);
+    if (had && !tilesBox.contains(document.activeElement)) menu.refocus();
+    return true;
+  };
+
+  /** The "next" card after a guest's offline match: its buttons by device, or nothing. True when it changed. */
+  const renderNext = (): boolean => {
+    const card = nextCard({ guest: guest(), aiMatchEnded: host.aiMatchEnded === true, dismissed: nextDismissed, tv, roomsOpen: !locked() });
+    const key = card === null ? '' : `${card.rooms}|${card.account}`;
+    if (key === nextKey) return false;
+    nextKey = key;
+    nextBox.hidden = card === null;
+    if (card === null) {
+      if (nextBox.contains(document.activeElement)) menu.refocus();
+      setChildren(nextBox);
+      return true;
+    }
+    const drop = (): void => {
+      nextDismissed = true;
+      render(performance.now());
+    };
+    const rooms = card.rooms
+      ? h('button.mn-btn.mn-btn-primary.mn-home-next-go', { type: 'button', 'data-nav': true, 'data-key': 'next-rooms', onclick: () => (drop(), menu.open('modes', false, 'lobbies')) }, icon('friends'), h('span', null, t('home.nextRooms')))
+      : null;
+    const account = h(
+      `button.mn-btn${card.rooms ? '' : '.mn-btn-primary'}.mn-home-next-go` as 'button',
+      { type: 'button', 'data-nav': true, 'data-key': 'next-account', onclick: () => (drop(), card.account === 'tvSignIn' ? menu.tvSignIn() : openProfileTab(menu, 'register', null)) },
+      icon(card.account === 'tvSignIn' ? 'tv' : 'profile'),
+      h('span', null, t(card.account === 'tvSignIn' ? 'tvsign.tile' : 'home.nextAccount')),
+    );
+    const x = h('button.mn-btn.mn-home-next-x', { type: 'button', 'data-nav': true, 'data-key': 'next-close', 'aria-label': t('home.nextClose'), title: t('home.nextClose'), onclick: () => drop() }, icon('close'));
+    setChildren(nextBox, h('div.mn-home-next-text', null, h('b', null, t('home.nextTitle')), h('span', null, t('home.nextLine'))), h('div.mn-home-next-acts', null, rooms, account, x));
     return true;
   };
 
@@ -227,6 +337,13 @@ export function homeScreen(menu: Menu): Screen {
     if (!acc.signedIn) return;
     fetchedFor = acc.account?.name ?? '?';
     void acc.fetchMe().then(() => render(performance.now()), () => undefined);
+  };
+
+  /** A TV guest's rooms open once the anti-bot check is warm: warmed again before its token goes (WARM_MS). */
+  const rewarm = (now: number): void => {
+    if (!tv || !guest() || now - warmAt < REWARM_MS) return;
+    warmAt = now;
+    host.prewarmAntiBot?.();
   };
 
   /** Everything that changed, then one fit (`fit`: false as the screen shows: the mount fits right after). */
@@ -247,7 +364,10 @@ export function homeScreen(menu: Menu): Screen {
     // A session restored after the screen showed: its profile once (the plate's rank, the ban).
     if (acc.signedIn && acc.me === null && fetchedFor !== (acc.account?.name ?? '?')) fetchMe();
     if (renderPlate()) changed = true;
-    if (renderRanked()) changed = true;
+    if (renderRole()) changed = true;
+    if (renderLocks()) changed = true;
+    if (renderNext()) changed = true;
+    rewarm(now);
     if (changed && fit) menu.refit();
   };
 
@@ -257,12 +377,14 @@ export function homeScreen(menu: Menu): Screen {
     const s = state;
     switch (s.kind) {
       case 'play':
-        menu.beforeMatch(() => menu.startSearch({ kind: s.queue.kind, modes: s.queue.modes, region: s.queue.region, net: s.queue.net }));
+        // "While you search" opens on the search's first answer.
+        menu.beforeMatch(() => menu.startSearch({ kind: s.queue.kind, modes: s.queue.modes, region: s.queue.region }, { sheet: true }));
         return;
       case 'search':
         menu.openSearchScreen();
         return;
       case 'offline':
+      case 'bots':
         menu.beforeMatch(() => host.playFriendly(host.mode, host.difficulty));
         return;
       case 'lobby':
@@ -281,11 +403,12 @@ export function homeScreen(menu: Menu): Screen {
     // `ranked`: the samples' queue is Competitive in every format (the longest subtitle).
     (window as unknown as { __homeHero: (kind: HeroKind | null, opts?: { pad?: boolean; ranked?: boolean }) => void }).__homeHero = (kind, opts) => {
       const now = performance.now();
-      const q: QueuePick = opts?.ranked === true ? { kind: 'ranked', modes: [...PLAYLISTS], region: null, net: 'server' } : heroQueue(menu.prefs, false, false);
+      const q: QueuePick = opts?.ranked === true ? { kind: 'ranked', modes: [...PLAYLISTS], region: null } : heroQueue(menu.prefs, false, false);
       const sample: Record<HeroKind, HeroState> = {
         play: { kind: 'play', queue: q },
         search: { kind: 'search', search: { kind: q.kind, modes: q.modes, region: q.region, since: now - 42_000 } },
         offline: { kind: 'offline' },
+        bots: { kind: 'bots' },
         lobby: { kind: 'lobby', lobby: { code: 'ABC234', count: 2, max: 4 } },
         update: { kind: 'update' },
         rejoin: { kind: 'rejoin', rejoin: { kind: q.kind, modes: q.modes, leftMs: 192_000 } },
@@ -302,9 +425,10 @@ export function homeScreen(menu: Menu): Screen {
     el,
     pillSlot: pills,
     show: () => {
-      heroKey = clockText = plateKey = rankedKey = '';
+      heroKey = clockText = plateKey = lockKey = nextKey = '';
       fetchMe();
-      menu.host.prewarmAntiBot?.(); // a guest's first JUGAR then rarely waits for the anti-bot check
+      warmAt = performance.now();
+      menu.host.prewarmAntiBot?.(); // a guest's first room rarely waits for the anti-bot check (a TV guest's rooms open with it)
       render(performance.now(), false);
     },
     tick: render,
