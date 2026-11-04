@@ -228,7 +228,7 @@ runuser -u turbogol -- node /opt/turbogol-node/launcher.mjs register --control h
 ```
 
 El registro "Ubuntu" quedó `banned` con `/nodes/admin/status`: no recibe partidas ni alertas, y no
-ocupa lugar en el tope de la cuenta del proyecto (`NODE_TRUSTED_MAX_NODES`, 4), porque un nodo
+ocupa lugar en el tope de la cuenta del proyecto (`NODE_TRUSTED_MAX_NODES`, 6), porque un nodo
 baneado de una cuenta de confianza no cuenta. Retirarlo (`POST /nodes/admin/retire`) lo saca
 además de `/nodes/mine`.
 
