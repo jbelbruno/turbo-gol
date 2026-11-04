@@ -256,9 +256,9 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
   whoever waited longest decides), and also the CASUAL bots matches of whoever searches from its
   region and waited 5 minutes with no rivals. If it cannot, or if that region has no project
   server in service, they are played on Cloudflare servers, never on the project server of another
-  region. If in an emergency we turn off matches on Cloudflare servers, each match goes to the
-  project server of its region and, if that one cannot take it, to the one in São Paulo, and waits
-  until one of them has room (Terms 7.6). Lobby matches do not go through them. **Nobody outside
+  region, except in an emergency: if we turn off matches on Cloudflare servers, each match goes to
+  the project server of its region and, if that one cannot take it, to the one in São Paulo, and
+  waits until one of them has room (Terms 7.6). Lobby matches do not go through them. **Nobody outside
   the project can register a server yet.** Even if the game talks about hosting servers, today you
   cannot register one.
 - **Verification, also in another country.** Each COMPETITIVE match on a community server is

@@ -716,6 +716,9 @@ test(`version ${VERSION_A} of the texts: the six countries, the providers, the v
   assert.ok(ten.includes("Today the only community servers are the project's own, in São Paulo (Brazil), Germany and Malaysia and, for now, also in South Africa, Australia and the United States."));
   assert.ok(tes.includes('Nunca va al servidor del proyecto de otra región, salvo en una emergencia'));
   assert.ok(ten.includes('It never goes to the project server of another region, except in an emergency'));
+  // ... and the policy's 4.4 says the same, with the same exception.
+  assert.ok(pes.includes('nunca en el servidor del proyecto de otra región, salvo en una emergencia: si apagamos las partidas en servidores de Cloudflare'));
+  assert.ok(pen.includes('never on the project server of another region, except in an emergency: if we turn off matches on Cloudflare servers'));
   // Terms 12.4.1 and the policy's 4.5: the list of PR 3 (only probation or active, "Anfitrión" and a
   // number for any host that is not the project, compatible, the unnamed node's region and number).
   for (const t of [tes, pes]) assert.ok(t.includes('«Anfitrión» y un número'));

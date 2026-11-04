@@ -259,9 +259,10 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
   decide la región de quien esperó más), también las de CASUAL contra bots de quien busca desde su
   región y esperó 5 minutos sin rivales. Si no puede, o si esa región no tiene un servidor del
   proyecto en servicio, se juegan en servidores de Cloudflare, nunca en el servidor del proyecto
-  de otra región. Si en una emergencia apagamos las partidas en servidores de Cloudflare, cada
-  partida va al servidor del proyecto de su región y, si ese no puede tomarla, al de São Paulo, y
-  espera hasta que alguno tenga lugar (Términos 7.6). Las partidas de salas no pasan por ahí.
+  de otra región, salvo en una emergencia: si apagamos las partidas en servidores de Cloudflare,
+  cada partida va al servidor del proyecto de su región y, si ese no puede tomarla, al de São
+  Paulo, y espera hasta que alguno tenga lugar (Términos 7.6). Las partidas de salas no pasan por
+  ahí.
   **Nadie fuera del proyecto puede registrar un servidor todavía.** Aunque el juego hable de
   alojar servidores, hoy no puedes registrar uno.
 - **La verificación, también en otro país.** Cada partida de COMPETITIVO en un servidor de la
