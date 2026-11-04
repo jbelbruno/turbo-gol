@@ -145,7 +145,13 @@ function traceColo(): Promise<string> {
 export interface MatchRecord {
   matchId: string;
   mode: GameModeId;
+  /** The matchmaker that formed it (the queue hub): its release goes back there ('mm:' + region). */
   region: string;
+  /**
+   * The host region (MatchmakerDO hostRegion), what a ranked result or cancel names
+   * (ranked_matches.region). Absent in a record from before it: `region` stands in.
+   */
+  host?: string;
   /** Each seat with its car (src/net/cosmetics.ts: absent = the default car); RoomHost reads only the RosterEntry fields. */
   roster: Array<RosterEntry & SeatCar>;
   matchLengthSeconds: number;
@@ -308,6 +314,7 @@ export class MatchDO extends DurableObject<Env> {
       matchId: body.matchId,
       mode: body.mode ?? '1v1',
       region: typeof body.region === 'string' ? body.region : '?',
+      ...(typeof body.host === 'string' ? { host: body.host } : {}),
       // Field by field: a car the catalog does not know is dropped (the seat drives the default), never refused.
       roster: body.roster.map((e) => {
         const car = seatCar(e.car);
@@ -936,7 +943,7 @@ export class MatchDO extends DurableObject<Env> {
     const players = rec.roster
       .filter((e) => e.kind === 'player' && e.playerId)
       .map((e) => ({ id: e.playerId as string, team: e.team, left: this.leftSlots[e.slot] === 1 || this.clients[e.slot] === null }));
-    this.ctx.waitUntil(this.accountsPost('/ranked-result', { matchId: rec.matchId, playlist: rec.mode, region: rec.region, winner, blue: s.blue, red: s.red, players }));
+    this.ctx.waitUntil(this.accountsPost('/ranked-result', { matchId: rec.matchId, playlist: rec.mode, region: rec.host ?? rec.region, winner, blue: s.blue, red: s.red, players }));
   }
 
   /**
@@ -951,7 +958,7 @@ export class MatchDO extends DurableObject<Env> {
     const players = rec.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => e.playerId as string);
     // Nobody connected at all looks like our failure more than theirs: no abandon for anyone then.
     const absent = noShows ?? (this.liveSockets === 0 ? [] : rec.roster.filter((e) => e.kind === 'player' && e.playerId && !this.clients[e.slot]?.ready).map((e) => e.playerId as string));
-    this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: rec.matchId, playlist: rec.mode, region: rec.region, players, noShows: absent, reason }));
+    this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: rec.matchId, playlist: rec.mode, region: rec.host ?? rec.region, players, noShows: absent, reason }));
     this.broadcast(encodeJson(MsgType.Event, { type: 'cancelled', reason } satisfies MatchEvent), null);
     await this.shutdown('cancelled');
   }
@@ -964,7 +971,7 @@ export class MatchDO extends DurableObject<Env> {
       // Lost to a restart / error / an empty room: nobody is rated or penalised, the locks go.
       this.rankedReported = true;
       const players = r.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => e.playerId as string);
-      this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: r.matchId, playlist: r.mode, region: r.region, players, noShows: [], reason }));
+      this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: r.matchId, playlist: r.mode, region: r.host ?? r.region, players, noShows: [], reason }));
     }
     if (this.interval) clearInterval(this.interval);
     if (this.startTimer) clearTimeout(this.startTimer);
