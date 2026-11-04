@@ -138,6 +138,28 @@ html[data-shell='rail'] .mn-wait-option {
   display: none;
 }
 
+/* A finger's pause: its plate sits under the scorebug too, where the strip runs (a phone held
+   sideways hid PAUSE's top behind it). The dock says the rest: CANCEL SEARCH, QUIT · the search
+   goes on. */
+.tg-touch .hud-pausing .hud-search {
+  display: none;
+}
+
+/* A held QUIT with a line of its own (the search goes on, ranked's abandon) has three lines with
+   its hold hint: on a finger's dock it grows to hold them (56 cut its label on the border), and
+   the two buttons above it step up by as much (render/Hud.ts: hud-pause-menu-tall). */
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > .hud-pause-quit {
+  height: 76px;
+}
+
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > :nth-last-child(2):not(.hud-pause-primary):not(.hud-pause-row) {
+  bottom: calc(var(--safe-bottom) + 112px);
+}
+
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > :nth-last-child(3):not(.hud-pause-primary):not(.hud-pause-row) {
+  bottom: calc(var(--safe-bottom) + 180px);
+}
+
 .hud-search-warn {
   color: var(--warn);
 }
