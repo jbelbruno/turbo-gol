@@ -3,7 +3,7 @@
  * - region: the region and the connection ("● Online", "● 12 playing" from PLAYING_SHOWN up: a
  *   small count reads as an empty game), "Connecting…", or "Offline · RETRY"; it opens the region
  *   sheet, or retries when offline;
- * - search: spinner · "CASUAL · 2v2 · 0:42" (the search's own screen), and ✕ (cancel; pad Y,
+ * - search: spinner · "CASUAL · 0:42" (Casual pools every format), "COMPETITIVO · 2v2 · 0:42" (the search's own screen), and ✕ (cancel; pad Y,
  *   keyboard X anywhere in the menus); a copy without focus floats over Settings (Menu.float);
  * - update: "UPDATE TO PLAY" (--warn) once the server refused this page's version (the sheet again);
  * - points: "≡ 2.100 server points" on GARAJE and PERFIL (PointsPill, not a focus stop).
@@ -88,7 +88,9 @@ export class SearchPill {
     const key = (v.kind ?? '') + v.modes.join();
     if (key !== this.key) {
       this.key = key;
-      this.label.textContent = (v.kind === 'ranked' ? t('menu.searchRanked') : t('menu.searchCasual')) + (v.modes.length > 0 ? ' · ' + v.modes.join(' · ') : '');
+      // Casual pools every format (its own is only the bots match's): its name alone.
+      const ranked = v.kind === 'ranked';
+      this.label.textContent = (ranked ? t('menu.searchRanked') : t('menu.searchCasual')) + (ranked && v.modes.length > 0 ? ' · ' + v.modes.join(' · ') : '');
     }
     const c = clock(now - v.since);
     if (this.time.textContent !== c) this.time.textContent = c;

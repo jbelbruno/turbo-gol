@@ -71,9 +71,11 @@ test('outcome and rows: from the player\'s side; the player\'s row first in its 
 });
 
 test('PLAY AGAIN repeats the same queue in one press (the kind\'s playlists, as Inicio\'s hero would), restarts against the AI, goes back to the lobby', () => {
-  const prefs = { ...DEFAULT_PREFS, casualModes: ['1v1', '3v3'], rankedModes: ['2v2'], region: 'EU', net: 'server', lastQueue: 'ranked' };
-  assert.deepEqual(F.againAction('casual', prefs), { kind: 'search', queue: { kind: 'casual', modes: ['1v1', '3v3'], region: 'EU', net: 'server' } });
-  assert.deepEqual(F.againAction('ranked', prefs), { kind: 'search', queue: { kind: 'ranked', modes: ['2v2'], region: 'EU', net: 'server' } });
+  // Casual repeats its preferred format (the pool takes every format); no connection any more (always a server).
+  const prefs = { ...DEFAULT_PREFS, casualPrefer: '3v3', rankedModes: ['2v2'], region: 'EU', lastQueue: 'ranked' };
+  assert.deepEqual(F.againAction('casual', prefs), { kind: 'search', queue: { kind: 'casual', modes: ['3v3'], region: 'EU' } });
+  assert.deepEqual(F.againAction('ranked', prefs), { kind: 'search', queue: { kind: 'ranked', modes: ['2v2'], region: 'EU' } });
+  for (const k of ['casual', 'ranked']) assert.equal('net' in F.againAction(k, prefs).queue, false, k);
   assert.deepEqual(F.againAction('ai', prefs), { kind: 'restart' });
   assert.deepEqual(F.againAction('lobby', prefs), { kind: 'lobby' });
   // A Super low pick waiting for the FINAL to go (its reload): the FINAL goes first, nothing starts.

@@ -64,6 +64,78 @@
   grid-template: 'hero casual friends' 1fr 'hero ai ranked' 1fr / 1.6fr 1fr 1fr;
 }
 
+/* A guest (home.ts data-role, the modes redesign): VS AI and LOBBIES first, Casual and Competitive
+   locked after them. Each layout below has its guest template too; the DOM is in the same order. */
+.mn-tiles[data-role='guest'] {
+  grid-template-areas: 'hero ai friends' 'hero casual ranked';
+}
+
+/* A TV guest: VS AI, SIGN IN WITH YOUR PHONE, then LOBBIES and Casual (no Competitive tile). */
+html.tg-tv .mn-tiles[data-role='guest'] {
+  grid-template-areas: 'hero ai tvsign' 'hero friends casual';
+}
+
+html.tg-tv .mn-tiles[data-role='guest'] .mn-mtile-ranked {
+  display: none;
+}
+
+/* "Now, with people?" over the tiles after a guest's offline match (home.ts nextCard). */
+.mn-home-next {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: auto;
+  margin-bottom: 1rem;
+  padding: 0.875rem 1rem 0.875rem 1.25rem;
+  color: var(--text);
+  background: var(--surface-1-94);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-tile);
+}
+
+.mn-home-next[hidden] {
+  display: none;
+}
+
+.mn-home-next:not([hidden]) + .mn-tiles {
+  margin-top: 0;
+}
+
+.mn-home-next-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: var(--t-small);
+  color: var(--text-2);
+}
+
+.mn-home-next-text b {
+  font-size: var(--t-body);
+  color: var(--text);
+}
+
+.mn-home-next-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.mn-home-next-go .mn-icon,
+.mn-home-next-x .mn-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.mn-home-next-x {
+  align-self: stretch;
+  min-width: 2.75rem;
+  padding: 0;
+}
+
 /* data-fit minimums (fit.ts --fit-min): a slot never shrinks, past its row it drops its text. */
 .mn-hero-title {
   --fit-min: 40;
@@ -137,6 +209,10 @@ html[data-shell='rail'] .mn-tiles {
   gap: 0.625rem;
 }
 
+html[data-shell='rail'] .mn-tiles[data-role='guest'] {
+  grid-template-areas: 'ai friends hero' 'casual ranked hero';
+}
+
 html[data-shell='rail'] .mn-hero-main {
   padding: 1.25rem 1.25rem 1.25rem 1.375rem;
 }
@@ -206,6 +282,17 @@ html[data-layout='portrait'] .mn-tiles {
   margin-top: 0;
   height: auto;
   grid-template: 'hero hero' minmax(10.5rem, auto) 'casual friends' auto 'ai ranked' auto / 1fr 1fr;
+}
+
+html[data-layout='portrait'] .mn-tiles[data-role='guest'] {
+  grid-template-areas: 'hero hero' 'ai friends' 'casual ranked';
+}
+
+/* Upright, the "next" card's text over its buttons. */
+html[data-layout='portrait'] .mn-home-next {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 0;
 }
 
 html[data-layout='portrait'] .mn-mtile {
@@ -354,8 +441,9 @@ html[data-shell='tv'] .mn-hero-sub {
 }
 
 /* Searching on a TV (a hero too low for ✕ CANCEL under the text): beside the subtitle, which keeps
-   the queue (the region pill is right above, by the plate). ✕'s room is the row's end and a part
-   that gives way last with its label (tile.ts), the ✕ then its icon. */
+   the queue and the estimate (the region pill is right above, by the plate; the queue gives way
+   first, the estimate never: tile.ts). ✕'s room is the row's end and a part that gives way last
+   with its label (tile.ts), the ✕ then its icon. */
 html[data-shell='tv'] .mn-hero-busy .mn-hero-main {
   padding-bottom: 1.375rem;
 }
@@ -370,9 +458,9 @@ html[data-shell='tv'] .mn-hero-busy .mn-hero-row {
   width: 7.25rem;
 }
 
-html[data-shell='tv'] .mn-hero-busy .mn-hero-dot,
-html[data-shell='tv'] .mn-hero-busy .mn-hero-region {
-  display: none;
+/* The search's estimate ticks in place (tile.ts setEst): its digits keep their width. */
+.mn-hero-est {
+  font-variant-numeric: tabular-nums;
 }
 
 html[data-shell='tv'] .mn-hero-go {

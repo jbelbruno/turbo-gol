@@ -68,7 +68,7 @@ import { h, setChildren } from './dom';
 import { FocusMemory, FocusNav, heldOver, isEditable, isEditing, navKey, setEditing } from './nav';
 import { installKeyboardInset } from './keyboard';
 import type { NavDir, NavZone } from './nav';
-import { finePointer, resetPageZoom, tapGuarded } from './device';
+import { finePointer, resetPageZoom, tapGuardSince, tapGuarded } from './device';
 import { keypadBox, keypadSpec, keypadWrite } from './components/keypad';
 import { channelStep } from './channelKeys';
 import type { KeypadView } from './components/keypad';
@@ -123,16 +123,21 @@ import { MODES } from '../sim/constants';
 import { OUTCOME_ACTION } from '../net/outcome';
 import type { Outcome } from '../net/outcome';
 import type { RejoinRecord } from '../game/rejoinStore';
+import type { QueueWait } from '../net/queueWait';
+import { waitSheetStep } from './screens/searchModel';
+import type { QueueTimes } from './screens/searchModel';
+import { openWaitSheet } from './screens/waitSheet';
+import { openTvSignIn } from './screens/tvSignIn';
 
 export type SearchKind = 'casual' | 'ranked';
 
+/** A search: Casual and Competitive always play on a server (the modes redesign, November 2026). */
 export interface SearchRequest {
   kind: SearchKind;
+  /** Competitive: its playlists; Casual: its preferred format (one playlist), the pool takes every format. */
   modes: GameMode[];
   /** null = automatic (the continent of the connection). */
   region: RegionId | null;
-  /** Casual only: a P2P room (default) or a server match. Ranked is always the server. */
-  net: 'p2p' | 'server';
 }
 
 export interface SearchView {
@@ -145,8 +150,20 @@ export interface SearchView {
   since: number;
   /** The running search's region (null = automatic). */
   region: RegionId | null;
-  /** The queue it joined (MODOS' bots countdown: which path fills with bots, and when); null when none runs. */
-  net?: 'p2p' | 'server' | null;
+  /** The last waiting answer's `wait` (src/net/queueWait.ts; null: none yet, or an older server). */
+  wait?: QueueWait | null;
+  /** performance.now() when it arrived (0: none yet). */
+  waitAt?: number;
+  /** Waiting answers of this search so far (Menu's "While you search" opens on the first). */
+  answers?: number;
+  /** The search still queues (no match found yet): "While you search" is for such a one only. */
+  queueing?: boolean;
+  /** performance.now() when its first POST left (0: none yet): "While you search" opens about 1 s after it, answered or not. */
+  postedAt?: number;
+  /** The region the last waiting answer counts `searchingHere` in (the hub's), null when it said none. */
+  waitRegion?: string | null;
+  /** The search's requests fail and are tried again (the network is away). */
+  retrying?: boolean;
   /** The last failure (shown once as a toast), null when none. */
   error: string | null;
   /** That failure is the server refusing this page's version (426 reload_required): reload to play online. */
@@ -165,8 +182,10 @@ export interface MenuConfig {
   autoRegion: string;
   oauth: string[];
   online: boolean;
-  /** The server queue's bot fill, ms (GET /api/config botFillMs: MODOS' "bots join in"), null when the Worker did not say. */
+  /** The server queue's bot fill, ms (GET /api/config botFillMs), null since the modes redesign (MODOS counts the 5:00 instead). */
   botFillMs: number | null;
+  /** GET /api/config's queue times (the 5:00, the widening per kind), null from an older Worker (searchModel.ts' defaults). */
+  queue?: QueueTimes | null;
   /** GET /api/config legal.terms: the terms version in force, null or absent until the owner publishes them (Inicio's footer links them then). */
   terms?: string | null;
 }
@@ -201,6 +220,13 @@ export interface MenuHost {
   /** Solve the anti-bot check ahead (Inicio shown: NetClient.prewarmAntiBot). */
   prewarmAntiBot?(): void;
   /**
+   * The anti-bot check would pass without asking (NetClient.antiBotReady: a guest session, a warm
+   * quiet token, no sitekey): a TV guest's rooms open (homeModel.ts roomsLocked).
+   */
+  readonly antiBotReady?: boolean;
+  /** A match against the AI reached its FINAL on this page (not a quit): a guest's "next" card on Inicio. */
+  readonly aiMatchEnded?: boolean;
+  /**
    * The guest's name: the server's wire form ('Invitado 4821', shown through names.ts playerName), or
    * game.guestName before the first guest session. A guest never chooses or changes it.
    */
@@ -215,21 +241,29 @@ export interface MenuHost {
    */
   readonly theme: ThemeId;
   setTheme(id: ThemeId): void;
-  /** An offline friendly match against the bots. */
+  /**
+   * An offline friendly match against the bots; while a search queues, the unlimited match of the
+   * wait instead (it keeps the search, the match found ends it: Game.startWaitBots).
+   */
   playFriendly(mode: GameMode, difficulty: Difficulty): void;
   /**
    * Free play or a shot pack; `opts.rules` (a preset id) makes free play experimental for an
-   * unlocked player (packs always run stock physics).
+   * unlocked player (packs always run stock physics). While a search queues it keeps the search
+   * (experimental free play is not offered then: queue matches are stock physics).
    */
   startTraining(id: string, opts?: { rules?: string }): void;
   search(req: SearchRequest): void;
   cancelSearch(): void;
   searchView(): SearchView;
   /**
-   * Free play with the running search alive (MODOS' "While you wait: Free play"): a match found
-   * ends it and plays (Game.practiceToMatch); quitting it comes back to the menus still searching.
+   * Play locally with the running search alive (MODOS' "While you wait: VS BOTS · TRAIN", "While
+   * you search"): an unlimited match against the bots (the VS AI tab's format and difficulty) or
+   * free play; the match found ends it and plays (Game.waitToMatch); quitting comes back to the
+   * menus still searching. Nothing starts when no search queues.
    */
-  practiceWhileSearching(): void;
+  waitPlay(kind: 'bots' | 'training'): void;
+  /** Casual's preferred format changed: a running Casual search carries it at once (NetClient.queuePrefer), no restart. */
+  setQueuePrefer(mode: GameMode): void;
   /** A custom lobby started: join this member's match. */
   playLobbyMatch(result: QueueResult | QueueResultP2p): void;
   /** The server match this tab may join again (rejoinStore.ts: a reload, a lost connection), or null. */
@@ -413,7 +447,9 @@ export class Menu {
   /** performance.now() when the rail and the top bar last changed shape (a stacked screen came or went: ‹ and the crumbs). */
   private chromeMovedAt = -Infinity;
   private chromeStacked = false;
-  /** The last finger / pen down and up (performance.now()), for the tap guard. */
+  /** performance.now() when the menus last came up from hidden (over a match): no finger down before it presses anything. */
+  private shownAt = -Infinity;
+  /** The last finger / pen down (anywhere: the HUD's too) and up (performance.now()), for the tap guard. */
   private touchDownAt = -Infinity;
   private touchUpAt = -Infinity;
   /**
@@ -442,6 +478,8 @@ export class Menu {
   private lastTry: (() => void) | null = null;
   private visibleNow = false;
   private searching = false;
+  /** A search started from Inicio's hero or the FINAL: "While you search" opens on its first waiting answer, or ~1 s after its first POST (searchModel.ts waitSheetStep). */
+  private waitSheetDue = false;
   /** The lobby pill is up (renderLobbyPill). */
   private lobbyPillUp = false;
   /** Settings opened from the menus are up (Menu.openSettings). */
@@ -629,16 +667,35 @@ export class Menu {
   }
 
   /**
-   * Start a search (Inicio's hero, Casual's and Competitive's FIND MATCH): its kind is the queue
-   * JUGAR AHORA repeats (MenuPrefs.lastQueue); the pill, the hints and the screen on top follow at
-   * once (renderSearch).
+   * Start a search (Inicio's hero, Casual's and Competitive's FIND MATCH, the FINAL's PLAY AGAIN):
+   * its kind is the queue JUGAR AHORA repeats (MenuPrefs.lastQueue); the pill, the hints and the
+   * screen on top follow at once (renderSearch). `opts.sheet` (the hero, the FINAL): "While you
+   * search" opens on its first waiting answer (screens/waitSheet.ts; MODOS has the choice inline).
    */
-  startSearch(req: SearchRequest): void {
-    this.lastTry = () => this.beforeMatch(() => this.startSearch(req));
+  startSearch(req: SearchRequest, opts: { sheet?: boolean } = {}): void {
+    this.lastTry = () => this.beforeMatch(() => this.startSearch(req, opts));
     this.prefs.lastQueue = req.kind;
     this.savePrefs();
+    this.waitSheetDue = opts.sheet === true;
     this.host.search(req);
     this.renderSearch(performance.now());
+  }
+
+  /**
+   * The player plays while waiting (the bots match or training over the search: Game.setWait): a
+   * "While you search" still owed (its answer came while the menus were hidden, a pack started from
+   * them first) is dropped, so it never pops up once the player is back in the menus.
+   */
+  waitPlayStarted(): void {
+    this.waitSheetDue = false;
+  }
+
+  /**
+   * The TV's sign-in with the phone (screens/tvSignIn.ts): a TV guest's way into the rooms while its
+   * anti-bot check is not ready (Inicio, SALAS), here so the lobby screens stay loadable under node.
+   */
+  tvSignIn(): void {
+    openTvSignIn(this);
   }
 
   /** Back into the server match this tab lost (MenuHost.rejoinMatch): Inicio's hero, the lost sheet. */
@@ -681,6 +738,7 @@ export class Menu {
     this.firstShow = false;
     if (ui !== null && this.factories.has(ui)) screenId = ui; // #ui=<screen>: scripts/ui-fit.mjs
     if (screenId !== undefined) this.open(screenId, true);
+    if (!this.visibleNow) this.shownAt = performance.now();
     this.root.hidden = false;
     this.root.parentElement?.classList.add('mn-open'); // menu.css hides the in-game HUD behind it
     this.visibleNow = true;
@@ -1145,17 +1203,22 @@ export class Menu {
    * next screen has under it; a modal that came up under a finger). The bars stay put across a
    * mount, so a second tap on them is meant, but for the rail and the top bar when a stacked
    * screen came or went (their ‹ and crumbs moved the items: a double tap on a rail item would
-   * press the one that slid under the finger). Trusted pointer clicks only: Enter / Space and the
-   * controller's A (FocusNav.accept: el.click()) always go through.
+   * press the one that slid under the finger). Nor is a tap whose finger went down before the
+   * menus came up over a match (device.ts tapGuardSince: QUIT held in the pause, lifted over the
+   * rail's info button), so a finger is noted anywhere on the page, the HUD included. Trusted
+   * pointer clicks only: Enter / Space and the controller's A (FocusNav.accept: el.click()) always
+   * go through.
    */
   private installTapGuard(): void {
     const finger = (e: Event): boolean => {
       const p = (e as PointerEvent).pointerType;
       return p === 'touch' || p === 'pen';
     };
-    this.root.addEventListener('pointerdown', (e) => {
-      this.pressing = true;
+    window.addEventListener('pointerdown', (e) => {
       if (finger(e)) this.touchDownAt = performance.now();
+    }, true);
+    this.root.addEventListener('pointerdown', () => {
+      this.pressing = true;
     }, true);
     for (const type of ['pointerup', 'pointercancel']) {
       window.addEventListener(type, () => {
@@ -1172,7 +1235,7 @@ export class Menu {
         if (!e.isTrusted || (e as MouseEvent).detail === 0) return; // a key's or FocusNav's click
         const target = e.target;
         const bar = target instanceof Element ? target.closest('.mn-rail, .mn-tabbar, .mn-top') : null;
-        const since = bar === null ? this.mountedAt : bar.classList.contains('mn-tabbar') ? -Infinity : this.chromeMovedAt;
+        const since = tapGuardSince(bar === null ? null : bar.classList.contains('mn-tabbar') ? 'tabbar' : 'chrome', { mountedAt: this.mountedAt, chromeMovedAt: this.chromeMovedAt, shownAt: this.shownAt });
         const p = (e as PointerEvent).pointerType;
         // Older engines' clicks are plain MouseEvents: a finger's when one just lifted.
         const byFinger = p === 'touch' || p === 'pen' || (p === undefined && performance.now() - this.touchUpAt < 800);
@@ -1499,7 +1562,7 @@ export class Menu {
         }
       })
       .catch(() => {
-        this.cfg = { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null };
+        this.cfg = { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null, queue: null };
         this.refreshChrome();
       });
   }
@@ -1754,6 +1817,22 @@ export class Menu {
       this.refocus();
     }
     this.searchPill.set(v, now);
+    // "While you search": on the first waiting answer of a search the hero or the FINAL started,
+    // or about 1 s after its first POST left without one (after the terms and the sign-in), over the
+    // menus only; a search matched or ended first shows none, nor one gone to MODOS (its panel has
+    // the same choice), nor one whose player already plays while waiting (waitPlayStarted).
+    if (this.waitSheetDue) {
+      const step = waitSheetStep({
+        queueing: v.active && v.queueing === true,
+        onModes: this.top()?.id === 'modes',
+        answers: v.answers ?? 0,
+        postedAt: v.postedAt ?? 0,
+        now,
+        menusFree: this.visibleNow && this.modalEl === null && !this.settingsUp(),
+      });
+      if (step !== 'wait') this.waitSheetDue = false;
+      if (step === 'open') openWaitSheet(this);
+    }
     if (v.active !== this.searching) {
       this.searching = v.active;
       this.root.classList.toggle('mn-searching', v.active);

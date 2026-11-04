@@ -1,6 +1,6 @@
 /**
- * The Sala (plan §6.4, PR 12) and the ways into it: CREATE LOBBY AND SHARE (a private lobby with
- * the last format, MODOS › SALAS and the empty list), JOIN WITH CODE (mn-codecells in a sheet), a
+ * The Sala (plan §6.4, PR 12) and the ways into it: CREATE PUBLIC LOBBY / CREATE PRIVATE LOBBY (a
+ * lobby with the last format, MODOS › SALAS; the empty list's public one), JOIN WITH CODE (mn-codecells in a sheet), a
  * list row, and a join link (`#sala=ABC234`, on a cold load or a hashchange: "Join lobby ABC234 ·
  * 2v2 · 2/4?" with JOIN; a guest's name is the server's, never asked).
  *
@@ -8,8 +8,9 @@
  * which on a phone is its tap), SHARE (screens/lobbyModel.ts shareWay: the system's share sheet on
  * a touch screen, the link copied on a PC, a sheet with the QR, the code and the short link on a
  * TV), the two teams side by side in 56 px rows (a row opens Move · Make host · Kick for the host,
- * Move for one's own; a kick asks first), and the action bar fixed at the bottom: START (the host)
- * or READY, and "…" with SETTINGS (the host) and LEAVE LOBBY. While the lobby socket is away
+ * Move for one's own; a kick asks first), and the action bar fixed at the bottom: START (the host;
+ * disabled for a host alone, with the line "You need one more player to start": lobbies are always
+ * P2P, a match needs two players) or READY, and "…" with SETTINGS (the host) and LEAVE LOBBY. While the lobby socket is away
  * (LobbyClient 'reconnecting') the status line says "Reconnecting to the lobby…" and the actions
  * wait.
  *
@@ -31,7 +32,7 @@ import { MODES } from '../../sim/constants';
 import { DEFAULT_MATCH_SECONDS } from '../../game/Match';
 import { takeLobbyStay } from '../../game/rejoinStore';
 import { GAME_NAME } from '../../brand';
-import { t } from '../../i18n';
+import { serverText, t } from '../../i18n';
 import { lobbyRulesLine } from '../../render/rulesText';
 import { lobbyTitle, playerName } from '../names';
 import type { Menu, Screen } from '../Menu';
@@ -39,7 +40,7 @@ import { icon } from '../components/icons';
 import { qrSvg } from '../components/qr';
 import { codeCells } from '../components/codecells';
 import { field } from './common';
-import { configureLobby, lengthLabel, lobbyRules, netLabel } from './custom';
+import { configureLobby, lengthLabel, lobbyRules, tvRoomsLocked } from './custom';
 import { hasLink, joinLink, linkCode, lobbyFormat, shareWay, shortLink, spacedCode, withoutLink } from './lobbyModel';
 
 
@@ -66,25 +67,31 @@ function failed(menu: Menu, e: unknown, retry?: () => void): void {
 let creating = false;
 
 /**
- * CREATE LOBBY AND SHARE: a private lobby with the last format (lobbyModel.ts lobbyFormat), P2P and
- * the default length, then its screen with SHARE focused. Already in a lobby: its screen.
+ * CREATE PUBLIC LOBBY / CREATE PRIVATE LOBBY (`visibility`): a lobby with the last format
+ * (lobbyModel.ts lobbyFormat), P2P (always) and the default length, then its screen with SHARE
+ * focused. Already in a lobby: its screen. A TV guest whose anti-bot check is not ready: the
+ * phone's sign-in instead (custom.ts tvRoomsLocked).
  */
-export async function createAndShare(menu: Menu): Promise<void> {
+export async function createAndShare(menu: Menu, visibility: 'public' | 'private'): Promise<void> {
   const lobby = menu.host.lobby;
   if (lobby.inLobby) {
     menu.open('lobby');
     return;
   }
+  if (tvRoomsLocked(menu)) {
+    menu.tvSignIn();
+    return;
+  }
   if (creating) return;
   creating = true;
   // No title: the server's default is the host's name, which every viewer reads in their own language (names.ts lobbyTitle).
-  const settings: LobbyCreate['settings'] = { mode: lobbyFormat(menu.prefs), visibility: 'private', net: 'p2p', matchLengthSeconds: DEFAULT_MATCH_SECONDS, physics: null };
+  const settings: LobbyCreate['settings'] = { mode: lobbyFormat(menu.prefs), visibility, net: 'p2p', matchLengthSeconds: DEFAULT_MATCH_SECONDS, physics: null };
   try {
     await lobby.create({ settings, password: null, region: menu.prefs.region });
     freshLobby = true;
     menu.open('lobby');
   } catch (e) {
-    failed(menu, e, () => void createAndShare(menu));
+    failed(menu, e, () => void createAndShare(menu, visibility));
   } finally {
     creating = false;
   }
@@ -282,11 +289,10 @@ export function installLobbyReturn(menu: Menu): void {
   go();
 }
 
-/** The Sala's settings line: "2v2 · P2P · 5 min · Private". */
+/** The Sala's settings line: "2v2 · 5 min · Private" (lobbies are always P2P). */
 function infoLine(s: LobbyState): string {
   return t('custom.info', {
     mode: s.settings.mode,
-    net: netLabel(s.settings.net),
     length: lengthLabel(s.settings.matchLengthSeconds),
     visibility: s.settings.visibility === 'public' ? t('custom.public') : t('custom.private'),
     lock: '',
@@ -329,12 +335,15 @@ export function lobbyScreen(menu: Menu): Screen {
   const go = h('button.mn-btn.mn-btn-primary.mn-sala-go', { type: 'button', 'data-nav': true, 'data-key': 'sala-go', 'data-autofocus': true, onclick: () => primaryPress() });
   const more = h('button.mn-btn.mn-sala-more', { type: 'button', 'data-nav': true, 'data-key': 'sala-more', 'aria-label': t('lobby.more'), title: t('lobby.more'), onclick: () => openMore() }, '…');
   const bar = h('div.mn-sala-bar', { 'data-nav-row': true }, go, more);
+  // A host alone: START waits for a second player (lobbies are P2P), and this line says so.
+  const need = h('p.mn-sala-need', { id: 'mn-sala-need', role: 'status', hidden: true });
   const el = h(
     'section.mn-sala',
     { 'data-tablero': true },
     h('div.mn-sala-head', null, h('div.mn-sala-title', null, name, info, rulesLine), h('div.mn-sala-codebox', { 'data-nav-row': true }, code, share)),
     status,
     teams,
+    need,
     bar,
   );
   let shown = false;
@@ -343,6 +352,8 @@ export function lobbyScreen(menu: Menu): Screen {
   const me = (): LobbyMember | null => lobby.me;
   const link = (s: LobbyState): string => joinLink(location.origin, s.code);
   const busy = (): boolean => lobby.reconnecting || state()?.status !== 'open';
+  /** The host is alone: a P2P match needs another player (the server refuses a lone start: need_players). */
+  const alone = (): boolean => lobby.isHost && (state()?.members.length ?? 0) < 2;
 
   const copyCode = (): void => {
     const s = state();
@@ -376,8 +387,9 @@ export function lobbyScreen(menu: Menu): Screen {
 
   const primaryPress = (): void => {
     if (busy()) return;
-    if (lobby.isHost) lobby.start();
-    else lobby.setReady(me()?.ready !== true);
+    if (lobby.isHost) {
+      if (!alone()) lobby.start();
+    } else lobby.setReady(me()?.ready !== true);
   };
 
   /** "…": SETTINGS (the host) and LEAVE LOBBY. */
@@ -499,7 +511,14 @@ export function lobbyScreen(menu: Menu): Screen {
     setChildren(go, host ? icon('play') : ready ? icon('check') : null, h('span', null, host ? t('lobby.start') : t('lobby.ready')));
     go.classList.toggle('mn-btn-primary', host || !ready);
     go.setAttribute('aria-pressed', host ? 'false' : String(ready));
-    go.disabled = busy();
+    const lone = alone();
+    go.disabled = busy() || lone;
+    // The server's text for its refusal (error.lobby.need_players); none known: no line (the button says enough).
+    const needText = lone ? serverText('lobby', 'need_players', '') : '';
+    need.hidden = needText === '';
+    need.textContent = needText;
+    if (needText !== '') go.setAttribute('aria-describedby', 'mn-sala-need');
+    else go.removeAttribute('aria-describedby');
     // The controller's place across re-renders (by data-key), else the screen's own.
     const again = focusedKey !== null ? el.querySelector<HTMLElement>(`[data-key="${focusedKey}"]`) : null;
     if (again !== null && document.activeElement !== again && !touch()) again.focus({ preventScroll: true });

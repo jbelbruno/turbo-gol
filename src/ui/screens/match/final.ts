@@ -92,9 +92,10 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
       return;
     }
     // The search runs from Inicio, whose hero shows it (and cancels it): the FINAL goes first.
+    // "While you search" opens on its first answer (screens/waitSheet.ts).
     menu.beforeMatch(() => {
       menu.back();
-      menu.startSearch(a.queue);
+      menu.startSearch(a.queue, { sheet: true });
     });
   };
 
@@ -113,7 +114,8 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
     if (v.kind === 'ai') return [t('final.vsAi'), v.mode, difficultyName(menu.host.difficulty)].join(HERO_SEP);
     // Out of the Sala meanwhile (it closed, a kick, a reload past its return): the button opens the list.
     if (v.kind === 'lobby') return t(menu.host.lobby.inLobby || sampleKind !== null ? 'final.backToLobby' : 'custom.notInLobby');
-    const modes = v.kind === 'ranked' ? menu.prefs.rankedModes : menu.prefs.casualModes;
+    // Casual pools every format: its name and the region only.
+    const modes = v.kind === 'ranked' ? menu.prefs.rankedModes : [];
     const region = regionText(menu.prefs.region);
     return [t(KIND_NAME[v.kind]), ...modes, region].filter((x) => x !== null).join(HERO_SEP);
   };
