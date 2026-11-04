@@ -178,7 +178,9 @@ if (SESSION.length > 0 || SESSION2.length > 0) {
   playerName = jwtPayload(SESSION)?.name ?? null;
   log('dev sign-in skipped (SESSION / SESSION2 given); the leave test needs a third account: skipped');
 } else {
-  const [a, b, c] = [await devAccount('smoke_a'), await devAccount('smoke_b'), await devAccount('smoke_c')];
+  // A fresh trio per run (a rerun would find the last run's match still holding its seats).
+  const run = Math.random().toString(36).slice(2, 8);
+  const [a, b, c] = [await devAccount('smoke_a_' + run), await devAccount('smoke_b_' + run), await devAccount('smoke_c_' + run)];
   if (a === null || b === null || c === null) {
     log('no account sessions: run wrangler dev with --var DEV_AUTH:1, or pass SESSION and SESSION2 (see the header comment)');
     process.exit(2);
@@ -240,6 +242,12 @@ check(typeof queued.ticket === 'string' && queued.ticket.split('.').length === 3
 check(typeof queued.wsUrl === 'string' && queued.wsUrl.endsWith('/ws/' + queued.matchId), `wsUrl ${queued.wsUrl}`);
 const wsTarget = resolveWs(queued.wsUrl);
 check(wsTarget.startsWith(WS_BASE.slice(0, WS_BASE.indexOf('://') + 3)), `socket scheme matches the API (${wsTarget.slice(0, wsTarget.indexOf('://') + 3)} for ${API.slice(0, API.indexOf('://') + 3)})`);
+// A Worker that names another host than the one asked (wrangler dev's dev.host when --port differs:
+// pass --local-upstream) would send the sockets to someone else's server: stop before any.
+if (!queued.node && new URL(wsTarget).host !== new URL(API).host) {
+  check(false, `the socket would go to ${new URL(wsTarget).host}, not ${new URL(API).host}: run wrangler dev with --local-upstream <host:port>`);
+  process.exit(1);
+}
 
 // a second queue request while the match is active is refused (one active match per player)
 const again = await api('/api/queue', QUEUE, session);

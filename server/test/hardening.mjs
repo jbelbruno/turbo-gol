@@ -110,8 +110,10 @@ function openSocket(wsUrl, ticket) {
 }
 
 // ---- 1. a match ------------------------------------------------------------------------------
-const session = await devSession('hardening_a');
-const mate = await devSession('hardening_b');
+// A fresh pair per run: the rejoin limit (10 a minute per player) would remember the last run's.
+const run = Math.random().toString(36).slice(2, 8);
+const session = await devSession('hard_a_' + run);
+const mate = await devSession('hard_b_' + run);
 if (session === null || mate === null) {
   log('no dev accounts: run wrangler dev with --var DEV_AUTH:1 (Casual is for accounts)');
   process.exit(2);
@@ -126,7 +128,9 @@ check(a.welcome.matchId === matchId, 'Welcome on socket A');
 check(a.welcome.roster.every((r) => !('playerId' in r)), `Welcome roster exposes no playerId: ${JSON.stringify(a.welcome.roster.map((r) => Object.keys(r)))}`);
 a.ws.send(P.encodeJson(P.MsgType.Ready, {}));
 a.ws.send(P.encodeJson(P.MsgType.Ready, {})); // a second Ready is a no-op
-await sleep(1500);
+// The partner never connects: the host waits its join grace (a few seconds) before the kickoff.
+for (let waited = 0; a.snapshots === 0 && waited < 12_000; waited += 250) await sleep(250);
+await sleep(500);
 check(a.snapshots > 0 && a.close === null, `loop running: ${a.snapshots} snapshots on A, still open`);
 
 // ---- 2. ping flood -> 1008 'rate' --------------------------------------------------------------
@@ -190,8 +194,8 @@ c.ws.close(1000, 'done');
 // ---- 6. [optional] a room nobody joins is dropped at 90 s and its lock released ------------------
 if (WAIT_UNUSED) {
   await sleep(61_000); // a fresh guest minute
-  const g2 = { json: { session: await devSession('hardening_ghost') } };
-  const ghostMate = await devSession('hardening_ghost_mate');
+  const g2 = { json: { session: await devSession('hard_ghost_' + run) } };
+  const ghostMate = await devSession('hard_mate_' + run);
   check(g2.json.session !== null && ghostMate !== null, 'ghost accounts');
   const q2 = await queueUntilMatched(g2.json.session, ghostMate);
   check(q2.json?.status === 'matched', `ghost matched (room ${q2.json?.matchId?.slice(0, 8)}...) and never connects`);
