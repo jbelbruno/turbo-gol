@@ -116,7 +116,7 @@ test('matchmaking lines: es.ts texts, the no-show wait in seconds below two minu
   const server = (code, message, retryAfterMs = 0) => ({ code, message, retryAfterMs });
   assert.equal(netErrorText(new NetError('http', 'queue failed (503 matchmaking_off)', 503, server('matchmaking_off', 'matchmaking_off'))), 'La búsqueda de partidas está en pausa, inténtalo más tarde');
   assert.equal(netErrorText(new NetError('http', 'queue failed (429 rate_limited)', 429, server('rate_limited', 'rate_limited'))), 'Demasiados intentos, espera un minuto');
-  assert.equal(netErrorText(new NetError('http', 'x', 403, server('account_required', 'Inicia sesión para jugar Competitivo'))), 'Inicia sesión para jugar Competitivo');
+  assert.equal(netErrorText(new NetError('http', 'x', 403, server('account_required', 'Inicia sesión para jugar Casual'))), 'Inicia sesión para jugar Casual y Competitivo');
   assert.equal(netErrorText(new NetError('turnstile', 'x', 503, server('turnstile_unconfigured', 'TURNSTILE_SITEKEY ...'))), 'Verificación anti-bots no configurada en el servidor, inténtalo más tarde');
   assert.equal(netErrorText(new NetError('turnstile', 'turnstile error 300030')), 'Falló la verificación anti-bots, inténtalo de nuevo');
   assert.equal(netErrorText(new NetError('http', 'x', 410, server('left', 'you left this match (its bots drive your car): queue again'))), 'Error del servidor');
