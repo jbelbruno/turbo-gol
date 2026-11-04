@@ -181,12 +181,14 @@ cannot:**
 
 1. **CASUAL** needs an account and is always played on a server, with the game's official
    physics. We look for players in your region first and, if nobody shows up within 1 minute, in
-   every region. As soon as 2 or more people are searching, the match starts and bots fill the free
-   seats; the format depends on how many they are. If nobody comes within 5 minutes, you play bots
-   on a server, in the format you picked, if the servers have room and the game is in view
-   (otherwise, as soon as there is room or you are back in the game). While you wait you can play
-   bots or train in your browser: when your match is found you join it at once and that local match
-   is lost. CASUAL never counts for the rating.
+   every region. Someone who has already searched for 1 minute in another region also finds you as
+   soon as you start, and the match may then be played in their region (section 7.6). As soon as 2
+   or more people find each other, the match starts and bots fill the free seats; the format
+   depends on how many they are. If nobody comes within 5 minutes, you play bots on a server, in
+   the format you picked, once the game is in view (otherwise, as soon as you are back in the
+   game). If the servers are full, the match, with people or with bots, waits until there is room.
+   While you wait you can play bots or train in your browser: when your match is found you join it
+   at once and that local match is lost. CASUAL never counts for the rating.
 2. **Lobbies are played P2P:** your device connects directly to the devices of the other players
    in the lobby, including people you do not know. To set up that connection, each device receives
    the public IP address of the others. From an IP it is possible to tell, roughly, which city you

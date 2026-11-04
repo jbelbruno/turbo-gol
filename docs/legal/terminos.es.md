@@ -183,12 +183,14 @@ otros jugadores, **no puedes:**
 
 1. **CASUAL** necesita una cuenta y siempre se juega en un servidor, con la física oficial del
    juego. Buscamos primero jugadores de tu región y, si en 1 minuto no aparece nadie, de todas las
-   regiones. Apenas hay 2 o más personas buscando, la partida empieza y los bots completan los
-   lugares libres; el formato depende de cuántas sean. Si en 5 minutos no llega nadie, juegas en un
-   servidor contra bots, en el formato que elegiste, si hay lugar en los servidores y tienes el
-   juego a la vista (si no, apenas haya lugar o vuelvas al juego). Mientras esperas puedes jugar
-   contra bots o entrenar en tu navegador: cuando aparece tu partida entras al instante y ese
-   partido local se pierde. CASUAL no cuenta para el puntaje.
+   regiones. Quien ya lleva 1 minuto buscando en otra región también te encuentra apenas empiezas,
+   y la partida puede jugarse entonces en su región (sección 7.6). Apenas se encuentran 2 o más
+   personas, la partida empieza y los bots completan los lugares libres; el formato depende de
+   cuántas sean. Si en 5 minutos no llega nadie, juegas en un servidor contra bots, en el formato
+   que elegiste, cuando tienes el juego a la vista (si no, apenas vuelvas al juego). Si los
+   servidores están llenos, la partida, con gente o con bots, espera hasta que haya lugar. Mientras
+   esperas puedes jugar contra bots o entrenar en tu navegador: cuando aparece tu partida entras al
+   instante y ese partido local se pierde. CASUAL no cuenta para el puntaje.
 2. **Las salas se juegan P2P:** tu dispositivo se conecta directo con el de los otros jugadores de
    la sala, también con personas que no conoces. Para armar esa conexión, cada dispositivo recibe
    la dirección IP pública de los demás. Con una IP se puede saber, más o menos, en qué ciudad estás

@@ -485,9 +485,11 @@ The game takes these decisions on its own, without a person:
 - **Turnstile:** it decides whether your browser looks like a bot. If it rejects you, you cannot
   start as a guest or sign in. If that happens to you, write to us.
 
-Matchmaking also uses your rating to choose opponents. The rules are in the source code. **You can
-ask us to explain the logic of these decisions to you, and for a person to review a sanction**
-(Terms, section 9), by writing to <mailto:privacy@turbo-gol.com>.
+Matchmaking also uses your rating (in COMPETITIVE), your region and how long you have been
+searching to choose whom you play with and in which region the match is played (Terms 7.1, 7.3
+and 7.6). The rules are in the source code. **You can ask us to explain the logic of these
+decisions to you, and for a person to review a sanction** (Terms, section 9), by writing to
+<mailto:privacy@turbo-gol.com>.
 
 ### 7.5 What you can do yourself in the game
 

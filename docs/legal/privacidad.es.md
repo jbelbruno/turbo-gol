@@ -488,9 +488,11 @@ Estas decisiones las toma el juego solo, sin una persona:
 - **Turnstile:** decide si tu navegador parece un bot. Si te rechaza, no puedes empezar como
   invitado ni entrar. Si te pasa, escríbenos.
 
-El emparejamiento también usa tu puntaje para elegir rivales. Las reglas están en el código
-fuente. **Puedes pedirnos que te expliquemos la lógica de estas decisiones, y que una persona
-revise una sanción** (Términos, sección 9), escribiendo a <mailto:privacy@turbo-gol.com>.
+El emparejamiento también usa tu puntaje (en COMPETITIVO), tu región y cuánto llevas buscando para
+elegir con quién juegas y en qué región se juega la partida (Términos 7.1, 7.3 y 7.6). Las reglas
+están en el código fuente. **Puedes pedirnos que te expliquemos la lógica de estas decisiones, y
+que una persona revise una sanción** (Términos, sección 9), escribiendo a
+<mailto:privacy@turbo-gol.com>.
 
 ### 7.5 Lo que puedes hacer tú mismo en el juego
 
