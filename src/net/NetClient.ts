@@ -13,11 +13,12 @@
  *                   client-side challenge failure reject with NetError 'turnstile'. Inicio pre-warms
  *                   one token (prewarmAntiBot, kept WARM_MS) for the next registration; a check that
  *                   wants the player says so (onAntiBotAsk: the menus' sheet, its CANCEL ends it)
- *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, local?, visible,
+ *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, bots?, local?, visible,
  *                   first? } (Bearer session) long-poll loop until 'matched' (the modes redesign,
  *                   November 2026: `api` is QUEUE_API, src/net/queueWait.ts, and a page without it
  *                   gets 426 reload_required; Casual is kind 'server' and pools every format, its
- *                   `prefer` the format of its online bots match; `local` says what the player does
+ *                   `prefer` the format of its online bots match and `bots` (queueBots) that
+ *                   match's bots level; `local` says what the player does
  *                   locally meanwhile, for the daily counters; `visible` whether the tab is in
  *                   view, which gates the 5:00 bots match). Kind 'p2p' is never sent any more (read
  *                   as 'server'). The first answer of a search comes at once (`first: true` until
@@ -38,7 +39,7 @@
  *                   after its own wait, reload_required, a 401 twice in a row...). Each POST
  *                   has a watchdog (QUEUE_POST_TIMEOUT_MS) and, on the tab coming back, one in
  *                   flight longer than QUEUE_STALE_MS is aborted: both re-POST at once. A change
- *                   of `queuePrefer`, `queueLocal` or the tab's visibility aborts the long-poll in
+ *                   of `queuePrefer`, `queueBots`, `queueLocal` or the tab's visibility aborts the long-poll in
  *                   flight with the client's own controller (neither a cancel nor a network error)
  *                   and re-POSTs at once, at most once per QUEUE_REPOST_MIN_MS (a later change
  *                   goes in one re-POST at the end of them). cancelQueue() aborts it and POSTs
@@ -102,6 +103,7 @@ import { LossEstimator } from './NetStats';
 import type { IceServer, QueueResultP2p } from './p2p/protocol';
 import { QUEUE_API, type QueueMatchedExtra, type QueueWait } from './queueWait';
 import type { GameMode } from '../sim/constants';
+import type { Difficulty } from '../ai/Bot';
 import { getToken as turnstileToken, type TurnstileLoader } from './Turnstile';
 import {
   INPUT_HEADER,
@@ -758,6 +760,7 @@ export class NetClient {
   /** The queue's requests fail and are retried (the menus' and the HUD's "Offline: the search goes on..."). */
   queueRetrying = false;
   private preferValue: GameMode | null = null;
+  private botsValue: Difficulty | null = null;
   private localValue: 'bots' | 'training' | null = null;
   private readonly visibleFn: () => boolean;
   private lastVisible: boolean;
@@ -768,7 +771,7 @@ export class NetClient {
   private pageBack: (() => void) | null = null;
   /** The queue POST in flight (null between them): its own controller, when it left (now()), the body version it carries, why the loop aborted it. */
   private queuePost: { ctrl: AbortController; at: number; version: number; reason: PostAbort | null } | null = null;
-  /** Bumped by every change the body carries (prefer, local, visibility). */
+  /** Bumped by every change the body carries (prefer, bots, local, visibility). */
   private bodyVersion = 0;
   /** now() of the last early re-POST, and the one waiting for its 5 s. */
   private repostAt = Number.NEGATIVE_INFINITY;
@@ -830,6 +833,20 @@ export class NetClient {
   set queuePrefer(v: GameMode | null) {
     if (v === this.preferValue) return;
     this.preferValue = v;
+    this.requestRepost();
+  }
+
+  /**
+   * Casual's bots level for its solo match, sent as `bots` (null: none, the server's level); a
+   * change re-POSTs a running search at once, as queuePrefer does (the hub updates it in place).
+   */
+  get queueBots(): Difficulty | null {
+    return this.botsValue;
+  }
+
+  set queueBots(v: Difficulty | null) {
+    if (v === this.botsValue) return;
+    this.botsValue = v;
     this.requestRepost();
   }
 
@@ -1595,7 +1612,7 @@ export class NetClient {
    * POST /api/queue body (read once per POST): the client-version marker (QUEUE_API: a page without
    * it is refused with 426 reload_required), the playlists (`queueModes`, else `mode`), the kind
    * (never 'p2p': the P2P queue is gone, the server reads it as 'server'), the region when one is
-   * chosen, Casual's `prefer`, what the player does locally (`local`), whether the tab is in view,
+   * chosen, Casual's `prefer` and `bots`, what the player does locally (`local`), whether the tab is in view,
    * and `first: true` while the search has had no answer yet (`first`: a new search, or one a
    * reloaded page starts again, whose waiter the hub still holds): the Worker answers that join at
    * once, without the long-poll. Only the loop's first POST in practice; again only when it got no
@@ -1607,6 +1624,7 @@ export class NetClient {
     if (modes !== null && modes.length > 0) body.modes = modes.slice();
     if (this.region !== null) body.region = this.region;
     if (this.preferValue !== null) body.prefer = this.preferValue;
+    if (this.botsValue !== null) body.bots = this.botsValue;
     if (this.localValue !== null) body.local = this.localValue;
     body.visible = this.visibleFn();
     if (first) body.first = true;

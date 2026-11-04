@@ -7,7 +7,10 @@
  * - CASUAL: FORMAT IF YOU PLAY BOTS, 1v1, 2v2 and 3v3 (Casual pools every format: with other
  *   people the format follows how many they are, as the note under the grid says); its pick is the
  *   search's `prefer` and, while Casual searches, changes the running search in place (no restart:
- *   MenuHost.setQueuePrefer). COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY, whose
+ *   MenuHost.setQueuePrefer); under it DIFFICULTY IF YOU PLAY BOTS (Easy, Normal, Hard: Hard until
+ *   the player picks another, MenuPrefs.casualBots), the search's `bots` for that match alone (with
+ *   other people the server picks the level), changed in place the same way (MenuHost.setQueueBots),
+ *   and named in the 5:00 box. COMPETITIVO: FORMAT as a 2 x 2 grid, 1v1, 2v2, 3v3 and ANY, whose
  *   pick restarts a running search, as its note says. A format's press picks it and searches (from
  *   Inicio a search of a chosen format is two presses). Then Region (the region sheet). Both always
  *   play on a server (the modes redesign, November 2026: no connection to pick). The action zone:
@@ -139,8 +142,13 @@ export function modesScreen(menu: Menu): Screen {
   const noteText = h('span');
   const note = h('p.mn-modes-note', { hidden: true }, icon('info'), noteText);
   const formatLabel = h('span.mn-modes-label');
+  // Casual: the bots' level of its bots match (the player's; with other people the server picks it).
+  const botsLabel = h('span.mn-modes-label.mn-modes-bots-label', { hidden: true }, t('modes.botsPrefer'));
+  const botsSeg = seg<Difficulty>('casual-bots', t('modes.botsPrefer'), DIFFICULTIES.map((d) => ({ value: d, label: difficultyName(d) })), () => menu.prefs.casualBots, (v) => pickBots(v));
+  botsSeg.el.classList.add('mn-modes-bots');
+  botsSeg.el.hidden = true;
   const region = picker('modes-region', 'globe', t('common.region'), () => menu.openRegionSheet());
-  const queuePart = h('div.mn-modes-queue', null, formatLabel, formats, note, h('div.mn-modes-rows', null, region.el));
+  const queuePart = h('div.mn-modes-queue', null, formatLabel, formats, note, botsLabel, botsSeg.el, h('div.mn-modes-rows', null, region.el));
   const lobbies = lobbyBrowser(menu);
   const lobbiesPart = h('div.mn-modes-lobbies', { hidden: true }, lobbies.el);
   const modeSeg = seg<GameMode>('ai-mode', t('friendly.mode'), PLAYLISTS.map((p) => ({ value: p, label: p })), () => aiMode, (v) => (aiMode = v));
@@ -174,7 +182,9 @@ export function modesScreen(menu: Menu): Screen {
   const sWarn = h('div.mn-act-est.mn-act-warn', { hidden: true });
   const botsTime = h('b.mn-act-bots-time');
   const botsBar = h('span.mn-act-bar', { 'aria-hidden': 'true' }, ...Array.from({ length: SEGMENTS }, () => h('span')));
-  const bots = h('div.mn-act-bots', { hidden: true }, h('div.mn-act-bots-row', null, icon('bot'), h('span', null, t('search.bots')), botsTime), botsBar, h('p.mn-act-always', null, t('search.always')));
+  // "Bots (Hard) join in 4:32": the level the player picked for that match (MenuPrefs.casualBots).
+  const botsText = h('span');
+  const bots = h('div.mn-act-bots', { hidden: true }, h('div.mn-act-bots-row', null, icon('bot'), botsText, botsTime), botsBar, h('p.mn-act-always', null, t('search.always')));
   const cancel = h(
     'button.mn-btn.mn-act-cancel',
     {
@@ -259,6 +269,17 @@ export function modesScreen(menu: Menu): Screen {
     render(performance.now());
   };
 
+  /** Casual's bots level: remembered, and a running Casual search carries it at once (no restart, no new search). */
+  const pickBots = (level: Difficulty): void => {
+    if (menu.prefs.casualBots !== level) {
+      menu.prefs.casualBots = level;
+      menu.savePrefs();
+    }
+    const v = searchView();
+    if (v.active && v.kind === 'casual') host.setQueueBots(level);
+    render(performance.now());
+  };
+
   const primary = (): void => {
     switch (state()) {
       case 'search':
@@ -330,6 +351,9 @@ export function modesScreen(menu: Menu): Screen {
         for (const [f, x] of formatEls) setHidden(x.el, !shown.includes(f));
         setText(formatLabel, t(tab === 'casual' ? 'modes.formatPrefer' : 'modes.format'));
       }
+      // Casual's bots level (Competitive has no bots match).
+      setHidden(botsLabel, tab !== 'casual');
+      setHidden(botsSeg.el, tab !== 'casual');
     }
     setText(intro, t(TAB_INTRO[tab]));
     // A TV guest's rooms: the check warmed again every 4 minutes while SALAS is up (its buttons
@@ -376,6 +400,7 @@ export function modesScreen(menu: Menu): Screen {
       // Casual's note always (the format of its bots match); Competitive's while it searches (a pick restarts it).
       setText(noteText, t(kind === 'casual' ? 'modes.formatPreferNote' : 'search.formatRestarts'));
       setHidden(note, kind === 'ranked' && !searchingHere);
+      if (kind === 'casual') botsSeg.refresh();
       region.set(menu.regionLabel);
     }
     if (tab === 'ai') {
@@ -420,6 +445,7 @@ export function modesScreen(menu: Menu): Screen {
       const left = botsCountdown({ kind, since: v.since, now, wait: v.wait ?? null, waitAt: v.waitAt ?? 0, soloAfterMs: menu.cfg?.queue?.soloAfterMs });
       setHidden(bots, left === null);
       if (left !== null) {
+        setText(botsText, t('search.botsLevel', { level: difficultyName(menu.prefs.casualBots) }));
         setText(botsTime, clock(left.left + 999));
         const on = botsSegments(left.left, left.total, SEGMENTS);
         botsBar.childNodes.forEach((n, i) => (n as HTMLElement).classList.toggle('on', i < on));

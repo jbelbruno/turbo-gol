@@ -313,6 +313,16 @@ html[data-input='pad'] .mn-keys-pad {
   height: 1.125rem;
 }
 
+/* Casual's DIFFICULTY IF YOU PLAY BOTS: a mn-seg under the note (the rail hides its label as the format's) */
+.mn-modes-bots-label {
+  margin-top: 1.125rem;
+}
+
+.mn-modes-bots {
+  flex: none;
+  margin-top: 0.625rem;
+}
+
 .mn-modes-rows {
   display: flex;
   flex-direction: column;

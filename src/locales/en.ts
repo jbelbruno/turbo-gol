@@ -329,7 +329,9 @@ export default {
   // Casual's format grid: the format of an online match against bots (the 5-minute one); with other
   // people searching the format follows how many they are
   'modes.formatPrefer': 'FORMAT IF YOU PLAY BOTS',
-  'modes.formatPreferNote': 'With more people searching, the format depends on how many there are.',
+  'modes.formatPreferNote': 'With more people searching, the format depends on how many there are and the server picks the difficulty.',
+  // Casual's level of the bots in that same match (Easy, Normal, Hard); with other people the server picks it
+  'modes.botsPrefer': 'DIFFICULTY IF YOU PLAY BOTS',
   // LOBBIES' action zone, over CREATE PUBLIC LOBBY · CREATE PRIVATE LOBBY
   'modes.lobbiesAction': 'Make a public lobby for anyone, or a private one for your friends',
   // A TV guest whose anti-bot check is not ready: the line over the phone's sign-in (tvsign.tile)
@@ -345,8 +347,8 @@ export default {
   'search.rankedTag': 'RANKED',
   // {format} is '2v2' or format.anySub, {region} a region's name
   'search.where': 'Looking for {format} in {region}',
-  // Followed by the time left (m:ss)
-  'search.bots': 'Bots join in',
+  // Followed by the time left (m:ss); {level} is the level picked for that match (Easy, Normal, Hard)
+  'search.botsLevel': 'Bots ({level}) join in',
   'search.always': 'If nobody comes within 5 minutes, you play bots online. Meanwhile, play here.',
   'search.cancel': 'CANCEL SEARCH',
   // Followed by search.waitBots · search.waitTraining: local play with the search still on

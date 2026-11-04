@@ -185,7 +185,7 @@ cannot:**
    soon as you start, and the match may then be played in their region (section 7.6). As soon as 2
    or more people find each other, the match starts and bots fill the free seats; the format
    depends on how many they are. If nobody comes within 5 minutes, you play bots on a server, in
-   the format you picked, once the game is in view (otherwise, as soon as you are back in the
+   the format and at the difficulty you picked, once the game is in view (otherwise, as soon as you are back in the
    game). If the servers are full, the match, with people or with bots, waits until there is room.
    While you wait you can play bots or train in your browser: when your match is found you join it
    at once and that local match is lost. CASUAL never counts for the rating.
@@ -201,8 +201,8 @@ cannot:**
    their username on a public leaderboard. Today there is no option to hide your name on it. If you
    ask for your account to be deleted, you stop appearing on it right away.
 4. **Custom lobbies.** Whoever creates a lobby is the lobby host (they can hand the role to another
-   member): they choose the mode and the rules, and the title if they have an account; they can set
-   a password and they can remove a player. When you create a lobby you choose whether it is
+   member): they choose the mode, the rules and the bots' difficulty, and the title if they have
+   an account; they can set a password and they can remove a player. When you create a lobby you choose whether it is
    public (CREATE PUBLIC LOBBY) or private (CREATE PRIVATE LOBBY), and the lobby host can change
    it. Lobbies are always played P2P (section 7.2) and a match needs at least 2 players. A public
    lobby appears in a list that anyone can see, with its title, the name of its current host, its

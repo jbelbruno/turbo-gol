@@ -238,6 +238,50 @@ test("the bots' level of a Casual MatchDO match: the KV flag bot_level (hard whe
   assert.equal('botDifficulty' in create, false);
 });
 
+test("the player's own bots level (the queue's `bots`): its 5:00 solo match plays it, changed in place keeps the clock; a pooled match never reads it (the flag's level); junk or ranked is no choice", async () => {
+  const w = await makeHubWorld({ flags: { bot_level: 'medium' } });
+  const a = pid();
+  await w.join(a, { extra: { bots: 'easy' } });
+  w.advance(2 * MIN);
+  const changed = await w.join(a, { extra: { bots: 'hard' } });
+  assert.equal(changed.json.wait.waitedMs, 2 * MIN, 'the same search: its clock goes on');
+  w.advance(Q.SOLO_AFTER_MS - 2 * MIN);
+  assert.equal((await w.join(a, { extra: { bots: 'hard' } })).json.humans, 1, 'the solo match');
+  assert.equal(w.created()[0].body.botDifficulty, 'hard', "its player's level, not the flag's medium");
+  // No choice (an older page) or junk: the flag's level.
+  for (const extra of [{}, { bots: 'insane' }, { bots: 'Hard' }]) {
+    const v = await makeHubWorld({ flags: { bot_level: 'medium' } });
+    const b = pid();
+    await v.join(b, { extra });
+    v.advance(Q.SOLO_AFTER_MS);
+    await v.join(b, { extra });
+    assert.equal(v.created()[0].body.botDifficulty, 'medium', JSON.stringify(extra));
+  }
+  // Pooled: two players each with their own pick play the flag's level, nobody's.
+  const p = await makeHubWorld({ flags: { bot_level: 'medium' } });
+  await p.join(pid(), { extra: { bots: 'easy' } });
+  assert.equal((await p.join(pid(), { extra: { bots: 'hard' } })).json.humans, 2);
+  assert.equal(p.created()[0].body.botDifficulty, 'medium');
+  // Ranked: the waiter keeps no level, the match carries none.
+  const r = await makeHubWorld();
+  await r.join(pid(), { kind: 'ranked', mode: '1v1', extra: { bots: 'easy' } });
+  await r.join(pid(), { kind: 'ranked', mode: '1v1', extra: { bots: 'easy' } });
+  assert.equal('botDifficulty' in r.created()[0].body, false);
+});
+
+test("Worker: POST /api/queue passes Casual's `bots` on to the hub when it is one of the three levels; the solo match plays it", async () => {
+  for (const [sent, want] of [['easy', 'easy'], ['medium', 'medium'], ['insane', 'hard'], [undefined, 'hard'], [3, 'hard']]) {
+    const w = await makeHubWorld();
+    const t = await accountToken(pid());
+    const body = { api: 2, mode: '2v2', prefer: '1v1', ...(sent !== undefined ? { bots: sent } : {}) };
+    assert.equal((await w.queue(t, { ...body, first: true })).json.status, 'waiting');
+    w.advance(Q.SOLO_AFTER_MS);
+    const r = await w.queue(t, body);
+    assert.deepEqual([r.json.status, r.json.mode, r.json.humans], ['matched', '1v1', 1]);
+    assert.equal(w.created()[0].body.botDifficulty, want, JSON.stringify(sent));
+  }
+});
+
 test('a hidden tab keeps its clock past 5:00 and gets no solo match; its first visible POST forms it at once', async () => {
   const w = await makeHubWorld();
   const a = pid();

@@ -87,11 +87,37 @@ test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked; a
   for (const c of ['bots', 'training', 'menu']) assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: c })).waitChoice, c);
   assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: 'x' })).waitChoice, 'bots');
   const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
-  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
+  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', casualBots: 'hard', rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
   assert.equal(P.PREFS_KEY, 'turbogol.menu.v1', 'the same key: no migration');
   // Each parse is a fresh object: a change to one never reaches the defaults.
   P.parsePrefs(null).rankedModes.push('3v3');
   assert.deepEqual(P.parsePrefs(null).rankedModes, ['2v2']);
+});
+
+test("parsePrefs: Casual's solo bots level is hard until the player picks another; one of the three levels kept, anything else hard", () => {
+  assert.equal(P.DEFAULT_PREFS.casualBots, 'hard');
+  assert.equal(P.parsePrefs(null).casualBots, 'hard', 'a first visit');
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: level })).casualBots, level);
+  for (const junk of ['Hard', 'expert', 2, null, {}]) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: junk })).casualBots, 'hard', JSON.stringify(junk));
+});
+
+test("MODOS › CASUAL: DIFFICULTY IF YOU PLAY BOTS under the format grid (es / en), a pick changes a running Casual search in place; every Casual search carries the pick, ranked none", async () => {
+  const en = (await import('../src/locales/en.ts')).default;
+  const es = (await import('../src/locales/es.ts')).default;
+  assert.deepEqual([en['modes.botsPrefer'], es['modes.botsPrefer']], ['DIFFICULTY IF YOU PLAY BOTS', 'DIFICULTAD SI JUEGAS CON BOTS']);
+  for (const msgs of [en, es]) {
+    assert.match(msgs['search.botsLevel'], /\{level\}/, "the 5:00 box names the level");
+    assert.equal('search.bots' in msgs, false, 'the box without the level is gone');
+  }
+  assert.match(es['modes.formatPreferNote'], /la dificultad la elige el servidor/);
+  const { readFileSync } = await import('node:fs');
+  const modes = readFileSync(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\)/);
+  assert.match(modes, /host\.setQueueBots\(level\)/);
+  const menu = readFileSync(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /this\.host\.search\(req\.kind === 'casual' \? \{ \.\.\.req, bots: this\.prefs\.casualBots \} : req\)/);
+  const game = readFileSync(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
+  assert.match(game, /client\.queueBots = req\.kind === 'casual' \? \(req\.bots \?\? null\) : null;/);
 });
 
 test('Inicio by role and device: a guest VS AI and LOBBIES first, a TV guest the phone sign-in and no Competitive, an account as before', () => {

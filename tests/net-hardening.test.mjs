@@ -422,6 +422,33 @@ test('early re-POST: a prefer or local change aborts the long-poll in flight and
   await assert.rejects(p, (err) => err instanceof NetError && err.code === 'cancelled');
 });
 
+test("queue body: Casual's solo bots level as `bots` (none while null); a change re-POSTs a running search at once, the same value never", async () => {
+  let n = 0;
+  const h = makeClient(
+    { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': (init) => (++n === 1 ? jsonResponse(200, WAITING) : hanging(init)) },
+    { queueTiming: { retryMs: [60_000], repostMinMs: 1 }, visible: () => true },
+  );
+  assert.equal(h.client.queueBots, null);
+  h.client.queuePrefer = '2v2';
+  h.client.queueBots = 'easy';
+  const p = h.client.queue('2v2', 'server');
+  for (let i = 0; i < 20 && queueCalls(h).length < 2; i++) await tick(1);
+  assert.deepEqual(queueCalls(h)[0].body, { api: 2, mode: '2v2', kind: 'server', prefer: '2v2', bots: 'easy', visible: true, first: true });
+  assert.equal(queueCalls(h)[1].body.bots, 'easy', 'every POST of the search carries it');
+  h.client.queueBots = 'medium';
+  for (let i = 0; i < 20 && queueCalls(h).length < 3; i++) await tick(1);
+  assert.equal(queueCalls(h).length, 3, 'the change re-POSTed at once');
+  assert.equal(queueCalls(h)[2].body.bots, 'medium');
+  h.client.queueBots = 'medium';
+  await tick(30);
+  assert.equal(queueCalls(h).length, 3, 'the same level: no re-POST');
+  h.client.queueBots = null;
+  for (let i = 0; i < 20 && queueCalls(h).length < 4; i++) await tick(1);
+  assert.equal('bots' in queueCalls(h)[3].body, false, 'null: no field (the server\'s level)');
+  h.client.cancelQueue();
+  await assert.rejects(p, (err) => err instanceof NetError && err.code === 'cancelled');
+});
+
 test('the watchdog: a queue POST hung past its timeout is aborted and re-sent at once (no backoff)', async () => {
   let n = 0;
   const h = makeClient(

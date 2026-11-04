@@ -6,7 +6,7 @@
  * regions' instances keep the custom lobbies' P2P rooms (/custom) and the locks of matches formed
  * there before the deploy.
  *
- *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, car?, account?, accountAgeDays? }
+ *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, bots?, car?, account?, accountAgeDays? }
  *                                            -> QueueResult (matched right away; with the hub's extras mode, host,
  *                                               humans: src/net/queueWait.ts QueueMatchedExtra) or 'waiting' with
  *                                               { waiting, region: home, wait: QueueWait } and fresh: true when this
@@ -17,9 +17,10 @@
  *                                               QUEUE_HUB). prefer: the format of its solo match (a playlist; else 2v2
  *                                               when `modes` has it, else modes[0]). local: 'bots' | 'training', what it
  *                                               plays locally meanwhile (the daily counters only). visible: false while
- *                                               its tab is in the background (no solo match then). A change of prefer,
- *                                               modes, local or visible updates the waiter in place (its clock goes on);
- *                                               only a change of kind replaces it.
+ *                                               its tab is in the background (no solo match then). bots: Casual, the
+ *                                               level of its solo match's bots (easy | medium | hard; anything else is
+ *                                               no choice). A change of prefer, modes, local, visible or bots updates
+ *                                               the waiter in place (its clock goes on); only a change of kind replaces it.
  *                                               car / account / accountAgeDays: the session's (index.ts seatFields),
  *                                               kept with the seat (HumanEntry) and copied into every roster;
  *                                               409 { error: 'active_match', matchId, kind } while a match / room of the
@@ -95,8 +96,9 @@
  *            lone waiter of SOLO_AFTER_MS with its tab visible gets its solo match (its `prefer`,
  *            bots everywhere else). Format by humans: 2-4 = 2v2, 5-6 = 3v3 (casualFormat), bots in
  *            the free seats. Always a MatchDO or a community node, never P2P. The bots play at
- *            the level of the KV flag bot_level (env.ts casualBotLevel: hard when unset), pooled
- *            and solo, MatchDO and node alike; ranked sends no level (a leaver's car stays medium).
+ *            the level of the KV flag bot_level (env.ts casualBotLevel: hard when unset), MatchDO
+ *            and node alike, except a solo match whose player chose its own (Waiter.bots, the
+ *            join's `bots`); ranked sends no level (a leaver's car stays medium).
  *   Ranked:  per playlist, humans only, the MMR windows as before (pickRankedGroup, balanceTeams):
  *            own region first, then, among waiters of RANKED_WIDEN_MS, any region.
  *   Where:   the host region of a match is its humans' majority (hostRegion; a tie: the longest
@@ -346,6 +348,12 @@ interface Waiter extends HumanEntry {
   visible: boolean;
   /** What it plays locally meanwhile (the daily counters only). */
   local?: LocalPlay;
+  /**
+   * Casual: the bots' level it chose for its solo match (the 5:00, alone: nobody else plays those
+   * bots). A pooled match never reads it (the KV flag bot_level's level for everyone). Absent: none
+   * chosen (an older page), the flag's level.
+   */
+  bots?: Difficulty;
   /** Its match could form but every server is full (wait.busy). */
   busy: boolean;
   /** Its last formation found no node and no MatchDO, or failed: not tried again before this. */
@@ -510,6 +518,8 @@ interface JoinBody {
   local?: unknown;
   /** false: the page's tab is hidden (no solo match then). Absent = true. */
   visible?: unknown;
+  /** Casual: the bots' level the player chose for its solo match (easy | medium | hard; anything else is ignored: the server's level). */
+  bots?: unknown;
 }
 
 /** The solo match's format: `prefer` when it is a playlist, else 2v2 when searched, else the first one searched. Pure. */
@@ -739,7 +749,11 @@ interface FormOptions {
   host?: RegionId;
   /** formMatch: a solo bots match (SOLO_ROOMS_MAX) of this search. */
   solo?: Omit<SoloInfo, 'at'>;
-  /** formRoom only (a custom lobby's P2P room): the bots' level the host picked (LobbySettings.bots); formMatch reads its own (botLevelOf). */
+  /**
+   * The bots' level someone picked: formRoom, the lobby host's (LobbySettings.bots); formMatch, the
+   * one a solo match's player chose (Waiter.bots: read only with `solo`, botLevelOf). Otherwise
+   * formMatch reads the KV flag bot_level.
+   */
   bots?: Difficulty;
 }
 
@@ -1170,6 +1184,8 @@ export class MatchmakerDO extends DurableObject<Env> {
     const prefer = preferOf(body.prefer, modes);
     const local = localOf(body.local);
     const visible = body.visible !== false;
+    // Casual's solo bots level, the player's (ranked has none; junk is no choice: the flag's level).
+    const bots = kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined;
     let ratings: Waiter['ratings'];
     if (kind === 'ranked') {
       const r = parseRatings(body.ratings, modes);
@@ -1251,6 +1267,8 @@ export class MatchmakerDO extends DurableObject<Env> {
       waiter.home = home;
       waiter.prefer = prefer;
       waiter.visible = visible;
+      if (bots === undefined) delete waiter.bots;
+      else waiter.bots = bots;
       this.setLocal(waiter, local, now);
       if (waiter.modes.length !== modes.length || waiter.modes.some((m) => !modes.includes(m))) {
         // A ranked waiter moves to its new playlists' queues, keeping its place by its join time.
@@ -1266,7 +1284,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       const restored = back !== undefined && back.kind === kind && back.until > now;
       if (back !== undefined && restored) this.forgetRecent(playerId);
       const joinedAt = restored ? back.joinedAt : now;
-      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}), ...(restored && back.soloRetried ? { soloRetried: true as const } : {}) };
+      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(bots !== undefined ? { bots } : {}), ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}), ...(restored && back.soloRetried ? { soloRetried: true as const } : {}) };
       if (!restored) {
         this.stat(now).searches[statsKindOf(kind)]++;
         this.arrive({ at: now, kind: statsKindOf(kind), home });
@@ -2355,7 +2373,8 @@ export class MatchmakerDO extends DurableObject<Env> {
       // do_disabled (the nodes on for them, or the Worker would have refused them): node only, so hosted SA.
       const host = planHost !== QUEUE_HUB && this.nodesFor(humans.map((h) => h.playerId)) && (await flag(this.env, 'do_disabled')) ? QUEUE_HUB : planHost;
       const first = humans[0];
-      formed = await this.formMatch(g.mode, humans, now, { host, ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home, ...(first.soloRetried ? { retried: true as const } : {}) } } : {}) });
+      // A solo match plays the bots' level its player chose (Waiter.bots); a pooled one the flag's.
+      formed = await this.formMatch(g.mode, humans, now, { host, ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home, ...(first.soloRetried ? { retried: true as const } : {}) }, ...(first.bots !== undefined ? { bots: first.bots } : {}) } : {}) });
       this.countFormed('casual', humans, formed, now);
     } catch (e) {
       this.formFailed(e, humans, now);
@@ -2557,11 +2576,13 @@ export class MatchmakerDO extends DurableObject<Env> {
   /**
    * The bots' level of a match formMatch forms: none for ranked (its only bots are the cars of
    * players who left, driven at RoomHost's default, medium, and never by the flag: a flip must not
-   * change how the counted mode plays), else the KV flag bot_level (env.ts casualBotLevel: hard
-   * when unset or unusable), for pooled and solo Casual matches alike, on a MatchDO or a node.
+   * change how the counted mode plays), a solo match's own level when its player chose one
+   * (opts.bots: alone, nobody else plays those bots), else the KV flag bot_level (env.ts
+   * casualBotLevel: hard when unset or unusable), on a MatchDO or a node.
    */
   private botLevelOf(opts: FormOptions): Promise<Difficulty | undefined> {
     if (opts.ranked === true) return Promise.resolve(undefined);
+    if (opts.solo !== undefined && opts.bots !== undefined) return Promise.resolve(opts.bots);
     return casualBotLevel(this.env);
   }
 

@@ -98,7 +98,7 @@
  * call too): the control plane's kill switch. server/README.md lists which flag stops what.
  */
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
@@ -441,13 +441,16 @@ interface QueueBody {
   /** true on the FIRST POST of a client's search loop (a new search, or the one a reloaded page starts again); a boolean, anything else is ignored. */
   first?: unknown;
   physics?: unknown;
+  /** Casual: the bots' level of the player's solo match (easy | medium | hard); anything else, or ranked, is not passed on. */
+  bots?: unknown;
 }
 
 /**
  * POST /api/queue (the build spec's §2.1): session (401), its limit, then the account gate (403
  * for a guest, any kind, any page version: decision 2), the client version (426 for an account's
  * page from before the deploy), the KV flags, the body, the ranked check, and the hub's /join with
- * the player's `home`, `prefer`, `local` and `visible`. A join that made or restored a search
+ * the player's `home`, `prefer`, `local`, `visible` and Casual's `bots` (its solo match's bots level,
+ * only one of the three levels). A join that made or restored a search
  * (`fresh`), or one whose body says `first: true` (a boolean; anything else is ignored), is
  * answered at once; any other waiting join long-polls as before.
  */
@@ -510,6 +513,8 @@ async function queue(request: Request, env: Env): Promise<Response> {
       prefer: preferOf(body.prefer, modes),
       local: body.local === 'bots' || body.local === 'training' ? body.local : undefined,
       visible: body.visible !== false,
+      // Casual's solo bots level, the player's pick (privacy policy, the search's row).
+      bots: kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined,
       ...seatFields(session, now),
     }),
   });

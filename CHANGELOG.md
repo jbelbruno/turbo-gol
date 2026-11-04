@@ -494,6 +494,11 @@ All notable changes to Turbogol are documented here. The format follows
   for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
   default) and every player's game runs it; the lobby's line shows it, the public list does not. The
   P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
+- Casual: you pick the difficulty of the bots in your 5:00 match against bots (MODOS › CASUAL,
+  DIFFICULTY IF YOU PLAY BOTS: Easy, Normal or Hard, Hard by default; a running search takes the
+  change at once, and the 5:00 box names it). A match with other people plays the server's level.
+  The search carries the pick, so the privacy policy (and Terms 7.1 and 7.4) say so in their next
+  version.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%

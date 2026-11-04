@@ -187,7 +187,7 @@ otros jugadores, **no puedes:**
    y la partida puede jugarse entonces en su región (sección 7.6). Apenas se encuentran 2 o más
    personas, la partida empieza y los bots completan los lugares libres; el formato depende de
    cuántas sean. Si en 5 minutos no llega nadie, juegas en un servidor contra bots, en el formato
-   que elegiste, cuando tienes el juego a la vista (si no, apenas vuelvas al juego). Si los
+   y con la dificultad que elegiste, cuando tienes el juego a la vista (si no, apenas vuelvas al juego). Si los
    servidores están llenos, la partida, con gente o con bots, espera hasta que haya lugar. Mientras
    esperas puedes jugar contra bots o entrenar en tu navegador: cuando aparece tu partida entras al
    instante y ese partido local se pierde. CASUAL no cuenta para el puntaje.
@@ -203,8 +203,8 @@ otros jugadores, **no puedes:**
    nombre de usuario en una clasificación pública. Hoy no hay una opción para ocultar tu nombre en
    ella. Si pides el borrado de tu cuenta, dejas de aparecer en ella enseguida.
 4. **Salas personalizadas.** Quien crea una sala es el anfitrión de la sala (puede pasarle el rol a
-   otro miembro): elige el modo y las reglas, y el título si tiene cuenta; puede ponerle contraseña
-   y puede sacar a un jugador. Al crear una sala eliges si es pública (CREAR SALA PÚBLICA) o
+   otro miembro): elige el modo, las reglas y la dificultad de los bots, y el título si tiene
+   cuenta; puede ponerle contraseña y puede sacar a un jugador. Al crear una sala eliges si es pública (CREAR SALA PÚBLICA) o
    privada (CREAR SALA PRIVADA), y el anfitrión de la sala puede cambiarlo. Las salas siempre se
    juegan P2P (sección 7.2) y una partida necesita al menos 2 jugadores. Una sala pública aparece
    en una lista que cualquiera puede ver, con su título, el nombre de su anfitrión actual, su

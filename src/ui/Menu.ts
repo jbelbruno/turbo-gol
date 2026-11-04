@@ -138,6 +138,8 @@ export interface SearchRequest {
   modes: GameMode[];
   /** null = automatic (the continent of the connection). */
   region: RegionId | null;
+  /** Casual: the bots' level of its 5:00 solo match (MenuPrefs.casualBots, filled by Menu.startSearch); absent: the server's. */
+  bots?: Difficulty;
 }
 
 export interface SearchView {
@@ -264,6 +266,8 @@ export interface MenuHost {
   waitPlay(kind: 'bots' | 'training'): void;
   /** Casual's preferred format changed: a running Casual search carries it at once (NetClient.queuePrefer), no restart. */
   setQueuePrefer(mode: GameMode): void;
+  /** The bots' level of Casual's solo match changed: a running Casual search carries it at once (NetClient.queueBots), no restart. */
+  setQueueBots(level: Difficulty): void;
   /** A custom lobby started: join this member's match. */
   playLobbyMatch(result: QueueResult | QueueResultP2p): void;
   /** The server match this tab may join again (rejoinStore.ts: a reload, a lost connection), or null. */
@@ -677,7 +681,8 @@ export class Menu {
     this.prefs.lastQueue = req.kind;
     this.savePrefs();
     this.waitSheetDue = opts.sheet === true;
-    this.host.search(req);
+    // Every Casual search (MODOS, Inicio's hero, PLAY AGAIN) carries the player's solo bots level.
+    this.host.search(req.kind === 'casual' ? { ...req, bots: this.prefs.casualBots } : req);
     this.renderSearch(performance.now());
   }
 
