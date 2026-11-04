@@ -146,8 +146,9 @@ test('a trusted host is verified by another free verifier of the same simulation
   const sp = online(await regNode(reg, project, 0, { roles: ['host', 'verify'], publicUrl: 'wss://sp.example.org' }), 0);
   const de = online(await regNode(reg, project, 0, { roles: ['host', 'verify'], publicUrl: 'wss://de.example.org' }), 0);
   const busy = new Map();
-  const pick = () => pickVerifier(reg.list(), sp, BUILD, 0, (id) => busy.get(id) ?? 0, { rand: () => 0.99 })?.nodeId;
-  for (let i = 0; i < 5; i++) assert.equal(pick(), de.nodeId, 'the other machine');
+  // The host is first in the list: a random pick among the least busy would land on it with a draw of 0.
+  const pick = (r = 0) => pickVerifier(reg.list(), sp, BUILD, 0, (id) => busy.get(id) ?? 0, { rand: () => r })?.nodeId;
+  for (const r of [0, 0.5, 0.99]) assert.equal(pick(r), de.nodeId, `the other machine, whatever the draw (${r})`);
   busy.set(de.nodeId, 1);
   assert.equal(pick(), sp.nodeId, 'the other one is busy: itself');
   busy.set(sp.nodeId, 2);
