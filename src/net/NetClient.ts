@@ -129,6 +129,8 @@ export const PING_INTERVAL_MS = 250;
 const SESSION_MIN_REMAINING_MS = 60_000;
 /** A pre-warmed Turnstile token is kept this long (Cloudflare accepts one for 300 s). */
 export const WARM_MS = 270_000;
+/** A pre-warm asked again solves a new token once the one it has is this old (before it goes at WARM_MS). */
+export const REWARM_AFTER_MS = 200_000;
 /** The queue loop's waits after a network error, a 500 / 502 / 504 or an unknown 503 (ms); the last repeats. */
 export const QUEUE_RETRY_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 /** A queue POST's own timeout: the long-poll's 25 s (MatchmakerDO POLL_TIMEOUT_MS) plus 10 s. */
@@ -992,17 +994,19 @@ export class NetClient {
   /**
    * Inicio opened: with a sitekey and no guest session stored, solve the check now and keep its
    * token for the next registration (a guest's, a sign-up's), so JUGAR rarely waits for it. A check
-   * that wants an interaction is dropped quietly: the registration's own asks the player.
+   * that wants an interaction is dropped quietly: the registration's own asks the player. A token
+   * older than REWARM_AFTER_MS is solved again (a TV guest's rooms re-warm it every 4 minutes while
+   * Inicio or SALAS is up: antiBotReady holds through, the old token stays until the new one comes).
    */
   prewarmAntiBot(): void {
-    if (this.warming || (this.warm !== null && this.now() - this.warm.at < WARM_MS)) return;
+    if (this.warming || (this.warm !== null && this.now() - this.warm.at < REWARM_AFTER_MS)) return;
     if (sessionValid(this.guest)) return;
     this.warming = true;
     void (async () => {
       try {
         const siteKey = (await this.config()).turnstileSiteKey;
         if (siteKey === null) return;
-        const token = await this.exclusive(undefined, () => this.challenge(siteKey, undefined, true));
+        const token = await this.exclusive(undefined, () => this.challenge(siteKey, undefined, true, false));
         this.warm = { token, at: this.now() };
       } catch {
         /* offline, refused, wanted a click: the next registration runs its own check */
@@ -1046,12 +1050,15 @@ export class NetClient {
   /**
    * One Turnstile challenge in the Hud's container (or the pre-warmed token, while fresh);
    * onTurnstile brackets it for the status line, onAntiBotAsk an interaction. `quiet`: the pre-warm,
-   * which reports nothing and gives up on an interaction. Run under exclusive().
+   * which reports nothing and gives up on an interaction. `useWarm` false: a new token whatever the
+   * warm one (the pre-warm renewing it, which keeps it meanwhile). Run under exclusive().
    */
-  private async challenge(siteKey: string, signal?: AbortSignal, quiet = false): Promise<string> {
-    const warm = this.warm;
-    this.warm = null;
-    if (warm !== null && this.now() - warm.at < WARM_MS) return warm.token;
+  private async challenge(siteKey: string, signal?: AbortSignal, quiet = false, useWarm = true): Promise<string> {
+    if (useWarm) {
+      const warm = this.warm;
+      this.warm = null;
+      if (warm !== null && this.now() - warm.at < WARM_MS) return warm.token;
+    }
     const container = this.turnstileContainer();
     if (container === null) throw new NetError('turnstile', 'no element to render the Turnstile widget into');
     const ctrl = new AbortController();

@@ -221,6 +221,7 @@ export function modesScreen(menu: Menu): Screen {
   /** Competitive's playlists, Casual's preferred format. */
   const modesFor = (kind: 'casual' | 'ranked'): GameMode[] => (kind === 'ranked' ? menu.prefs.rankedModes : [menu.prefs.casualPrefer]);
   let warmAt = 0;
+  const tvGuest = (): boolean => document.documentElement.classList.contains('tg-tv') && !acc.signedIn;
   /** A region's name: the queue's own, else the automatic one; "Automatic" before the server said which. */
   const regionText = (id: RegionId | null): string => {
     const r = id ?? menu.regionId;
@@ -332,8 +333,9 @@ export function modesScreen(menu: Menu): Screen {
     }
     // VS AI's intro while a search runs: its PLAY is the wait's unlimited match.
     setText(intro, t(tab === 'ai' && running !== null ? 'friendly.introWaiting' : TAB_INTRO[tab]));
-    // A TV guest's rooms: the check warmed again while SALAS is up (its tiles and buttons unlock with it).
-    if (tab === 'lobbies' && tvRoomsLocked(menu) && now - warmAt >= REWARM_MS) {
+    // A TV guest's rooms: the check warmed again every 4 minutes while SALAS is up (its buttons
+    // unlock with it; a warm token is renewed before it goes, so they lock again only if that fails).
+    if (tab === 'lobbies' && tvGuest() && now - warmAt >= REWARM_MS) {
       warmAt = now;
       host.prewarmAntiBot?.();
     }
