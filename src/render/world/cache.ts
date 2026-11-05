@@ -15,7 +15,9 @@
  * Bump whenever a generator, a bake material or the codec changes what a bake produces (the theme
  * data itself is hashed into the key, see `cacheKey`).
  */
-export const WORLD_CACHE_VERSION = 9;
+// 10: the sky bake's cloud shader and the blades' grass shader compile in Firefox now (PR 117): a Firefox that baked while
+// they failed holds a bake with a wrong sky and skyline, and the key knows nothing about shaders.
+export const WORLD_CACHE_VERSION = 10;
 const DB_NAME = 'turbogol-world';
 /** Version 2 added the `used` store (version 1 evicted the oldest write first). */
 const DB_VERSION = 2;
