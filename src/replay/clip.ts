@@ -58,8 +58,18 @@ const MIME_CANDIDATES: ReadonlyArray<{ mime: string; ext: 'mp4' | 'webm' }> = [
   { mime: 'video/webm', ext: 'webm' },
 ];
 
-/** The first container + codec the browser can record (MP4 first: what every platform takes), null when none. */
-export function pickMime(isSupported: (mime: string) => boolean): { mime: string; ext: 'mp4' | 'webm' } | null {
+/**
+ * The first container + codec the browser can record (MP4 first: what every platform takes), null when
+ * none. With `withAudio` the ones that name an audio codec too (AAC in MP4, Opus in WebM) come first.
+ */
+export function pickMime(isSupported: (mime: string) => boolean, withAudio = false): { mime: string; ext: 'mp4' | 'webm' } | null {
+  if (withAudio) {
+    for (const c of MIME_CANDIDATES) {
+      const audio = c.ext === 'mp4' ? 'mp4a.40.2' : 'opus';
+      const mime = c.mime.includes('codecs=') ? `${c.mime},${audio}` : c.mime;
+      if (mime !== c.mime && isSupported(mime)) return { mime, ext: c.ext };
+    }
+  }
   for (const c of MIME_CANDIDATES) if (isSupported(c.mime)) return c;
   return null;
 }
@@ -195,7 +205,15 @@ export interface ClipOverlay {
   clock: string;
   /** The goal caption: the scoring team, the scorer's name (null: no name), the word and the seconds since the goal; null none. */
   goal: { team: 0 | 1; scorer: string | null; word: string; age: number } | null;
+  /** Seconds into the clip and the clip's length (the call to action takes the last CTA_SECONDS); total 0: no call to action. */
+  elapsed: number;
+  total: number;
+  /** The call to action's first line ('Play free at'). */
+  cta: string;
 }
+
+/** How long the closing call to action shows (s). */
+export const CTA_SECONDS = 2.6;
 
 /** How long the goal caption stays (s); it leaves over its last 0.4 s. */
 export const GOAL_CAPTION_SECONDS = 2.8;
@@ -355,6 +373,98 @@ function drawGoal(ctx: CanvasRenderingContext2D, w: number, h: number, u: number
   }
 }
 
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/**
+ * The game's name and address, small and clear all along (a dark chip, bottom left, above where the
+ * apps put their own caption and buttons), and in the last CTA_SECONDS a lime slab with the call to
+ * action: "Play free at turbo-gol.com".
+ */
+function drawBrand(ctx: CanvasRenderingContext2D, w: number, h: number, u: number, vertical: boolean, o: ClipOverlay): void {
+  const ctaK = o.total > 0 ? clamp01((o.elapsed - (o.total - CTA_SECONDS)) / 0.35) : 0;
+  // the chip
+  if (ctaK < 1) {
+    const x = Math.max(24 * u, w * 0.04);
+    const cy = vertical ? h * 0.76 : h * 0.88;
+    ctx.save();
+    ctx.globalAlpha = 1 - ctaK;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `italic 900 ${40 * u}px ${FONT}`;
+    const a = 'TURBO';
+    const b = 'GOL';
+    const aw = ctx.measureText(a).width;
+    const bw = ctx.measureText(b).width;
+    ctx.font = `800 ${23 * u}px ${FONT}`;
+    const dw = ctx.measureText('turbo-gol.com').width;
+    const cw = Math.max(aw + bw, dw) + 44 * u;
+    const ch = 100 * u;
+    ctx.fillStyle = 'rgba(5, 7, 13, 0.82)';
+    roundRectPath(ctx, x, cy - ch / 2, cw, ch, 12 * u);
+    ctx.fill();
+    ctx.fillStyle = LIME;
+    ctx.fillRect(x, cy - ch / 2 + 10 * u, 6 * u, ch - 20 * u);
+    ctx.font = `italic 900 ${40 * u}px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(a, x + 22 * u, cy - 18 * u);
+    ctx.fillStyle = LIME;
+    ctx.fillText(b, x + 22 * u + aw, cy - 18 * u);
+    ctx.font = `800 ${23 * u}px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('turbo-gol.com', x + 22 * u, cy + 26 * u);
+    ctx.restore();
+  }
+  // the call to action
+  if (ctaK > 0) {
+    const cy = vertical ? h * 0.62 : h * 0.76;
+    const e = easeOutBack(ctaK);
+    ctx.save();
+    ctx.globalAlpha = ctaK;
+    ctx.translate(w / 2, cy + (1 - e) * 40 * u);
+    ctx.scale(0.8 + 0.2 * e, 0.8 + 0.2 * e);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 ${26 * u}px ${FONT}`;
+    const line1 = o.cta.toUpperCase();
+    ctx.font = `italic 900 ${54 * u}px ${FONT}`;
+    let big = 54 * u;
+    const tw0 = ctx.measureText('TURBO-GOL.COM').width;
+    if (tw0 > w * 0.66) {
+      big *= (w * 0.66) / tw0;
+      ctx.font = `italic 900 ${big}px ${FONT}`;
+    }
+    const tw = ctx.measureText('TURBO-GOL.COM').width;
+    const slabW = tw + 80 * u;
+    const slabH = big + 66 * u;
+    const skew = 0.16 * slabH;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 24 * u;
+    ctx.fillStyle = LIME;
+    ctx.beginPath();
+    ctx.moveTo(-slabW / 2 + skew, -slabH / 2);
+    ctx.lineTo(slabW / 2 + skew, -slabH / 2);
+    ctx.lineTo(slabW / 2 - skew, slabH / 2);
+    ctx.lineTo(-slabW / 2 - skew, slabH / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#0b1300';
+    ctx.font = `800 ${22 * u}px ${FONT}`;
+    ctx.fillText(line1.split('').join('\u200A'), 0, -slabH / 2 + 30 * u);
+    ctx.font = `italic 900 ${big}px ${FONT}`;
+    ctx.fillText('TURBO-GOL.COM', 0, 14 * u);
+    ctx.restore();
+  }
+}
+
 /** The clip's own scorebug, goal caption and watermark, sized from the frame's height. */
 export function drawOverlay(ctx: CanvasRenderingContext2D, w: number, h: number, o: ClipOverlay): void {
   const u = Math.min(w, h) / 720;
@@ -364,7 +474,8 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, w: number, h: number,
   const bw = 330 * u;
   const bh = 62 * u;
   const bx = (w - bw) / 2;
-  const by = Math.max(20 * u, h * 0.04);
+  const vertical = h > w * 1.3;
+  const by = Math.max(20 * u, h * (vertical ? 0.1 : 0.04));
   ctx.fillStyle = 'rgba(8, 11, 20, 0.78)';
   ctx.fillRect(bx, by, bw, bh);
   ctx.fillStyle = BLUE;
@@ -381,24 +492,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, w: number, h: number,
   // Goal caption, upper third: a team-coloured flash, a ring and spokes bursting out, the word on a
   // slab (drops in big, bounces, tilts, pulses) and the scorer's name popping in letter by letter.
   if (o.goal !== null) drawGoal(ctx, w, h, u, o.goal);
-  // Watermark, bottom centre: the game's name and where to find it.
-  const wy = h - Math.max(34 * u, h * 0.05);
-  ctx.font = `italic 900 ${40 * u}px ${FONT}`;
-  const a = 'TURBO';
-  const b = 'GOL';
-  const aw = ctx.measureText(a).width;
-  const bwd = ctx.measureText(b).width;
-  ctx.textAlign = 'left';
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-  ctx.shadowBlur = 8 * u;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(a, (w - aw - bwd) / 2, wy);
-  ctx.fillStyle = LIME;
-  ctx.fillText(b, (w - aw - bwd) / 2 + aw, wy);
-  ctx.textAlign = 'center';
-  ctx.font = `700 ${20 * u}px ${FONT}`;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.fillText('turbo-gol.com', w / 2, wy + 34 * u);
+  drawBrand(ctx, w, h, u, vertical, o);
   ctx.restore();
 }
 
@@ -409,6 +503,8 @@ export interface ClipResult {
   /** A JPEG data URL of one frame (the preview: a video preview would need blob: in the page's media-src). */
   thumb: string;
   seconds: number;
+  /** Whether the file carries the game's sound. */
+  sound: boolean;
 }
 
 /** Whether this browser can record a clip at all (MediaRecorder, canvas capture and a container). */
@@ -423,6 +519,7 @@ export class ClipRecorder {
   private readonly chunks: Blob[] = [];
   private readonly ext: 'mp4' | 'webm';
   private readonly mime: string;
+  private readonly hasAudio: boolean;
   private readonly stopped: Promise<void>;
   private startedAt = 0;
   private lastDraw = -1;
@@ -432,12 +529,14 @@ export class ClipRecorder {
   private readonly source: HTMLCanvasElement;
   private readonly fps: number;
 
-  constructor(source: HTMLCanvasElement, format: ClipFormat, quality: ClipQuality = 'standard') {
+  constructor(source: HTMLCanvasElement, format: ClipFormat, quality: ClipQuality = 'standard', audio: MediaStream | null = null) {
     const q = CLIP_QUALITIES[quality];
     const fps = q.fps;
     this.source = source;
     this.fps = fps;
-    const pick = pickMime((m) => MediaRecorder.isTypeSupported(m));
+    const audioTracks = audio === null ? [] : audio.getAudioTracks();
+    this.hasAudio = audioTracks.length > 0;
+    const pick = pickMime((m) => MediaRecorder.isTypeSupported(m), this.hasAudio);
     if (pick === null) throw new Error('no recordable video format');
     this.ext = pick.ext;
     this.mime = pick.mime;
@@ -452,7 +551,9 @@ export class ClipRecorder {
     this.ctx.imageSmoothingQuality = 'high';
     this.ctx.fillStyle = '#05070d';
     this.ctx.fillRect(0, 0, f.w, f.h);
-    this.rec = new MediaRecorder(this.out.captureStream(fps), { mimeType: pick.mime, videoBitsPerSecond: q.bitrate });
+    const stream = this.out.captureStream(fps);
+    for (const tr of audioTracks) stream.addTrack(tr);
+    this.rec = new MediaRecorder(stream, { mimeType: pick.mime, videoBitsPerSecond: q.bitrate, ...(this.hasAudio ? { audioBitsPerSecond: 160_000 } : {}) });
     this.rec.ondataavailable = (e): void => {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
@@ -509,13 +610,14 @@ export class ClipRecorder {
     if (this.thumb === '') this.snapshot();
     const blob = new Blob(this.chunks, { type: this.mime.split(';')[0] });
     if (blob.size === 0) throw new Error('empty recording');
-    return { blob, ext: this.ext, thumb: this.thumb, seconds };
+    return { blob, ext: this.ext, thumb: this.thumb, seconds, sound: this.hasAudio };
   }
 
   cancel(): void {
     this.rec.ondataavailable = null;
     this.rec.onerror = null;
     if (this.rec.state !== 'inactive') this.rec.stop();
-    for (const tr of (this.rec.stream as MediaStream).getTracks()) tr.stop();
+    // only the video track: the audio one belongs to the game's mix (sound.ts) and is reused
+    for (const tr of (this.rec.stream as MediaStream).getVideoTracks()) tr.stop();
   }
 }

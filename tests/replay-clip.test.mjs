@@ -189,6 +189,14 @@ test('the timeline: the ruler picks a label step that keeps its labels apart, a 
   assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, 500 * TICK_RATE, end), { start: 90 * TICK_RATE, end });
 });
 
+test('with sound the container names an audio codec too (AAC in MP4, Opus in WebM), and falls back to video only', () => {
+  assert.equal(C.pickMime(() => true, true).mime, 'video/mp4;codecs=avc1.64002A,mp4a.40.2');
+  assert.equal(C.pickMime((m) => m.startsWith('video/webm;codecs=vp9,'), true).mime, 'video/webm;codecs=vp9,opus');
+  assert.equal(C.pickMime((m) => m === 'video/mp4', true).mime, 'video/mp4');
+  assert.equal(C.pickMime(() => false, true), null);
+  assert.equal(C.pickMime(() => true).mime, 'video/mp4;codecs=avc1.64002A', 'without sound as before');
+});
+
 test('every clip line is in English and in Spanish, with the same placeholders', () => {
   const keys = Object.keys(en).filter((k) => k.startsWith('replay.clip'));
   assert.ok(keys.length >= 20, `${keys.length} clip lines`);

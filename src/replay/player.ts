@@ -34,7 +34,9 @@ import {
   B_POS,
   BALL_OFFSET,
   C_IS_ON_GROUND,
+  C_IS_BOOSTING,
   C_IS_SUPERSONIC,
+  C_ROT,
   C_VEL,
   CarPreset,
   NUM_BOOST_PADS,
@@ -51,9 +53,11 @@ import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
 import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
+import { ReplaySound } from './sound';
 import { ClipTimeline } from './timeline';
 import { GOAL_CAPTION_SECONDS, ClipRecorder, canRecordClips, clampClipRange, clipFileName, clipSize, clipWindow, defaultClipRange, drawOverlay, estimateBytes, shareUrl, timeText } from './clip';
 import type { ClipFormat, ClipQuality, ClipResult } from './clip';
+import type { AudioState } from '../audio/Audio';
 import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
 import { clockText, el } from './list';
@@ -103,17 +107,24 @@ interface ClipPrefs {
   format: ClipFormat;
   quality: ClipQuality;
   names: boolean;
+  /** Sound in the export, and its volume and music level (0-100). */
+  sound: boolean;
+  volume: number;
+  music: number;
 }
 
 /** What the Clip sheet remembers (best effort: storage can be off). */
 function loadClipPrefs(): ClipPrefs {
-  const d: ClipPrefs = { format: 'vertical', quality: 'high', names: true };
+  const d: ClipPrefs = { format: 'vertical', quality: 'high', names: true, sound: true, volume: 80, music: 50 };
   try {
     const p = JSON.parse(window.localStorage.getItem(CLIP_KEY) ?? 'null') as Partial<ClipPrefs> | null;
     if (p && typeof p === 'object') {
       if (p.format === 'vertical' || p.format === 'square' || p.format === 'wide') d.format = p.format;
       if (p.quality === 'standard' || p.quality === 'high' || p.quality === 'max') d.quality = p.quality;
       if (typeof p.names === 'boolean') d.names = p.names;
+      if (typeof p.sound === 'boolean') d.sound = p.sound;
+      if (typeof p.volume === 'number' && Number.isFinite(p.volume)) d.volume = clamp(p.volume, 0, 100);
+      if (typeof p.music === 'number' && Number.isFinite(p.music)) d.music = clamp(p.music, 0, 100);
     }
   } catch {
     /* private mode */
@@ -330,12 +341,62 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   tags.setVisible(true);
 
   const hud = new Hud(o.hudRoot);
+  // The game's own audio (sound.ts): the browser starts it on a gesture, so every press and key tries.
+  const sound = new ReplaySound(renderer.spec.cpuLite);
+  const unlockSound = (): void => sound.unlock();
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, unlockSound, { passive: true });
   // Super low drops the blur, shadows and decorative animation of the page (src/style.css), as the game does.
   document.documentElement.classList.toggle('tg-superlow', renderer.spec.cpuLite);
   const events: MatchEvent[] = [];
   const goalAt = new Map(o.scan.goals.map((g) => [g.tick, g]));
   /** The ball's place at a goal, for the explosion (sim coordinates). */
   const goalPos: [number, number, number] = [0, 0, 0];
+
+  // The game's ball-hit sparks and sound and its car-hit sound, from the sim's events: only on the ticks the
+  // viewer plays (a seek fast-forwards the sim without them), a touch of a car at most every 6 ticks (Game.ts).
+  let liveStep = false;
+  const hitPos: [number, number, number] = [0, 0, 0];
+  const lastHit = new Int32Array(roster.length).fill(-1000);
+  const hookSim = (rn: Run): void => {
+    rn.sim.events.onBallHit = (carId, relSpeed) => {
+      if (!liveStep || relSpeed < 250) return;
+      const slot = rn.sim.slotOf(carId);
+      if (slot < 0) return;
+      const tick = rn.sim.tickCount;
+      if (tick - lastHit[slot] < 6) return;
+      lastHit[slot] = tick;
+      const b = rn.sim.buf;
+      hitPos[0] = b[BALL_OFFSET + B_POS];
+      hitPos[1] = b[BALL_OFFSET + B_POS + 1];
+      hitPos[2] = b[BALL_OFFSET + B_POS + 2];
+      effects.onBallHit(hitPos, relSpeed);
+      sound.ballHit(relSpeed / 3000);
+    };
+    rn.sim.events.onBump = (_bumper, _victim, isDemo) => {
+      if (liveStep) sound.carHit(isDemo);
+    };
+  };
+  hookSim(run);
+  /** Once per drawn frame: the music and, with a chase camera, the engine, boost and wind of the car it follows. */
+  const soundStep = (dt: number): void => {
+    let car: AudioState | null = null;
+    if (camIndex >= CAM_CAR0 && sound.running) {
+      const po = offsets[camIndex - CAM_CAR0];
+      const v = po + C_VEL;
+      const f = po + C_ROT;
+      const speed = Math.hypot(cur[v], cur[v + 1], cur[v + 2]);
+      const boosting = cur[po + C_IS_BOOSTING] > 0.5;
+      car = {
+        speed,
+        forwardSpeed: cur[v] * cur[f] + cur[v + 1] * cur[f + 1] + cur[v + 2] * cur[f + 2],
+        boosting,
+        supersonic: cur[po + C_IS_SUPERSONIC] > 0.5,
+        grounded: cur[po + C_IS_ON_GROUND] > 0.5,
+        throttle: boosting ? 1 : Math.min(1, speed / 900),
+      };
+    }
+    sound.frame(dt, car, playing && seekTarget < 0 && !restarting);
+  };
 
   // ---- the control bar ------------------------------------------------------------------------
   const playBtn = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.pause')) as HTMLButtonElement;
@@ -359,6 +420,15 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const prevGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.prevGoal')) as HTMLButtonElement;
   const nextGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.nextGoal')) as HTMLButtonElement;
   const clipBtn = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.clip')) as HTMLButtonElement;
+  const soundBtn = el('button.rp-btn', { type: 'button', 'aria-pressed': String(sound.enabled) }, t(sound.enabled ? 'replay.soundOn' : 'replay.soundOff')) as HTMLButtonElement;
+  soundBtn.addEventListener('click', () => {
+    sound.setEnabled(!sound.enabled);
+    soundBtn.setAttribute('aria-pressed', String(sound.enabled));
+    soundBtn.textContent = t(sound.enabled ? 'replay.soundOn' : 'replay.soundOff');
+  });
+  // Short screens (a phone on its side) keep one thin line: the second one opens with this.
+  const moreBtn = el('button.rp-btn.rp-more-btn', { type: 'button', 'aria-expanded': 'false', 'aria-label': t('replay.moreControls') }, '···') as HTMLButtonElement;
+  moreBtn.addEventListener('click', () => moreBtn.setAttribute('aria-expanded', String(o.bar.classList.toggle('rp-more'))));
   // The chase cameras' own controls: ball cam or car cam, and how far behind (shown with a car's camera).
   const ballCamBtn = el('button.rp-btn', { type: 'button' }, '') as HTMLButtonElement;
   const distSlider = el('input', { type: 'range', min: String(CHASE_MIN), max: String(CHASE_MAX), step: '10', 'aria-label': t('replay.distance') }) as HTMLInputElement;
@@ -369,8 +439,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const fullscreenBtn = el('button.rp-btn', { type: 'button', 'aria-pressed': 'false' }, t('replay.fullscreen')) as HTMLButtonElement;
   document.addEventListener('fullscreenchange', () => fullscreenBtn.setAttribute('aria-pressed', String(document.fullscreenElement != null)));
   o.bar.replaceChildren(
-    el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time),
-    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, clipBtn, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
+    el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time, clipBtn, moreBtn),
+    el('div.rp-line', null, speedSel, camSel, soundBtn, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
   );
   o.bar.classList.remove('rp-hidden');
 
@@ -442,6 +512,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       newRun(r, o.mesh).then(
         (rn) => {
           run = rn;
+          hookSim(rn);
           cur.set(rn.sim.buf.subarray(0, STATE_BUFFER_FLOATS));
           prev.set(cur);
           restarting = false;
@@ -636,8 +707,11 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     run.host.takeEvents(events);
     if (!live) return;
     for (const e of events) {
-      if (e.type === 'countdown') hud.showCountdown(e.n);
-      else if (e.type === 'go') {
+      if (e.type === 'countdown') {
+        hud.showCountdown(e.n);
+        sound.countdown();
+      } else if (e.type === 'go') {
+        sound.go();
         hud.showCountdown('GO');
         goHideTick = e.tick + GO_CAPTION_TICKS;
       } else if (e.type === 'kickoff') {
@@ -655,6 +729,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
         goalPos[1] = b[BALL_OFFSET + B_POS + 1];
         goalPos[2] = b[BALL_OFFSET + B_POS + 2];
         effects.onGoal(e.team, goalPos);
+        sound.goal(e.team);
       } else if (e.type === 'ended') showEnd(e.winner, e.blue, e.red);
     }
   };
@@ -804,6 +879,9 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   let clipFormat: ClipFormat = clipPrefs.format;
   let clipQuality: ClipQuality = clipPrefs.quality;
   let clipNames = clipPrefs.names;
+  let clipSound = clipPrefs.sound;
+  let clipVolume = clipPrefs.volume;
+  let clipMusic = clipPrefs.music;
   let clipUrl: string | null = null;
   /** The goal the last event showed: its caption goes on the frames after it (the DOM banner is not recorded). */
   let lastGoal: { tick: number; team: 0 | 1; scorer: string | null } | null = null;
@@ -899,6 +977,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     if (job === null) return;
     clipJob = null;
     job.rec?.cancel();
+    sound.endExport();
     leaveClipMode();
     speed = job.savedSpeed;
     speedSel.value = String(speed);
@@ -926,7 +1005,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       if (seekTarget >= 0 || restarting) return;
       if (job.wait-- > 0) return;
       try {
-        job.rec = new ClipRecorder(renderer.gpu.domElement, clipFormat, clipQuality);
+        const audioStream = clipSound ? sound.beginExport(clipVolume / 100, clipMusic / 100) : null;
+        job.rec = new ClipRecorder(renderer.gpu.domElement, clipFormat, clipQuality, audioStream);
         job.rec.start();
       } catch (e) {
         console.error('clip: cannot record', e);
@@ -944,7 +1024,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const tick = run.host.currentTick;
     const age = lastGoal === null ? -1 : (tick - lastGoal.tick) / TICK_RATE;
     const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
-    rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
+    rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal, elapsed: (tick - job.start) / TICK_RATE, total: (job.end - job.start) / TICK_RATE, cta: t('replay.clipCta') });
     if (tick >= job.thumbAt) rec.snapshot();
     recText.textContent = `${Math.floor(rec.seconds)} / ${Math.round((job.end - job.start) / TICK_RATE)} s`;
     if (tick >= job.end || tick >= endTick) {
@@ -953,6 +1033,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       speed = job.savedSpeed;
       speedSel.value = String(speed);
       setPlaying(false);
+      sound.endExport();
       rec.finish().then(
         (res) => showClipSheet({ result: res, goalTick: job.goalTick, at: job.start }),
         (e: unknown) => {
@@ -975,7 +1056,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       const name = clipFileName(o.matchId, s.goalTick ?? s.at ?? 0, r2.ext);
       if (clipUrl !== null) URL.revokeObjectURL(clipUrl);
       clipUrl = URL.createObjectURL(r2.blob);
-      panel.append(el('img.rp-clip-thumb', { alt: '', src: r2.thumb }), el('p.rp-clip-note', null, t('replay.clipMeta', { s: Math.round(r2.seconds), size: mb(r2.blob.size), ext: r2.ext.toUpperCase() })));
+      panel.append(el('img.rp-clip-thumb', { alt: '', src: r2.thumb }), el('p.rp-clip-note', null, t('replay.clipMeta', { s: Math.round(r2.seconds), size: mb(r2.blob.size), ext: r2.ext.toUpperCase(), sound: t(r2.sound ? 'replay.clipWithSound' : 'replay.clipNoSound') })));
       const main = el('div.rp-clip-open');
       main.append(el('a.rp-btn.rp-primary', { href: clipUrl, download: name }, t('replay.clipDownload')));
       panel.append(main);
@@ -1090,7 +1171,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       const tick = run.host.currentTick;
       const age = lastGoal === null ? -1 : (tick - lastGoal.tick) / TICK_RATE;
       const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
-      drawOverlay(ovlCtx, ovl.width, ovl.height, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
+      const r = clipRange;
+      drawOverlay(ovlCtx, ovl.width, ovl.height, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal, elapsed: r === null ? 0 : (tick - r.start) / TICK_RATE, total: r === null ? 0 : (r.end - r.start) / TICK_RATE, cta: t('replay.clipCta') });
     }
   };
 
@@ -1102,10 +1184,14 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const exportBtn = el('button.rp-btn.rp-primary.rp-ed-export', { type: 'button' }, t('replay.editorExport')) as HTMLButtonElement;
     exportBtn.disabled = !clipSupported;
     exportBtn.addEventListener('click', () => {
+      sound.unlock();
       if (clipRange !== null) startClip(clipRange, goalIn(clipRange));
     });
     edSum = el('span.rp-ed-sum', null, '');
-    const head = el('header.rp-ed-head', null, back, el('span.rp-ed-title', null, t('replay.editorTitle')), el('span.rp-grow'), edSum, exportBtn);
+    // Small screens keep the goals and the settings in a sheet this button opens
+    const optsBtn = el('button.rp-btn.rp-ed-optsbtn', { type: 'button', 'aria-expanded': 'false' }, t('replay.editorOptions')) as HTMLButtonElement;
+    optsBtn.addEventListener('click', () => optsBtn.setAttribute('aria-expanded', String(edRoot.classList.toggle('rp-ed-opts'))));
+    const head = el('header.rp-ed-head', null, back, el('span.rp-ed-title', null, t('replay.editorTitle')), el('span.rp-grow'), edSum, optsBtn, exportBtn);
 
     // left: the goals
     const status = el('p.rp-clip-note.rp-clip-dim', null, o.matchId === null ? t('replay.clipNoLink') : '');
@@ -1156,7 +1242,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const center = el('section.rp-ed-center', null, edStage, el('div.rp-ed-transport', null, edTime, el('span.rp-grow'), edPlay, playClip));
 
     // right: format, quality, camera, options
-    const save = (): void => saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
+    const save = (): void => saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames, sound: clipSound, volume: clipVolume, music: clipMusic });
     const chips = <K extends string>(label: string, items: Array<[K, string]>, get: () => K, set: (k: K) => void): HTMLElement[] => {
       const group = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': label });
       for (const [key, text] of items) {
@@ -1185,6 +1271,27 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       clipNames = names.checked;
       save();
     });
+    const sndOn = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    sndOn.checked = clipSound;
+    sndOn.addEventListener('change', () => {
+      clipSound = sndOn.checked;
+      save();
+      for (const r2 of sndRows) r2.classList.toggle('rp-disabled', !clipSound);
+    });
+    const slider = (label: string, get: () => number, set: (v: number) => void): HTMLElement => {
+      const val = el('b.rp-clip-time', null, `${get()}%`);
+      const input = el('input', { type: 'range', min: '0', max: '100', step: '5', value: String(get()), 'aria-label': label }) as HTMLInputElement;
+      input.addEventListener('input', () => {
+        set(Number(input.value));
+        val.textContent = `${input.value}%`;
+        save();
+      });
+      input.addEventListener('keydown', (e) => e.stopPropagation());
+      return el('div.rp-ed-slider', null, el('span.rp-clip-note', null, label), input, val);
+    };
+    const sndRows = [slider(t('replay.clipVolume'), () => clipVolume, (v) => (clipVolume = v)), slider(t('replay.clipMusic'), () => clipMusic, (v) => (clipMusic = v))];
+    for (const r2 of sndRows) r2.classList.toggle('rp-disabled', !clipSound);
+    const soundControls = [el('span.rp-clip-sub', null, t('replay.clipSoundTitle')), el('label.rp-clip-check', null, sndOn, t('replay.clipSound')), ...sndRows];
     const right = el(
       'aside.rp-ed-right',
       null,
@@ -1194,6 +1301,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       el('span.rp-clip-sub', null, t('replay.camera')),
       edCam,
       el('label.rp-clip-check', null, names, t('replay.clipNames')),
+      ...soundControls,
       clipSupported ? null : el('p.rp-clip-note', null, t('replay.clipUnsupported')),
     );
 
@@ -1237,7 +1345,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       zoomSlider,
     );
     const bottom = el('footer.rp-ed-tl', null, tools, tl.root);
-    edRoot.replaceChildren(head, left, center, right, bottom);
+    edRoot.replaceChildren(head, el('div.rp-ed-panels', null, left, right), center, bottom);
     new ResizeObserver(() => layoutStage()).observe(edStage);
   };
   let editorSetEdge: (edge: 'start' | 'end') => void = () => undefined;
@@ -1321,6 +1429,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       acc = 0;
     } else if (playing) {
       acc += dt * speed;
+      liveStep = true;
       while (acc >= TICK_DT && run.host.currentTick < endTick) {
         step(run, r);
         onEvents(true);
@@ -1331,6 +1440,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
           goHideTick = -1;
         }
       }
+      liveStep = false;
       if (run.host.currentTick >= endTick) {
         acc = 0;
         setPlaying(false);
@@ -1342,6 +1452,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     lastDrawn = now;
     draw(seekTarget >= 0 || !playing ? 1 : acc / TICK_DT, playing && seekTarget < 0 ? drawDt * speed : 0);
     updateHud();
+    soundStep(drawDt);
     clipStep(now);
     if (previewUntil >= 0 && playing && seekTarget < 0 && !restarting && run.host.currentTick >= previewUntil) {
       previewUntil = -1;
@@ -1352,5 +1463,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   requestAnimationFrame(frame);
   return () => {
     stopped = true;
+    for (const ev of ['pointerdown', 'keydown', 'touchend']) window.removeEventListener(ev, unlockSound);
+    sound.dispose();
   };
 }
