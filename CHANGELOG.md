@@ -394,6 +394,8 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- Firefox: a stadium baked while the grass and cloud shaders failed to compile (before the Firefox fix) is discarded: the world cache version is raised, so the sky and the skyline are baked again on the next visit (the first load after this takes a moment longer).
+- Firefox (WebGPU): the Ultra grass and the sky's clouds no longer fail to compile. Two shader expressions called a math function with only literal numbers (a smoothstep and a mix), which Firefox's validator rejects ("Abstract types may only appear in constant expressions"); the game fell back to a lower tier and the sky and background looked wrong. Both are evaluated in JavaScript or written differently now; every shader the game compiles passes Firefox 159's validator.
 - Community nodes (from node release 0.3.1): a node the control plane refuses for good (banned,
   retired, or on an address its token does not allow) no longer keeps logging in (about every 30
   seconds after a ban or retirement, every second on a refused address): it finishes its matches,
