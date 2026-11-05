@@ -34,6 +34,7 @@ const P = await import('../src/ui/screens/profile.ts');
 const en = (await import('../src/locales/en.ts')).default;
 const es = (await import('../src/locales/es.ts')).default;
 const PROFILE = readFileSync(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8');
+const LINKS = readFileSync(new URL('../src/ui/screens/accountLinks.ts', import.meta.url), 'utf8');
 
 const me = (maintainer) => ({ playerId: 'p', name: 'Proyecto', createdAt: 0, providers: ['password', 'discord'], hasPassword: true, renameAt: 0, ratings: [], rankedBanUntil: 0, abandons24h: 0, season: 1, experimental: false, ...(maintainer ? { maintainer } : {}) });
 
@@ -72,16 +73,33 @@ test('PERFIL shows CUENTA DEL PROYECTO only with /api/me\'s maintainer, first in
   const view = PROFILE.slice(PROFILE.indexOf('const accountView = '), PROFILE.indexOf('/** ACERCA DE, under either view. */'));
   assert.match(view, /const project = me\?\.maintainer;/);
   assert.match(view, /project !== undefined && !\(sample === null && acc\.account\?\.tv === true\)/, 'not on a TV signed in with the phone');
-  assert.match(view, /section\(t\('profile\.maintainerTitle'\), h\('div\.mn-prof-node', null, h\('p\.mn-prof-node-reason', null, t\('profile\.maintainerNote'\)\), \.\.\.maintainerChecks\(project\)\.map\(\(c\) => h\('span\.mn-prof-node-state', \{ 'data-ok': c\.ok \? 'true' : 'false' \}, h\('span\.mn-dot'\), c\.text\)\), confirm\)\)/);
+  assert.match(view, /section\(t\('profile\.maintainerTitle'\), h\('div\.mn-prof-node', null, h\('p\.mn-prof-node-reason', null, t\('profile\.maintainerNote'\)\), \.\.\.maintainerChecks\(project\)\.map\(\(c\) => h\('span\.mn-prof-node-state', \{ 'data-ok': c\.ok \? 'true' : 'false' \}, h\('span\.mn-dot'\), c\.text\)\), confirm, panel\)\)/);
   assert.match(view, /'div\.mn-prof-col',\s*null,\s*projectChecks,\s*h\('section\.mn-section\.mn-prof-security'/, 'above CUENTA Y SEGURIDAD');
+});
+
+test('CONTROL DE NODOS: inside CUENTA DEL PROYECTO (decision 5), with a data-key of its own, never on a TV, opening the panel stacked on PERFIL; MI SERVIDOR keeps its conditions', () => {
+  const view = PROFILE.slice(PROFILE.indexOf('const accountView = '), PROFILE.indexOf('/** ACERCA DE, under either view'));
+  assert.match(view, /const panel = tv\(\) \? null : h\('div\.mn-prof-device', null, h\('p\.mn-prof-node-reason', null, t\('nodesAdmin\.entryNote'\)\), secondary\(t\('nodesAdmin\.entry'\), \(\) => menu\.open\('nodes-admin'\), \{ 'data-key': 'profile-nodes-admin' \}\)\);/);
+  assert.match(view, /c\.text\)\), confirm, panel\)\)/, 'beside CONFIRMAR CON LA CONTRASEÑA, in the checklist tile');
+  // Shown with /api/me's maintainer (the block's own condition), with or without nodes of its own.
+  assert.match(view, /project !== undefined && !\(sample === null && acc\.account\?\.tv === true\)/);
+  assert.match(view, /const server = v\.nodes\.length > 0 \? section\(t\('profile\.myServer'\)/, "MI SERVIDOR's condition as it was");
+  assert.match(PROFILE, /if \(el\.isConnected && list\.length > 0\) render\(\);/);
+  assert.match(PROFILE, /void acc\.nodesMine\(\)\.then\(\s*\(\{ nodes: list \}\) => \{/, 'PERFIL reads /nodes/mine through nodesMine (ownCall)');
+  assert.equal(es['nodesAdmin.entry'], 'CONTROL DE NODOS');
+  assert.equal(en['nodesAdmin.entry'], 'NODE CONTROL');
 });
 
 test('CONFIRMAR CON LA CONTRASEÑA: the project account reaches level 2 in PERFIL with its password (the node token\'s console line comes after it), and "confirm it is you" never offers it a code by email (the server refuses it: password_required)', () => {
   const view = PROFILE.slice(PROFILE.indexOf('const accountView = '), PROFILE.indexOf('/** ACERCA DE, under either view. */'));
   assert.match(view, /const confirm = project\?\.password === true \? h\('div\.mn-prof-device', null, h\('p\.mn-prof-node-reason', null, t\('profile\.maintainerConfirmNote'\)\), secondary\(t\('profile\.maintainerConfirm'\), \(\) => fresh\(\(\) => menu\.toast\(t\('profile\.maintainerConfirmed'\), 'ok'\), 2, true\)/, 'level 2, asked every time (force)');
-  assert.match(view, /c\.text\)\), confirm\)\)/, 'inside the checklist tile');
-  const fresh = PROFILE.slice(PROFILE.indexOf('const fresh = '), PROFILE.indexOf('const unlinkNow = '));
+  assert.match(view, /c\.text\)\), confirm, panel\)\)/, 'inside the checklist tile');
+  // "Confirm it's you" is accountLinks.ts confirmItsYou, shared by PERFIL and CONTROL DE NODOS: PERFIL's fresh hands over to it.
+  assert.match(PROFILE, /const fresh = \(go: \(\) => void, level: 1 \| 2 = 1, force = false, resume: string \| null = null\): void => confirmItsYou\(menu, go, level, force, resume\);/);
+  const fresh = LINKS.slice(LINKS.indexOf('export function confirmItsYou('), LINKS.indexOf('// ---- adding and changing the email'));
   assert.match(fresh, /const mailbox = me\?\.emailVerified === true && typeof me\.email === 'string' && me\.email\.length > 0 && me\.legacy !== true && me\.maintainer === undefined \? me\.email : null;/);
+  assert.match(fresh, /await acc\.reauth\(pass\.input\.value\);/, 'the password: acc.reauth');
+  assert.match(fresh, /mailbox !== null\s*\? navButton\(/, 'a normal account also gets the code by email (prompt 2 reuses it)');
 });
 
 test('the texts in both languages: Spanish with tú, the refusal as the server words it', () => {

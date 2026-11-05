@@ -300,17 +300,29 @@ las releases; sin `NODE_TRUSTED_OPERATORS`, nadie crea tokens (403 `not_trusted`
   - `tokens`, con la sesión de cuenta: 401 sin sesión, 403 `account_required` para un invitado y
     403 `not_trusted` para una cuenta que no está en `NODE_TRUSTED_OPERATORS`; el DO lo vuelve a
     comprobar. La respuesta trae la línea de instalación de Linux.
-  - Una cuenta de confianza tiene como mucho 2 nodos (`MAX_TRUSTED_NODES_PER_OPERATOR`,
-    `control-plane/registry.ts`): el VPS y uno de reemplazo. El tope va en el registro, así que
-    también vale para tokens creados antes; un registro rechazado (403 `too_many_nodes`) deja el
+  - Una cuenta de confianza tiene como mucho `NODE_TRUSTED_MAX_NODES` nodos (una var de
+    `wrangler.jsonc`, hoy 6; acotada en código de 2 a 8, y 2 si falta: `trustedNodeCap`,
+    `control-plane/registry.ts`). Un nodo retirado no ocupa lugar, y uno baneado tampoco para la
+    cuenta del proyecto (para la comunidad sí); al salir de su baneo vuelve a ocupar uno, así que
+    con el tope lleno sigue baneado (409 `too_many_nodes`). Con el tope lleno, `POST /nodes/tokens`
+    responde 409 `too_many_nodes` sin crear el token; el registro vuelve a comprobarlo, así que
+    también vale para tokens creados antes: un registro rechazado (403 `too_many_nodes`) deja el
     token sin gastar y un `ALERT`. Un operador que ya tenía más nodos al entrar a la lista los
     conserva.
+  - **Retiro y pérdida de confianza.** `POST /nodes/admin/retire` saca de los libros un nodo
+    apagado, o drenado y sin partidas abiertas: libera su lugar, no recibe partidas, sale de
+    `/nodes/mine` y el cron lo ignora; cada login suyo se rechaza (4403) y su ficha queda en el
+    panel. Si una cuenta sale de `NODE_TRUSTED_OPERATORS`, al arrancar el DO sus nodos vuelven a
+    `probation` (0 de 20 verificadas, motivo `trust_removed`) con un `ALERT`: ninguno queda
+    `active` por la confianza que ya no tiene.
   - Topes por dirección en el Worker, con una IPv6 contada por su /64: `connect`, 30 por minuto;
     subidas y bajadas de replays, 60 por minuto cada una; `status`, 60; y `mine`, 30 por minuto
     por cuenta. Un `register` o un `tokens` que declara más de 4 KB recibe 413, y una subida de
     más de 16 MiB también, antes de llegar al DO. Los topes de 5 registros por dirección por hora y
     10 tokens por cuenta por día los lleva el DO, en memoria: un deploy los pone en cero. El
-    Worker los repite por isolate, para que la basura no llegue al DO.
+    Worker los repite por isolate, para que la basura no llegue al DO. Los 10 tokens son los
+    emitidos: un pedido rechazado (un error de tipeo, el tope) cuenta solo entre 30 intentos por
+    minuto.
   - Las rutas de la tienda y de WebRTC, y cualquier otra bajo `/nodes/`, responden 404.
 
 #### [7] servidor: gancho del matchmaker y rejoin/leave (P22-P23): #29
@@ -327,6 +339,13 @@ configurados ni siquiera se lee KV).
   `MAX_ACTIVE_ROOMS`; una ranked en un nodo toma el lock ranked con el id del nodo; las salas
   privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11)
   (hasta 2026-11-04; desde entonces toda partida de Casual cuyo host es SA puede caer en un nodo).
+  **Colocación regional (PR 0 del prompt 1, noviembre de 2026):** toda partida de Casual o
+  Competitivo pide primero un nodo de su región anfitriona (la de la mayoría de sus humanos),
+  nunca uno de otra región; si ninguno la toma, va a un `MatchDO` cerca de esa región. Con
+  `do_disabled`, primero un nodo de su región y después uno de SA, nunca un `MatchDO`. Una región
+  sin nodos (NA, OC y AF hoy) responde `hosts: 0` y se le pregunta una vez por minuto. La
+  liberación de una partida de nodo va siempre a la cola central (`mm:SA`), y
+  `ranked_matches.region` es la región anfitriona, en `MatchDO` y en nodo.
 - [x] **P23. `/api/rejoin` y `/api/leave` para partidas de nodo:** `rejoin` libera el lock si
   la partida no existe, terminó o el jugador no estaba, y lo mantiene si salió (`left`) o el nodo
   no responde; un id de 64 hex que no es nada responde 404 y libera el lock. `leave` le pregunta
@@ -432,7 +451,7 @@ aviso.
   contraseña y al menos dos formas de entrar (no se puede desvincular por debajo de eso) y no se
   puede borrar. Un `ALERT` por cada inicio de sesión y cada confirmación con contraseña, con el
   método y el país (nunca la IP ni el correo), otro por cada token y cada registro (P24), y un
-  tope de 2 nodos para esa cuenta (P20).
+  tope de `NODE_TRUSTED_MAX_NODES` nodos (6) para esa cuenta (P20).
 - **Un solo DO para todo.** Quien juega en un nodo conoce el id de la partida y el del nodo. Sin
   topes, subidas de replays o conexiones sin autenticar pueden trabar el DO, y con 60 s sin
   heartbeats se anulan partidas en curso (P19, P20).
@@ -553,11 +572,14 @@ aviso.
   bots (`server/src/MatchmakerDO.ts:1028-1041`). Las PCs en prueba solo hostean casuales y
   necesitan 20 verificadas para el ranked: sin casuales por servidor, tardarían mucho. Hay que
   decidir si los nodos comunitarios toman casuales, por ejemplo con una opción "servidores de la
-  comunidad". **Decidido 2026-11-04:** Casual y Competitivo siempre en servidor, el nodo de São
-  Paulo primero; P2P solo en salas.
-- [ ] **La latencia no entra en la elección del nodo.** Las regiones son continentes y el
-  scheduler elige al azar entre los menos cargados. Para la beta, preferir el VPS de São Paulo;
-  después, que el cliente mida el ping a los nodos de su región.
+  comunidad". **Decidido 2026-11-04:** Casual y Competitivo siempre en servidor, ~~el nodo de São
+  Paulo primero~~ un nodo de la región anfitriona primero (colocación regional, PR 0 del prompt 1);
+  P2P solo en salas.
+- [ ] **La latencia no entra en la elección del nodo dentro de una región.** La región sí: desde
+  la colocación regional, una partida pide primero un nodo de su región anfitriona y nunca uno de
+  otra (con `do_disabled`, después uno de SA). Pero las regiones son continentes y, dentro de una,
+  el scheduler elige al azar entre los menos cargados. Después, que el cliente mida el ping a los
+  nodos de su región.
 
 ## Etapa 3: abierto a cualquiera
 
@@ -780,6 +802,7 @@ Sin número D: no frenan la etapa 1.
   por defecto al abrir. Pasar de unas 900 horas de 2v2 por mes con relay pide subir el
   presupuesto.
 - **Casuales en nodos comunitarios:** decidido 2026-11-04 (ver "El casual por defecto es P2P" en
-  Decisiones de producto): Casual siempre en servidor, el nodo primero cuando el host es SA.
+  Decisiones de producto): Casual siempre en servidor, ~~el nodo primero cuando el host es SA~~ un
+  nodo de la región anfitriona primero (colocación regional, PR 0 del prompt 1).
 - **Segundo verificador:** cuándo se levanta el de Hetzner.
 - **El primer auto:** cuál es. El precio ya está decidido en 1.500 puntos.

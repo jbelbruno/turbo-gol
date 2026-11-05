@@ -44,25 +44,37 @@
  *                                     replaySite count only the edge-cache misses
  *     Both carry X-Robots-Tag: noindex, and the KV flag replays_off turns both off (404, cached copies
  *     too, the object never asked) and nothing else.
- *   POST     /nodes/tokens            { region, name? }, Bearer account session of a NODE_TRUSTED_OPERATORS account
- *                                     -> a one-time registration token and the Linux install line; 413 over 4 KB.
+ *   POST     /nodes/tokens            { region, name?, publicHost?, roles?, matches?, egressCapGB? }, Bearer account
+ *                                     session of a NODE_TRUSTED_OPERATORS account -> a one-time registration token
+ *                                     and the Linux install line, composed by the object (409 too_many_nodes before
+ *                                     any token when the account has its NODE_TRUSTED_MAX_NODES nodes); 413 over 4 KB;
+ *                                     10 tokens minted a day per account and 30 tries a minute, refused ones included.
  *                                     Like every maintainer route: never a TV's session (403 tv_session), and one
  *                                     whose device proved a credential at level 2 (a typed password: a sign-in or
  *                                     PERFIL's "confirm it's you"; a provider's press is level 1) in the last
  *                                     MAINTAINER_FRESH_S; else 403 reauth_required { level: 2 }
  *   GET      /nodes/mine              Bearer account session -> the caller's own nodes
  *   GET      /nodes/status            the public list of nodes, cached 10 s
- *   GET      /nodes/admin/nodes       the maintainers' routes, Bearer account session of a NODE_TRUSTED_OPERATORS
- *   POST     /nodes/admin/status      account (401 without one, 403 for any other), 30 a minute per account, 413
- *   POST     /nodes/admin/drain       over 4 KB: every node in full; { nodeId, status, reason }; { nodeId, reason };
- *   POST     /nodes/admin/update      the channel read again and the nodes below its minimum told to update;
- *   POST     /nodes/admin/reprobe     { nodeId };
- *   POST     /nodes/admin/grant       { account, item }, /revoke { account, item }, /unfreeze { account }: an
- *   POST     /nodes/admin/revoke      account's items and wallet in AccountsDO. Every call is an ALERT line naming
- *   POST     /nodes/admin/unfreeze    the account (NodeRegistryDO.ts);
+ *   GET      /nodes/admin/nodes       the maintainers' routes (ADMIN_ROUTES), Bearer account session of a
+ *   GET      /nodes/admin/overview    NODE_TRUSTED_OPERATORS account through the maintainer gate below, 30 a minute
+ *   GET      /nodes/admin/wallet      per account, 413 over 4 KB, no-store, no CORS: every node in full; the panel's
+ *   GET      /nodes/admin/frozen      overview; ?account=: one wallet; the frozen wallets; { nodeId, status, reason?,
+ *   POST     /nodes/admin/status      force? }; { nodeId, reason }; the channel read again and the nodes below its
+ *   POST     /nodes/admin/drain       minimum told to update; { nodeId }; { nodeId, reason }: an offline or drained
+ *   POST     /nodes/admin/update      node retired; { id }: an unused token revoked; { account, item, reason? },
+ *   POST     /nodes/admin/reprobe     /revoke { account, item, reason? }, /unfreeze { account, reason? }: an
+ *   POST     /nodes/admin/retire      account's items and wallet in AccountsDO. Every action is an ALERT line naming
+ *   POST     /nodes/admin/tokens/revoke  the account, every time; every read a log line, and an ALERT once per
+ *   POST     /nodes/admin/grant       account per 30 minutes (NodeRegistryDO.ts readAudit);
+ *   POST     /nodes/admin/revoke
+ *   POST     /nodes/admin/unfreeze
  *   POST     /nodes/admin/delist      { matchId, reason? }: a match out of the public replays (its row and its R2
  *                                     object), then its view purged here (Cache API) and, with CF_ZONE_ID and
  *                                     CF_PURGE_TOKEN, in every location (purgeEverywhere)
+ *     The maintainer gate, in this order, for every one of them (and for tokens, account-stats and
+ *     queue-stats): 413 over 4 KB; requirePrimary (401, 403 account_required, 403 tv_session); 403
+ *     not_trusted; requireFresh(2, MAINTAINER_FRESH_S) (403 reauth_required { level: 2 }); the limit;
+ *     then the object (503 nodes_off when the flag is set).
  *   GET      /nodes/shop              aliases of GET /api/me/shop and POST /api/me/shop/claim (accountRoutes.ts,
  *   POST     /nodes/shop/claim        AccountsDO): answered with or without the node settings
  *   GET      /nodes/admin/account-stats  the owner's account counts (AccountsDO, accountStore.ts AccountStats): counts
@@ -70,7 +82,9 @@
  *                                     trusted account's own session, not a TV's, at level 2 within MAINTAINER_FRESH_S),
  *                                     10 a minute per account (limits.ts accountStats), no-store, no CORS. The node
  *                                     operators' ids come from the object (/internal/operators) and go on to AccountsDO
- *                                     only; without the node settings the node counts are null
+ *                                     only; without the node settings the node counts are null. Like queue-stats,
+ *                                     each read is a log line and, after the answer, goes to the object's read window
+ *                                     (/internal/read-audit, auditRead) when the object is there
  *   GET      /nodes/admin/queue-stats?days=N  the public queues' anonymous daily counters (queueStats.ts QueueDay:
  *                                     totals only, no id, name, address or region), newest first, today's
  *                                     included; days 1 to 90 (default 30). The queue hub's (MatchmakerDO
@@ -89,8 +103,9 @@
  * tokens, mine, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
  * here are per isolate (index.ts rateLimited), per minute except two: registrations per address
  * per hour and tokens per account per day, the object's own limits, which only the object holds
- * across isolates. Here they keep junk from reaching it: every route that reaches the object has
- * one, per address (an IPv6 address counted by its /64, env.ts limitKey) or per account.
+ * across isolates (a day's tokens are the ones minted: a refused request is a try of the minute's).
+ * Here they keep junk from reaching it: every route that reaches the object has one, per address
+ * (an IPv6 address counted by its /64, env.ts limitKey) or per account.
  *
  * The cron (index.ts scheduled, every 5 minutes) calls nodeHealthCheck: one call to the object,
  * which probes the trusted nodes' /healthz; nothing at all without the node settings.
@@ -101,7 +116,7 @@ import type { SessionClaims } from './auth';
 import { INTERNAL_HEADER, internalSecret } from './auth';
 import { JSON_MAX_BYTES, error, flag, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
 import type { Env, NodesEnv } from './env';
-import { NODE_ROUTES, OPERATORS_ROUTE, nodesStub } from './nodeApi';
+import { NODE_ROUTES, OPERATORS_ROUTE, READ_AUDIT_ROUTE, nodesStub } from './nodeApi';
 import { accountGate, edgeCache, overLimit, sitePrefix, subjectsOf, widePrefix } from './limits';
 import type { LimitName, Limiter } from './limits';
 import { REGISTER_PER_IP_PER_HOUR, REPLAY_MAX_BYTES, TOKENS_PER_ACCOUNT_PER_DAY } from './NodeRegistryDO';
@@ -122,6 +137,8 @@ export interface NodeRouteContext {
   session: () => Promise<SessionClaims | null>;
   /** limits.ts isolateLimited: true = over `max` in the current window (default one minute), in this isolate. */
   limited: (key: string, max: number, windowMs?: number) => boolean;
+  /** limits.ts isolateSpent: `limited`'s check without its count (a route that counts only what it did, after the answer). */
+  spent: (key: string, max: number) => boolean;
   /** limits.ts limiter: a rule of its table, counted across the location's isolates when the Worker has its binding. */
   limit: Limiter;
   /** CORS headers for this request (index.ts corsHeaders). */
@@ -133,6 +150,8 @@ export interface NodeRouteContext {
 /** The object's own limits (NodeRegistryDO.ts), here per isolate: junk stops before the object. */
 const LIMIT_REGISTER_PER_IP = REGISTER_PER_IP_PER_HOUR;
 const LIMIT_TOKENS_PER_ACCOUNT = TOKENS_PER_ACCOUNT_PER_DAY;
+/** Token requests per account per minute, refused ones included (the day's limit counts only the tokens minted). */
+const LIMIT_TOKEN_TRIES_PER_ACCOUNT = 30;
 const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
 const LIMIT_STATUS_PER_IP = 60;
@@ -159,7 +178,22 @@ export const REPLAY_BROKEN_S = 86_400;
 /** How long an isolate keeps the KV flag replays_off: one KV read per isolate this often, cache hits included. */
 const REPLAYS_OFF_TTL_MS = 30_000;
 /** The maintainers' routes and the method of each. */
-const ADMIN_ROUTES: Readonly<Record<string, 'GET' | 'POST'>> = { nodes: 'GET', status: 'POST', drain: 'POST', update: 'POST', reprobe: 'POST', grant: 'POST', revoke: 'POST', unfreeze: 'POST', delist: 'POST' };
+const ADMIN_ROUTES: Readonly<Record<string, 'GET' | 'POST'>> = {
+  nodes: 'GET',
+  overview: 'GET',
+  wallet: 'GET',
+  frozen: 'GET',
+  status: 'POST',
+  drain: 'POST',
+  update: 'POST',
+  reprobe: 'POST',
+  retire: 'POST',
+  'tokens/revoke': 'POST',
+  grant: 'POST',
+  revoke: 'POST',
+  unfreeze: 'POST',
+  delist: 'POST',
+};
 
 /**
  * A release key: an optional X.Y.Z/ directory, then one file name. Nothing else is ever looked up in
@@ -277,8 +311,13 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     if (!trustedOperatorIds(env).has(s.sub)) return error(403, 'not_trusted', 'only the project creates node tokens for now');
     const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
     if (fresh instanceof Response) return fresh;
-    if (c.limited('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT, DAY_MS)) return error(429, 'rate_limited');
-    return toRegistry(env, c.request, path, operator(s));
+    // The day's tokens are the ones minted, counted after the object's 200 (its own limit counts only
+    // those too): a refusal (a typo in the panel's form, the cap) makes no token and costs one of the
+    // minute's tries instead, so a few of them never stop the next good request.
+    if (c.spent('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT) || c.limited('ntry:' + s.sub, LIMIT_TOKEN_TRIES_PER_ACCOUNT)) return error(429, 'rate_limited');
+    const res = await toRegistry(env, c.request, path, operator(s));
+    if (res.ok) c.limited('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT, DAY_MS);
+    return res;
   }
   if (method === 'GET' && path === '/nodes/mine') {
     const s = requireAccount({ session: await c.session() });
@@ -303,10 +342,33 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
     if (fresh instanceof Response) return fresh;
     if (c.limited('nadm:' + s.sub, LIMIT_ADMIN_PER_ACCOUNT)) return error(429, 'rate_limited');
-    const res = await toRegistry(env, c.request, path, operator(s));
+    // A read's query (wallet?account=) goes on; the object reads nothing else of the URL.
+    const res = await toRegistry(env, c.request, method === 'GET' ? path + c.url.search : path, operator(s));
     return admin === 'delist' && res.ok ? delisted(c, env, res) : res;
   }
   return error(404, 'not_found');
+}
+
+/**
+ * A maintainer read this Worker answered itself (account-stats, queue-stats), in the object's one
+ * window for every read (NodeRegistryDO readAudit: an ALERT once per account per 30 minutes), after
+ * the answer: a log line here every time, and the object told when it is there (the node settings,
+ * nodes_off not set). Never throws.
+ */
+async function auditRead(c: NodeRouteContext, env: Env, s: SessionClaims, what: 'account-stats' | 'queue-stats'): Promise<void> {
+  console.log(`[nodes] admin ${s.name} (${s.sub}): read ${what}`);
+  const tell = async () => {
+    if (!nodesConfigured(env) || !env.JWT_SECRET) return;
+    try {
+      const res = await toRegistry(env, new Request('https://nodes' + READ_AUDIT_ROUTE, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ what }) }), READ_AUDIT_ROUTE, operator(s));
+      await res.body?.cancel();
+    } catch (e) {
+      console.log(`[nodes] read audit not handed to the control plane: ${String(e)}`);
+    }
+  };
+  // Without a context (the tests) it is awaited, so nothing outlives the answer.
+  if (c.waitUntil) c.waitUntil(tell());
+  else await tell();
 }
 
 /**
@@ -346,6 +408,7 @@ async function accountStats(c: NodeRouteContext, env: Env): Promise<Response> {
   const res = await accountsCall(env, '/account-stats', { operatorIds, trusted: [...trusted].slice(0, STATS_TRUSTED_MAX) });
   const out = new Response(res.body, res);
   out.headers.set('cache-control', 'no-store');
+  await auditRead(c, env, s, 'account-stats');
   return out;
 }
 
@@ -369,6 +432,7 @@ async function queueStats(c: NodeRouteContext, env: Env): Promise<Response> {
   });
   const out = new Response(res.body, res);
   out.headers.set('cache-control', 'no-store');
+  await auditRead(c, env, s, 'queue-stats');
   return out;
 }
 

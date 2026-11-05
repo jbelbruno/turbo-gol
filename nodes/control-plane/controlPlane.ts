@@ -76,7 +76,7 @@ import { regionFactor } from './ledger';
 import type { Ledger, LedgerEntry, LedgerPlayer } from './ledger';
 import { matchFromRow } from './persist';
 import type { MatchRow, MatchStore } from './persist';
-import { MAX_CAPACITY, usableTransports } from './registry';
+import { MAX_CAPACITY, isRetired, usableTransports } from './registry';
 import type { Registry, NodeRecord } from './registry';
 import { ineligibility, pickNode, pickVerifier, transportFor } from './scheduler';
 import type { Shop } from './shop';
@@ -117,6 +117,9 @@ const DONE_RETENTION_MS = 10 * 60_000;
 export const CASUAL_VERIFY_RATE = 0.2;
 /** Matches the matchmaker could not place on a node count as demand for this long. */
 const UNPLACED_WINDOW_MS = 15 * 60_000;
+/** A node's control link cuts are counted over this long (the maintainers' panel), at most LINK_CUTS_MAX of them. */
+export const LINK_CUTS_WINDOW_MS = 24 * 60 * 60_000;
+const LINK_CUTS_MAX = 500;
 /**
  * Strikes closer together than this count once: one outage (a stop, a crash, a restart) is one
  * strike, however many matches it took. A silence counts from its start (strike's `since`).
@@ -253,6 +256,33 @@ export interface LeaveResult {
 
 /** A refused replay upload: the HTTP status and error code the Worker answers. */
 export type ReplayRefusal = { ok: false; status: number; code: string };
+
+/** The last reachability probe of a wss host (memory only): when it ended, and what it found. */
+export interface ProbeResult {
+  at: number;
+  ok: boolean;
+  /** What went wrong (probeFailure's words), or null when it passed. */
+  error: string | null;
+}
+
+/** One region as the maintainers' panel sees it (ControlPlane.regionView). */
+export interface RegionView {
+  region: string;
+  /** Hosts that may take a match now (hostsOnline). */
+  hostsOnline: number;
+  /** The match slots those hosts offer. */
+  slots: number;
+  /** Matches running on them (the control plane's count, never below their heartbeats'). */
+  active: number;
+  /** Matches placed in the region and not reported yet. */
+  matches: number;
+  /** Matches no node could take in the last 15 minutes (the demand the nodes did not meet). */
+  unplaced: number;
+  /** The region factor a match placed now would get (community points only). */
+  regionFactor: number;
+  /** A ranked match could go there now: an active host on a build some trusted verifier online re-simulates. */
+  rankedReady: boolean;
+}
 
 export interface MatchEntry {
   assign: MatchAssignment;
@@ -490,9 +520,14 @@ export class ControlPlane {
   private readonly requireRelay: boolean;
   private readonly casualVerifyRate: number;
   private readonly probing = new Set<string>();
+  /** When each host's last probe started (the sweep paces the next one by it). */
   private readonly lastProbe = new Map<string, number>();
+  /** What each host's last probe found (probeOf; memory only, like the rest of the probes' state). */
+  private readonly probeResults = new Map<string, ProbeResult>();
   /** Failed re-probes in a row of proven hosts, and the hosts they took out (for the recovery line). */
   private readonly probeFailures = new Map<string, number>();
+  /** When each node's logged-in control link ended, the last LINK_CUTS_WINDOW_MS (linkCutsOf). */
+  private readonly linkCuts = new Map<string, number[]>();
   private readonly unreachable = new Set<string>();
   private readonly deferredUpdates = new Set<string>();
   private readonly lastStrike = new Map<string, number>();
@@ -623,7 +658,7 @@ export class ControlPlane {
    */
   adopt(link: NodeLink, nodeId: string, quiet = false): Session | null {
     const n = this.registry.node(nodeId);
-    if (!n || n.status === 'banned') {
+    if (!n || n.status === 'banned' || isRetired(n)) {
       link.close(4401, 'unknown node');
       return null;
     }
@@ -658,7 +693,23 @@ export class ControlPlane {
     if (s.nodeId && this.sessions.get(s.nodeId) === s) {
       this.sessions.delete(s.nodeId);
       this.registry.disconnected(s.nodeId);
+      this.linkCut(s.nodeId);
     }
+  }
+
+  /** A node's logged-in link ended (any cause: its close, a 4408, a replacement, a ban): counted for the panel. */
+  private linkCut(nodeId: string): void {
+    const now = this.now();
+    const cuts = (this.linkCuts.get(nodeId) ?? []).filter((t) => now - t < LINK_CUTS_WINDOW_MS);
+    cuts.push(now);
+    this.linkCuts.set(nodeId, cuts.slice(-LINK_CUTS_MAX));
+  }
+
+  /** A node's control link cuts in the last 24 h and when the last one was (memory only: a restart forgets them). */
+  linkCutsOf(nodeId: string): { count24h: number; lastAt: number | null } {
+    const now = this.now();
+    const cuts = (this.linkCuts.get(nodeId) ?? []).filter((t) => now - t < LINK_CUTS_WINDOW_MS);
+    return { count24h: cuts.length, lastAt: cuts.length > 0 ? cuts[cuts.length - 1] : null };
   }
 
   /** One text frame from a node. Never throws for anything the node sends; a storage failure while handling a report rejects (no ack: the node sends it again). */
@@ -780,6 +831,11 @@ export class ControlPlane {
     if (n.status === 'banned') {
       s.link.send({ t: 'error', code: 'banned' });
       return s.link.close(4403, 'banned');
+    }
+    // Retired by a maintainer: refused as a banned node is, whatever its status says.
+    if (isRetired(n)) {
+      s.link.send({ t: 'error', code: 'retired' });
+      return s.link.close(4403, 'retired');
     }
     if (s.closed) return;
     if (s.authTimer) clearTimeout(s.authTimer);
@@ -907,17 +963,29 @@ export class ControlPlane {
   private async healthz(n: NodeRecord, url: string): Promise<string | null> {
     this.probing.add(n.nodeId);
     this.lastProbe.set(n.nodeId, this.now());
+    let error: string | null = null;
     try {
       const nonce = randomB64(18);
       const get = this.o.fetchJson ?? (async (u: string) => (await fetch(u, { signal: AbortSignal.timeout(5_000) })).json());
       const body = (await get(`${httpOf(url)}/healthz?nonce=${nonce}`)) as { nodeId?: unknown; sig?: unknown };
-      if (body?.nodeId !== n.nodeId || typeof body.sig !== 'string' || !(await verifyWith(n.publicKey, reachMessage(n.nodeId, nonce), body.sig))) return 'bad answer';
-      return null;
+      if (body?.nodeId !== n.nodeId || typeof body.sig !== 'string' || !(await verifyWith(n.publicKey, reachMessage(n.nodeId, nonce), body.sig))) error = 'bad answer';
     } catch (e) {
-      return probeFailure(e);
+      error = probeFailure(e);
     } finally {
       this.probing.delete(n.nodeId);
     }
+    this.probeResults.set(n.nodeId, { at: this.now(), ok: error === null, error });
+    return error;
+  }
+
+  /** The last probe of a wss host (what the panel shows of a node stuck in pending), or null before its first. */
+  probeOf(nodeId: string): ProbeResult | null {
+    return this.probeResults.get(nodeId) ?? null;
+  }
+
+  /** Failed re-probes in a row of a proven host (REPROBE_FAILURES of them take its wss out). */
+  probeStreak(nodeId: string): number {
+    return this.probeFailures.get(nodeId) ?? 0;
   }
 
   /**
@@ -1033,7 +1101,36 @@ export class ControlPlane {
    * took out (and that has no other way in) offers nothing until a probe passes again.
    */
   private mayHost(n: NodeRecord): boolean {
-    return this.isOnline(n.nodeId) && n.roles.includes('host') && (n.status === 'probation' || n.status === 'active') && usableTransports(n).length > 0;
+    return this.isOnline(n.nodeId) && !isRetired(n) && n.roles.includes('host') && (n.status === 'probation' || n.status === 'active') && usableTransports(n).length > 0;
+  }
+
+  /**
+   * One region for the maintainers' panel: its hosts and slots, the matches on them, the demand
+   * they did not meet, its factor and whether a ranked match could go there now (an active host
+   * whose build a trusted verifier online re-simulates: what place() asks of a ranked candidate).
+   */
+  regionView(region: string): RegionView {
+    const now = this.now();
+    let hostsOnline = 0;
+    let slots = 0;
+    let active = 0;
+    let rankedReady = false;
+    for (const n of this.registry.list()) {
+      if (n.region !== region || !this.mayHost(n)) continue;
+      hostsOnline++;
+      slots += n.capacity.matches;
+      active += Math.max(n.active, this.runningOn(n.nodeId));
+      if (!rankedReady && n.status === 'active' && this.verifiable(n.build)) rankedReady = true;
+    }
+    let matches = 0;
+    for (const m of this.matches.values()) if (m.assign.region === region && (m.state === 'assigned' || m.state === 'reporting')) matches++;
+    const unplaced = this.unplaced.filter((u) => u.region === region && now - u.at < UNPLACED_WINDOW_MS).length;
+    return { region, hostsOnline, slots, active, matches, unplaced, regionFactor: this.regionFactorAt(region), rankedReady };
+  }
+
+  /** The verifications a verifier node is running now. */
+  verifyingOn(nodeId: string): number {
+    return this.sessions.get(nodeId)?.verifying ?? 0;
   }
 
   /**

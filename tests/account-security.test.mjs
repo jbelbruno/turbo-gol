@@ -196,8 +196,11 @@ test('auth-3: PERFIL never sets a first password or mints codes from a Bearer: C
   // The level is linkLevel's: 1, or 2 for the project account (tests/maintainer-link-level.test.mjs).
   assert.match(src, /fresh\(\(\) => \(window\.location\.href = acc\.oauthUrl\(p, true\)\)(?:, linkLevel\((?:me|acc\.me)\))?\)/, 'a link');
   assert.match(src, /fresh\(\(\) => \{\s*void acc\.unlink\(p\)/, 'an unlink');
-  assert.match(src, /acc\.oauthUrl\(p, 'reauth'\)/, 'the provider round trip');
-  assert.match(src, /await acc\.reauth\(pass\.input\.value\)/, 'or the password');
+  // "Confirm it is you" itself is accountLinks.ts confirmItsYou, shared by PERFIL and CONTROL DE NODOS.
+  const sheet = await readFile(new URL('../src/ui/screens/accountLinks.ts', import.meta.url), 'utf8');
+  assert.match(src, /const fresh = .*\): void => confirmItsYou\(menu, go, level, force, resume\);/, "PERFIL's fresh is the shared sheet");
+  assert.match(sheet, /acc\.oauthUrl\(p, 'reauth'\)/, 'the provider round trip');
+  assert.match(sheet, /await acc\.reauth\(pass\.input\.value\)/, 'or the password');
 });
 
 // ---- auth-5 / sign-in PR 4: every anonymous sign-in carries a solved anti-bot check ----------------
@@ -272,9 +275,12 @@ test('sign-in PR 4: "confirm it\'s you" asks for the level the server names; at 
   assert.equal(e.level, 2, 'the level comes with the refusal');
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8');
-  // (sign-in PR 9 adds `resume`: the dialog a provider's round trip comes back to.)
-  assert.match(src, /const fresh = \(go: \(\) => void, level: 1 \| 2 = 1, force = false, resume: string \| null = null\): void => \{\s*if \(!force && acc\.fresh\(level\)\)/, 'the sheet is for a level');
-  assert.match(src, /const offered = level === 1 \? own : \[\];/, 'no provider at level 2');
+  // (sign-in PR 9 adds `resume`: the dialog a provider's round trip comes back to. The nodes' panel
+  // moves the sheet to accountLinks.ts confirmItsYou, which PERFIL's fresh hands over to.)
+  const sheet = await readFile(new URL('../src/ui/screens/accountLinks.ts', import.meta.url), 'utf8');
+  assert.match(src, /const fresh = \(go: \(\) => void, level: 1 \| 2 = 1, force = false, resume: string \| null = null\): void => confirmItsYou\(menu, go, level, force, resume\);/);
+  assert.match(sheet, /export function confirmItsYou\(menu: Menu, go: \(\) => void, level: 1 \| 2 = 1, force = false, resume: string \| null = null\): void \{\s*const acc = menu\.host\.accounts;\s*if \(!force && acc\.fresh\(level\)\)/, 'the sheet is for a level');
+  assert.match(sheet, /const offered = level === 1 \? own : \[\];/, 'no provider at level 2');
   assert.match(src, /e\.code === 'reauth_required' && e\.level > level \? unlinkNow\(p, 2\)/, 'an unlink asked for level 2 asks again, once');
   const es = (await import('../src/locales/es.ts')).default;
   const en = (await import('../src/locales/en.ts')).default;
