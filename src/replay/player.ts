@@ -49,8 +49,8 @@ import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
 import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
-import { CLIP_FORMATS, CLIP_HERE_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipWindow, fitBox, shareUrl } from './clip';
-import type { ClipFormat, ClipResult } from './clip';
+import { CLIP_HERE_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipSize, clipWindow, shareUrl } from './clip';
+import type { ClipFormat, ClipQuality, ClipResult } from './clip';
 import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
 import { clockText, el } from './list';
@@ -93,6 +93,37 @@ function loadCamPrefs(): CamPrefs {
     /* private mode */
   }
   return d;
+}
+
+const CLIP_KEY = STORAGE_PREFIX + 'replay.clip';
+interface ClipPrefs {
+  format: ClipFormat;
+  quality: ClipQuality;
+  names: boolean;
+}
+
+/** What the Clip sheet remembers (best effort: storage can be off). */
+function loadClipPrefs(): ClipPrefs {
+  const d: ClipPrefs = { format: 'vertical', quality: 'high', names: true };
+  try {
+    const p = JSON.parse(window.localStorage.getItem(CLIP_KEY) ?? 'null') as Partial<ClipPrefs> | null;
+    if (p && typeof p === 'object') {
+      if (p.format === 'vertical' || p.format === 'square' || p.format === 'wide') d.format = p.format;
+      if (p.quality === 'standard' || p.quality === 'high' || p.quality === 'max') d.quality = p.quality;
+      if (typeof p.names === 'boolean') d.names = p.names;
+    }
+  } catch {
+    /* private mode */
+  }
+  return d;
+}
+
+function saveClipPrefs(p: ClipPrefs): void {
+  try {
+    window.localStorage.setItem(CLIP_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode */
+  }
 }
 
 function saveCamPrefs(p: CamPrefs): void {
@@ -749,8 +780,10 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   // A clip seeks to its start, plays once at 1x with the page's chrome hidden and the canvas in the
   // clip's shape, and records every drawn frame (clip.ts); then a result sheet offers the file.
   const clipSupported = canRecordClips();
-  let clipFormat: ClipFormat = 'vertical';
-  let clipNames = true;
+  const clipPrefs = loadClipPrefs();
+  let clipFormat: ClipFormat = clipPrefs.format;
+  let clipQuality: ClipQuality = clipPrefs.quality;
+  let clipNames = clipPrefs.names;
   let clipUrl: string | null = null;
   /** The goal the last event showed: its caption goes on the frames after it (the DOM banner is not recorded). */
   let lastGoal: { tick: number; team: 0 | 1; scorer: string | null } | null = null;
@@ -795,15 +828,21 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       clipUrl = null;
     }
   };
+  /**
+   * The canvas at the video's own size in CSS pixels (so the game renders exactly that many pixels:
+   * a stage as small as the window gave a blurry video) and scaled down by a transform to fit the window.
+   */
   const fitStage = (): void => {
-    const f = CLIP_FORMATS[clipFormat];
-    const b = fitBox(window.innerWidth, window.innerHeight, f.w, f.h);
+    const f = clipSize(clipFormat, clipQuality);
+    const k = Math.min(window.innerWidth / f.w, window.innerHeight / f.h);
     const s = renderer.gpu.domElement.style;
     s.inset = 'auto';
-    s.left = `${b.left}px`;
-    s.top = `${b.top}px`;
-    s.width = `${b.width}px`;
-    s.height = `${b.height}px`;
+    s.width = `${f.w}px`;
+    s.height = `${f.h}px`;
+    s.left = `${Math.round((window.innerWidth - f.w * k) / 2)}px`;
+    s.top = `${Math.round((window.innerHeight - f.h * k) / 2)}px`;
+    s.transformOrigin = '0 0';
+    s.transform = `scale(${k})`;
   };
   const enterClipMode = (): void => {
     document.body.classList.add('rp-clip');
@@ -812,7 +851,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const leaveClipMode = (): void => {
     document.body.classList.remove('rp-clip');
     const s = renderer.gpu.domElement.style;
-    s.inset = s.left = s.top = s.width = s.height = '';
+    s.inset = s.left = s.top = s.width = s.height = s.transform = s.transformOrigin = '';
     recHud.classList.add('rp-hidden');
   };
   window.addEventListener('resize', () => {
@@ -849,7 +888,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     if (job.phase === 'seek') {
       if (seekTarget >= 0 || restarting) return;
       try {
-        job.rec = new ClipRecorder(renderer.gpu.domElement, clipFormat);
+        job.rec = new ClipRecorder(renderer.gpu.domElement, clipFormat, clipQuality);
         job.rec.start();
       } catch (e) {
         console.error('clip: cannot record', e);
@@ -996,16 +1035,32 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(clipFormat === key) }, label) as HTMLButtonElement;
       b.addEventListener('click', () => {
         clipFormat = key;
+        saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
         for (const x of fmt.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
       });
       fmt.append(b);
+    }
+    const qual = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': t('replay.clipQuality') });
+    for (const [key, label] of [
+      ['standard', t('replay.clipQStandard')],
+      ['high', t('replay.clipQHigh')],
+      ['max', t('replay.clipQMax')],
+    ] as Array<[ClipQuality, string]>) {
+      const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(clipQuality === key) }, label) as HTMLButtonElement;
+      b.addEventListener('click', () => {
+        clipQuality = key;
+        saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
+        for (const x of qual.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+      });
+      qual.append(b);
     }
     const names = el('input', { type: 'checkbox' }) as HTMLInputElement;
     names.checked = clipNames;
     names.addEventListener('change', () => {
       clipNames = names.checked;
+      saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
     });
-    panel.append(fmt, el('label.rp-clip-check', null, names, t('replay.clipNames')), status);
+    panel.append(el('span.rp-clip-sub', null, t('replay.clipFormat')), fmt, el('span.rp-clip-sub', null, t('replay.clipQuality')), qual, el('p.rp-clip-note.rp-clip-dim', null, t('replay.clipQualityHint')), el('label.rp-clip-check', null, names, t('replay.clipNames')), status);
     if (!clipSupported) panel.append(el('p.rp-clip-note', null, t('replay.clipUnsupported')));
     const close = el('button.rp-btn', { type: 'button' }, t('replay.clipClose'));
     close.addEventListener('click', closeClipPanel);

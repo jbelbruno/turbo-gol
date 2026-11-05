@@ -96,6 +96,20 @@ test('the frame box is the largest of the clip shape that fits the window, centr
   for (const f of Object.values(C.CLIP_FORMATS)) assert.ok(f.w <= 1280 && f.h <= 1280 && f.w % 2 === 0 && f.h % 2 === 0, 'even sizes, 720p at most');
 });
 
+test('the quality sets the video size, the frame rate and the bit rate: standard 720p, high and max 1080p, even sizes', () => {
+  assert.deepEqual(C.clipSize('vertical', 'standard'), { w: 720, h: 1280 });
+  assert.deepEqual(C.clipSize('vertical', 'high'), { w: 1080, h: 1920 });
+  assert.deepEqual(C.clipSize('wide', 'max'), { w: 1920, h: 1080 });
+  assert.deepEqual(C.clipSize('square', 'high'), { w: 1080, h: 1080 });
+  for (const f of Object.keys(C.CLIP_FORMATS)) for (const q of Object.keys(C.CLIP_QUALITIES)) {
+    const z = C.clipSize(f, q);
+    assert.ok(z.w % 2 === 0 && z.h % 2 === 0 && Math.max(z.w, z.h) <= 1920, `${f} ${q}`);
+  }
+  const { standard, high, max } = C.CLIP_QUALITIES;
+  assert.ok(standard.bitrate < high.bitrate && high.bitrate < max.bitrate);
+  assert.ok(standard.fps === 30 && high.fps === 30 && max.fps === 60);
+});
+
 test('every clip line is in English and in Spanish, with the same placeholders', () => {
   const keys = Object.keys(en).filter((k) => k.startsWith('replay.clip'));
   assert.ok(keys.length >= 20, `${keys.length} clip lines`);

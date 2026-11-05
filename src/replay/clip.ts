@@ -20,14 +20,35 @@ export const CLIP_HERE_SECONDS = 10;
 
 export type ClipFormat = 'vertical' | 'square' | 'wide';
 
-/** The video's size per format (720p: light on a weak device, plenty for a phone). */
+/** The shape of each format at 720p; a quality scales it (clipSize). */
 export const CLIP_FORMATS: Readonly<Record<ClipFormat, { w: number; h: number }>> = {
   vertical: { w: 720, h: 1280 },
   square: { w: 720, h: 720 },
   wide: { w: 1280, h: 720 },
 };
 
+/**
+ * What the player picks: the size, the frame rate and the bit rate of the video. Standard is light
+ * on a weak device; High and Max render the stage at 1080p and ask more of the GPU and the encoder.
+ */
+export type ClipQuality = 'standard' | 'high' | 'max';
+export const CLIP_QUALITIES: Readonly<Record<ClipQuality, { scale: number; fps: number; bitrate: number }>> = {
+  standard: { scale: 1, fps: 30, bitrate: 5_000_000 },
+  high: { scale: 1.5, fps: 30, bitrate: 10_000_000 },
+  max: { scale: 1.5, fps: 60, bitrate: 16_000_000 },
+};
+
+/** The video's size in pixels (even numbers: the encoders need them). */
+export function clipSize(format: ClipFormat, quality: ClipQuality): { w: number; h: number } {
+  const f = CLIP_FORMATS[format];
+  const k = CLIP_QUALITIES[quality].scale;
+  return { w: Math.round((f.w * k) / 2) * 2, h: Math.round((f.h * k) / 2) * 2 };
+}
+
 const MIME_CANDIDATES: ReadonlyArray<{ mime: string; ext: 'mp4' | 'webm' }> = [
+  // H.264 High profile (level 4.2 / 4.0: 1080p at 60 / 30 fps) first: better quality at the same bit rate than the baseline one
+  { mime: 'video/mp4;codecs=avc1.64002A', ext: 'mp4' },
+  { mime: 'video/mp4;codecs=avc1.640028', ext: 'mp4' },
   { mime: 'video/mp4;codecs=avc1.42E01E', ext: 'mp4' },
   { mime: 'video/mp4', ext: 'mp4' },
   { mime: 'video/webm;codecs=vp9', ext: 'webm' },
@@ -195,23 +216,27 @@ export class ClipRecorder {
   private readonly source: HTMLCanvasElement;
   private readonly fps: number;
 
-  constructor(source: HTMLCanvasElement, format: ClipFormat, fps = 30) {
+  constructor(source: HTMLCanvasElement, format: ClipFormat, quality: ClipQuality = 'standard') {
+    const q = CLIP_QUALITIES[quality];
+    const fps = q.fps;
     this.source = source;
     this.fps = fps;
     const pick = pickMime((m) => MediaRecorder.isTypeSupported(m));
     if (pick === null) throw new Error('no recordable video format');
     this.ext = pick.ext;
     this.mime = pick.mime;
-    const f = CLIP_FORMATS[format];
+    const f = clipSize(format, quality);
     this.out = document.createElement('canvas');
     this.out.width = f.w;
     this.out.height = f.h;
     const c = this.out.getContext('2d');
     if (c === null) throw new Error('no 2D canvas');
     this.ctx = c;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
     this.ctx.fillStyle = '#05070d';
     this.ctx.fillRect(0, 0, f.w, f.h);
-    this.rec = new MediaRecorder(this.out.captureStream(fps), { mimeType: pick.mime, videoBitsPerSecond: 3_500_000 });
+    this.rec = new MediaRecorder(this.out.captureStream(fps), { mimeType: pick.mime, videoBitsPerSecond: q.bitrate });
     this.rec.ondataavailable = (e): void => {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
