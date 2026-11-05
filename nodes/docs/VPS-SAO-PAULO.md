@@ -190,9 +190,10 @@ bash /tmp/turbogol-install.sh --control https://turbo-gol.com --token '<tgn1_...
 
 - **`--roles host,verify`:** hostea y verifica. Los roles se fijan al registrar: cambiarlos pide
   un token nuevo.
-- **`--public-host <host>`:** sin esto, el instalador registra la IPv4 que ve `/nodes/whoami`, y
-  el chequeo de alcance nunca pasa: un Worker no puede pedir una IP. Nunca le pongas un puerto:
-  todo lo que tiene `:` se toma como IPv6.
+- **`--public-host <host>`:** el nombre del nodo. Sin él, o con una IP, una instalación nueva por
+  wss se detiene antes de instalar nada: el chequeo de alcance corre en un Worker, que no puede
+  pedir una IP, y el plano de control la rechaza (`ip_not_supported`). `--allow-ip` acepta una IP
+  solo para un plano de control de desarrollo. Nunca le pongas un puerto ni `https://`.
 - **`--egress-cap-gb <tope-gb>`:** el nodo cuenta lo que mandan las partidas que terminan
   (`node/runtime.ts:514-519`), por mes calendario UTC (`:617-620`), y el scheduler deja de
   mandarle partidas al 95 % del tope (`control-plane/scheduler.ts:55`). El tope tiene que dejar

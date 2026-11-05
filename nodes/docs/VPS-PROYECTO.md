@@ -27,11 +27,13 @@ notas privadas del mantenedor, nunca en este repo (`tests/public-docs.test.mjs`)
 3. **El sistema:** Debian 12 o más nuevo, o Ubuntu 22.04 o más nuevo, con NTP activo.
 4. **DNS:** `<host>`, un registro A **solo DNS** (sin el proxy de Cloudflare) hacia la máquina, y un
    AAAA solo si apunta a esa misma máquina. Hace falta un nombre: el chequeo de alcance corre en el
-   Worker, y un Worker no puede pedir una IP. El panel y el servidor rechazan una IP o un puerto.
-5. **Si va a verificar:** Node.js fijado en la misma versión que São Paulo, la prueba `xmachine`
-   pasada contra São Paulo con el checkout actual (`nodes/scripts/xmachine.mjs`; `VPS-SAO-PAULO.md`,
-   "Ventana de mantenimiento") y la misma release que el canal estable. Solo así verifica las ranked
-   de los otros nodos de confianza, y ellos las suyas.
+   Worker, y un Worker no puede pedir una IP. El panel y el servidor rechazan una IP o un puerto, y
+   el instalador también, antes de instalar nada.
+5. **Si va a verificar:** Node.js fijado en la misma versión que São Paulo (con la versión exacta en
+   `--node-version <versión>`, el instalador la instala y la retiene con `apt-mark hold`), la
+   prueba `xmachine` pasada contra São Paulo con el checkout actual (`nodes/scripts/xmachine.mjs`;
+   `VPS-SAO-PAULO.md`, "Ventana de mantenimiento") y la misma release que el canal estable. Solo
+   así verifica las ranked de los otros nodos de confianza, y ellos las suyas.
 6. **La protección contra ataques de denegación:** la del proveedor, encendida para la máquina. El
    nodo no tiene otra delante.
 7. **D19 y D20** (`VPS-SAO-PAULO.md`, "Instalar el nodo"):
@@ -62,7 +64,10 @@ curl -fsSL https://turbo-gol.com/nodes/releases/install.sh | sudo bash -s -- --c
 
    El token sirve una sola vez y solo para `<host>`: un registro con otro nombre o con una IP se
    rechaza sin gastarlo. Si en la máquina hay un Caddyfile que no escribió el instalador, el
-   instalador se detiene antes de gastar el token: apártalo primero.
+   instalador se detiene antes de gastar el token: apártalo primero. Para un verificador, agrega
+   al final `--node-version <versión>` (la de São Paulo, exacta): el panel no lo pone. Al
+   terminar, el instalador muestra la dirección de Mis servidores (`/#servers`) y la guía del
+   operador; este nodo se sigue en el panel (paso 5).
 5. **El seguimiento:** el panel sigue el token y el nodo nuevo hasta `active`. Si queda `pending`,
    muestra el error de la última prueba y qué revisar: el DNS, los puertos 80 y 443, un Caddyfile
    previo o el certificado. Si el token vence, pide otro.
