@@ -1,0 +1,283 @@
+/* The players' names over their cars (src/render/nameTags.ts; the owner's "Neón de arena" with
+   the boost meter, 2026-11-05), in the game's matches and the replay viewer: src/style.css imports
+   this sheet, so both pages read the same one. No plate: the name in the display face's italic
+   capitals, lit in its team's neon over a soft dark halo, a thin skewed line under it and a post on
+   its team's goal side (blue left, red right). A teammate's tag (.tg-neon--meter: the viewer's
+   team, every car in a replay) adds the lime boost meter, filled from the post's side. Three steps
+   by distance (base, --mid, --far: the size and the glow; the opacity is the layer's, per frame),
+   a bot's robot and dimmer glow, the edge tag with its arrow (--off, --offr / --offl). The team's
+   colours are custom properties on the tag (the tokens: tokens.css --tag-*). */
+
+.tg-tags {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tg-tags[hidden],
+.tg-neon[hidden] {
+  display: none;
+}
+
+/* The safe rect the tags stay in (measured by the layer): the device's safe area plus 12 px, or a
+   page's own bar plus 12 px where it reaches further (--tags-inset-top / -bottom, from the window's
+   edge: the replay viewer's Exit and control bar, so an edge tag never hides under them). */
+.tg-tags-safe {
+  position: absolute;
+  top: calc(max(var(--safe-top), var(--tags-inset-top, 0px)) + var(--sp-3));
+  right: calc(var(--safe-right) + var(--sp-3));
+  bottom: calc(max(var(--safe-bottom), var(--tags-inset-bottom, 0px)) + var(--sp-3));
+  left: calc(var(--safe-left) + var(--sp-3));
+  visibility: hidden;
+}
+
+/* Its transform (written per frame) makes each tag a stacking context: the halo (z-index -1) stays behind its own name. */
+.tg-neon {
+  --tg-ol: 1px 0 0 var(--ink), -1px 0 0 var(--ink), 0 1px 0 var(--ink), 0 -1px 0 var(--ink);
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 0 0.55em 0.58em;
+  font-size: var(--t-tag);
+  line-height: 1;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.tg-neon--blue {
+  --tg-text: var(--tag-blue-text);
+  --tg-neon: var(--tag-blue-neon);
+  --tg-haze: var(--tag-blue-haze);
+  --tg-haze-mid: var(--tag-blue-haze-mid);
+  --tg-far: var(--tag-blue-far);
+  --tg-dim: var(--tag-blue-dim);
+  --tg-core: var(--tag-blue-core);
+  --tg-glow: var(--blue);
+  --tg-glow-wide: var(--tag-blue-glow-wide);
+  --tg-arrow: var(--tag-blue-arrow);
+  --tg-hi: var(--blue-hi);
+  padding-left: 1.05em;
+}
+
+.tg-neon--red {
+  --tg-text: var(--tag-red-text);
+  --tg-neon: var(--tag-red-neon);
+  --tg-haze: var(--tag-red-haze);
+  --tg-haze-mid: var(--tag-red-haze-mid);
+  --tg-far: var(--tag-red-far);
+  --tg-dim: var(--tag-red-dim);
+  --tg-core: var(--tag-red-core);
+  --tg-glow: var(--tag-red-glow);
+  --tg-glow-wide: var(--tag-red-glow-wide);
+  --tg-arrow: var(--tag-red-arrow);
+  --tg-hi: var(--red-hi);
+  padding-right: 1.05em;
+}
+
+.tg-neon::before {
+  content: '';
+  position: absolute;
+  left: -0.35em;
+  right: -0.35em;
+  top: -0.5em;
+  bottom: -0.15em;
+  z-index: -1;
+  background: radial-gradient(closest-side, var(--tag-halo), var(--tag-halo-edge) 62%, transparent);
+}
+
+/* The face has capitals only: a name shows uppercased, and what it lacks ('_') comes from the next face. */
+.tg-neon-name {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tg-text);
+  text-shadow: var(--tg-ol), 0 0 6px var(--tg-neon), 0 0 14px var(--tg-haze);
+}
+
+.tg-neon-line,
+.tg-neon-post {
+  position: absolute;
+  bottom: 0.3em;
+  border-radius: var(--r-hair);
+  background: var(--tg-core);
+  box-shadow: 0 0 0 1px var(--tag-rim), 0 0 4px var(--tg-glow), 0 0 10px var(--tg-glow-wide);
+}
+
+.tg-neon-line {
+  left: 0.5em;
+  right: 0.45em;
+  height: 0.15em;
+  min-height: 2px;
+  transform: skewX(-20deg);
+}
+
+.tg-neon-post {
+  left: 0.5em;
+  width: 0.2em;
+  min-width: 2px;
+  height: 1.3em;
+  transform-origin: 50% 100%;
+  transform: skewX(-14deg);
+}
+
+.tg-neon--red .tg-neon-line {
+  left: 0.45em;
+  right: 0.5em;
+}
+
+.tg-neon--red .tg-neon-post {
+  left: auto;
+  right: 0.5em;
+}
+
+/* The boost meter: a dark track under the line, the lime fill scaled from the post's side (nameTags.ts writes scaleX). */
+.tg-neon-boost {
+  display: none;
+  position: absolute;
+  bottom: 0;
+  left: 0.4em;
+  right: 0.45em;
+  height: 0.22em;
+  min-height: 3px;
+  overflow: hidden;
+  background: var(--tag-track);
+  box-shadow: 0 0 0 1px var(--ink);
+  transform: skewX(-20deg);
+}
+
+.tg-neon--meter .tg-neon-boost {
+  display: block;
+}
+
+.tg-neon--red .tg-neon-boost {
+  left: 0.45em;
+  right: 0.4em;
+}
+
+/* Its own layer: a new whole number rescales it on the compositor, never repainting the tag's glow. */
+.tg-neon-boost-fill {
+  height: 100%;
+  background: var(--brand);
+  box-shadow: 0 0 6px var(--brand-line);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.tg-neon--red .tg-neon-boost-fill {
+  transform-origin: 100% 50%;
+}
+
+/* A bot: a small robot head (two eyes, an antenna) before the name. */
+.tg-neon-bot {
+  display: none;
+  position: relative;
+  width: 0.8em;
+  height: 0.62em;
+  margin-right: 0.32em;
+  border: 0.11em solid currentColor;
+  border-radius: var(--r-tag-bot);
+  transform: skewX(-12deg);
+  background: radial-gradient(circle at 31% 54%, currentColor 0 0.08em, transparent 0.11em), radial-gradient(circle at 69% 54%, currentColor 0 0.08em, transparent 0.11em);
+  box-shadow: 0 0 0 1px var(--tag-rim-bot), 0 0 5px var(--tg-far);
+}
+
+.tg-neon--isbot .tg-neon-bot {
+  display: inline-block;
+}
+
+.tg-neon-bot::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -0.32em;
+  width: 0.11em;
+  height: 0.22em;
+  margin-left: -0.055em;
+  background: currentColor;
+}
+
+/* The steps: smaller, a shorter glow. A bot's dimmer glow wins at every step. */
+.tg-neon--mid {
+  font-size: var(--t-tag-mid);
+}
+
+.tg-neon--far,
+.tg-neon--off {
+  font-size: var(--t-tag-far);
+}
+
+.tg-neon--mid .tg-neon-name {
+  text-shadow: var(--tg-ol), 0 0 5px var(--tg-neon), 0 0 10px var(--tg-haze-mid);
+}
+
+.tg-neon--far .tg-neon-name {
+  text-shadow: var(--tg-ol), 0 0 4px var(--tg-far);
+}
+
+.tg-neon--isbot .tg-neon-name {
+  text-shadow: var(--tg-ol), 0 0 5px var(--tg-dim);
+}
+
+/* Off screen: ›› (or ‹‹) outside the side the car is on. */
+.tg-neon-arrow {
+  display: none;
+  position: absolute;
+  top: -0.1em;
+  font-family: var(--font-display);
+  font-size: var(--t-tag-arrow);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  color: var(--tg-hi);
+  text-shadow: var(--tg-ol), 0 0 6px var(--tg-arrow);
+}
+
+.tg-neon--off .tg-neon-arrow {
+  display: block;
+}
+
+.tg-neon--offr .tg-neon-arrow {
+  right: -1em;
+}
+
+.tg-neon--offl .tg-neon-arrow {
+  left: -0.95em;
+}
+
+/* The TV: the sizes grow by the tokens (html.tg-tv --t-tag*), the line and the post to 3 px. */
+html.tg-tv .tg-neon-line {
+  min-height: 3px;
+}
+
+html.tg-tv .tg-neon-post {
+  min-width: 3px;
+}
+
+/* Super low (src/style.css drops every shadow): no glow and no halo; the name and the arrow keep a
+   hard 1 px outline (these rules outrank the global one), the name turns white, and the line, the
+   post, the meter and the robot get a dark outline instead. */
+html.tg-superlow .tg-neon::before {
+  display: none;
+}
+
+html.tg-superlow .tg-neon .tg-neon-name {
+  color: var(--text);
+  text-shadow: var(--tg-ol) !important;
+}
+
+html.tg-superlow .tg-neon .tg-neon-arrow {
+  text-shadow: var(--tg-ol) !important;
+}
+
+html.tg-superlow .tg-neon-line,
+html.tg-superlow .tg-neon-post,
+html.tg-superlow .tg-neon-boost,
+html.tg-superlow .tg-neon-bot {
+  outline: 1px solid var(--ink);
+}

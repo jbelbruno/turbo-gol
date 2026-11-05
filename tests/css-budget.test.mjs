@@ -151,14 +151,64 @@ test('a scroller never cuts the focus ring: every vertical scroller declares a s
   assert.deepEqual(bad, []);
 });
 
-test('the debug readout (F3) stays hidden in a match: only .hud-debug shows it (B15)', () => {
+test('the debug readouts (F3) stay hidden in a match: only .hud-debug shows them, or the player\'s own switch (Settings > HUD) (B15)', () => {
+  let shown = 0;
   for (const [f, text] of css) {
     for (const b of blocks(text)) {
-      if (!b.selector.split(',').some((sel) => /\.hud-fps$/.test(sel.trim()))) continue;
       const display = /(?:^|;)\s*display:\s*([\w-]+)/.exec(b.body);
-      if (display && display[1] !== 'none') assert.match(b.selector, /\.hud-debug /, `${f}: ${b.selector}`);
+      if (!display || display[1] === 'none') continue;
+      for (const sel of b.selector.split(',').map((s) => s.trim())) {
+        const el = /\.(hud-fps|hud-speed)$/.exec(sel);
+        if (el === null) continue;
+        assert.match(sel, new RegExp(`\\.(?:hud-debug|hud-show-${el[1] === 'hud-fps' ? 'fps' : 'speed'}) `), `${f}: ${sel}`);
+        shown++;
+      }
     }
   }
+  assert.equal(shown, 4, 'F3 and the switch, for each of the two');
+  // The switch shows the fps alone: the info line (backend, draws, GPU) stays F3's.
+  const style = blocks(css.get('src/style.css'));
+  assert.ok(style.some((b) => b.selector === '.hud-root.hud-show-fps:not(.hud-debug) .hud-fps-info' && /^\s*display:\s*none;?\s*$/.test(b.body)));
+});
+
+test('Settings > HUD hides for real: every .hud-no-* rule is display: none on its own part but the scorebug\'s (visibility: its box stays the touch tap target); the goal banner stays a screen reader\'s', async () => {
+  const sels = [];
+  let scorebug = 0;
+  for (const [f, text] of css) {
+    for (const b of blocks(text)) {
+      for (const sel of b.selector.split(',').map((s) => s.trim())) {
+        if (!/\.hud-no-/.test(sel)) continue;
+        sels.push(sel);
+        if (sel === '.hud-root.hud-no-score .hud-top') {
+          assert.match(b.body, /^\s*visibility:\s*hidden;?\s*$/, `${f}: ${sel}`);
+          scorebug++;
+        } else assert.match(b.body, /^\s*display:\s*none;?\s*$/, `${f}: ${sel}`);
+      }
+    }
+  }
+  assert.equal(scorebug, 1);
+  // Each class on the very part it hides, and nothing more under them (a .hud-score hidden inside
+  // .hud-top would empty the box the touch scoreboard's tap measures).
+  assert.deepEqual(sels.sort(), ['.hud-root.hud-no-bars .hud-bars', '.hud-root.hud-no-boost .hud-boost', '.hud-root.hud-no-cam .hud-cam', '.hud-root.hud-no-controls ~ .trn-root .trn-keys', '.hud-root.hud-no-score .hud-top']);
+  // Those parts are the elements the code builds; the training hints in a root after the HUD's, in
+  // the same container (the ~ step).
+  const src = async (p) => readFile(join(SRC, p), 'utf8');
+  const hud = await src('render/Hud.ts');
+  assert.match(hud, /this\.root = el\('div', 'hud-root'\);/);
+  for (const [tag, c] of [['div', 'hud-top'], ['div', 'hud-boost'], ['div', 'hud-cam'], ['span', 'hud-bars']]) assert.match(hud, new RegExp(`el\\('${tag}', '${c}'`), c);
+  const training = await src('render/TrainingHud.ts');
+  assert.match(training, /el\('div', 'trn-keys'/);
+  assert.match(training, /this\.root = el\('div', 'trn-root'\);/);
+  assert.match(training, /container\.appendChild\(this\.root\);/);
+  assert.match(await src('game/Game.ts'), /new TrainingHud\(this\.hud\.root\.parentElement \?\? this\.hud\.root,/);
+  // Out of sight, never out of the accessibility tree: no display: none, no visibility: hidden.
+  const goal = blocks(css.get('src/style.css')).filter((b) => b.selector.includes('hud-sr-goal'));
+  assert.equal(goal.length, 1);
+  assert.equal(goal[0].selector, '.hud-root.hud-sr-goal .hud-goal');
+  assert.match(goal[0].body, /clip-path:\s*inset\(50%\)/);
+  assert.match(goal[0].body, /width:\s*1px/);
+  assert.match(goal[0].body, /height:\s*1px/);
+  assert.doesNotMatch(goal[0].body, /display|visibility|opacity/);
 });
 
 test('hover only where a pointer really hovers: every :hover sits in @media (hover: hover)', () => {
@@ -275,9 +325,24 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // review's fixes (the read-only blocks as stops of the arrows with their ring inside them, a
 // tablet's node rows as a phone's, a frozen wallet's reason on a line of its own): 171,840 B (main
 // 168,525 B; 171,406 B before the fixes), the cap that plus about 0.6 KB.
+// The name tags over the cars (the owner's "Neón de arena" with the boost meter, 2026-11-05) add
+// styles/nametags.css (the layer, the safe-rect probe with a page's own insets, the name, line,
+// post, halo, meter with its fill on a layer of its own, robot, steps, the edge arrow, the TV's and
+// super low's rules: 4,594 B), their tokens in tokens.css (the teams' neon at each strength the
+// approved mockup draws, the halo, the rims and the track, the three steps' sizes and the TV's,
+// --r-hair and --r-tag-bot: 993 B) and style.css's import (35 B): 177,665 B (main 172,043 B). The
+// cap rises by exactly those 5,622 B, keeping the 397 B it had to spare (809 B of them come from
+// its review: the mockup's own glow per rule instead of three merged ones, the fill's layer, the
+// insets).
+// Settings > HUD (the owner's "qué quiero ver", 2026-11-05) adds style.css's rules for what each
+// player hides or shows (the hud-no-* parts, the scorebug kept as the touch tap target, the goal
+// banner left to a screen reader, the fps and the speed shown by their switches: 463 B),
+// touch.css's place for the speed under the small buttons (157 B) and settings.css's "Se guarda
+// solo" card kept off computers under 700 tall, where the seventh tab takes its room (27 B):
+// 178,312 B. The cap rises by exactly those 647 B, keeping the 397 B it had to spare.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 172_440;
+const CSS_BUDGET = 178_709;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

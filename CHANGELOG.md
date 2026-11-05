@@ -7,6 +7,31 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
+  P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
+  in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and
+  dimmer far away, a robot before a bot's name. A teammate's tag also shows the boost it has left, a
+  lime meter under the name; a rival's never does. Your own car has none, a tag over the ball fades
+  so it never hides it, a car off the screen is pinned to the edge with ›› or ‹‹ towards it, and a
+  demolished car's tag goes until it respawns. Tags never cover each other: cars bunched far away
+  stack their tags upwards, the nearest car's over it, and tags pinned to one edge line up along it,
+  without trading places or jumping up and down from frame to frame as cars side by side wobble. On
+  a TV the tags are a quarter larger; on super low they keep a hard outline instead of the glow. The
+  replay viewer draws the same tags instead of its plain pills, with every car's boost and none on
+  the car its camera follows, under its scorebug and clear of its Exit button and control bar
+  (`src/render/nameTags.ts`, `src/ui/styles/nametags.css`).
+- Settings > HUD, a tab of its own after Game: each player picks what a match shows them, over the
+  pause too, applied at once and saved in this browser. In the match: the score and clock (hidden,
+  the held scoreboard still shows both, and on a touch screen a tap on that corner opens it), the
+  names over the cars (all, the rivals', your team's or none; never over your own car), your team's
+  boost under their names (listed while the names include them; a rival's boost never shows), the
+  boost meter, the ball's arrow when it is off screen, the ring under the ball, the camera
+  indicator, the goal banner (a screen reader still announces each goal), the player notices, the
+  demolition notice and the control hints (the controls card, the mouse hint and the training
+  keys). Performance: the connection signal by the clock (listed while the score and clock show),
+  the frames per second and a speedometer, both off by default; F3 works as before. In touch mode the rows its own buttons make pointless
+  (the boost meter, the camera indicator, the control hints) are not listed. RESET HUD puts every
+  row back. The replay viewer keeps its look (`src/render/hudView.ts`).
 - An about page at /about (and /acerca in Spanish), served by the Worker as plain HTML that needs no
   script: what Turbogol is, links to the game, the privacy policy, the terms and the source code,
   what Sign in with Google asks Google for (only the `openid` and `email` scopes) and why, how to

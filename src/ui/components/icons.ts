@@ -53,6 +53,8 @@ export const ICON_PATHS = {
   offline: 'M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01M3 3l18 18',
   boost: 'M13 2 4 14h7l-1 8 9-12h-7z',
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18M12 11v6M12 7.5h.01',
+  // Ajustes' HUD tab (what a match shows): an eye, its lids two arcs round a pupil of 3.
+  eye: 'M2 12c2.6-4.6 6-7 10-7s7.4 2.4 10 7c-2.6 4.6-6 7-10 7s-7.4-2.4-10-7zM12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

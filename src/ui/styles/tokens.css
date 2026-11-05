@@ -97,6 +97,35 @@
   --red-deep: #6e0c1c;
   --red-hi: #ff8c9b;
   --red-glow: rgba(212, 32, 57, 0.5);
+  /* The name tags' neon over the cars (styles/nametags.css), per team as drawn: the name (-text),
+     its glow near and far (-neon, -haze), the middle step's far one (-haze-mid), the far step's
+     (-far, the robot's too) and a bot's dimmer one (-dim); the line and the post (-core), their
+     glow near (-glow; blue's is --blue) and wide (-glow-wide); the edge arrow's (-arrow); then the
+     dark halo behind a name, the ink rim round its line and its robot's (-bot), the meter's track. */
+  --tag-blue-text: #d4eaff;
+  --tag-blue-neon: rgba(58, 155, 255, 0.9);
+  --tag-blue-haze: rgba(58, 155, 255, 0.5);
+  --tag-blue-haze-mid: rgba(58, 155, 255, 0.4);
+  --tag-blue-far: rgba(58, 155, 255, 0.85);
+  --tag-blue-dim: rgba(58, 155, 255, 0.7);
+  --tag-blue-core: #7cc3ff;
+  --tag-blue-glow-wide: rgba(58, 155, 255, 0.6);
+  --tag-blue-arrow: rgba(58, 155, 255, 0.95);
+  --tag-red-text: #ffc9cf;
+  --tag-red-neon: rgba(255, 46, 78, 0.9);
+  --tag-red-haze: rgba(212, 32, 57, 0.55);
+  --tag-red-haze-mid: rgba(212, 32, 57, 0.45);
+  --tag-red-far: rgba(255, 46, 78, 0.85);
+  --tag-red-dim: rgba(255, 46, 78, 0.7);
+  --tag-red-core: #ff5a70;
+  --tag-red-glow: #ff2e4e;
+  --tag-red-glow-wide: rgba(212, 32, 57, 0.65);
+  --tag-red-arrow: rgba(255, 46, 78, 0.95);
+  --tag-halo: rgba(5, 7, 13, 0.65);
+  --tag-halo-edge: rgba(5, 7, 13, 0.25);
+  --tag-rim: rgba(5, 7, 13, 0.6);
+  --tag-rim-bot: rgba(5, 7, 13, 0.7);
+  --tag-track: rgba(5, 7, 13, 0.72);
   --danger: #ff6a3d; /* leave, kick, errors (6.1:1); never the team crimson */
   --danger-line: rgba(255, 106, 61, 0.6);
   --danger-tint: rgba(255, 106, 61, 0.16);
@@ -163,6 +192,12 @@
   --t-again: 2.5rem; /* 40: the FINAL's PLAY AGAIN (the owner's edit) */
   --t-car: 4.125rem; /* 66: GARAJE's TU AUTO */
   --t-points: 4rem; /* 64: GARAJE's server points */
+  /* The name tags' three steps by distance: 14, 12.5 and 12 px at 1080, never under 12 (the TV's
+     below); the arrow of an edge tag is the tag's size times 1.25. */
+  --t-tag: max(12px, 1.3vh);
+  --t-tag-mid: max(12px, 1.16vh);
+  --t-tag-far: max(12px, 1.11vh);
+  --t-tag-arrow: 1.25em;
   --track-label: 0.06em;
 
   /* ---- Space, radii, shadows ------------------------------------------------------------------- */
@@ -174,6 +209,8 @@
   --sp-6: 32px;
   --sp-7: 48px;
   --sp-8: 64px;
+  --r-hair: 1px; /* the name tags' line and post */
+  --r-tag-bot: 0.12em; /* the name tags' robot: 1.7 px at 14 px, 2.1 px on a TV */
   --r-slot: 3px; /* slot backgrounds, the boost bar */
   --r-key: 6px; /* keys, HUD plates */
   --r-tile: 10px; /* tiles, buttons, rows, the scorebug */
@@ -319,6 +356,9 @@ html.tg-tv {
   --t-caption: 1rem;
   --t-label: 1rem;
   --t-wordmark: 1.75rem;
+  --t-tag: max(15px, 1.62vh);
+  --t-tag-mid: max(15px, 1.45vh);
+  --t-tag-far: max(15px, 1.39vh);
   --focus-w: 4px;
   --focus-heel: 6px;
 }

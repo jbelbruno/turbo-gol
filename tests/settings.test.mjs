@@ -114,7 +114,7 @@ test('the master volume is a number in 0..100 (%); anything else falls back to t
   assert.equal(DEFAULT_AUDIO.volume % step, 0, 'the default sits on the slider grid');
 });
 
-const { DEFAULT_TOUCH, DEFAULT_UI, TOUCH_OPACITY_RANGE, TOUCH_DEADZONE_RANGE } = await import('../src/settings.ts');
+const { DEFAULT_TOUCH, DEFAULT_UI, DEFAULT_HUD, NAME_TAG_MODES, TOUCH_OPACITY_RANGE, TOUCH_DEADZONE_RANGE } = await import('../src/settings.ts');
 
 test('PR 11 groups are additive: a save from before them loads unchanged, its new groups at their defaults', () => {
   const old = {
@@ -132,6 +132,7 @@ test('PR 11 groups are additive: a save from before them loads unchanged, its ne
   assert.deepEqual(s.bindings.kbm.boost, { kind: 'key', code: 'KeyF' });
   assert.deepEqual(s.touch, DEFAULT_TOUCH);
   assert.deepEqual(s.ui, DEFAULT_UI);
+  assert.deepEqual(s.hud, DEFAULT_HUD);
   assert.deepEqual(DEFAULT_UI, { size: 0, motion: 'system', fullscreen: true }, "the interface size: the device's own; full screen when playing on");
   assert.deepEqual(defaultSettings().touch, { size: 'M', opacity: 100, lefty: false, stick: 'floating', deadzone: 0.12, vibration: true }, "today's controls");
 });
@@ -181,4 +182,57 @@ test('the music volume sits beside PR 11 groups: a save from before either loads
   const all = mergeSettings({ audio: { volume: 35, music: 80 }, touch: { size: 'S', opacity: 60, lefty: true, stick: 'fixed', deadzone: 0.2, vibration: false }, ui: { size: 150, motion: 'off' } });
   assert.deepEqual(mergeSettings(JSON.parse(JSON.stringify(all))), all);
   assert.deepEqual(defaultSettings().audio, DEFAULT_AUDIO);
+});
+
+test("Settings > HUD: today's match screen by default (names over every other car with a teammate's boost, the two readouts off)", () => {
+  assert.deepEqual(DEFAULT_HUD, {
+    scorebug: true,
+    names: 'all',
+    teamBoost: true,
+    boost: true,
+    ballIndicator: true,
+    ballMarker: true,
+    camera: true,
+    goal: true,
+    players: true,
+    demos: true,
+    controls: true,
+    netBars: true,
+    fps: false,
+    speed: false,
+  });
+  assert.deepEqual(NAME_TAG_MODES, ['all', 'rivals', 'team', 'none'], "the seg's order: TODOS, RIVALES, EQUIPO, NINGUNO");
+  assert.deepEqual(defaultSettings().hud, DEFAULT_HUD);
+  assert.notEqual(defaultSettings().hud, DEFAULT_HUD, 'a copy: Ajustes writes into it');
+  // A save from before the group (rev 2, no bump): every field at its default, the rest unchanged.
+  const old = mergeSettings({ audio: { volume: 40 }, ui: { size: 115 }, rev: 2 });
+  assert.deepEqual(old.hud, DEFAULT_HUD);
+  assert.equal(old.audio.volume, 40);
+  for (const bad of [null, 'none', 7, true, []]) assert.deepEqual(mergeSettings({ hud: bad }).hud, DEFAULT_HUD, JSON.stringify(bad));
+});
+
+test('Settings > HUD: valid values kept, a missing field reads its default, garbage falls back field by field', () => {
+  for (const names of NAME_TAG_MODES) assert.equal(mergeSettings({ hud: { names } }).hud.names, names);
+  for (const bad of ['ALL', 'everyone', '', 0, null, true, ['team'], { mode: 'team' }]) assert.equal(mergeSettings({ hud: { names: bad } }).hud.names, 'all', `names ${JSON.stringify(bad)} reads TODOS`);
+  const flags = Object.keys(DEFAULT_HUD).filter((k) => typeof DEFAULT_HUD[k] === 'boolean');
+  assert.equal(flags.length, 13);
+  for (const k of flags) {
+    const flipped = !DEFAULT_HUD[k];
+    assert.equal(mergeSettings({ hud: { [k]: flipped } }).hud[k], flipped, `${k} kept`);
+    assert.deepEqual(mergeSettings({ hud: { [k]: flipped } }).hud, { ...DEFAULT_HUD, [k]: flipped }, `${k} alone: the rest at defaults`);
+    for (const bad of ['yes', 'false', 0, 1, null, {}]) assert.equal(mergeSettings({ hud: { [k]: bad } }).hud[k], DEFAULT_HUD[k], `${k} ${JSON.stringify(bad)} reads its default`);
+  }
+  // One bad field never takes the good ones with it, nor an unknown key gets in.
+  const mixed = mergeSettings({ hud: { names: 'rivals', teamBoost: 'no', fps: true, scorebug: 0, goal: false, laser: true } });
+  assert.deepEqual(mixed.hud, { ...DEFAULT_HUD, names: 'rivals', fps: true, goal: false });
+});
+
+test('Settings > HUD: a round trip through storage keeps every choice, beside the other groups', () => {
+  const picked = { scorebug: false, names: 'team', teamBoost: false, boost: false, ballIndicator: false, ballMarker: false, camera: false, goal: false, players: false, demos: false, controls: false, netBars: false, fps: true, speed: true };
+  const s = mergeSettings({ hud: picked, ui: { size: 130, motion: 'on', fullscreen: false }, audio: { volume: 20, music: 10 }, rev: 2 });
+  assert.deepEqual(s.hud, picked);
+  const again = mergeSettings(JSON.parse(JSON.stringify({ ...s, rev: 2 })));
+  assert.deepEqual(again, s);
+  assert.deepEqual(again.hud, picked);
+  assert.deepEqual(again.ui, { size: 130, motion: 'on', fullscreen: false });
 });

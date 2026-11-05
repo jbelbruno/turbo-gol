@@ -26,6 +26,7 @@ import type { CameraCarState } from '../render/Camera';
 import { CarView } from '../render/Car';
 import { Effects } from '../render/Effects';
 import { Hud } from '../render/Hud';
+import { NameTags } from '../render/nameTags';
 import type { Renderer } from '../render/Renderer';
 import type { ArenaMesh } from '../sim/arenaMesh';
 import { RocketSim } from '../sim/RocketSimBridge';
@@ -102,8 +103,6 @@ function saveCamPrefs(p: CamPrefs): void {
 
 /** How long the GO caption stays (Game.ts GO_CAPTION_SECONDS). */
 const GO_CAPTION_TICKS = Math.round(0.8 * TICK_RATE);
-/** Name tags float this far above a car's origin (uu). */
-const TAG_HEIGHT = 140;
 const TEAM_NAME = [() => t('game.teamBlueUpper'), () => t('game.teamRedUpper')] as const;
 
 /** One run of the match: a fresh sim and RoomHost, fed from tick 1. */
@@ -277,17 +276,18 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const cars: CarView[] = [];
   const offsets: number[] = [];
   const slots: number[] = [];
-  const tags: HTMLElement[] = [];
-  for (const [i, e] of roster.entries()) {
+  for (const e of roster) {
     const team = run.sim.teamOf(e.slot);
     cars.push(new CarView(scene, config, team, q));
     effects.registerCar(e.slot, team);
     slots.push(e.slot);
     offsets.push(run.sim.carOffset(e.slot));
-    const tag = el(`div.rp-tag.${e.team === 0 ? 'rp-blue' : 'rp-red'}`, null, shownName[i]);
-    o.tagsRoot.append(tag);
-    tags.push(tag);
   }
+  // The game's name tags (src/render/nameTags.ts) as a spectator sees them: no team of its own, so
+  // every car shows its boost; a seat the host's bot took over shows as a bot from then on (placeTags).
+  const tags = new NameTags(o.tagsRoot);
+  const tagRows = roster.map((e, i) => ({ name: shownName[i], team: e.team, you: false, bot: e.kind === 'bot' }));
+  tags.setVisible(true);
 
   const hud = new Hud(o.hudRoot);
   // Super low drops the blur, shadows and decorative animation of the page (src/style.css), as the game does.
@@ -356,7 +356,6 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const orbit = { yaw: -0.7, pitch: 0.5, dist: prefs.orbitDist, follow: true, target: new THREE.Vector3() };
   const camState: CameraCarState = { grounded: true, speed: 0, supersonic: false };
   const lookAt = new THREE.Vector3();
-  const v = new THREE.Vector3();
 
   const setPlaying = (p: boolean): void => {
     playing = p;
@@ -612,27 +611,10 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     time.textContent = `${clockText(T)} / ${clockText(endTick)}`;
   };
 
+  /** The tags on the frame just drawn: none on the car the camera follows. */
   const placeTags = (): void => {
-    const camera = renderer.camera;
-    const w = o.tagsRoot.clientWidth;
-    const hgt = o.tagsRoot.clientHeight;
-    for (let i = 0; i < cars.length; i++) {
-      const tag = tags[i];
-      if (camIndex === i + CAM_CAR0) {
-        tag.style.transform = 'translate(-9999px, 0)';
-        continue;
-      }
-      v.copy(cars[i].position);
-      v.y += TAG_HEIGHT;
-      v.project(camera);
-      if (v.z > 1 || v.z < -1) {
-        tag.style.transform = 'translate(-9999px, 0)';
-        continue;
-      }
-      const x = ((v.x + 1) / 2) * w;
-      const y = ((1 - v.y) / 2) * hgt;
-      tag.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
-    }
+    for (let i = 0; i < tagRows.length; i++) tagRows[i].bot = !run.host.isHumanSlot(slots[i]);
+    tags.update(renderer.camera, tagRows, cars, offsets, cur, ball.position, camIndex >= CAM_CAR0 ? camIndex - CAM_CAR0 : -1, null);
   };
 
   const draw = (alpha: number, dt: number): void => {
@@ -709,6 +691,19 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     el('div.rp-menu-panel', null, el('span.rp-eyebrow', null, t('replay.paused')), resumeBtn, el('a.rp-btn', { href: './replay.html' }, t('replay.list')), el('a.rp-btn', { href: './' }, t('replay.back'))),
   );
   app.append(exitBtn, menu);
+  // An edge tag stays clear of Exit and of the bar (nametags.css .tg-tags-safe): under them it could
+  // not be seen. Both measured from the window's edge, again whenever either changes size (Exit hidden
+  // behind the menu keeps its last).
+  const tagInsets = (): void => {
+    if (exitBtn.offsetHeight > 0) o.tagsRoot.style.setProperty('--tags-inset-top', `${exitBtn.offsetTop + exitBtn.offsetHeight}px`);
+    o.tagsRoot.style.setProperty('--tags-inset-bottom', `${o.bar.offsetHeight}px`);
+  };
+  tagInsets();
+  if (typeof ResizeObserver === 'function') {
+    const insets = new ResizeObserver(tagInsets);
+    insets.observe(exitBtn);
+    insets.observe(o.bar);
+  }
   let menuOpen = false;
   let resumeOnClose = false;
   const setMenu = (open: boolean): void => {
