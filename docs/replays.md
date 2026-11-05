@@ -122,7 +122,9 @@ or controller navigation). Without `?id` it lists the matches; with
 `?id=<matchId>` it plays one. It decodes and validates the replay (`decodeReplay`), creates the
 renderer with the player's saved graphics quality, runs the whole match once (finds the goals and
 their scorers for the timeline, compares every checkpoint), then plays it with the game's own views
-and HUD: scorebug, countdown, goal banners with the scorer, name tags, a timeline with the goals,
+and HUD: scorebug, countdown, goal banners with the scorer, the game's name tags
+(`src/render/nameTags.ts`: every car's boost meter, as the viewer has no team; none on the car the
+camera follows; an edge tag stays clear of Exit and the control bar), a timeline with the goals,
 speed 0.25x to 8x, a broadcast camera and each car's chase camera. Seeking back restarts the
 simulation from the first tick (a 3-minute match re-simulates in about half a second on a desktop).
 

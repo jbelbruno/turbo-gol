@@ -12,7 +12,8 @@
  *   constant by default, so the sim rotation cannot be trusted for visuals).
  * - Ground blob: a soft dark disc on the floor under the ball, always visible (the main depth
  *   cue), fading and growing with height.
- * - Ground marker: a flat additive ring on the floor under the ball that fades in with height.
+ * - Ground marker: a flat additive ring on the floor under the ball that fades in with height;
+ *   Settings > HUD can turn it off (setGroundMarker), the blob stays.
  *
  * Draw calls: ball 1 + blob 1 + marker 1 (only while airborne). No per-frame allocations.
  */
@@ -303,6 +304,8 @@ export class BallView {
   private readonly blobMat: THREE.MeshBasicNodeMaterial;
   private readonly blobOpacity: THREE.UniformNode<'float', number>;
   private disposed = false;
+  /** The ground marker is wanted (Settings > HUD's switch: setGroundMarker); the replay viewer keeps it. */
+  private markerOn = true;
   /** Marker state to restore after a warm-up render (see setWarmUp). */
   private warmMarker = false;
   private warmMarkerOpacity = 0;
@@ -392,9 +395,9 @@ export class BallView {
     this.blob.scale.set(bs, 1, bs);
     this.blobOpacity.value = BLOB_OPACITY_LO + (BLOB_OPACITY_HI - BLOB_OPACITY_LO) * hk;
 
-    // Ground marker under the ball, fading in with height.
+    // Ground marker under the ball, fading in with height (unless the player turned it off).
     const k = smooth01(height, MARKER_FADE_LO, MARKER_FADE_HI) * MARKER_MAX_OPACITY;
-    if (k > 0.01) {
+    if (this.markerOn && k > 0.01) {
       this.marker.visible = true;
       this.marker.position.x = this.root.position.x;
       this.marker.position.z = this.root.position.z;
@@ -402,6 +405,12 @@ export class BallView {
     } else {
       this.marker.visible = false;
     }
+  }
+
+  /** Settings > HUD's "ring under the ball": off hides the ground marker at once and for good (the warm-up still compiles it). */
+  setGroundMarker(on: boolean): void {
+    this.markerOn = on;
+    if (!on) this.marker.visible = false;
   }
 
   /**

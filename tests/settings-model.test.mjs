@@ -23,11 +23,18 @@ const { stackAfterOpen } = await import('../src/ui/backModel.ts');
 const { DEFAULT_KBM } = await import('../src/input/bindings.ts');
 const { DEFAULT_CAMERA, CLASSIC_CAMERA_DEFAULTS, CAMERA_RANGES } = await import('../src/settings.ts');
 
-test('the rail: six tabs in the artboard order, L / R step round, Menu.open tabs by name', () => {
-  assert.deepEqual(M.SETTINGS_TABS.map((x) => x.id), ['controls', 'camera', 'game', 'audio', 'graphics', 'experimental']);
+test('the rail: seven tabs in the artboard order (HUD right after JUEGO), L / R step round, Menu.open tabs by name', () => {
+  assert.deepEqual(M.SETTINGS_TABS.map((x) => x.id), ['controls', 'camera', 'game', 'hud', 'audio', 'graphics', 'experimental']);
   assert.equal(M.stepSettingsTab('controls', -1), 'experimental');
   assert.equal(M.stepSettingsTab('experimental', 1), 'controls');
   assert.equal(M.stepSettingsTab('camera', 1), 'game');
+  assert.equal(M.stepSettingsTab('game', 1), 'hud');
+  assert.equal(M.stepSettingsTab('hud', 1), 'audio');
+  assert.equal(M.stepSettingsTab('hud', -1), 'game');
+  const hud = M.SETTINGS_TABS.find((x) => x.id === 'hud');
+  assert.equal(hud.label, 'settings.tabHud');
+  assert.equal(hud.icon, 'eye');
+  assert.equal(M.asSettingsTab('hud'), 'hud');
   assert.equal(M.asSettingsTab('experimental'), 'experimental');
   assert.equal(M.asSettingsTab('kbm'), null, "today's old tab names are none");
   assert.equal(M.asSettingsTab(undefined), null);

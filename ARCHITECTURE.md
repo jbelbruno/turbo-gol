@@ -243,11 +243,26 @@ src/render/
                         sub; src/ui/nav.ts FocusNav driven by Input's menu edges through
                         pauseAction; online "MATCH IN PROGRESS"; setPauseCovered: Ajustes over it,
                         src/ui/screens/settings/overlay.ts), the controls card (setControlsCard: big
-                        card or slim strip, bottom right); its own keys are F3 and F4
+                        card or slim strip, bottom right); its own keys are F3 and F4; what the
+                        player chose to see (setView: Settings > HUD's classes, the feed by kind)
+  hudView.ts            Settings > HUD, pure: the HUD root's classes (hud-no-*, hud-sr-goal,
+                        hud-show-fps / -speed), the feed's chips by kind, whose cars get a name tag
+                        and which a boost meter (a rival never), the rows touch mode leaves out
   controlsCard.ts       the controls card of the first matches and free play, pure: when it shows
                         (ControlsCardPlan: the first 3 matches' kickoff countdown, free play until
                         the car moves, then a strip for 60 s of play; the count in localStorage)
                         and its rows from the live bindings of the device (controlsCardRows)
+  nameTags.ts           the names over the other cars (the matches and the replay viewer): a pure
+                        model (tagBucket: three distance steps with hysteresis; tagHasMeter: the
+                        lime boost meter on the viewer's teammates only, on every car for a
+                        spectator; tagAnchor / clampTag: the edge tag with its ‹‹ ››, mirrored
+                        behind the camera, held by a band at the edge; overBall: the fade over the
+                        ball; orderTags / declutterTags: no tag over another, nearer cars first in
+                        an order with hysteresis, a farther one lifted on screen, moved along its
+                        edge when pinned, a moved one held until TAG_STACK_HOLD clear of the tag
+                        it was moved off) and NameTags, a DOM layer under the HUD that writes a
+                        transform and an opacity per frame, a class only on a change
+                        (src/ui/styles/nametags.css)
 src/ai/
   Bot.ts                heuristic bot: produces CarControls from SimStateView + ball prediction;
                         stall / net / wall recovery; scans every car (nearest opponent, bump
@@ -293,7 +308,7 @@ src/input/
                         nothing; the scoreboard tap (scoreboardOpen), the three first-match cards
                         (cardsUp, turbogol.touchCards), the rotate notice (setLive: translucent
                         over a live online match, the scorebug above it), touch mode (tg-touch)
-src/settings.ts         Settings { controls, camera, bindings, audio, touch, ui }: defaults, ranges,
+src/settings.ts         Settings { controls, camera, bindings, audio, touch, ui, hud }: defaults, ranges,
                         validation, localStorage load / save. One live object shared by Input,
                         ChaseCamera and Ajustes; Game.applySettings() persists and re-applies
 src/game/
@@ -417,14 +432,15 @@ src/ui/                 the front-end menus: the Tablero shell (styles/shell.css
                         leaderboard.css, profile.css: plan PR 13's, training.css also the three's
                         stage per class and menu.css's shared controls at the class's type roles
                         there)
-  screens/settings/     Ajustes (plan PR 10, its new rows PR 11): model.ts (pure: the six tabs, CONTROLES' device
+  screens/settings/     Ajustes (plan PR 10, its new rows PR 11): model.ts (pure: the seven tabs, CONTROLES' device
                         sections, the camera preset, the quality trial, the memory tag, a binding's
                         conflict, the sliders' maths; tests/settings-model.test.mjs), view.ts
                         (SettingsView, the one component: the rail of tabs and each tab's page,
                         every setting with its saved key; CONTROLES per device detected, the last
                         input's first, sensitivities then mn-bind rows, TÁCTIL's settings.touch;
                         CÁMARA's presets; JUEGO with INTERFAZ: Idioma (components/language.ts's
-                        sheet), the interface size, reduced motion; AUDIO; GRÁFICOS as cards,
+                        sheet), the interface size, reduced motion; HUD (settings.hud: EN EL
+                        PARTIDO and RENDIMIENTO, render/hudView.ts); AUDIO; GRÁFICOS as cards,
                         applied with A and back by themselves in 10 s unless kept, then the
                         resolution scale, the frame limit, the animated stadium, the Super low
                         switch (A only) and RESTABLECER GRÁFICOS; EXPERIMENTAL; "Se guarda solo"
