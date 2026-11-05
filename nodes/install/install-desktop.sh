@@ -8,7 +8,7 @@
 #   curl -fsSL <control>/nodes/releases/install-desktop.sh | bash -s -- --uninstall
 #
 # What it does (and nothing else):
-#   1. checks that Node.js >= 24 is already installed (it never installs system packages)
+#   1. checks that Node.js >= 26 is already installed (it never installs system packages)
 #   2. one folder in your home, with app/ (the launcher) and data/ (keys, releases, state, node.log):
 #        macOS  ~/Library/Application Support/TurbogolNode
 #        Linux  ${XDG_DATA_HOME:-~/.local/share}/turbogol-node
@@ -234,9 +234,9 @@ validate_args() {
 
 node_missing() {
   if [ -n "$NODE_VERSION" ]; then
-    printf 'turbogol-node: tienes Node.js %s y hace falta la versión 24 o más nueva.\n' "$NODE_VERSION" >&2
+    printf 'turbogol-node: tienes Node.js %s y hace falta la versión 26 o más nueva.\n' "$NODE_VERSION" >&2
   else
-    printf 'turbogol-node: falta Node.js (versión 24 o más nueva).\n' >&2
+    printf 'turbogol-node: falta Node.js (versión 26 o más nueva).\n' >&2
   fi
   if [ "$OS" = macos ]; then
     if [ -n "$NODE_VERSION" ]; then
@@ -247,9 +247,9 @@ node_missing() {
   else
     cat >&2 <<'EOF'
   Instálalo de alguna de estas formas:
-    - el paquete de tu distribución, si trae la 24 o más nueva (apt, dnf, pacman, zypper...)
+    - el paquete de tu distribución, si trae la 26 o más nueva (apt, dnf, pacman, zypper...)
     - NodeSource: https://github.com/nodesource/distributions
-    - nvm: https://github.com/nvm-sh/nvm  y después  nvm install 24
+    - nvm: https://github.com/nvm-sh/nvm  y después  nvm install 26
 EOF
   fi
   printf '  Después vuelve a ejecutar el mismo comando.\n' >&2
@@ -265,7 +265,7 @@ find_node() {
   case "$major" in
     ''|*[!0-9]*) NODE_VERSION=""; node_missing ;;
   esac
-  if [ "$major" -lt 24 ]; then node_missing; fi
+  if [ "$major" -lt 26 ]; then node_missing; fi
   case "$NODE_BIN" in
     /*) ;;
     *) NODE_BIN="$(cd "$(dirname "$NODE_BIN")" && pwd)/$(basename "$NODE_BIN")" ;;

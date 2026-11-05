@@ -71,7 +71,7 @@ export function fakeBuild(t, root, raw, { commit = 'f00d'.padEnd(40, '1') } = {}
   }
   const inputs = Buffer.from(JSON.stringify({ version, files: ['nodes/node/main.ts'] }));
   writeFileSync(join(rel, 'inputs.json'), inputs);
-  const manifest = { name: 'turbogol-node', version, protocol, wasmSha256: files[1].sha256, nodeMajor: 24, entry: 'node.mjs', createdAt: '2026-10-19T00:00:00Z', ...(commit ? { commit } : {}), inputsSha256: sha(inputs), files };
+  const manifest = { name: 'turbogol-node', version, protocol, wasmSha256: files[1].sha256, nodeMajor: 26, entry: 'node.mjs', createdAt: '2026-10-19T00:00:00Z', ...(commit ? { commit } : {}), inputsSha256: sha(inputs), files };
   writeFileSync(join(rel, 'manifest.json'), JSON.stringify(manifest, null, 2));
   writeFileSync(join(out, 'launcher.mjs'), 'console.log("launcher")');
   for (const name of INSTALLERS) writeFileSync(join(out, name), fillInstaller(readFileSync(join(root, 'install', name), 'utf8'), publicKeyOf(raw)));
