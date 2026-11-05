@@ -511,6 +511,15 @@ All notable changes to Turbogol are documented here. The format follows
   for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
   default) and every player's game runs it; the lobby's line shows it, the public list does not. The
   P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
+- The terms of use and the privacy policy are at version 2026-11-05, in force on its deploy day: the
+  project's servers in Brazil, Germany and Malaysia (Hostinger) and, for now, South Africa,
+  Australia and the United States (Google Cloud), each taking its region's Casual and Competitive
+  matches; a Competitive match verified on a project server that may be in another country; the
+  public server list of the servers in service, with a community host as "Anfitrión" and a number;
+  the maintainers' 30-day history of the servers; the bots' level a player picks; and the notice of
+  an important change cut from 30 to 7 days, posted in Spanish in the repository and in English on
+  Discord (`docs/legal/avisos/2026-11-05.md`). The notice above the accepting buttons names the new
+  countries, and every account and guest accepts again before playing online.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%

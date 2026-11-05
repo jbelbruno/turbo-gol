@@ -1874,7 +1874,7 @@ export default {
   'replay.chaseHint': 'Rueda: distancia · B: cámara a la pelota o al auto · [ ]: goles',
   'replay.keys': 'Espacio: reproducir o pausar · ← →: 5 s · [ ]: goles · 0-{max}: cámara · Esc: menú · F: pantalla completa',
   'replay.fullscreen': 'Pantalla completa',
-  'legal.notice': 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos y Brasil. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en las salas, que se juegan P2P, los demás jugadores pueden ver tu IP. Lee la {privacy}.',
+  'legal.notice': 'Al tocar «{button}» aceptas los {terms} y das tu consentimiento para que tus datos se guarden fuera de Argentina, sobre todo en Estados Unidos, Brasil, Alemania, Malasia, Sudáfrica y Australia. Turbogol es gratis y se ofrece tal como está. Usamos tu dirección IP y los datos de la partida, y en las salas, que se juegan P2P, los demás jugadores pueden ver tu IP. Lee la {privacy}.',
   'legal.termsLink': 'Términos',
   'legal.privacyLink': 'Política de privacidad',
   'legal.terms': 'Términos de uso',

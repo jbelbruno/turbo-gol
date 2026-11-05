@@ -20,7 +20,10 @@ notas privadas del mantenedor, nunca en este repo (`tests/public-docs.test.mjs`)
    - firewall con entrada denegada por defecto y abiertos solo 22, 80 y 443 (IPv4 e IPv6), sin UDP;
    - fail2ban sobre `sshd`;
    - actualizaciones de seguridad automáticas, sin reinicio, y needrestart sin tocar Caddy ni el
-     nodo.
+     nodo;
+   - logs de 7 días como mucho, el journal y los de texto (rsyslog, ufw, fail2ban): es lo que dice
+     la política de privacidad (sección 6), porque pueden tener direcciones IP. La configuración está
+     en la fila "Logs" de São Paulo.
 3. **El sistema:** Debian 12 o más nuevo, o Ubuntu 22.04 o más nuevo, con NTP activo.
 4. **DNS:** `<host>`, un registro A **solo DNS** (sin el proxy de Cloudflare) hacia la máquina, y un
    AAAA solo si apunta a esa misma máquina. Hace falta un nombre: el chequeo de alcance corre en el

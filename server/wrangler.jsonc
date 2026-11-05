@@ -122,10 +122,11 @@
     "EMAIL_DAILY_CAP": 100,
     // The terms of service and the privacy policy (docs/legal/*.md; env.ts termsVersion). Empty: not
     // published, so /terminos, /privacidad, /terms and /privacy answer 404 and the game shows no
-    // notice, link or acceptance. Set: the version in the texts' headers (the owner approved
-    // 2026-11-04-2 on 2026-11-04); a new value asks every player to accept again. To try another one
+    // notice, link or acceptance. Set: the version in the texts' headers (2026-11-05, in force from
+    // its deploy day, approved by the owner before its merge; docs/legal/avisos/2026-11-05.md is its
+    // notice); a new value asks every player to accept again. To try another one
     // locally, set TERMS_VERSION in your own .dev.vars (or wrangler dev --var TERMS_VERSION:test-1).
-    "TERMS_VERSION": "2026-11-04-2",
+    "TERMS_VERSION": "2026-11-05",
     // Sign-in PR 9 (§3.10): the day the username-only sign-in closes, an ISO date (accountStore.ts
     // legacyDateOf reads it as that day at 12:00 UTC, 09:00 in Argentina). The cutoff is the later of this
     // date and 30 days after the Worker first sees the var, so a late deploy moves it by itself. Absent =

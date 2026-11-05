@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -401,7 +401,7 @@ test('P12: GET /api/config says what is published: legal.terms (null until TERMS
   for (const [v, want] of [[undefined, null], ['', null], [' V1 ', 'v1'], ['2026-12-01', '2026-12-01'], ['a b', null], ['x'.repeat(33), null]]) assert.equal(ENV.termsVersion({ TERMS_VERSION: v }), want, JSON.stringify(v));
 });
 
-test('P12: production is published: wrangler.jsonc routes the four paths to the Worker first, bundles docs/legal/*.md as text, sets TERMS_VERSION to the version in the four texts\' headers and opens DELETION_OPEN; no text keeps a [[token]] or a draft mark', () => {
+test('P12: production is published: wrangler.jsonc routes the four paths to the Worker first, bundles docs/legal/*.md as text, sets TERMS_VERSION to the version in the four texts\' headers and opens DELETION_OPEN; no text keeps a [[token]] or a draft mark; the version in force has its notice in docs/legal/avisos', () => {
   const raw = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const cfg = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, ''));
   for (const p of Object.keys(PAGES)) assert.ok(cfg.assets.run_worker_first.includes(p), p);
@@ -413,5 +413,14 @@ test('P12: production is published: wrangler.jsonc routes the four paths to the 
     const text = readFileSync(new URL(file, DOCS), 'utf8');
     assert.match(text, new RegExp('^# .+\\n\\nVersi(?:ón|on) ' + version.replace(/\./g, '\\.') + '\\. '), file + ': the header says the version in force');
     assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, file + ': no token or draft mark left');
+  }
+  // The version in force was announced (Términos 18.2): its notice, the official Spanish text and
+  // the English translation posted on Discord (docs/legal/README.md), with no token left either.
+  for (const f of [`${version}.md`, `${version}.en.md`]) {
+    const at = new URL(`avisos/${f}`, DOCS);
+    assert.ok(existsSync(at), `docs/legal/avisos/${f}: the notice of the version in force`);
+    const text = readFileSync(at, 'utf8');
+    assert.ok(text.includes(`(versión ${version})**`) || text.includes(`(version ${version})**`), `docs/legal/avisos/${f}: its title names the version`);
+    assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, `docs/legal/avisos/${f}: no token or draft mark left`);
   }
 });

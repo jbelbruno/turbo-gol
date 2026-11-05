@@ -1,6 +1,6 @@
 # Política de privacidad de Turbogol
 
-Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
+Versión 2026-11-05. Vigente desde el 5 de noviembre de 2026. Este texto en español es el oficial; la traducción al inglés es informativa.
 
 ---
 
@@ -23,9 +23,10 @@ Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en es
   son solo los del proyecto.
 - **Medimos las visitas con Cloudflare Web Analytics,** que según Cloudflare no usa cookies. Le
   pedimos a Cloudflare que deje fuera a los visitantes de la Unión Europea (sección 9.4).
-- **Tus datos se guardan fuera de Argentina:** en Cloudflare (incluido Estados Unidos), en el
-  servidor del proyecto en Brasil y, en lo poco que llega al equipo o al correo, en Discord y en
-  Google (sección 5).
+- **Tus datos se guardan fuera de Argentina:** en Cloudflare (incluido Estados Unidos), en los
+  servidores del proyecto que están en servicio (en Brasil, Alemania y Malasia y, por ahora, en
+  Sudáfrica, Australia y Estados Unidos) y, en lo poco que llega al equipo o al correo, en Discord
+  y en Google (sección 5).
 - **Puedes pedirnos una copia de tus datos, corregirlos o borrarlos** escribiendo a
   <mailto:privacy@turbo-gol.com>. Te respondemos en 10 días corridos como máximo. También puedes
   borrar tu cuenta desde PERFIL (sección 12).
@@ -70,8 +71,8 @@ Versión 2026-11-04-2. Vigente desde el 4 de noviembre de 2026. Este texto en es
 | **Juegas una partida** | Tu nombre, tu auto, tu equipo y tus controles (cada tecla o movimiento). En una partida de sala (P2P), tu dirección IP | Jugar la partida. Mostrar el resultado |
 | **Juegas COMPETITIVO** | Tu puntaje, tus partidas, victorias y derrotas, tu mejor puntaje, tus abandonos y tus bloqueos de la cola | Emparejarte con rivales parejos. La clasificación. Las sanciones por abandonar |
 | **Usas una sala personalizada** | El código de la sala, su título, su contraseña (guardamos solo una huella), los miembros (su identificador de sesión, su nombre, su auto y su equipo), a quién sacó el anfitrión y los intentos fallidos de contraseña de cada jugador. Si la creas tú y tu conexión usa IPv6, el prefijo de tu red. Al crearla eliges si es pública o privada. Las salas se juegan P2P | Hacer funcionar la sala. Limitar cuántas salas abre una misma red y una misma sesión |
-| **Buscas partida (CASUAL o COMPETITIVO)** | Mientras buscas, en la memoria del servidor: el identificador de tu cuenta, tu nombre, tu auto, cuántos días tiene tu cuenta, en COMPETITIVO tu puntaje, tu región, los formatos que buscas y el que prefieres, desde cuándo buscas, cuándo llegó tu último pedido, si estás jugando contra bots o entrenando, si tienes el juego a la vista y si tu partida espera lugar en los servidores. Si la búsqueda se corta, o si nadie juega la partida contra bots que te tocó (por ejemplo, porque el teléfono se bloqueó; esto, una vez por búsqueda), el servidor guarda 10 minutos el identificador de tu cuenta, desde cuándo buscabas, la cola, tu región y cuál de las dos cosas pasó, para que tu búsqueda siga con su reloj cuando vuelves. Para eso, el servidor anota junto a la partida contra bots el identificador de tu cuenta, desde cuándo buscabas, tu región y cuándo empezó: 90 segundos si se juega en un servidor de la comunidad, o lo que dura si se juega en uno de Cloudflare. Para estimar la espera, el servidor guarda cuándo empezó cada búsqueda de la última hora, en qué cola y desde qué región, sin tu cuenta, tu nombre ni tu IP (como máximo 2.000; una búsqueda cancelada sale de ahí). Además contamos por día, sin tu cuenta, tu nombre ni tu IP, cuántas búsquedas empiezan y terminan, cuántas partidas se arman y con cuántas personas, cuánto se esperó (por tramos) y cuántas veces se juega contra bots o se entrena mientras se espera; esos totales se guardan 90 días | Armar tu partida y estimar la espera. Saber si la espera funciona y mejorarla |
-| **Juegas en un servidor de la comunidad** | Tu nombre, tu identificador de jugador (el mismo en todas tus partidas), tu equipo, tus controles y tu dirección IP, que ve quien opera el servidor. Después, la repetición de la partida y, sin publicarse, qué cuenta (o sesión de invitado) ocupó cada lugar. Si el anfitrión no es el proyecto, para calcular sus puntos también anotamos cuánto tiempo jugaste y, si tienes cuenta, cuántos días tiene tu cuenta. La repetición, los lugares y esas notas se guardan 30 días. Hoy esos servidores son solo los del proyecto (sección 4.4) | Jugar la partida. Verificar que el resultado sea limpio. Publicar la repetición. Calcular los puntos del anfitrión, cuando el anfitrión no es el proyecto |
+| **Buscas partida (CASUAL o COMPETITIVO)** | Mientras buscas, en la memoria del servidor: el identificador de tu cuenta, tu nombre, tu auto, cuántos días tiene tu cuenta, en COMPETITIVO tu puntaje, tu región, los formatos que buscas y el que prefieres, en CASUAL la dificultad de los bots que elegiste para tu partida contra bots, desde cuándo buscas, cuándo llegó tu último pedido, si estás jugando contra bots o entrenando, si tienes el juego a la vista y si tu partida espera lugar en los servidores. Si la búsqueda se corta, o si nadie juega la partida contra bots que te tocó (por ejemplo, porque el teléfono se bloqueó; esto, una vez por búsqueda), el servidor guarda 10 minutos el identificador de tu cuenta, desde cuándo buscabas, la cola, tu región y cuál de las dos cosas pasó, para que tu búsqueda siga con su reloj cuando vuelves. Para eso, el servidor anota junto a la partida contra bots el identificador de tu cuenta, desde cuándo buscabas, tu región y cuándo empezó: 90 segundos si se juega en un servidor de la comunidad, o lo que dura si se juega en uno de Cloudflare. Para estimar la espera, el servidor guarda cuándo empezó cada búsqueda de la última hora, en qué cola y desde qué región, sin tu cuenta, tu nombre ni tu IP (como máximo 2.000; una búsqueda cancelada sale de ahí). Además contamos por día, sin tu cuenta, tu nombre ni tu IP, cuántas búsquedas empiezan y terminan, cuántas partidas se arman y con cuántas personas, cuánto se esperó (por tramos) y cuántas veces se juega contra bots o se entrena mientras se espera; esos totales se guardan 90 días | Armar tu partida y estimar la espera. Saber si la espera funciona y mejorarla |
+| **Juegas en un servidor de la comunidad** | Tu nombre, tu identificador de jugador (el mismo en todas tus partidas), tu equipo, tus controles y tu dirección IP, que ve quien opera el servidor. Una partida de COMPETITIVO también vuelve a simularse, para verificarla, en un servidor del proyecto que puede estar en otro país (sección 4.4): ese servidor recibe la repetición, con tu nombre, tu identificador de jugador, tu equipo y tus controles, no tu IP. Después, la repetición de la partida y, sin publicarse, qué cuenta (o sesión de invitado) ocupó cada lugar. Si el anfitrión no es el proyecto, para calcular sus puntos también anotamos cuánto tiempo jugaste y, si tienes cuenta, cuántos días tiene tu cuenta. La repetición, los lugares y esas notas se guardan 30 días. Además, el equipo guarda 30 días, en un historial interno de los servidores que no se publica, cada partida terminada (el servidor, los tiempos, el resultado y su verificación) con el nombre y el identificador de jugador de cada jugador: si ocultas tu nombre en las repeticiones públicas, el historial no lo muestra, pero sí lo lleva la repetición completa, que el equipo puede descargar desde ahí. Hoy esos servidores son solo los del proyecto (sección 4.4) | Jugar la partida. Verificar que el resultado sea limpio. Publicar la repetición. Calcular los puntos del anfitrión, cuando el anfitrión no es el proyecto. Que el equipo revise cómo funciona cada servidor y cada partida |
 | **Marcas una repetición como favorita (una estrella) o miras «Mis repeticiones»** | El identificador de tu cuenta junto al de la partida, nunca tu nombre. Puedes marcar hasta 500 repeticiones. Cuántas cuentas marcaron cada partida es público; cuáles, no | Mostrar las partidas más marcadas y tu lista de partidas. Se borran cuando la repetición cumple 30 días, también si borras tu cuenta antes |
 | **Conectas una TV con tu teléfono** | El código de la TV. El país, la ciudad, la red y el nombre del proveedor de internet aproximados de la TV. La dirección IP de la TV (de IPv6, solo el prefijo de la red), mientras vive el código. La de tu teléfono solo se compara con la de la TV; si te equivocas de código, se guarda 15 minutos, para frenar los intentos fallidos. Todo en memoria | Que tu teléfono te muestre qué TV vas a conectar y si está en tu misma red, para que nadie te engañe con un código ajeno. Frenar los intentos fallidos |
 | **Cambias tus opciones** | Tus ajustes de física experimentales (con sus nombres), tus récords de entrenamiento, el interruptor de funciones experimentales, tu auto, «Ocultar mi nombre en repeticiones públicas» y «Novedades por correo» | Que tus opciones te sigan en cualquier dispositivo |
@@ -175,7 +176,8 @@ reportes de errores de red (sección 9.4).
 | Proveedor | País | Qué hace | Qué datos ve |
 |---|---|---|---|
 | **Cloudflare, Inc.** | Estados Unidos, con una red en todo el mundo | Ver la lista de abajo | Todo lo que guardamos, la dirección IP de cada pedido y los correos que te mandamos |
-| **Hostinger** | Brasil | La máquina del servidor del proyecto en São Paulo | Tu dirección IP y la partida, cuando juegas en ese servidor |
+| **Hostinger** | Brasil, Alemania y Malasia | Las máquinas de los servidores del proyecto en São Paulo, Alemania y Malasia | Tu dirección IP y la partida, cuando juegas en uno de esos servidores. Las repeticiones de las partidas de COMPETITIVO que esos servidores vuelven a simular para verificarlas, de cualquier servidor del proyecto (sin tu IP) |
+| **Google Cloud** | Sudáfrica, Australia y Estados Unidos | Por ahora, las máquinas de los servidores del proyecto en esos países | Tu dirección IP y la partida, cuando juegas en uno de esos servidores |
 | **Google** | Estados Unidos | El buzón donde leemos y respondemos lo que escribes a privacy@turbo-gol.com. Cloudflare lo reenvía | Tu mensaje y tu correo |
 | **Discord, Inc.** | Estados Unidos | El canal interno donde el equipo recibe avisos técnicos | Ver la lista de abajo. Nunca el correo ni la IP de quien juega. Sí puede aparecer la dirección de un servidor de la comunidad, que puede ser una IP |
 
@@ -197,10 +199,14 @@ reportes de errores de red (sección 9.4).
 
 **Lo que llega al canal del equipo en Discord:** los nombres de usuario de los anfitriones, sus
 servidores y la dirección de cada uno, el país de cada ingreso del equipo a su cuenta de
-mantenimiento, el identificador de una cuenta a la que el equipo le da o le quita un ítem, el
-identificador de la cuenta de un anfitrión que se borró, los identificadores de partidas y el motivo
-que escribe el equipo cuando saca una repetición o bloquea un servidor. Ese motivo puede nombrar a
-un jugador.
+mantenimiento, el identificador de una cuenta a la que el equipo le da o le quita un ítem, cuyos
+puntos consulta o cuyos canjes reactiva, el identificador de la cuenta de un anfitrión que se
+borró, los identificadores de partidas y el motivo que escribe el equipo cuando saca una
+repetición, anula una partida, cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo
+retira) o da, quita o reactiva algo en una cuenta. Ese motivo puede nombrar a un jugador. Si al
+terminar una partida en un servidor de la comunidad no se puede registrar algo de ella (por
+ejemplo, su resultado o los puntos de su anfitrión), el aviso lleva además los identificadores de
+las cuentas de sus jugadores o el de la cuenta de su anfitrión.
 
 La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/subprocessors/>.
 
@@ -248,29 +254,46 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
 
 ### 4.4 Los servidores de la comunidad y sus anfitriones
 
-- Algunas partidas se juegan en servidores de la comunidad («nodos»). **Hoy el único es el del
-  proyecto, en São Paulo (Brasil),** en una máquina de Hostinger. Cuando puede tomarlas,
-  le llegan las partidas de CASUAL y de COMPETITIVO cuya mayoría de jugadores es de Sudamérica
-  (si empatan, decide la región de quien esperó más), también las de CASUAL contra bots de quien
-  busca desde Sudamérica y esperó 5 minutos sin rivales. Si no puede, se juegan en servidores de
-  Cloudflare. Si en una emergencia apagamos las partidas en servidores de Cloudflare, le llegan
-  todas las de CASUAL y de COMPETITIVO, de cualquier región, y esperan hasta que tenga lugar
-  (Términos 7.6). Las partidas de salas no pasan por ahí. **Nadie fuera del proyecto puede
-  registrar un servidor todavía.** Aunque el juego hable de alojar servidores, hoy no puedes
-  registrar uno.
+- Algunas partidas se juegan en servidores de la comunidad («nodos»). **Hoy son solo los del
+  proyecto:** en São Paulo (Brasil), Alemania y Malasia, en máquinas de Hostinger, y, por ahora,
+  en Sudáfrica, Australia y Estados Unidos, en máquinas de Google Cloud. Cada uno sirve a una
+  región: Sudamérica, Europa, Asia, África, Oceanía y Norteamérica, en ese orden. Los que están en
+  servicio aparecen en turbo-gol.com/nodes/status. Cuando puede tomarlas, a cada uno le llegan las
+  partidas de CASUAL y de COMPETITIVO cuya mayoría de jugadores es de su región (si empatan,
+  decide la región de quien esperó más), también las de CASUAL contra bots de quien busca desde su
+  región y esperó 5 minutos sin rivales. Si no puede, o si esa región no tiene un servidor del
+  proyecto en servicio, se juegan en servidores de Cloudflare, nunca en el servidor del proyecto
+  de otra región, salvo en una emergencia: si apagamos las partidas en servidores de Cloudflare,
+  cada partida va al servidor del proyecto de su región y, si ese no puede tomarla, al de São
+  Paulo, y espera hasta que alguno tenga lugar (Términos 7.6). Las partidas de salas no pasan por
+  ahí.
+  **Nadie fuera del proyecto puede registrar un servidor todavía.** Aunque el juego hable de
+  alojar servidores, hoy no puedes registrar uno.
+- **La verificación, también en otro país.** Cada partida de COMPETITIVO en un servidor de la
+  comunidad vuelve a simularse en un servidor del proyecto que verifica partidas: hoy, los de
+  Brasil, Alemania y Malasia. Puede ser otro que el que la alojó, en otro país: una partida jugada
+  en Brasil puede verificarse en Alemania o en Malasia, y una de Sudáfrica, Australia o Estados
+  Unidos, en cualquiera de los tres. Ese servidor recibe la repetición, con el nombre, el
+  identificador de jugador, el equipo y los controles de cada jugador, pero no su IP. Las partidas
+  de CASUAL de un servidor del proyecto no se verifican, y los servidores de Sudáfrica, Australia y
+  Estados Unidos nunca verifican partidas.
 - **Cuando la red se abra a otras personas** (lo anunciaremos), quien opere un servidor verá tu
   nombre, tu identificador de jugador (el mismo en todas tus partidas), tus controles, lo que pasa
   en la partida y tu dirección IP. Las condiciones para anfitriones (sección 12 de los Términos) les
   prohíben guardar o usar esos datos para otra cosa.
 - **De los anfitriones** guardamos su nombre de usuario, los datos de cada servidor (nombre,
-  región, dirección pública, que puede ser una IP, capacidad, versión, datos de la máquina y
-  cuántas partidas verificó, perdió o falló), las direcciones IP desde las que entran sus servidores
-  (30 días) y sus puntos. Un servidor se queda en nuestros registros aunque se apague. Hoy eso vale
+  región, dirección pública, que puede ser una IP, capacidad, versión, datos de la máquina,
+  cuántas partidas verificó, perdió o falló y el último motivo que escribió el equipo al cambiar su
+  estado, que también ve su anfitrión, o al retirarlo), las direcciones IP desde las que entran sus
+  servidores (30 días), un historial de sus servidores y de sus partidas (30 días, sección 6) y sus
+  puntos. Un servidor se queda en nuestros registros aunque se apague o lo retiremos. Hoy eso vale
   solo para la cuenta del proyecto.
-- **Es público,** para cualquiera que lo pida en turbo-gol.com/nodes/status: el nombre de usuario
-  del anfitrión junto a sus servidores y los puntos de los últimos 30 días de los 50 anfitriones que
-  más sumaron. Si el anfitrión no elige un nombre para su servidor, el nombre del servidor lleva su
-  nombre de usuario.
+- **Es público,** para cualquiera que lo pida en turbo-gol.com/nodes/status: cada servidor en
+  servicio (en prueba o activo), con quién lo opera, y los puntos de los últimos 30 días de los 50
+  anfitriones que más sumaron (sección 4.5). Una cuenta del proyecto se ve con su nombre de
+  usuario; cualquier otro anfitrión, como «Anfitrión» y un número, nunca con su nombre de usuario.
+  Si el anfitrión no elige un nombre para su servidor, el servidor se llama con su región y un
+  número.
 
 ### 4.5 El público
 
@@ -281,7 +304,7 @@ Cualquiera, sin cuenta, puede ver:
 | **La clasificación** de cada modo | Los 100 mejores con al menos 5 partidas en la temporada: nombre de usuario, puntaje, rango, partidas y victorias. No aparecen las cuentas suspendidas ni las que pidieron el borrado | Mientras tengas cuenta | Hoy no hay una opción para ocultar tu nombre en la clasificación. Aparece solo quien juega COMPETITIVO y está entre los 100 mejores de un modo. Si pides el borrado de tu cuenta, dejas de aparecer en menos de un minuto |
 | **La lista de salas públicas** | El título de la sala, el nombre de su anfitrión actual, su código, el modo, la región, cuántos jugadores tiene, si tiene contraseña y, si las tiene, sus reglas experimentales | Mientras la sala esté abierta | Crea tu sala con CREAR SALA PRIVADA, o cámbiala a privada en CONFIGURAR |
 | **Las repeticiones públicas** | Las partidas de COMPETITIVO y de CASUAL en servidores de la comunidad: lo que se ve de la partida y lo que se ve de ti (abajo). Nunca tu identificador ni tu IP | 30 días | «Ocultar mi nombre en repeticiones públicas» (abajo) |
-| **La lista de servidores de la comunidad** | El nombre de cada servidor, el nombre de usuario de su anfitrión, la región, el estado, si está conectado, cuántas partidas tiene en curso, la capacidad, el retraso medido, la versión, si es un servidor del proyecto, si aloja o verifica partidas y qué conexiones acepta. Aparte, los puntos de los últimos 30 días de los 50 anfitriones que más sumaron | Sin plazo: un servidor sigue en la lista, sin conexión, aunque se apague. Si el anfitrión borra su cuenta, el servidor queda en la lista como bloqueado, con su nombre de usuario. Hoy solo hay servidores del proyecto | Solo afecta a los anfitriones |
+| **La lista de servidores de la comunidad** | De cada servidor en servicio (en prueba o activo): su nombre, quién lo opera (una cuenta del proyecto, con su nombre de usuario; cualquier otro anfitrión, como «Anfitrión» y un número), la región, el estado, si está conectado, cuántas partidas tiene en curso, la capacidad, el retraso medido, la versión y si es compatible con la versión actual del juego, si es un servidor del proyecto, si aloja o verifica partidas y qué conexiones acepta. Aparte, los puntos de los últimos 30 días de los 50 anfitriones que más sumaron, con ese mismo nombre | Mientras el servidor esté en prueba o activo: sigue en la lista, sin conexión, aunque se apague. Un servidor pendiente, suspendido, bloqueado o retirado no aparece, tampoco el de un anfitrión que borró su cuenta. Hoy solo hay servidores del proyecto | Solo afecta a los anfitriones. Un anfitrión que no es el proyecto nunca aparece con su nombre de usuario |
 
 - **Lo que se ve de la partida:** el modo, la región, el resultado, la duración, si fue de
   COMPETITIVO, si un verificador la volvió a simular, la versión del juego, la hora redondeada,
@@ -298,9 +321,9 @@ Cualquiera, sin cuenta, puede ver:
 - Tu nombre sigue en las repeticiones públicas hasta que se borra la cuenta, a los 14 días (o antes,
   si pides que la borremos sin esperar), salvo que actives antes «Ocultar mi nombre en repeticiones
   públicas». Al borrarse la cuenta, tu nombre se oculta también en las repeticiones que ya estaban
-  publicadas; en las publicadas antes de la fecha de vigencia de esta política puede seguir visible
-  hasta que vencen, a más tardar 30 días después de esa fecha. Si quieres que no se vea mientras esperas el borrado, actívalo en PERFIL > PRIVACIDAD
-  antes de pedirlo.
+  publicadas; en las publicadas antes del 4 de noviembre de 2026 puede seguir visible hasta que
+  vencen, a más tardar 30 días después de esa fecha. Si quieres que no se vea mientras esperas el
+  borrado, actívalo en PERFIL > PRIVACIDAD antes de pedirlo.
 - Pedimos a los buscadores que no indexen las repeticiones. Pero alguien puede copiar lo que es
   público mientras se ve, y eso no lo podemos deshacer.
 
@@ -323,15 +346,19 @@ Damos datos a una autoridad solo cuando la ley nos obliga, con un pedido formal.
 |---|---|---|
 | **Estados Unidos y la red de Cloudflare** | Todo lo que guardamos en Cloudflare. Cloudflare decide en qué centro de datos corre y guarda cada cosa. En octubre de 2026 los servidores de las partidas se midieron en Miami y en Atlanta. Para una partida de CASUAL o COMPETITIVO le pedimos a Cloudflare que la corra cerca de la región de la mayoría de sus jugadores (Términos 7.6), y Cloudflare decide. Las repeticiones se guardan en un almacenamiento de Cloudflare que no tiene región en Sudamérica. Cada pedido pasa por el centro de Cloudflare más cercano a ti | Alojar el juego |
 | **Estados Unidos (Cloudflare, por su cuenta)** | Las señales de Turnstile | Mejorar su detección de bots |
-| **Brasil** | Tu IP y la partida, en el servidor del proyecto en São Paulo | Jugar con poco retraso en Sudamérica (en una emergencia, cualquier partida de CASUAL o COMPETITIVO: sección 4.4) |
+| **Brasil** | Tu IP y la partida, en el servidor del proyecto en São Paulo. Las repeticiones de las partidas de COMPETITIVO que ese servidor vuelve a simular, de cualquier servidor del proyecto (sin tu IP) | Jugar con poco retraso en Sudamérica (en una emergencia, también partidas de otras regiones: sección 4.4). Verificar partidas de COMPETITIVO |
+| **Alemania** | Tu IP y la partida, en el servidor del proyecto en Alemania. Las repeticiones de las partidas de COMPETITIVO que ese servidor vuelve a simular, de cualquier servidor del proyecto (sin tu IP) | Jugar con poco retraso en Europa. Verificar partidas de COMPETITIVO |
+| **Malasia** | Tu IP y la partida, en el servidor del proyecto en Malasia. Las repeticiones de las partidas de COMPETITIVO que ese servidor vuelve a simular, de cualquier servidor del proyecto (sin tu IP) | Jugar con poco retraso en Asia. Verificar partidas de COMPETITIVO |
+| **Sudáfrica, Australia y Estados Unidos (Google Cloud)** | Por ahora, tu IP y la partida, en los servidores del proyecto en esos países | Jugar con poco retraso en África, en Oceanía y en Norteamérica |
 | **Estados Unidos (Discord y Google)** | Que iniciaste sesión en Turbogol. Nosotros no les mandamos datos del juego | Tu inicio de sesión |
-| **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las cuentas de anfitrión y las repeticiones |
+| **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas y de lo que hace con los servidores, las partidas, las cuentas de anfitrión y las repeticiones |
 | **Estados Unidos (Google)** | Lo que nos escribes | Leer y responder tus pedidos |
 | **El país de cada jugador** | Tu IP, en las partidas de sala (P2P) | La conexión directa |
 | **El país de cada anfitrión** | Tu IP y la partida, cuando se abran los servidores de terceros | Jugar la partida |
 
-**Para Argentina:** ni Estados Unidos ni Brasil están en la lista de países con protección
-adecuada de la AAIP (Disposición DNPDP 60-E/2016, con la Resolución AAIP 34/2019). Por eso te
+**Para Argentina:** Estados Unidos, Brasil, Malasia, Sudáfrica y Australia no están en la lista de
+países con protección adecuada de la AAIP (Disposición DNPDP 60-E/2016, con la Resolución AAIP
+34/2019). Por eso te
 pedimos tu consentimiento expreso para que tus datos se guarden y se traten en los países de esta
 tabla: el aviso que está encima del botón con que aceptas los Términos lo dice, y tocar ese botón es
 darlo (Decreto 1558/2001, art. 12). Sin ese consentimiento no puedes jugar en línea, porque el juego
@@ -341,8 +368,9 @@ Además, para lo que Cloudflare trata por nosotros rige su contrato de tratamien
 **Para la Unión Europea y el Reino Unido:** Argentina tiene una decisión de adecuación de la
 Comisión Europea (Decisión 2003/490/CE), que el Reino Unido mantiene. Cloudflare está en el Marco
 de Privacidad de Datos UE-EE. UU. y su contrato incluye cláusulas contractuales tipo. Brasil tiene
-adecuación de la UE desde enero de 2026. Puedes pedirnos una copia de estas garantías a
-<mailto:privacy@turbo-gol.com>.
+adecuación de la UE desde enero de 2026. Alemania es un Estado de la Unión Europea. Malasia,
+Sudáfrica y Australia no tienen una decisión de adecuación de la Comisión Europea. Puedes pedirnos
+una copia de estas garantías a <mailto:privacy@turbo-gol.com>.
 
 **Para Brasil:** las transferencias se apoyan en que son necesarias para el contrato (LGPD,
 art. 33 IX).
@@ -393,9 +421,10 @@ art. 33 IX).
 
 | Dato | Cuánto |
 |---|---|
-| Puntos de cada partida para el anfitrión (con el tiempo de cada jugador) | 30 días. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
+| Puntos de cada partida para el anfitrión (con el tiempo de cada jugador) | 30 días. Sin datos de los jugadores, quedan además en la cuenta del anfitrión mientras exista. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
 | El registro de cuántos puntos ganó cada anfitrión (si se borra la cuenta, ya no se pueden usar) | Sin plazo, también después de borrar la cuenta. Hoy solo el proyecto tiene servidores |
-| Ficha de cada servidor de la comunidad | Sin plazo, también después de borrar la cuenta: el servidor queda bloqueado y sigue en la lista pública, con el nombre de usuario del anfitrión |
+| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que puede nombrar a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que lo retiremos. Un servidor bloqueado o retirado sale de la lista pública |
+| Historial interno de los servidores: lo que pasó con cada servidor, cada partida terminada (con el nombre y el identificador de jugador de cada jugador) y las líneas de aviso del equipo (pueden llevar identificadores de cuentas, como los avisos de la sección 4.1). Solo lo ve el equipo | 30 días. De las líneas de aviso, las últimas 2.000 como mucho. Un nombre que su jugador ocultó en las repeticiones públicas no se muestra (sí está en la repetición completa, que el equipo puede descargar), y al borrarse una cuenta su nombre y su identificador salen de las partidas del historial |
 | Direcciones IP desde las que entran los servidores de la comunidad | 30 días |
 
 **Registros y copias**
@@ -405,9 +434,11 @@ art. 33 IX).
 | Registros técnicos de Cloudflare | 7 días |
 | Registro de envíos de correo de Cloudflare (a quién, cuándo y si llegó) | Hasta 30 días, también después de borrar la cuenta |
 | Registros de la máquina de São Paulo (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
+| Registros de las máquinas de Alemania y Malasia, en Hostinger (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
+| Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP) | 7 días. Esas máquinas no tienen copias de seguridad |
 | Señales de Turnstile que Cloudflare usa por su cuenta | Las fija Cloudflare. Su anexo no da un plazo |
 | Reportes de errores de red y Cloudflare Web Analytics | Los fija Cloudflare |
-| Avisos técnicos al equipo en Discord | 90 días |
+| Avisos técnicos al equipo en Discord | 1 año, para investigar fallas y abusos |
 | Copias de seguridad de Cloudflare | La base de datos se puede volver a cualquier momento de los últimos 30 días. Algo borrado puede seguir en esas copias hasta 30 días. Solo las usamos para reparar una falla |
 | Tus pedidos sobre tus datos y nuestras respuestas | 2 años desde la respuesta, para probar que respondimos |
 | Lo que escribes a privacy@turbo-gol.com, en un buzón de Google | Lo mismo que tus pedidos |
@@ -489,7 +520,8 @@ Estas decisiones las toma el juego solo, sin una persona:
   invitado ni entrar. Si te pasa, escríbenos.
 
 El emparejamiento también usa tu puntaje (en COMPETITIVO), tu región y cuánto llevas buscando para
-elegir con quién juegas y en qué región se juega la partida (Términos 7.1, 7.3 y 7.6). Las reglas
+elegir con quién juegas y en qué región y en qué servidor se juega la partida (Términos 7.1, 7.3 y
+7.6). Las reglas
 están en el código fuente. **Puedes pedirnos que te expliquemos la lógica de estas decisiones, y
 que una persona revise una sanción** (Términos, sección 9), escribiendo a
 <mailto:privacy@turbo-gol.com>.
@@ -579,7 +611,7 @@ Ninguna de las nuestras la puede leer el código de la página: solo viajan a nu
 | «Este navegador entró como…» (`turbogol.account`): tu nombre y tu identificador de cuenta | Saber quién entró en este navegador | Al cerrar sesión, o cuando tu sesión deja de valer |
 | Tus funciones experimentales y ajustes de física (`turbogol.experimental.v1.` y el identificador de tu cuenta) | Usarlos sin conexión | Quedan después de cerrar sesión |
 | Tus récords de entrenamiento (`turbogol.training.v1` como invitado, y una copia por cada cuenta que usaste en este navegador, con su identificador) | Mostrártelos | Los de invitado, cuando borras los datos del sitio. La copia de una cuenta queda después de cerrar sesión |
-| Tus opciones: idioma, gráficos, controles, región, modo, el formato que prefieres en CASUAL, qué haces mientras buscas, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
+| Tus opciones: idioma, gráficos, sonido, cámara del juego, controles, interfaz (tamaño, movimiento reducido y pantalla completa al jugar), región, modo, el formato y la dificultad de los bots que prefieres en CASUAL, qué haces mientras buscas, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
 | El nivel de gráficos que falló en esta placa de video (con el nombre de la placa) | No volver a usarlo | A los 30 días, o cuando borras los datos del sitio |
 
 ### 9.3 Almacenamiento de la pestaña (se borra al cerrarla)
@@ -644,8 +676,12 @@ cierra tu sesión y vuelves a las opciones de fábrica.
 - **Los correos no tienen imágenes,** píxeles de seguimiento ni enlaces rastreados.
 - **Los registros técnicos nunca guardan tu contraseña** ni el cuerpo de lo que envías al servidor
   (lo que escribes en los formularios). Nuestras propias líneas de registro no llevan IP, correo ni
-  contraseña. Pocas llevan el nombre de usuario de una cuenta del equipo, o el identificador de una
-  cuenta que se borró (completo si era anfitrión; los primeros 6 caracteres en los demás casos).
+  contraseña. Pocas llevan un dato de una cuenta: el nombre de usuario de un anfitrión; el nombre
+  de usuario y el identificador de una cuenta del equipo; el identificador de una cuenta a la que
+  el equipo le da, le quita o le reactiva algo, o cuyos puntos consulta; los de las cuentas de los
+  jugadores o del anfitrión de una partida de la que no se pudo registrar algo (sección 4.1); el
+  motivo que escribe el equipo, que puede nombrar a un jugador (sección 4.1), y el de una cuenta
+  que se borró (completo si era anfitrión; los primeros 6 caracteres en los demás casos).
 - **Los registros técnicos guardan las direcciones pedidas.** Algunas llevan un identificador: el
   código de un solo uso de Discord o Google al volver a Turbogol, el código de una sala, el de una
   partida y, cuando empecemos a mandar novedades, el identificador del enlace de baja, que no cambia
@@ -742,14 +778,23 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
     estrellas que diste, con el identificador de tu cuenta y nunca tu nombre; y los registros de
     puntos de anfitrión de esas partidas, también con el identificador y sin tu nombre: hasta
     30 días;
-  - los registros técnicos (7 días);
+  - las partidas del historial interno de los servidores: tu nombre y tu identificador salen de
+    él cuando se borra la cuenta, y la partida queda, sin ellos, hasta 30 días (con el motivo que
+    haya escrito el equipo si la anuló, que puede nombrarte);
+  - las líneas de aviso del equipo que lleven el identificador de tu cuenta o un motivo que te
+    nombre (hasta 30 días en el historial interno y 1 año en Discord, sección 6);
+  - los registros técnicos de Cloudflare (7 días) y los de las máquinas de los servidores del
+    proyecto (sección 6);
   - el registro de envíos de correo (hasta 30 días);
   - las copias de seguridad de Cloudflare (hasta 30 días).
+- **Un motivo que te nombre en la ficha de un servidor** (el último que escribió el equipo al
+  cambiar su estado o al retirarlo): queda sin plazo, como la ficha (sección 6).
 - **Si eras anfitrión:** hoy solo el proyecto tiene servidores, así que esto todavía no afecta a
   ningún jugador. Cuando se abra a otras personas: el registro de cuántos puntos ganaron tus
-  servidores (que ya no puedes usar) y la ficha de tus servidores quedan, y los servidores quedan
-  bloqueados. Tu nombre de usuario sigue en la lista
-  pública de servidores y, hasta 30 días, en la tabla de anfitriones.
+  servidores (que ya no puedes usar) y la ficha de tus servidores, con tu nombre de usuario,
+  quedan, y los servidores quedan bloqueados y salen de la lista pública de servidores. Tus
+  puntos pueden seguir hasta 30 días en la tabla de anfitriones, como «Anfitrión» y un número,
+  nunca con tu nombre de usuario.
 - **En los navegadores donde entraste, también en este:** la cookie de «navegador conocido» (hasta
   180 días, con el identificador de tu cuenta), «Continuar como…» con tu nombre de usuario, tus
   récords de entrenamiento (una copia con el identificador de tu cuenta) y, si usaste funciones
@@ -802,10 +847,11 @@ dirección o cuando borras tu cuenta.
 
 ## 14. Cambios en esta política
 
-- Si cambiamos algo importante, publicamos un aviso al menos 30 días antes, en nuestro servidor de
-  Discord y en el repositorio del proyecto
-  (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), como dicen los Términos de
-  uso (sección 18). El aviso dice qué cambia y por qué. Hoy no hay un aviso dentro del juego ni
+- Si cambiamos algo importante, publicamos un aviso al menos 7 días antes: en español, el texto
+  oficial, en el repositorio del proyecto
+  (<https://github.com/DonJaimeHash/turbo-gol/tree/main/docs/legal>), y su traducción al inglés en
+  nuestro servidor de Discord, como dicen los Términos de uso (sección 18.2). El aviso dice qué
+  cambia y por qué. Hoy no hay un aviso dentro del juego ni
   por correo. Los cambios que pide la ley o la seguridad pueden valer antes (Términos, sección
   18.4).
 - Cuando el cambio empieza a valer, el juego te muestra los enlaces a los dos textos y te pide
@@ -847,6 +893,7 @@ Para quien quiera saber qué hay detrás de las palabras simples de esta políti
 |---|---|
 | El alojamiento de Cloudflare | Cloudflare Workers, Durable Objects, KV y caché |
 | El almacenamiento de las repeticiones | Cloudflare R2 |
+| El historial interno de los servidores | Tablas del Durable Object de los nodos (NodeRegistryDO), en Cloudflare |
 | Los correos del juego | Cloudflare Email Service, desde `no-reply@turbo-gol.com` |
 | Los correos que nos escribes | Cloudflare Email Routing, que reenvía privacy@turbo-gol.com a un buzón de Google, en Estados Unidos |
 | Conectar las partidas de sala (P2P) | WebRTC, con el STUN de Cloudflare |

@@ -67,6 +67,26 @@ test("the trusted node's manual and plan give placeholders, not its provider, ke
   assert.deepEqual(hits, []);
 });
 
+test("the legal texts and their notices name the project's providers and countries, never a machine's plan, host name, cloud region or machine type, or a cap", () => {
+  // The privacy policy has to name each provider and country (docs/legal/README.md), so Hostinger
+  // and Google Cloud may appear there. What would point an abuser at a machine may not: a name under
+  // turbo-gol.com other than the site and its mailboxes, a cloud region or zone id, a machine type,
+  // a provider's plan, a declared capacity or a traffic cap.
+  const hits = [];
+  for (const f of docs.filter((d) => d.startsWith('docs/legal/'))) {
+    const text = read(f);
+    for (const [what, re] of [
+      ['a host name under turbo-gol.com', /(?<![@\w.-])(?:[a-z0-9-]+\.)+turbo-gol\.com\b/i],
+      ['a cloud region or zone', /\b(?:africa|asia|australia|europe|me|northamerica|southamerica|us)-(?:central|east|west|north|south|southeast|northeast)\d(?:-[a-c])?\b/i],
+      ['a machine type', /\b(?:e2|n1|n2|n2d|n4|c2|c2d|c3|c3d|c4|t2a|t2d)-(?:micro|small|medium|standard|highcpu|highmem)\b/i],
+      ['a plan', /\bKVM ?\d/i],
+      ['a declared capacity or a traffic cap', /--matches\b|--egress-cap-gb\b|egressCapGB/],
+    ])
+      if (re.test(text)) hits.push(`${f}: ${what} (${re.exec(text)[0]})`);
+  }
+  assert.deepEqual(hits, []);
+});
+
 test("a doc names only the project's public mailboxes (the legal texts' privacy address and the mail sender), never the maintainer account's own", () => {
   // The maintainer account's sign-in address stays out of every public page: knowing it is half of
   // a password-guessing or a phishing run against the account that registers trusted nodes.
