@@ -7,6 +7,10 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Each car has a legend: the Dune is the beginning and the others are Cyclone (the edge), Vortex (the untamed),
+  Sirocco (the unreachable) and Magma (the fire within), with a one-line tagline and a short story in the second
+  person, shown in the garage's detail card where there is room (PC, tablet, a tall phone upright). The cars
+  have global English names of wild nature, and their ids follow them (`cyclone`, `vortex`, `sirocco`, `magma`).
 - Clips and links in the replay viewer (`replay.html`): a **Clip / Share** button opens a clip editor, a
   video editor's layout. The goals are on the left, the player is in the middle (the canvas in the
   clip's shape with the scorebug, the goal caption and the watermark drawn over it as they will be

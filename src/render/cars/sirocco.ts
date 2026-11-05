@@ -1,5 +1,5 @@
 /**
- * The Sirocco ('sirocco'): an aero jet racer after the Andean sirocco gliding. A low lofted fuselage
+ * The Sirocco ('sirocco'): an aero jet racer, the unreachable: a gust of wind that nobody catches. A low lofted fuselage
  * ending in a sharp white beak hooked down to a point (the ruff's white), a cab-forward bubble
  * canopy, a proud white ruff behind the glass and a low spine running back to a tall swept dorsal
  * fin (an ice-white leading edge) with a T-tail; the fuselage ends in a dark engine bay, twin

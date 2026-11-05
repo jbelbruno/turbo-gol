@@ -1,5 +1,5 @@
 /**
- * The Magma ('magma': small, loud, territorial): a compact retro rally
+ * The Magma ('magma', the fire within: small, loud, stubborn): a compact retro rally
  * hatchback. A short two-box body with a tall glasshouse (raked screen under a white sun strip,
  * blacked-out B-pillar, thick C-pillars, a painted tailgate under a small rear glass) and a crowned
  * roof, flanks bowed out a little at the doors, square-cut bolted-on box flares over all four wheels

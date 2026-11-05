@@ -1,5 +1,5 @@
 /**
- * The Cyclone ('cyclone', a spinning storm): a low, wide, razor-edged wedge of
+ * The Cyclone ('cyclone', the edge): a low, wide, razor-edged wedge of
  * an endurance hyper-GT, built from faceted lofts (polygon sections with hard creases, so every
  * facet takes its own light; super low shades them by diffuse alone), one design language from
  * the nose to the canopy and the tail.

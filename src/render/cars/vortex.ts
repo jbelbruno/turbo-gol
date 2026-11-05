@@ -1,6 +1,6 @@
 /**
- * The Vortex ('vortex'): a friendly armoured off-road brute, chunky and calm like the
- * capybara. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
+ * The Vortex ('vortex'): a friendly armoured off-road brute, chunky and calm, the untamed:
+ * nothing in its way stops it. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
  * (a cream roof cap, a dark visor round the split windshield) whose roof rolls down into a round
  * rump; a tall, blunt, square muzzle with two oval nostril intakes and its round headlamps set high
  * in pods on the bonnet's front corners, half-lidded (the sleepy eyes), and big round mirrors high

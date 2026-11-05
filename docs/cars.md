@@ -282,3 +282,22 @@ roster entry drives, online too.) Compare the
 draws only for the same view (free play, or a showroom angle): in the menu's orbit the count moves
 with what the camera frames. Then the usual: `#webgl2`, `#compat`, `#lowgpu`, `#nancheck`, and
 `npm run typecheck` and `npm test`.
+
+## Legends
+
+Every car has a legend, not a spec sheet: `car.<id>Desc` is its tagline (one menu line, 64 characters at most) and
+`car.<id>Story` what someone would tell you when they see you earned it (two or three sentences, 240 at most,
+second person, the name in it, English and Spanish). The garage's detail card shows the story where there is
+room: PC and tablet always, a phone upright from 800 px of height, never on a short screen or a phone held sideways
+(it would take the rows of the list). Keep the voice when a car is added: pride, a challenge and a little mystery.
+
+| Car | Stands for | What you feel on getting it |
+|---|---|---|
+| Dune | The beginning | Potential |
+| Cyclone | The edge (precision) | Superiority |
+| Vortex | The untamed (resistance) | Respect |
+| Sirocco | The unreachable (speed) | Freedom |
+| Magma | The fire within (determination) | Rebellion |
+
+An official car is a public statement: other players see it in the match and know the owner earned it with host
+points. The personalisation to come (a car editor) is for expressing yourself and is seen only on your own screen.
