@@ -110,6 +110,26 @@ test('the quality sets the video size, the frame rate and the bit rate: standard
   assert.ok(standard.fps === 30 && high.fps === 30 && max.fps === 60);
 });
 
+test('the goal caption: drops in big and settles, pulses, bursts then fades out, never past its bounds', () => {
+  const g0 = C.goalAnim(0);
+  assert.ok(g0.scale > 2 && g0.alpha === 0, 'starts big and invisible');
+  assert.ok(g0.shake === 1 && g0.flash > 0.3 && g0.punch > 1.05, 'the frame shakes, flashes and punches in at the goal');
+  const settled = C.goalAnim(0.8);
+  assert.ok(Math.abs(settled.scale - 1) < 0.06 && settled.alpha === 1 && settled.shake === 0 && settled.flash === 0, 'settled');
+  assert.ok(settled.punch < 1.01);
+  assert.ok(C.goalAnim(C.GOAL_CAPTION_SECONDS).alpha < 1e-9, 'gone at its end');
+  assert.ok(C.goalAnim(C.GOAL_CAPTION_SECONDS - 0.2).alpha < 1 && C.goalAnim(C.GOAL_CAPTION_SECONDS - 0.2).alpha > 0, 'fading in its last 0.4 s');
+  // the bounce: the word dips under its size before it settles
+  let min = Infinity;
+  for (let a = 0.2; a < 0.6; a += 0.01) min = Math.min(min, C.goalAnim(a).scale);
+  assert.ok(min < 0.97, 'overshoots');
+  for (let a = -1; a < 4; a += 0.05) {
+    const g = C.goalAnim(a);
+    for (const [k, v] of Object.entries(g)) assert.ok(Number.isFinite(v), `${k} at ${a}`);
+    assert.ok(g.alpha >= 0 && g.alpha <= 1 && g.ringAlpha >= 0 && g.ringAlpha <= 1 && g.flash >= 0 && g.shake >= 0 && g.shake <= 1 && g.ring >= 0 && g.ring <= 1, `bounds at ${a}`);
+  }
+});
+
 test('every clip line is in English and in Spanish, with the same placeholders', () => {
   const keys = Object.keys(en).filter((k) => k.startsWith('replay.clip'));
   assert.ok(keys.length >= 20, `${keys.length} clip lines`);

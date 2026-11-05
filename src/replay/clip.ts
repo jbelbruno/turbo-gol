@@ -119,8 +119,166 @@ export interface ClipOverlay {
   red: number;
   /** The match clock as shown ('2:41'). */
   clock: string;
-  /** The goal caption: the scoring team and the scorer's name (null: no name), shown right after a goal; null none. */
-  goal: { team: 0 | 1; scorer: string | null } | null;
+  /** The goal caption: the scoring team, the scorer's name (null: no name), the word and the seconds since the goal; null none. */
+  goal: { team: 0 | 1; scorer: string | null; word: string; age: number } | null;
+}
+
+/** How long the goal caption stays (s); it leaves over its last 0.4 s. */
+export const GOAL_CAPTION_SECONDS = 2.8;
+
+const easeOutBack = (x: number): number => {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+};
+const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
+
+/**
+ * The goal caption's motion `age` seconds after the goal: the word drops in big and bounces to its
+ * size, tilted, pulsing; a ring and spokes burst out from it; the frame shakes, punches in and
+ * flashes in the team's colour for the first moments; the name's letters pop in one after another.
+ */
+export function goalAnim(age: number): { scale: number; alpha: number; rot: number; ring: number; ringAlpha: number; flash: number; shake: number; punch: number } {
+  const a = Math.max(0, age);
+  const into = clamp01(a / 0.32);
+  const out = clamp01((a - (GOAL_CAPTION_SECONDS - 0.4)) / 0.4);
+  const pulse = 1 + 0.025 * Math.sin(a * 14) * clamp01(a / 0.5);
+  const rk = clamp01(a / 0.6);
+  return {
+    scale: (2.6 - 1.6 * easeOutBack(into)) * pulse * (1 + 0.15 * out),
+    alpha: clamp01(a / 0.1) * (1 - out),
+    rot: -0.05 + 0.1 * Math.pow(1 - into, 2),
+    ring: 1 - Math.pow(1 - rk, 3),
+    ringAlpha: Math.pow(1 - rk, 1.5) * 0.9,
+    flash: Math.max(0, 1 - a / 0.3) * 0.38,
+    shake: a < 0.45 ? Math.pow(1 - a / 0.45, 2) : 0,
+    punch: 1 + 0.07 * Math.exp(-a * 7),
+  };
+}
+
+function drawGoal(ctx: CanvasRenderingContext2D, w: number, h: number, u: number, g: NonNullable<ClipOverlay['goal']>): void {
+  const an = goalAnim(g.age);
+  const color = g.team === 0 ? BLUE : RED;
+  const cy = h * 0.27;
+  const sx = Math.sin(g.age * 95) * 14 * u * an.shake;
+  const sy = Math.cos(g.age * 83) * 10 * u * an.shake;
+  // flash over the whole frame
+  if (an.flash > 0) {
+    ctx.globalAlpha = an.flash;
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+  }
+  // ring and spokes from the word's centre
+  if (an.ringAlpha > 0.01) {
+    const r = an.ring * w * 0.62;
+    ctx.save();
+    ctx.translate(w / 2 + sx, cy + sy);
+    ctx.globalAlpha = an.ringAlpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 14 * u * (1 - an.ring * 0.7);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = LIME;
+    ctx.lineWidth = 7 * u;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2 + g.age * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * r * 0.78, Math.sin(ang) * r * 0.78);
+      ctx.lineTo(Math.cos(ang) * r * 1.02, Math.sin(ang) * r * 1.02);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // the word on its slab
+  const word = g.word.toUpperCase();
+  let fs = 104 * u;
+  ctx.font = `italic 900 ${fs}px ${FONT}`;
+  const maxW = w * 0.8;
+  const tw0 = ctx.measureText(word).width;
+  if (tw0 > maxW) {
+    fs *= maxW / tw0;
+    ctx.font = `italic 900 ${fs}px ${FONT}`;
+  }
+  const tw = ctx.measureText(word).width;
+  ctx.save();
+  ctx.globalAlpha = an.alpha;
+  ctx.translate(w / 2 + sx, cy + sy);
+  ctx.rotate(an.rot);
+  ctx.scale(an.scale, an.scale);
+  const slabW = tw + 90 * u;
+  const slabH = fs * 1.5;
+  const skew = 0.22 * slabH;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+  ctx.shadowBlur = 22 * u;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-slabW / 2 + skew, -slabH / 2);
+  ctx.lineTo(slabW / 2 + skew, -slabH / 2);
+  ctx.lineTo(slabW / 2 - skew, slabH / 2);
+  ctx.lineTo(-slabW / 2 - skew, slabH / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = LIME;
+  ctx.beginPath();
+  ctx.moveTo(-slabW / 2 - skew * 0.55, slabH / 2 - 12 * u);
+  ctx.lineTo(slabW / 2 - skew * 0.55 + 0 * u, slabH / 2 - 12 * u);
+  ctx.lineTo(slabW / 2 - skew, slabH / 2);
+  ctx.lineTo(-slabW / 2 - skew, slabH / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 10 * u;
+  ctx.strokeStyle = 'rgba(5, 7, 13, 0.7)';
+  ctx.strokeText(word, 0, -4 * u);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(word, 0, -4 * u);
+  ctx.restore();
+  // the scorer's name: a dark chip with the team's bar, the letters popping in one by one
+  if (g.scorer !== null) {
+    const name = g.scorer.toUpperCase();
+    const nf = 58 * u;
+    ctx.font = `italic 900 ${nf}px ${FONT}`;
+    const nw = ctx.measureText(name).width;
+    const chipW = nw + 86 * u;
+    const chipH = nf * 1.55;
+    const ny = cy + (slabH / 2) * 1.02 + 46 * u + sy;
+    const chipIn = clamp01((g.age - 0.12) / 0.25);
+    ctx.save();
+    ctx.globalAlpha = an.alpha * chipIn;
+    ctx.translate(w / 2 + sx, ny + (1 - easeOutBack(chipIn)) * 40 * u);
+    ctx.fillStyle = 'rgba(8, 11, 20, 0.88)';
+    ctx.fillRect(-chipW / 2, -chipH / 2, chipW, chipH);
+    ctx.fillStyle = color;
+    ctx.fillRect(-chipW / 2, -chipH / 2, 14 * u, chipH);
+    ctx.fillStyle = LIME;
+    ctx.fillRect(-chipW / 2, chipH / 2 - 6 * u, chipW, 6 * u);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let x = -nw / 2 + 8 * u;
+    for (let i = 0; i < name.length; i++) {
+      const ch = name[i];
+      const cw = ctx.measureText(ch).width;
+      const k = clamp01((g.age - 0.18 - i * 0.035) / 0.28);
+      if (k > 0) {
+        const e = easeOutBack(k);
+        ctx.save();
+        ctx.translate(x + cw / 2, 2 * u);
+        ctx.scale(e, e);
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = an.alpha * chipIn * clamp01(k * 3);
+        ctx.fillText(ch, -cw / 2, 0);
+        ctx.restore();
+      }
+      x += cw;
+    }
+    ctx.restore();
+  }
 }
 
 /** The clip's own scorebug, goal caption and watermark, sized from the frame's height. */
@@ -146,25 +304,9 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.fillText(String(o.red), bx + bw - 62 * u, by + bh / 2 + 2 * u);
   ctx.font = `800 ${26 * u}px ${FONT}`;
   ctx.fillText(o.clock, w / 2, by + bh / 2 + 1 * u);
-  // Goal caption, upper third.
-  if (o.goal !== null) {
-    const color = o.goal.team === 0 ? BLUE : RED;
-    const cy = h * 0.24;
-    ctx.font = `italic 900 ${96 * u}px ${FONT}`;
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 12 * u;
-    ctx.strokeStyle = 'rgba(5, 7, 13, 0.85)';
-    ctx.strokeText('GOAL', w / 2, cy);
-    ctx.fillStyle = color;
-    ctx.fillText('GOAL', w / 2, cy);
-    if (o.goal.scorer !== null) {
-      ctx.font = `800 ${40 * u}px ${FONT}`;
-      ctx.lineWidth = 8 * u;
-      ctx.strokeText(o.goal.scorer, w / 2, cy + 74 * u);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(o.goal.scorer, w / 2, cy + 74 * u);
-    }
-  }
+  // Goal caption, upper third: a team-coloured flash, a ring and spokes bursting out, the word on a
+  // slab (drops in big, bounces, tilts, pulses) and the scorer's name popping in letter by letter.
+  if (o.goal !== null) drawGoal(ctx, w, h, u, o.goal);
   // Watermark, bottom centre: the game's name and where to find it.
   const wy = h - Math.max(34 * u, h * 0.05);
   ctx.font = `italic 900 ${40 * u}px ${FONT}`;
@@ -264,7 +406,15 @@ export class ClipRecorder {
     const k = Math.max(w / sw, h / sh);
     const cw = w / k;
     const ch = h / k;
-    this.ctx.drawImage(this.source, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, w, h);
+    // The game frame punches in and shakes for a moment after a goal (goalAnim); the overlay does not.
+    const g = overlay.goal;
+    const an = g === null ? null : goalAnim(g.age);
+    const u = Math.min(w, h) / 720;
+    const dw = w * (an?.punch ?? 1);
+    const dh = h * (an?.punch ?? 1);
+    const shx = g === null || an === null ? 0 : Math.sin(g.age * 95) * 14 * u * an.shake;
+    const shy = g === null || an === null ? 0 : Math.cos(g.age * 83) * 10 * u * an.shake;
+    this.ctx.drawImage(this.source, (sw - cw) / 2, (sh - ch) / 2, cw, ch, (w - dw) / 2 + shx, (h - dh) / 2 + shy, dw, dh);
     drawOverlay(this.ctx, w, h, overlay);
   }
 

@@ -31,6 +31,8 @@ import type { Renderer } from '../render/Renderer';
 import type { ArenaMesh } from '../sim/arenaMesh';
 import { RocketSim } from '../sim/RocketSimBridge';
 import {
+  B_POS,
+  BALL_OFFSET,
   C_IS_ON_GROUND,
   C_IS_SUPERSONIC,
   C_VEL,
@@ -49,7 +51,7 @@ import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
 import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
-import { CLIP_HERE_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipSize, clipWindow, shareUrl } from './clip';
+import { CLIP_HERE_SECONDS, GOAL_CAPTION_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipSize, clipWindow, shareUrl } from './clip';
 import type { ClipFormat, ClipQuality, ClipResult } from './clip';
 import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
@@ -331,6 +333,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   document.documentElement.classList.toggle('tg-superlow', renderer.spec.cpuLite);
   const events: MatchEvent[] = [];
   const goalAt = new Map(o.scan.goals.map((g) => [g.tick, g]));
+  /** The ball's place at a goal, for the explosion (sim coordinates). */
+  const goalPos: [number, number, number] = [0, 0, 0];
 
   // ---- the control bar ------------------------------------------------------------------------
   const playBtn = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.pause')) as HTMLButtonElement;
@@ -635,6 +639,12 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
         const scorer = g && g.slot >= 0 ? (shownName[g.slot] ?? null) : null;
         hud.showGoal(e.team, scorer, e.blue, e.red);
         lastGoal = { tick: e.tick, team: e.team, scorer };
+        // The game's goal explosion at the ball (Game.onSimGoal): the burst, the confetti, the rings and the flash.
+        const b = run.sim.buf;
+        goalPos[0] = b[BALL_OFFSET + B_POS];
+        goalPos[1] = b[BALL_OFFSET + B_POS + 1];
+        goalPos[2] = b[BALL_OFFSET + B_POS + 2];
+        effects.onGoal(e.team, goalPos);
       } else if (e.type === 'ended') showEnd(e.winner, e.blue, e.red);
     }
   };
@@ -904,7 +914,8 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     if (rec === null) return;
     const m = run.host.match;
     const tick = run.host.currentTick;
-    const goal = lastGoal !== null && tick >= lastGoal.tick && tick - lastGoal.tick < 2.5 * TICK_RATE ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null } : null;
+    const age = lastGoal === null ? -1 : (tick - lastGoal.tick) / TICK_RATE;
+    const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
     rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
     if (tick >= job.thumbAt) rec.snapshot();
     recText.textContent = `${Math.floor(rec.seconds)} s`;
