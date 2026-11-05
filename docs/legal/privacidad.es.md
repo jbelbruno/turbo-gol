@@ -438,7 +438,7 @@ art. 33 IX).
 | Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP) | 7 días. Esas máquinas no tienen copias de seguridad |
 | Señales de Turnstile que Cloudflare usa por su cuenta | Las fija Cloudflare. Su anexo no da un plazo |
 | Reportes de errores de red y Cloudflare Web Analytics | Los fija Cloudflare |
-| Avisos técnicos al equipo en Discord | 90 días |
+| Avisos técnicos al equipo en Discord | 1 año, para investigar fallas y abusos |
 | Copias de seguridad de Cloudflare | La base de datos se puede volver a cualquier momento de los últimos 30 días. Algo borrado puede seguir en esas copias hasta 30 días. Solo las usamos para reparar una falla |
 | Tus pedidos sobre tus datos y nuestras respuestas | 2 años desde la respuesta, para probar que respondimos |
 | Lo que escribes a privacy@turbo-gol.com, en un buzón de Google | Lo mismo que tus pedidos |
@@ -782,7 +782,7 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
     él cuando se borra la cuenta, y la partida queda, sin ellos, hasta 30 días (con el motivo que
     haya escrito el equipo si la anuló, que puede nombrarte);
   - las líneas de aviso del equipo que lleven el identificador de tu cuenta o un motivo que te
-    nombre (hasta 30 días en el historial interno y 90 días en Discord, sección 6);
+    nombre (hasta 30 días en el historial interno y 1 año en Discord, sección 6);
   - los registros técnicos de Cloudflare (7 días) y los de las máquinas de los servidores del
     proyecto (sección 6);
   - el registro de envíos de correo (hasta 30 días);

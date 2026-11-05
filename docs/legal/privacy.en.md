@@ -433,7 +433,7 @@ art. 33 IX).
 | Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses) | 7 days. Those machines have no backups |
 | Turnstile signals that Cloudflare uses on its own account | Set by Cloudflare. Its addendum gives no period |
 | Network error reports and Cloudflare Web Analytics | Set by Cloudflare |
-| Technical alerts to the team on Discord | 90 days |
+| Technical alerts to the team on Discord | 1 year, to investigate failures and abuse |
 | Cloudflare backups | The database can be restored to any moment of the last 30 days. Something deleted may remain in those copies for up to 30 days. We use them only to repair a failure |
 | Your requests about your data and our answers | 2 years from the answer, to prove that we answered |
 | What you write to privacy@turbo-gol.com, in a Google mailbox | The same as your requests |
@@ -785,7 +785,7 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
     account is deleted, and the match stays, without them, for up to 30 days (with the reason the
     team wrote if it voided it, which may name you);
   - the team's alert lines that carry your account's identifier or a reason that names you (up to
-    30 days in the internal history and 90 days on Discord, section 6);
+    30 days in the internal history and 1 year on Discord, section 6);
   - Cloudflare's technical logs (7 days) and those of the machines of the project's servers
     (section 6);
   - the email sending log (up to 30 days);
