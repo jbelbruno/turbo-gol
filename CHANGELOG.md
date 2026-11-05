@@ -153,8 +153,8 @@ All notable changes to Turbogol are documented here. The format follows
   each car's camera. The match is re-simulated from the recording, so the viewer says when a match
   was played on another version of the game, or from when it stops matching the recording. Only
   the names the game's servers assigned are shown, never account or server ids (`docs/replays.md`).
-- Four new cars: Pampero (a low, sharp wedge), Carpincho (a round, sturdy off-roader), Cóndor (a long
-  jet racer with a tail fin) and Tero (a compact rally hatch), beside the Dune, which stays free
+- Four new cars: Cyclone (a low, sharp wedge), Avalanche (a round, sturdy off-roader), Tempest (a long
+  jet racer with a tail fin) and Wildfire (a compact rally hatch), beside the Dune, which stays free
   for everyone. Every car drives the same: same handling, same hitbox, only the look changes, so
   ranked and every counted match are untouched. Other players see your car online, in server
   matches and in lobbies.

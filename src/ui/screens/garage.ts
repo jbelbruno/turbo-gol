@@ -24,7 +24,7 @@
  * on the row picked goes to its action. EQUIPAR: Garage.equip (an account through POST
  * /api/me/car, so its next seats drive it). CANJEAR (a car that can be redeemed): the sheet with
  * the balance after it, CANCELAR focused and MANTÉN PARA CONFIRMAR held REDEEM_HOLD_MS
- * (components/hold.ts) → Garage.claim (one server transaction) → "Pampero es tuyo" with EQUIPAR
+ * (components/hold.ts) → Garage.claim (one server transaction) → "Cyclone es tuyo" with EQUIPAR
  * AHORA; a failure spends nothing and offers REINTENTAR. A car out of reach keeps CANJEAR, never
  * lime, with the reason; its press explains (sign in, the guide, PERFIL's MI SERVIDOR). Points come
  * only from hosting (nodes/docs/RECOMPENSAS.md): never a rate, nothing is paid.

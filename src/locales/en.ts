@@ -49,18 +49,17 @@ export default {
   'theme.canyon-sunset': 'Red canyon',
   'theme.alpine-day': 'Alpine valley',
   // Cosmetic cars (src/game/cosmetics.ts): the garage and the shop. The names are invented proper
-  // names, Spanish words kept as they are (the pampas wind, the capybara, the condor, the southern
-  // lapwing); each *Desc is the car's one line under its name
+  // names, the same in every language (wild nature: wind, snow, fire); each *Desc is the car's one line under its name
   'car.dune': 'Dune',
   'car.duneDesc': 'Bubble canopy, roll hoop and knobby tyres: the all-rounder',
-  'car.pampero': 'Pampero',
-  'car.pamperoDesc': 'Low and sharp, like the cold wind of the pampas',
-  'car.carpincho': 'Carpincho',
-  'car.carpinchoDesc': 'Round, sturdy and unflappable, like the capybara',
-  'car.condor': 'Cóndor',
-  'car.condorDesc': 'Long and wide, built to glide',
-  'car.tero': 'Tero',
-  'car.teroDesc': 'A compact rally hatch, loud and always on the alert',
+  'car.pampero': 'Cyclone',
+  'car.pamperoDesc': 'Low and razor-sharp, it cuts the air like a spinning storm',
+  'car.carpincho': 'Avalanche',
+  'car.carpinchoDesc': 'Round, heavy and unstoppable once it gets going',
+  'car.condor': 'Tempest',
+  'car.condorDesc': 'Long and wide, built to ride the wind',
+  'car.tero': 'Wildfire',
+  'car.teroDesc': 'A compact rally hatch, loud and impossible to put out',
   'tier.bronze': 'Bronze',
   'tier.silver': 'Silver',
   'tier.gold': 'Gold',

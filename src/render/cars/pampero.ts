@@ -1,5 +1,5 @@
 /**
- * The Pampero ('pampero', the cold southern wind of the pampas): a low, wide, razor-edged wedge of
+ * The Cyclone ('pampero', a spinning storm): a low, wide, razor-edged wedge of
  * an endurance hyper-GT, built from faceted lofts (polygon sections with hard creases, so every
  * facet takes its own light; super low shades them by diffuse alone), one design language from
  * the nose to the canopy and the tail.

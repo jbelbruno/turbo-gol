@@ -1,8 +1,8 @@
 /**
  * The cars as side-view outlines (plan §1.4.2: GARAJE's rows and the redeem sheet), one original
  * drawing per body, the nose to the right, on a 72 x 36 grid: the body's line, a detail that tells
- * it apart (the Dune's roll hoop, the Pampero's wing, the Carpincho's roof rack, the Cóndor's
- * T-tail, the Tero's roof wing) and the two wheels on the ground (y 32). Strokes take the colour of
+ * it apart (the Dune's roll hoop, the Cyclone's wing, the Avalanche's roof rack, the Tempest's
+ * T-tail, the Wildfire's roof wing) and the two wheels on the ground (y 32). Strokes take the colour of
  * the text (`currentColor`: a locked car's row draws it in --edge-hi), the wheels are filled with
  * the well's ink (styles/screens/garage.css). Every car simulates as the same Standard car: these
  * are looks only. Built on call, nothing at import (tests/garage-screen.test.mjs reads the data).

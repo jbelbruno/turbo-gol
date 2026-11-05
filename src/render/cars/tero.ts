@@ -1,5 +1,5 @@
 /**
- * The Tero ('tero', the southern lapwing: small, loud, territorial): a compact retro rally
+ * The Wildfire ('tero': small, loud, territorial): a compact retro rally
  * hatchback. A short two-box body with a tall glasshouse (raked screen under a white sun strip,
  * blacked-out B-pillar, thick C-pillars, a painted tailgate under a small rear glass) and a crowned
  * roof, flanks bowed out a little at the doors, square-cut bolted-on box flares over all four wheels

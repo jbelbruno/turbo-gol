@@ -62,7 +62,7 @@ export function themeName(id: ThemeId): string {
   return t(`theme.${id}`);
 }
 
-/** A cosmetic car (src/game/cosmetics.ts): 'Dune', 'Pampero'... */
+/** A cosmetic car (src/game/cosmetics.ts): 'Dune', 'Cyclone'... */
 export function carName(id: CarId): string {
   return t(`car.${id}`);
 }

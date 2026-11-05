@@ -55,10 +55,10 @@ test('catalog: a car is available exactly when its body module has a body; a car
 test('every car has a name and a one-line description in English and Spanish', () => {
   const names = {
     dune: ['Dune', 'Dune'],
-    pampero: ['Pampero', 'Pampero'],
-    carpincho: ['Carpincho', 'Carpincho'],
-    condor: ['Cóndor', 'Cóndor'],
-    tero: ['Tero', 'Tero'],
+    pampero: ['Cyclone', 'Cyclone'],
+    carpincho: ['Avalanche', 'Avalanche'],
+    condor: ['Tempest', 'Tempest'],
+    tero: ['Wildfire', 'Wildfire'],
   };
   assert.deepEqual(Object.keys(names), [...CAR_IDS]);
   for (const id of CAR_IDS) {
