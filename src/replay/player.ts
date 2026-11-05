@@ -51,7 +51,7 @@ import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
 import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
-import { CLIP_HERE_SECONDS, GOAL_CAPTION_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipSize, clipWindow, shareUrl } from './clip';
+import { GOAL_CAPTION_SECONDS, ClipRecorder, canRecordClips, clampClipRange, clipFileName, clipSize, clipWindow, defaultClipRange, estimateBytes, shareUrl, timeText } from './clip';
 import type { ClipFormat, ClipQuality, ClipResult } from './clip';
 import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
@@ -347,6 +347,9 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   roster.forEach((_e, i) => camSel.append(el('option', { value: String(i + 2) }, `${i + 2} · ${shownName[i]}`)));
   const seek = el('input', { type: 'range', min: '0', max: String(endTick), step: '1', value: '0', 'aria-label': t('replay.title') }) as HTMLInputElement;
   const marks = el('div.rp-marks');
+  /** The clip's range on the timeline (the Clip sheet sets it). */
+  const rangeBand = el('div.rp-clipband.rp-hidden');
+  marks.append(rangeBand);
   for (const g of o.scan.goals) {
     const m = el(`div.rp-mark.${g.team === 0 ? 'rp-blue' : 'rp-red'}`);
     m.style.left = `${(100 * g.tick) / Math.max(1, endTick)}%`;
@@ -466,6 +469,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     }
   };
   const togglePlay = (): void => {
+    previewUntil = -1;
     if (!playing && pos() >= endTick) seekTo(0);
     setPlaying(!playing);
   };
@@ -566,6 +570,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   seek.addEventListener('pointercancel', release);
   seek.addEventListener('change', () => {
     dragging = false;
+    previewUntil = -1;
     seekTo(Number(seek.value));
   });
   /** The Esc press that will close the menu on its release (performance.now; -1 none): full screen with Esc locked. */
@@ -807,6 +812,11 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     thumbAt: number;
   }
   let clipJob: ClipJob | null = null;
+  /** The range to record (ticks), and whether the player has set it (otherwise it follows the moment the sheet opens at). */
+  let clipRange: { start: number; end: number } | null = null;
+  let clipEdited = false;
+  /** The tick a range preview stops at (-1: none). */
+  let previewUntil = -1;
   const clipPanel = el('div.rp-menu.rp-hidden', { role: 'dialog', 'aria-modal': 'true', 'aria-label': t('replay.clipTitle') });
   const recText = el('span.rp-rec-time', null, '');
   const recCancel = el('button.rp-btn', { type: 'button' }, t('replay.clipCancel')) as HTMLButtonElement;
@@ -918,7 +928,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
     rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
     if (tick >= job.thumbAt) rec.snapshot();
-    recText.textContent = `${Math.floor(rec.seconds)} s`;
+    recText.textContent = `${Math.floor(rec.seconds)} / ${Math.round((job.end - job.start) / TICK_RATE)} s`;
     if (tick >= job.end || tick >= endTick) {
       clipJob = null;
       leaveClipMode();
@@ -983,99 +993,163 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const close = el('button.rp-btn', { type: 'button' }, t('replay.clipClose'));
     close.addEventListener('click', closeClipPanel);
     panel.append(close);
+    clipPanel.classList.remove('rp-clip-dock');
     clipPanel.replaceChildren(panel);
     clipPanel.classList.remove('rp-hidden');
   }
 
-  /** The panel: one row per goal, a row for this moment, and the clip's format. */
+  /**
+   * The Clip sheet: the range to record (two sliders that move the viewer to their moment, a preview,
+   * the band on the timeline), the goals as shortcuts to a range, the format and quality, and Record.
+   */
+  const renderBand = (): void => {
+    if (clipRange === null) {
+      rangeBand.classList.add('rp-hidden');
+      return;
+    }
+    rangeBand.classList.remove('rp-hidden');
+    rangeBand.style.left = `${(100 * clipRange.start) / Math.max(1, endTick)}%`;
+    rangeBand.style.width = `${(100 * (clipRange.end - clipRange.start)) / Math.max(1, endTick)}%`;
+  };
+  const goalIn = (r: { start: number; end: number }): number | null => {
+    const g = goals.find((x) => x.tick >= r.start && x.tick <= r.end);
+    return g ? g.tick : null;
+  };
   const openClipPanel = (): void => {
     setPlaying(false);
+    if (clipRange === null || !clipEdited) clipRange = defaultClipRange(pos(), goals.map((g) => g.tick), endTick);
+    renderBand();
     const panel = el('div.rp-menu-panel.rp-clip-panel');
     panel.append(el('span.rp-eyebrow', null, t('replay.clipTitle')));
-    const status = el('p.rp-clip-note.rp-clip-dim', null, o.matchId === null ? t('replay.clipNoLink') : '');
-    const rows = el('div.rp-clip-rows');
-    const addRow = (label: string, team: 0 | 1 | null, tick: number, onWatch: (() => void) | null, range: { start: number; end: number }, goalTick: number | null): void => {
-      const row = el('div.rp-clip-row');
-      row.append(el(`span.rp-dot${team === null ? '' : team === 0 ? '.rp-blue' : '.rp-red'}`), el('span.rp-clip-label', null, label));
-      const acts = el('span.rp-clip-acts');
-      if (onWatch) {
-        const w = el('button.rp-btn', { type: 'button' }, t('replay.clipWatch'));
-        w.addEventListener('click', onWatch);
-        acts.append(w);
-      }
-      if (o.matchId !== null) {
-        const l = el('button.rp-btn', { type: 'button' }, t('replay.clipLink')) as HTMLButtonElement;
-        l.addEventListener('click', () => {
-          void shareLink(tick).then((ok) => {
-            status.textContent = ok ? t('replay.clipLinkDone') : t('replay.clipLinkFailed');
-          });
-        });
-        acts.append(l);
-      }
-      const c = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.clipMake')) as HTMLButtonElement;
-      c.disabled = !clipSupported;
-      c.addEventListener('click', () => startClip(range, goalTick));
-      acts.append(c);
-      row.append(acts);
-      rows.append(row);
+
+    // -- the range
+    const sliderStep = String(TICK_RATE / 4);
+    const mkSlider = (label: string, which: 'start' | 'end'): { row: HTMLElement; sync: () => void } => {
+      const input = el('input', { type: 'range', min: '0', max: String(endTick), step: sliderStep, 'aria-label': label }) as HTMLInputElement;
+      const val = el('b.rp-clip-time', null, '');
+      input.addEventListener('input', () => {
+        if (clipRange === null) return;
+        const v = Number(input.value);
+        clipRange = clampClipRange(which === 'start' ? v : clipRange.start, which === 'end' ? v : clipRange.end, endTick, which);
+        clipEdited = true;
+        renderBand();
+        syncAll();
+        // the viewer behind shows the moment being set
+        seekTo(which === 'start' ? clipRange.start : clipRange.end);
+      });
+      input.addEventListener('keydown', (e) => e.stopPropagation());
+      const row = el('div.rp-clip-slider', null, el('span.rp-clip-sub', null, label), input, val);
+      return {
+        row,
+        sync: () => {
+          if (clipRange === null) return;
+          input.value = String(which === 'start' ? clipRange.start : clipRange.end);
+          val.textContent = timeText(which === 'start' ? clipRange.start : clipRange.end);
+        },
+      };
     };
-    goals.forEach((g, i) => {
-      const who = g.slot >= 0 ? (shownName[g.slot] ?? '') : '';
-      addRow(
-        `${t('replay.clipGoal', { n: i + 1 })} · ${clockText(g.tick)}${who ? ` · ${who}` : ''}`,
-        g.team,
-        g.tick,
-        () => {
+    const sStart = mkSlider(t('replay.clipStart'), 'start');
+    const sEnd = mkSlider(t('replay.clipEnd'), 'end');
+    const summary = el('p.rp-clip-note', null, '');
+    const syncAll = (): void => {
+      sStart.sync();
+      sEnd.sync();
+      if (clipRange !== null) {
+        const secs = (clipRange.end - clipRange.start) / TICK_RATE;
+        summary.textContent = t('replay.clipLength', { s: secs.toFixed(1), size: mb(estimateBytes(secs, clipQuality)) });
+      }
+    };
+    const preview = el('button.rp-btn', { type: 'button' }, t('replay.clipPreview')) as HTMLButtonElement;
+    preview.addEventListener('click', () => {
+      if (clipRange === null) return;
+      previewUntil = clipRange.end;
+      closeClipPanel();
+      seekTo(clipRange.start);
+      setPlaying(true);
+    });
+    panel.append(el('span.rp-clip-sub', null, t('replay.clipRange')), sStart.row, sEnd.row, el('div.rp-clip-sumrow', null, summary, preview));
+
+    // -- the goals as shortcuts
+    const status = el('p.rp-clip-note.rp-clip-dim', null, o.matchId === null ? t('replay.clipNoLink') : '');
+    if (goals.length > 0) {
+      const rows = el('div.rp-clip-rows');
+      goals.forEach((g, i) => {
+        const who = g.slot >= 0 ? (shownName[g.slot] ?? '') : '';
+        const row = el('div.rp-clip-row');
+        row.append(el(`span.rp-dot.${g.team === 0 ? 'rp-blue' : 'rp-red'}`), el('span.rp-clip-label', null, `${t('replay.clipGoal', { n: i + 1 })} · ${clockText(g.tick)}${who ? ` · ${who}` : ''}`));
+        const acts = el('span.rp-clip-acts');
+        const w = el('button.rp-btn', { type: 'button' }, t('replay.clipWatch'));
+        w.addEventListener('click', () => {
           closeClipPanel();
           seekTo(goalLead(g));
           setPlaying(true);
-        },
-        clipWindow(g.tick, endTick),
-        g.tick,
-      );
-    });
-    const here = pos();
-    addRow(t('replay.clipHere', { time: clockText(here), s: CLIP_HERE_SECONDS }), null, here, null, clipFrom(here, endTick), null);
-    panel.append(rows);
-    const fmt = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': t('replay.clipFormat') });
-    for (const [key, label] of [
-      ['vertical', t('replay.clipVertical')],
-      ['square', '1:1'],
-      ['wide', '16:9'],
-    ] as Array<[ClipFormat, string]>) {
-      const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(clipFormat === key) }, label) as HTMLButtonElement;
-      b.addEventListener('click', () => {
-        clipFormat = key;
-        saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
-        for (const x of fmt.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+        });
+        acts.append(w);
+        if (o.matchId !== null) {
+          const l = el('button.rp-btn', { type: 'button' }, t('replay.clipLink'));
+          l.addEventListener('click', () => {
+            void shareLink(g.tick).then((ok) => {
+              status.textContent = ok ? t('replay.clipLinkDone') : t('replay.clipLinkFailed');
+            });
+          });
+          acts.append(l);
+        }
+        const use = el('button.rp-btn', { type: 'button' }, t('replay.clipUse'));
+        use.addEventListener('click', () => {
+          clipRange = clipWindow(g.tick, endTick);
+          clipEdited = true;
+          renderBand();
+          syncAll();
+          seekTo(clipRange.start);
+        });
+        acts.append(use);
+        row.append(acts);
+        rows.append(row);
       });
-      fmt.append(b);
+      panel.append(el('span.rp-clip-sub', null, t('replay.clipGoals')), rows);
     }
-    const qual = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': t('replay.clipQuality') });
-    for (const [key, label] of [
-      ['standard', t('replay.clipQStandard')],
-      ['high', t('replay.clipQHigh')],
-      ['max', t('replay.clipQMax')],
-    ] as Array<[ClipQuality, string]>) {
-      const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(clipQuality === key) }, label) as HTMLButtonElement;
-      b.addEventListener('click', () => {
-        clipQuality = key;
-        saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
-        for (const x of qual.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
-      });
-      qual.append(b);
-    }
+
+    // -- format, quality, names
+    const save = (): void => saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
+    const chips = <K extends string>(label: string, items: Array<[K, string]>, get: () => K, set: (k: K) => void): HTMLElement[] => {
+      const group = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': label });
+      for (const [key, text] of items) {
+        const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(get() === key) }, text) as HTMLButtonElement;
+        b.addEventListener('click', () => {
+          set(key);
+          save();
+          for (const x of group.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+          syncAll();
+        });
+        group.append(b);
+      }
+      return [el('span.rp-clip-sub', null, label), group];
+    };
+    panel.append(
+      ...chips<ClipFormat>(t('replay.clipFormat'), [['vertical', t('replay.clipVertical')], ['square', '1:1'], ['wide', '16:9']], () => clipFormat, (k) => (clipFormat = k)),
+      ...chips<ClipQuality>(t('replay.clipQuality'), [['standard', t('replay.clipQStandard')], ['high', t('replay.clipQHigh')], ['max', t('replay.clipQMax')]], () => clipQuality, (k) => (clipQuality = k)),
+      el('p.rp-clip-note.rp-clip-dim', null, t('replay.clipQualityHint')),
+    );
     const names = el('input', { type: 'checkbox' }) as HTMLInputElement;
     names.checked = clipNames;
     names.addEventListener('change', () => {
       clipNames = names.checked;
-      saveClipPrefs({ format: clipFormat, quality: clipQuality, names: clipNames });
+      save();
     });
-    panel.append(el('span.rp-clip-sub', null, t('replay.clipFormat')), fmt, el('span.rp-clip-sub', null, t('replay.clipQuality')), qual, el('p.rp-clip-note.rp-clip-dim', null, t('replay.clipQualityHint')), el('label.rp-clip-check', null, names, t('replay.clipNames')), status);
+    panel.append(el('label.rp-clip-check', null, names, t('replay.clipNames')), status);
     if (!clipSupported) panel.append(el('p.rp-clip-note', null, t('replay.clipUnsupported')));
+
+    // -- record / close
+    const record = el('button.rp-btn.rp-primary.rp-clip-record', { type: 'button' }, t('replay.clipRecord')) as HTMLButtonElement;
+    record.disabled = !clipSupported;
+    record.addEventListener('click', () => {
+      if (clipRange !== null) startClip(clipRange, goalIn(clipRange));
+    });
     const close = el('button.rp-btn', { type: 'button' }, t('replay.clipClose'));
     close.addEventListener('click', closeClipPanel);
-    panel.append(close);
+    panel.append(el('div.rp-clip-foot', null, record, close));
+    syncAll();
+    clipPanel.classList.add('rp-clip-dock');
     clipPanel.replaceChildren(panel);
     clipPanel.classList.remove('rp-hidden');
   };
@@ -1137,6 +1211,11 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     draw(seekTarget >= 0 || !playing ? 1 : acc / TICK_DT, playing && seekTarget < 0 ? drawDt * speed : 0);
     updateHud();
     clipStep(now);
+    if (previewUntil >= 0 && playing && seekTarget < 0 && !restarting && run.host.currentTick >= previewUntil) {
+      previewUntil = -1;
+      setPlaying(false);
+      openClipPanel();
+    }
   };
   requestAnimationFrame(frame);
   return () => {

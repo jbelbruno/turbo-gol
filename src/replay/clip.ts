@@ -14,7 +14,9 @@ import { TICK_RATE } from '../sim/types';
 /** The lead before a goal and the tail after it a clip keeps (s), and the longest clip (s). */
 export const CLIP_LEAD_SECONDS = 4;
 export const CLIP_TAIL_SECONDS = 3;
-export const CLIP_MAX_SECONDS = 20;
+export const CLIP_MAX_SECONDS = 60;
+/** The shortest clip (s). */
+export const CLIP_MIN_SECONDS = 1;
 /** The length of a clip made "from here" (s). */
 export const CLIP_HERE_SECONDS = 10;
 
@@ -74,6 +76,48 @@ export function clipFrom(tick: number, endTick: number, rate: number = TICK_RATE
   const len = CLIP_HERE_SECONDS * rate;
   const end = Math.min(endTick, Math.max(0, Math.round(tick)) + len);
   return { start: Math.max(0, end - len), end };
+}
+
+/**
+ * The range after one end moved: inside the match, at least CLIP_MIN_SECONDS and at most
+ * CLIP_MAX_SECONDS long; the end that did not move gives way when the length is out of bounds.
+ */
+export function clampClipRange(start: number, end: number, endTick: number, moved: 'start' | 'end', rate: number = TICK_RATE): { start: number; end: number } {
+  const min = CLIP_MIN_SECONDS * rate;
+  const max = CLIP_MAX_SECONDS * rate;
+  const last = Math.max(endTick, min);
+  let s = Math.round(Math.min(Math.max(0, start), last - min));
+  let e = Math.round(Math.min(Math.max(end, min), last));
+  if (moved === 'start') {
+    if (e - s < min) e = Math.min(last, s + min);
+    if (e - s > max) e = s + max;
+  } else {
+    if (e - s < min) s = Math.max(0, e - min);
+    if (e - s > max) s = e - max;
+  }
+  return { start: s, end: e };
+}
+
+/** The range the sheet opens with: the goal's window the viewer is in or about to reach, the last goal's, or ten seconds from here. */
+export function defaultClipRange(here: number, goalTicks: readonly number[], endTick: number, rate: number = TICK_RATE): { start: number; end: number } {
+  const sorted = [...goalTicks].sort((a, b) => a - b);
+  const windows = sorted.map((g) => clipWindow(g, endTick, rate));
+  const inside = windows.find((w) => here >= w.start && here <= w.end);
+  if (inside) return inside;
+  const next = windows.find((w) => w.start > here);
+  if (next) return next;
+  return windows.length > 0 ? windows[windows.length - 1] : clipFrom(here, endTick, rate);
+}
+
+/** A time as m:ss.d (the range's sliders). */
+export function timeText(ticks: number, rate: number = TICK_RATE): string {
+  const s = Math.max(0, ticks) / rate;
+  return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+/** About how many bytes a clip of `seconds` takes at a quality (its bit rate; the encoder lands within ~25%). */
+export function estimateBytes(seconds: number, quality: ClipQuality): number {
+  return (CLIP_QUALITIES[quality].bitrate * Math.max(0, seconds)) / 8;
 }
 
 /** Where the goal's link goes: this page with the match and the tick (replay.html?id=..&t=..). */

@@ -96,6 +96,48 @@ test('the frame box is the largest of the clip shape that fits the window, centr
   for (const f of Object.values(C.CLIP_FORMATS)) assert.ok(f.w <= 1280 && f.h <= 1280 && f.w % 2 === 0 && f.h % 2 === 0, 'even sizes, 720p at most');
 });
 
+test('the range: inside the match, 1 to 60 s, and the end that did not move gives way', () => {
+  const end = 300 * TICK_RATE;
+  const R = (s, e, moved) => C.clampClipRange(s * TICK_RATE, e * TICK_RATE, end, moved);
+  assert.deepEqual(R(10, 25, 'start'), { start: 10 * TICK_RATE, end: 25 * TICK_RATE });
+  // the start pushed past the end drags the end along by the shortest clip; the end pulled before the start drags the start
+  assert.deepEqual(R(30, 25, 'start'), { start: 30 * TICK_RATE, end: 31 * TICK_RATE });
+  assert.deepEqual(R(30, 25, 'end'), { start: 24 * TICK_RATE, end: 25 * TICK_RATE });
+  // longer than the longest clip: the other end follows
+  assert.deepEqual(R(10, 200, 'start'), { start: 10 * TICK_RATE, end: 70 * TICK_RATE });
+  assert.deepEqual(R(10, 200, 'end'), { start: 140 * TICK_RATE, end: 200 * TICK_RATE });
+  // the match's edges
+  assert.deepEqual(R(-5, 4, 'start'), { start: 0, end: 4 * TICK_RATE });
+  assert.deepEqual(R(299.5, 400, 'start'), { start: 299 * TICK_RATE, end: 300 * TICK_RATE });
+  for (let s = -10; s < 320; s += 17) for (let e = -10; e < 320; e += 13) for (const m of ['start', 'end']) {
+    const r = C.clampClipRange(s * TICK_RATE, e * TICK_RATE, end, m);
+    assert.ok(r.start >= 0 && r.end <= end && r.end - r.start >= C.CLIP_MIN_SECONDS * TICK_RATE && r.end - r.start <= C.CLIP_MAX_SECONDS * TICK_RATE, `${s} ${e} ${m}`);
+  }
+  // a very short match still gives a valid range
+  const tiny = C.clampClipRange(0, 10, 50, 'end');
+  assert.ok(tiny.start === 0 && tiny.end > 0);
+});
+
+test('the sheet opens on the goal being watched, the next one, the last one, or ten seconds from here', () => {
+  const end = 300 * TICK_RATE;
+  const goals = [50 * TICK_RATE, 120 * TICK_RATE];
+  const w = (g) => C.clipWindow(g, end);
+  assert.deepEqual(C.defaultClipRange(48 * TICK_RATE, goals, end), w(goals[0]), 'inside the first goal window');
+  assert.deepEqual(C.defaultClipRange(10 * TICK_RATE, goals, end), w(goals[0]), 'the next goal');
+  assert.deepEqual(C.defaultClipRange(100 * TICK_RATE, goals, end), w(goals[1]), 'the next one after the first');
+  assert.deepEqual(C.defaultClipRange(250 * TICK_RATE, goals, end), w(goals[1]), 'past the last: the last');
+  assert.deepEqual(C.defaultClipRange(20 * TICK_RATE, [], end), C.clipFrom(20 * TICK_RATE, end), 'no goals: from here');
+});
+
+test('the range sliders show m:ss.d and the sheet an estimate of the file', () => {
+  assert.equal(C.timeText(0), '0:00.0');
+  assert.equal(C.timeText(75.5 * TICK_RATE), '1:15.5');
+  assert.equal(C.timeText(9 * TICK_RATE), '0:09.0');
+  assert.equal(C.estimateBytes(10, 'standard'), 6_250_000);
+  assert.ok(C.estimateBytes(10, 'max') > C.estimateBytes(10, 'high') && C.estimateBytes(10, 'high') > C.estimateBytes(10, 'standard'));
+  assert.equal(C.estimateBytes(-3, 'high'), 0);
+});
+
 test('the quality sets the video size, the frame rate and the bit rate: standard 720p, high and max 1080p, even sizes', () => {
   assert.deepEqual(C.clipSize('vertical', 'standard'), { w: 720, h: 1280 });
   assert.deepEqual(C.clipSize('vertical', 'high'), { w: 1080, h: 1920 });
