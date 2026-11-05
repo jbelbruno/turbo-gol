@@ -47,7 +47,8 @@
  * screen (against the AI, a server's, a P2P room's), from the scoreboard rows (name, team, bot: a
  * takeover's bot shows at once) at the views' drawn positions; a teammate of the player's own team
  * also shows its boost, read from the state every client simulates. Placed after the frame is drawn
- * (`render`), on its camera; none in the menus, the showroom or training.
+ * (`render`), on its camera; none in the menus, the showroom or training. Settings > HUD picks whose
+ * names show (every other car, the rivals', the teammates', none) and the teammates' meter.
  *
  * Long loads run behind the loading screen (src/ui/LoadingOverlay.ts, `withLoading`): a quality
  * switch (`switchQuality`: renderer tier, view rebuild, the world's new bake sizes, every pipeline
@@ -93,12 +94,14 @@
  * `#diag` (src/render/frameStats.ts): the loop feeds the frame times and the CPU of the ball
  * prediction, the bots, the physics step and the render call; nothing is measured without it.
  *
- * Settings (src/settings.ts: controls, camera, bindings, audio, touch, ui) are one live object
+ * Settings (src/settings.ts: controls, camera, bindings, audio, touch, ui, hud) are one live object
  * shared by Input (reads bindings / sensitivities, mutates them from the settings screen),
- * ChaseCamera (reads `camera` by reference), the touch controls (`touch`) and Ajustes. Every
- * change ends in `applySettings()`: save to localStorage, re-apply the dodge deadzone to the sim,
- * the camera projection, the volume, the touch controls' look and feel and the interface (size,
- * reduced motion: src/ui/device.ts).
+ * ChaseCamera (reads `camera` by reference), the touch controls (`touch`), the name tags (`hud`'s
+ * names and meters, through a getter) and Ajustes. Every change ends in `applySettings()`: save to
+ * localStorage, re-apply the dodge deadzone to the sim, the camera projection, the volume, the
+ * touch controls' look and feel, the interface (size, reduced motion: src/ui/device.ts) and what the
+ * player sees in a match (Settings > HUD: Hud.setView, the ball's ring); the ball's arrow, the
+ * controls card and the click hint read `hud` on every frame.
  *
  * Day stadiums (themeWorld(theme).night false) give the ball no shadow (`applyBallShadow`): under
  * a low sun it lands far from the ball and reads as a second landing marker. Only the ball mesh's
@@ -1187,10 +1190,13 @@ export class Game implements P2PGameHooks {
     this.timedMatch = new Match({ lengthSeconds: opts.matchLengthSeconds ?? DEFAULT_MATCH_SECONDS });
     this.match = this.timedMatch;
     this.hud = new Hud(opts.hudContainer);
+    // What the player chose to see (Settings > HUD), from the first frame; applySettings after each change.
+    this.hud.setView(settings.hud);
     // The name tags' layer goes first in the container: every HUD plate, the touch controls and the menus draw over it.
+    // They read the player's choice of names and meters (settings.hud) on every frame.
     const tagsRoot = document.createElement('div');
     opts.hudContainer.prepend(tagsRoot);
-    this.nameTags = new NameTags(tagsRoot);
+    this.nameTags = new NameTags(tagsRoot, () => settings.hud);
     this.loading = opts.loading ?? new LoadingOverlay(overlayHost(opts.hudContainer));
     // Touch screens only: the controls layer goes right after the Hud root and drives Input like a keyboard.
     this.touch = hasTouchScreen() ? new TouchControls(this.hud.root, { kbm: () => settings.bindings.kbm, holdJump: () => settings.controls.touchHoldJump, settings: () => settings.touch }) : null;
@@ -3578,8 +3584,9 @@ export class Game implements P2PGameHooks {
     const playing = this.playing && !this.carsFrozen;
     plan.tick(playing ? dt : 0);
     if (playing && this.training !== null && this.training.isFreeplay && hasCarInput(this.playerControls)) plan.drove();
-    // Not playing: paused, after the final whistle, a pack summary (the countdown counts as playing).
-    const view = inMenu || !this.playing || touchMode ? 'off' : plan.view;
+    // Not playing: paused, after the final whistle, a pack summary (the countdown counts as playing);
+    // nor with Settings > HUD's control hints off (the plan still counts its matches and seconds).
+    const view = inMenu || !this.playing || touchMode || !this.settings.hud.controls ? 'off' : plan.view;
     if (view === 'off') {
       hud.setControlsCard('off', null);
       return;
@@ -3914,6 +3921,10 @@ export class Game implements P2PGameHooks {
     // "Full screen when playing" off: the game's own full screen goes now, Android's tap stops.
     this.fullscreen?.setEnabled(s.ui.fullscreen);
     if (this.device !== null) applyUiSettings(s.ui);
+    // Settings > HUD at once, mid-match too: the HUD's parts and feed, the ball's ring (the name
+    // tags, the ball's arrow, the controls card and the click hint read settings.hud every frame).
+    this.hud.setView(s.hud);
+    this.ball.setGroundMarker(s.hud.ballMarker);
   }
 
   /** Cars take no input: kickoff countdown, goal pause, after the final whistle, in the menu. */
@@ -4505,7 +4516,9 @@ export class Game implements P2PGameHooks {
       } else {
         this.chase.update(camera, player.position, player.quaternion, this.ball.position, cs, this.paused ? 0 : dt, look);
       }
-      this.updateBallIndicator(camera, cur);
+      // The off-screen ball's arrow, unless the player turned it off (Settings > HUD).
+      if (this.settings.hud.ballIndicator) this.updateBallIndicator(camera, cur);
+      else this.hud.setBallIndicator(false);
     }
 
     // HUD.
@@ -4545,9 +4558,10 @@ export class Game implements P2PGameHooks {
     if (ds !== null) ds.add('render', performance.now() - tr);
 
     // The other cars' names on the camera this frame was drawn with, teammates (the boost meter)
-    // by the player's own team. None in the menus, the showroom or training (only the player's car).
+    // by the player's own team. None in the menus, the showroom or training (only the player's car),
+    // nor with Settings > HUD's names on none (the layer reads the rest of the choice itself).
     const tags = this.nameTags;
-    const tagsOn = !inMenu && this.showroom === null && this.training === null;
+    const tagsOn = !inMenu && this.showroom === null && this.training === null && this.settings.hud.names !== 'none';
     tags.setVisible(tagsOn);
     if (tagsOn) tags.update(camera, this.sbRows, cars, offs, cur, this.ball.position, this.playerIndex, this.sbRows[this.playerIndex]?.team ?? 0);
   }
@@ -4620,8 +4634,10 @@ export class Game implements P2PGameHooks {
       if (this.device !== null) this.device.notePadPresses(presses);
     }
     // Mouse look needs the pointer lock; pad players (a controller connected), fingers and keyboard-only
-    // players (no action on a mouse button: their live bindings) are not nagged.
-    hud.showHint(this.canPointerLock && !this.input.pointerLocked && !this.input.hasGamepad && this.playing && !touchMode && usesMouseButton(this.settings.bindings.kbm) ? POINTER_LOCK_HINT : null);
+    // players (no action on a mouse button: their live bindings) are not nagged, nor a player who
+    // turned the control hints off (Settings > HUD).
+    const settings = this.settings;
+    hud.showHint(this.canPointerLock && !this.input.pointerLocked && !this.input.hasGamepad && this.playing && !touchMode && settings.hud.controls && usesMouseButton(settings.bindings.kbm) ? POINTER_LOCK_HINT : null);
     if (this.goCaptionUntil >= 0 && this.time >= this.goCaptionUntil) {
       this.goCaptionUntil = -1;
       hud.showCountdown(null);
@@ -5133,6 +5149,7 @@ export class Game implements P2PGameHooks {
     const scene = this.renderer.scene;
     this.arena = new ArenaView(scene, this.arenaMesh, q, this.theme);
     this.ball = new BallView(scene, q);
+    this.ball.setGroundMarker(this.settings.hud.ballMarker);
     this.applyBallShadow();
     this.buildCarViews(q);
     this.placeViews();

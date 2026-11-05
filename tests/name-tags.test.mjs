@@ -459,6 +459,61 @@ test('playing red: the red teammate gets the meter, the blues none', () => {
   assert.equal(mate.fill.style.transform, 'scaleX(0.12)');
 });
 
+test('Settings > HUD through the Game\'s getter, read on every update: RIVALES, EQUIPO, NINGUNO, the teammates\' boost; a rival\'s meter never', () => {
+  const s = scene();
+  const view = { names: 'all', teamBoost: true };
+  const tags = new N.NameTags(s.root, () => view);
+  tags.setVisible(true);
+  const rows = [
+    { name: 'You', team: 0, you: true },
+    { name: 'Bot 1', team: 0, you: false },
+    { name: 'Jv_77_B', team: 1, you: false, bot: false },
+    { name: 'Lucho', team: 1, you: false, bot: false },
+  ];
+  const frame = () => {
+    tags.update(s.camera, rows, s.cars, s.offsets, s.state, s.ball, 0, 0);
+    return [1, 2, 3].map((i) => tagOf(s.root, i));
+  };
+  const shown = (ts) => ts.map((x) => !x.el.hidden);
+  // A hidden tag keeps the classes it last had: only a shown one counts.
+  const meters = (ts) => ts.map((x) => !x.el.hidden && x.classes.includes('tg-neon--meter'));
+  assert.deepEqual(shown(frame()), [true, true, true], 'TODOS');
+  assert.deepEqual(meters(frame()), [true, false, false]);
+  view.names = 'rivals';
+  let ts = frame();
+  assert.deepEqual(shown(ts), [false, true, true], 'RIVALES: the teammate goes, at once');
+  assert.deepEqual(meters(ts), [false, false, false]);
+  view.names = 'team';
+  ts = frame();
+  assert.deepEqual(shown(ts), [true, false, false], 'EQUIPO');
+  assert.deepEqual(meters(ts), [true, false, false]);
+  view.teamBoost = false;
+  ts = frame();
+  assert.deepEqual(shown(ts), [true, false, false]);
+  assert.deepEqual(meters(ts), [false, false, false], "the teammates' boost off: the name stays");
+  view.names = 'none';
+  assert.deepEqual(shown(frame()), [false, false, false], 'NINGUNO');
+  // Every choice, for a rival: no meter, and its boost never written.
+  for (const names of ['all', 'rivals', 'team', 'none']) {
+    for (const teamBoost of [true, false]) {
+      view.names = names;
+      view.teamBoost = teamBoost;
+      ts = frame();
+      for (const r of [ts[1], ts[2]]) {
+        assert.ok(!r.classes.includes('tg-neon--meter'), `${names} ${teamBoost}`);
+        assert.equal(r.fill.style.transform, undefined, `${names} ${teamBoost}`);
+      }
+    }
+  }
+  // Back to TODOS: every tag back over its car.
+  view.names = 'all';
+  view.teamBoost = true;
+  ts = frame();
+  assert.deepEqual(shown(ts), [true, true, true]);
+  assert.deepEqual(meters(ts), [true, false, false]);
+  assert.equal(tagOf(s.root, 0).el.hidden, true, 'never the own car');
+});
+
 test('the replay\'s layer: every car shows its boost, the followed car has no tag, a tag over the ball fades', () => {
   const s = scene();
   const tags = new N.NameTags(s.root);
@@ -1053,10 +1108,11 @@ test('the sheet draws the approved mockup\'s glows (Opción 4, "Neón de arena")
 
 test('the wiring: the Game tags every car but the player\'s own, teammates by its team, none in the menus, the showroom or training', () => {
   const game = read('src/game/Game.ts');
-  assert.match(game, /opts\.hudContainer\.prepend\(tagsRoot\);\s*this\.nameTags = new NameTags\(tagsRoot\);/, 'first in the HUD\'s container: under every plate');
+  assert.match(game, /opts\.hudContainer\.prepend\(tagsRoot\);\s*this\.nameTags = new NameTags\(tagsRoot, \(\) => settings\.hud\);/, 'first in the HUD\'s container: under every plate; the player\'s choice (Settings > HUD) read live');
   assert.match(
     game,
-    /const tagsOn = !inMenu && this\.showroom === null && this\.training === null;\s*tags\.setVisible\(tagsOn\);\s*if \(tagsOn\) tags\.update\(camera, this\.sbRows, cars, offs, cur, this\.ball\.position, this\.playerIndex, this\.sbRows\[this\.playerIndex\]\?\.team \?\? 0\);/,
+    /const tagsOn = !inMenu && this\.showroom === null && this\.training === null && this\.settings\.hud\.names !== 'none';\s*tags\.setVisible\(tagsOn\);\s*if \(tagsOn\) tags\.update\(camera, this\.sbRows, cars, offs, cur, this\.ball\.position, this\.playerIndex, this\.sbRows\[this\.playerIndex\]\?\.team \?\? 0\);/,
+    'names on NINGUNO: the layer is off, nothing projected',
   );
   assert.equal(game.match(/\.nameTags\b/g).length, 2, 'built once, driven from render only');
   // After the frame is drawn, on its camera.
@@ -1065,6 +1121,7 @@ test('the wiring: the Game tags every car but the player\'s own, teammates by it
 
 test('the wiring: the replay tags every car but the followed one, every meter shown, names as the page shows them, under the HUD and clear of its bars', () => {
   const player = read('src/replay/player.ts');
+  assert.match(player, /new NameTags\([^,()]+\)/, 'no view: Settings > HUD never reaches the replay viewer');
   assert.match(player, /tags\.update\(renderer\.camera, tagRows, cars, offsets, cur, ball\.position, camIndex >= CAM_CAR0 \? camIndex - CAM_CAR0 : -1, null\);/);
   assert.match(player, /const tagRows = roster\.map\(\(e, i\) => \(\{ name: shownName\[i\], team: e\.team, you: false, bot: e\.kind === 'bot' \}\)\);/);
   assert.match(player, /for \(let i = 0; i < tagRows\.length; i\+\+\) tagRows\[i\]\.bot = !run\.host\.isHumanSlot\(slots\[i\]\);/);

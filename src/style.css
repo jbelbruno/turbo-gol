@@ -225,6 +225,40 @@ body {
   display: flex;
 }
 
+/* ---- What the player chose to see (Settings > HUD: Hud.setView, src/render/hudView.ts) ------
+   Its switches show the fps alone (the info line stays F3's) and the speed; F3 still shows both
+   whole. A hud-no-* class hides its part with display: none, but the scorebug: visibility keeps its
+   box, the touch tap target of the full scoreboard (TouchControls). Off, the goal banner is a
+   screen reader's only (its role status still speaks). */
+
+.hud-root.hud-show-fps .hud-fps,
+.hud-root.hud-show-speed .hud-speed {
+  display: flex;
+}
+
+.hud-root.hud-show-fps:not(.hud-debug) .hud-fps-info {
+  display: none;
+}
+
+.hud-root.hud-no-score .hud-top {
+  visibility: hidden;
+}
+
+.hud-root.hud-no-boost .hud-boost,
+.hud-root.hud-no-cam .hud-cam,
+.hud-root.hud-no-bars .hud-bars,
+.hud-root.hud-no-controls ~ .trn-root .trn-keys {
+  display: none;
+}
+
+.hud-root.hud-sr-goal .hud-goal {
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .hud-fps {
   position: absolute;
   top: calc(var(--safe-top) + 8px);

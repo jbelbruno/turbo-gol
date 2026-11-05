@@ -26,6 +26,10 @@
  *               other way comes back only with a tag's height of room
  *   no tag      the viewer's own car (in a replay, the car the camera follows), a demolished car
  *               until it respawns, a point inside the camera's near plane
+ *   the player  Settings > HUD, read each frame through the Game's getter (src/render/hudView.ts):
+ *               names over every other car, the rivals', the teammates' or none, and a teammate's
+ *               meter on or off; a rival's meter never. The replay viewer passes none: every tag
+ *               and every meter, as before
  *
  * The model is pure (tagBucket, tagAnchor, clampTag, orderTags, declutterTags, overBall, tagClass...:
  * tests/name-tags.test.mjs).
@@ -38,8 +42,10 @@
  * src/ui/styles/nametags.css.
  */
 import * as THREE from 'three/webgpu';
+import type { HudSettings } from '../settings';
 import { BALL } from '../sim/constants';
 import { C_BOOST, C_IS_DEMOED } from '../sim/types';
+import { boostBarShown, tagShown as tagInView } from './hudView';
 
 /** A tag floats this far above its car's origin (uu). */
 export const TAG_HEIGHT = 140;
@@ -126,7 +132,7 @@ export function tagShown(i: number, self: number, demoed: boolean): boolean {
   return i !== self && !demoed;
 }
 
-/** A teammate's tag carries the boost meter, a rival's never; with no viewer team (a replay's spectator) every car's does. */
+/** A teammate's tag carries the boost meter (while the player keeps it: hudView.ts boostBarShown), a rival's never; with no viewer team (a replay's spectator) every car's does. */
 export function tagHasMeter(team: 0 | 1, viewerTeam: 0 | 1 | null): boolean {
   return viewerTeam === null || team === viewerTeam;
 }
@@ -356,9 +362,19 @@ const _eye = new THREE.Vector3();
 const _anchor: { x: number; y: number; side: TagSide } = { x: 0, y: 0, side: 0 };
 const _at = { x: 0, y: 0 };
 
-/** The DOM layer: `root` covers the picture (the Game's under the HUD, the replay's #tags); hidden until setVisible(true). */
+/** What the player chose to see of the tags (Settings > HUD: settings.hud). */
+export type TagView = Readonly<Pick<HudSettings, 'names' | 'teamBoost'>>;
+
+/** No view (the replay viewer): every tag, every meter. */
+const ALL_TAGS: TagView = { names: 'all', teamBoost: true };
+
+/**
+ * The DOM layer: `root` covers the picture (the Game's under the HUD, the replay's #tags); hidden
+ * until setVisible(true). `view`, read on every update: the player's choice (the Game's live settings).
+ */
 export class NameTags {
   private readonly root: HTMLElement;
+  private readonly view: () => TagView;
   /** An empty box at the safe inset (nametags.css .tg-tags-safe): the safe rect, measured with the layer. */
   private readonly probe: HTMLElement;
   private readonly tags: Tag[] = [];
@@ -372,8 +388,9 @@ export class NameTags {
   private h = 0;
   private readonly safe: SafeRect = { left: 0, top: 0, right: 0, bottom: 0 };
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, view: () => TagView = () => ALL_TAGS) {
     this.root = root;
+    this.view = view;
     root.classList.add('tg-tags');
     // The scoreboard says who is who; the tags only show where.
     root.setAttribute('aria-hidden', 'true');
@@ -432,13 +449,16 @@ export class NameTags {
     camera.updateMatrixWorld();
     _eye.setFromMatrixPosition(camera.matrixWorld);
     const tags = this.tags;
+    const view = this.view();
 
     // What each tag shows this frame: its step and side, its classes, its name and its boost.
     for (let i = 0; i < n; i++) {
       const t = tags[i];
       const row = rows[i];
       const off = offsets[i];
-      let shown = tagShown(i, self, state[off + C_IS_DEMOED] > 0.5);
+      // A teammate by the viewer's team (a replay's spectator: every car), for the player's choice and the meter.
+      const mate = tagHasMeter(row.team, viewerTeam);
+      let shown = tagShown(i, self, state[off + C_IS_DEMOED] > 0.5) && tagInView(view.names, mate);
       if (shown) {
         const p = cars[i].position;
         _v.set(p.x, p.y + TAG_HEIGHT, p.z);
@@ -469,7 +489,7 @@ export class NameTags {
         t.dirty = true;
       }
       const side = _anchor.side;
-      const meter = tagHasMeter(row.team, viewerTeam);
+      const meter = boostBarShown(view.names, view.teamBoost, mate);
       const bot = isBotRow(row);
       const key = tagKey(row.team, meter, bot, t.bucket, side);
       if (key !== t.key) {

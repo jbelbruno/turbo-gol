@@ -1965,6 +1965,8 @@ export default {
   'settings.tabCamera': 'Camera',
   // Tab: sensitivities, deadzones and other control options
   'settings.tabGameplay': 'Gameplay',
+  // Tab: what the screen shows during a match (scorebug, names over the cars, notices, readouts)
+  'settings.tabHud': 'HUD',
   // Tab: sound volume
   'settings.tabAudio': 'Audio',
   // Tab: graphics quality
@@ -2129,6 +2131,62 @@ export default {
   'settings.reducedMotionHelp': 'Nothing slides or bounces in the menus.',
   // Reduced motion's first option: follow the system's setting
   'settings.motionSystem': 'SYSTEM',
+  // HUD tab (src/ui/screens/settings/view.ts buildHud): line over the rows; each switch shows or
+  // hides a part of the match screen for this player only (settings.on / settings.off)
+  'settings.hudNote': 'What you see during a match',
+  // HUD tab: the group of the match screen's parts, then the group of the connection and the readouts
+  'settings.groupMatch': 'In the match',
+  'settings.groupPerformance': 'Performance',
+  // The score and clock plate, top left. Its help says how to see them while it is hidden: hold the
+  // scoreboard's key or pad button (action.scoreboard); in touch mode (HelpTap), tap its corner
+  'settings.hudScorebug': 'Score and clock',
+  'settings.hudScorebugHelp': 'When it is hidden, hold the scoreboard key or button to see it.',
+  'settings.hudScorebugHelpTap': 'When it is hidden, tap the top left corner to see it.',
+  // Whose cars get their player's name over them; the four options, uppercase
+  'settings.hudNames': 'Names over the cars',
+  'settings.hudNamesHelp': 'Never over your own car.',
+  'settings.hudNamesAll': 'ALL',
+  'settings.hudNamesRivals': 'RIVALS',
+  'settings.hudNamesTeam': 'TEAM',
+  'settings.hudNamesNone': 'NONE',
+  // Listed while the names include your teammates: a bar of their boost under their names
+  'settings.hudTeamBoost': "Your team's boost",
+  'settings.hudTeamBoostHelp': "A bar under each teammate's name. A rival's boost never shows.",
+  // The boost plate, bottom left (not listed in touch mode: BOOST shows the amount there)
+  'settings.hudBoost': 'Boost meter',
+  'settings.hudBoostHelp': 'Your boost, bottom left.',
+  // The ball's glyph pinned to the screen's edge when the ball is out of sight
+  'settings.hudBallIndicator': 'Ball off screen',
+  'settings.hudBallIndicatorHelp': 'An arrow at the edge points to the ball, with its distance.',
+  // The ring drawn on the floor under the ball while it flies
+  'settings.hudBallMarker': 'Ring under the ball',
+  'settings.hudBallMarkerHelp': 'A ring on the floor under the ball in the air.',
+  // The BALL CAM / CAR CAM pill (not listed in touch mode: CAM lights up there)
+  'settings.hudCamera': 'Camera indicator',
+  'settings.hudCameraHelp': 'Says at the bottom whether the camera follows the ball.',
+  // The big banner after a goal, with the scorer
+  'settings.hudGoal': 'Goal banner',
+  'settings.hudGoalHelp': 'The banner and the scorer. A screen reader still announces each goal.',
+  // The notices at the top when a player joins or leaves, or a bot takes a seat over (online)
+  'settings.hudPlayers': 'Player notices',
+  'settings.hudPlayersHelp': 'Who joins, who leaves and when a bot takes over a car.',
+  // The DEMOLISHED notice at the top (hud.demolished)
+  'settings.hudDemos': 'Demolition notice',
+  'settings.hudDemosHelp': 'DEMOLISHED and your count, at the top.',
+  // The controls card, the "click to move the camera with the mouse" hint, training's key hints (not listed in touch mode)
+  'settings.hudControls': 'Control hints',
+  'settings.hudControlsHelp': 'The controls card, the mouse hint and the training keys.',
+  // The three network bars by the clock in an online match
+  'settings.hudNetBars': 'Connection signal',
+  'settings.hudNetBarsHelp': 'The bars by the clock online. A dropped connection is still announced.',
+  // Frames per second, top right ("FPS" stays as is)
+  'settings.hudFps': 'Show FPS',
+  'settings.hudFpsHelp': 'Frames per second, top right.',
+  // The car's speed in km/h
+  'settings.hudSpeed': 'Speedometer',
+  'settings.hudSpeedHelp': 'Your speed in km/h.',
+  // HUD's head button: every row back to its default, uppercase
+  'settings.resetHud': 'RESET HUD',
   // Controls > Touch rows: the buttons' size (S / M / L), their opacity, the mirrored layout,
   // where the stick starts (where the thumb lands / always in its place), its deadzone, vibration
   'settings.touchSize': 'Button size',

@@ -1,5 +1,5 @@
 /**
- * Ajustes, pure (the Tablero plan PR 10; the owner's hub-ajustes-pc): the six tabs of the rail, the
+ * Ajustes, pure (the Tablero plan PR 10; the owner's hub-ajustes-pc): the seven tabs of the rail, the
  * device sections of CONTROLES (only the devices detected, the last one used first), the camera
  * preset the live values match, the quality trial (a tier applied comes back by itself 10 s later
  * unless kept), the memory tag of the heavy tiers, a binding's conflict and the sliders' maths.
@@ -12,13 +12,14 @@ import type { Quality } from '../../../render/quality';
 import type { InputKind } from '../../device';
 import type { IconName } from '../../components/icons';
 
-/** The rail, in the artboard's order. */
-export type SettingsTab = 'controls' | 'camera' | 'game' | 'audio' | 'graphics' | 'experimental';
+/** The rail, in the artboard's order; HUD (what a match shows, the owner's 2026-11-05) right after JUEGO. */
+export type SettingsTab = 'controls' | 'camera' | 'game' | 'hud' | 'audio' | 'graphics' | 'experimental';
 
 export const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTab; label: Key; icon: IconName }> = [
   { id: 'controls', label: 'settings.tabControls', icon: 'pad' },
   { id: 'camera', label: 'settings.tabCamera', icon: 'camera' },
   { id: 'game', label: 'settings.tabGameplay', icon: 'ball' },
+  { id: 'hud', label: 'settings.tabHud', icon: 'eye' },
   { id: 'audio', label: 'settings.tabAudio', icon: 'audio' },
   { id: 'graphics', label: 'settings.tabGraphics', icon: 'graphics' },
   // Always listed (no hidden tab for L / R): a guest's says it needs a sign-in.
