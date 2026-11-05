@@ -2,12 +2,13 @@
 // its proof in the replay, even when the node's wall clock and its simulation disagree (an event
 // loop stall makes the sim fall behind: advance() clamps dt). Also the TTL: armed by the control
 // plane's clock (RoomContext.serverNow) and only whistled in overtime. A match that started but has
-// not ticked yet cannot end with a replay (no record at tick 0): it is cancelled.
+// not ticked yet cannot end with a replay (no record at tick 0): it is cancelled. And the keepalive:
+// a socket that sends no Input or Ping for silentMs is closed, the node's own stalls aside.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { T, P, chaseInput, roster1v1, testBuild } from './helpers.mjs';
 
-const { MatchRoom } = await import('../node/matchRoom.ts');
+const { MatchRoom, DEFAULT_TIMINGS } = await import('../node/matchRoom.ts');
 const { LagHistogram } = await import('../node/ticker.ts');
 const { verifyReplay, FORFEIT_DC_TICKS, EMPTY_PROOF_TICKS } = await import('../shared/verify.ts');
 const { nodeSimFactory } = await import('../shared/nodeArena.ts');
@@ -478,4 +479,103 @@ test('a TTL that fires during regulation waits for overtime, then whistles a ttl
   const v = await verify(seen.ended.replay, assign, build, { leaves: [] });
   assert.equal(v.code, 'ok', `${v.code} ${v.message ?? ''}`);
   assert.equal(v.endReason, 'ttl');
+});
+
+// ---- 6. keepalive: a silent socket is closed ----------------------------------------------------
+
+function pingFrame() {
+  const b = new Uint8Array(P.PING_LEN);
+  P.encodePing(b, performance.now());
+  return b;
+}
+
+/** One Input frame for `tick` (zero controls), as a client sends ahead of the snapshots. */
+function inputFrame(tick) {
+  const out = new Uint8Array(P.INPUT_HEADER + T.PACKED_INPUT_BYTES);
+  return out.subarray(0, P.encodeInput(out, tick, 1, 0, new Int8Array(T.PACKED_INPUT_BYTES), 0));
+}
+
+/** Keep the fake socket's close() calls and the events the room sends it. */
+function watch(ws) {
+  ws.closes = [];
+  ws.events = [];
+  ws.close = (code, reason) => ws.closes.push({ code, reason });
+  ws.send = (b) => {
+    if (b instanceof Uint8Array && b[0] === P.MsgType.Event) ws.events.push(P.decodeJson(b));
+  };
+  return ws;
+}
+
+test('a socket with no Input or Ping for silentMs is closed (1008 silent): its slot is disconnected and the others are told', async () => {
+  const assign = assignment();
+  const { room } = await makeRoom(assign, { timings: { silentMs: 300 } });
+  const ws = [watch(join(room, assign, 0)), watch(join(room, assign, 1))];
+  // Slot 0 pings, slot 1 sends inputs, a few times a second (the client pings 4 times a second).
+  let inputs = true;
+  let tick = 0;
+  const iv = setInterval(() => {
+    ws[0].onmessage(pingFrame(), false);
+    if (inputs) ws[1].onmessage(inputFrame(++tick), false);
+  }, 50);
+  try {
+    await sleep(700); // over twice silentMs
+    assert.deepEqual(
+      ws.map((w) => w.closes),
+      [[], []],
+      'both alive',
+    );
+    inputs = false;
+    const quiet = performance.now();
+    await waitFor(() => ws[1].closes.length > 0, 2_000, 'the silent socket to close');
+    assert.ok(performance.now() - quiet >= 250, `closed ${Math.round(performance.now() - quiet)} ms after its last input`);
+    assert.deepEqual(ws[1].closes, [{ code: 1008, reason: 'silent' }]);
+    assert.equal(room.sockets, 1);
+    assert.equal(room.host['connected'][1], 0, 'its slot gets zero controls');
+    assert.equal(room.host['connected'][0], 1);
+    assert.deepEqual(
+      ws[0].events.filter((e) => e.type === 'playerLeft'),
+      [{ type: 'playerLeft', slot: 1 }],
+    );
+    await sleep(400);
+    assert.deepEqual(ws[0].closes, [], 'the socket that pings stays');
+  } finally {
+    clearInterval(iv);
+    room.dispose();
+  }
+  assert.equal(room['silentTimer'], null, 'the sweep stops with the room');
+});
+
+test("the keepalive is 10 s by default and counts only time the node was awake: the node's own stall is not the players' silence", async (t) => {
+  assert.equal(DEFAULT_TIMINGS.silentMs, 10_000);
+  await withFakeClock(async (clock) => {
+    const assign = assignment({ createdAt: clock.t });
+    const { room } = await makeRoom(assign);
+    t.after(() => room.dispose());
+    const ws = [watch(join(room, assign, 0)), watch(join(room, assign, 1))];
+    // The sweep by hand, on the fake clock (the room's own runs on real time: nothing here awaits).
+    const sweep = (ms) => {
+      clock.t += ms;
+      room['sweepSilent']();
+    };
+    // Slot 0 pings every second, slot 1 never says anything.
+    for (let s = 0; s < 5; s++) {
+      sweep(1_000);
+      ws[0].onmessage(pingFrame(), false);
+    }
+    sweep(60_000); // the node froze for a minute (GC, a busy machine): the sweep comes late
+    assert.deepEqual(
+      ws.map((w) => w.closes),
+      [[], []],
+      'a stall is not silence',
+    );
+    ws[0].onmessage(pingFrame(), false); // what came during the stall is read after the timers
+    for (let s = 0; s < 3; s++) {
+      sweep(1_000);
+      ws[0].onmessage(pingFrame(), false);
+    }
+    assert.deepEqual(ws[1].closes, [], '9 s of silence while awake');
+    sweep(1_000);
+    assert.deepEqual(ws[1].closes, [{ code: 1008, reason: 'silent' }], '10 s');
+    assert.deepEqual(ws[0].closes, []);
+  });
 });
