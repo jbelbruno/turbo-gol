@@ -2678,6 +2678,30 @@ export default {
   'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu · F: full screen',
   // The replay viewer's button (and its F key): full screen on, or off again
   'replay.fullscreen': 'Full screen',
+  // The replay viewer's Clip sheet: a goal or any stretch recorded into a video (no sound) and a link to the moment
+  'replay.clip': 'Clip / Share',
+  'replay.clipTitle': 'Clip or share',
+  'replay.clipGoal': 'Goal {n}',
+  'replay.clipHere': 'From {time} · {s} s',
+  'replay.clipWatch': 'Watch',
+  'replay.clipLink': 'Copy link',
+  'replay.clipLinkDone': 'Link copied',
+  'replay.clipLinkFailed': 'The link could not be copied.',
+  'replay.clipNoLink': 'A link needs a match from the servers; this file only makes clips.',
+  'replay.clipMake': 'Make clip',
+  'replay.clipFormat': 'Format',
+  'replay.clipVertical': '9:16 · TikTok · Reels · Shorts',
+  'replay.clipNames': 'Show the scorer\'s name',
+  'replay.clipRecording': 'Recording',
+  'replay.clipCancel': 'Cancel',
+  'replay.clipReady': 'Your clip is ready',
+  'replay.clipMeta': '{s} s · {size} · {ext}, no sound',
+  'replay.clipDownload': 'Download',
+  'replay.clipShare': 'Share',
+  'replay.clipClose': 'Close',
+  'replay.clipHint': 'Upload it to TikTok, Instagram Reels or YouTube Shorts and add your music there.',
+  'replay.clipFailed': 'The clip could not be recorded. Try again, or use a recent Chrome, Edge or Safari.',
+  'replay.clipUnsupported': 'This browser cannot record video. Use a recent Chrome, Edge or Safari to make clips; the links still work.',
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
   // Its consent covers what it names: storage in the United States, Brazil, Germany, Malaysia, South Africa and Australia (the Cloudflare and project servers' countries; the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)

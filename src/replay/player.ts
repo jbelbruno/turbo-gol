@@ -49,6 +49,8 @@ import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
 import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
+import { CLIP_FORMATS, CLIP_HERE_SECONDS, ClipRecorder, canRecordClips, clipFileName, clipFrom, clipWindow, fitBox, shareUrl } from './clip';
+import type { ClipFormat, ClipResult } from './clip';
 import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
 import { clockText, el } from './list';
@@ -245,6 +247,10 @@ export interface PlayerOptions {
   hudRoot: HTMLElement;
   tagsRoot: HTMLElement;
   bar: HTMLElement;
+  /** The match's id when it came from the server (a goal's link needs it), null for a local file. */
+  matchId: string | null;
+  /** A link's ?t=: the goal tick to open at (null: from the start). */
+  startTick: number | null;
 }
 
 /** Play `replay` on the page: the views, the HUD, the name tags and the control bar. Returns its stop (the loop ends). */
@@ -316,6 +322,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const goals = [...o.scan.goals].sort((a, b) => a.tick - b.tick);
   const prevGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.prevGoal')) as HTMLButtonElement;
   const nextGoalBtn = el('button.rp-btn', { type: 'button' }, t('replay.nextGoal')) as HTMLButtonElement;
+  const clipBtn = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.clip')) as HTMLButtonElement;
   // The chase cameras' own controls: ball cam or car cam, and how far behind (shown with a car's camera).
   const ballCamBtn = el('button.rp-btn', { type: 'button' }, '') as HTMLButtonElement;
   const distSlider = el('input', { type: 'range', min: String(CHASE_MIN), max: String(CHASE_MAX), step: '10', 'aria-label': t('replay.distance') }) as HTMLInputElement;
@@ -327,7 +334,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   document.addEventListener('fullscreenchange', () => fullscreenBtn.setAttribute('aria-pressed', String(document.fullscreenElement != null)));
   o.bar.replaceChildren(
     el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time),
-    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
+    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, clipBtn, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
   );
   o.bar.classList.remove('rp-hidden');
 
@@ -537,12 +544,15 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     if (e.code === 'Escape') {
       e.preventDefault();
       const act = escMenuAction(menuOpen, e.repeat, escLocked());
-      if (act === 'open') setMenu(true);
+      if (act === 'open') {
+        if (clipJob !== null) cancelClip();
+        else setMenu(true);
+      }
       else if (act === 'close') setMenu(false);
       else if (act === 'arm') escArmedAt = performance.now();
       return;
     }
-    if (menuOpen) return;
+    if (menuOpen || clipJob !== null) return;
     if (e.target instanceof HTMLSelectElement || (e.target instanceof HTMLInputElement && e.target.type !== 'range')) return;
     if (e.code === 'Space') {
       e.preventDefault();
@@ -593,6 +603,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
         const g = goalAt.get(e.tick);
         const scorer = g && g.slot >= 0 ? (shownName[g.slot] ?? null) : null;
         hud.showGoal(e.team, scorer, e.blue, e.red);
+        lastGoal = { tick: e.tick, team: e.team, scorer };
       } else if (e.type === 'ended') showEnd(e.winner, e.blue, e.red);
     }
   };
@@ -732,6 +743,282 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       history.pushState({ tgReplay: 1 }, '');
     } else history.back();
   });
+
+  // ---- clips and links ------------------------------------------------------------------------
+  // The Clip panel: each goal with Watch / Link / Clip, a clip from the current moment, the format.
+  // A clip seeks to its start, plays once at 1x with the page's chrome hidden and the canvas in the
+  // clip's shape, and records every drawn frame (clip.ts); then a result sheet offers the file.
+  const clipSupported = canRecordClips();
+  let clipFormat: ClipFormat = 'vertical';
+  let clipNames = true;
+  let clipUrl: string | null = null;
+  /** The goal the last event showed: its caption goes on the frames after it (the DOM banner is not recorded). */
+  let lastGoal: { tick: number; team: 0 | 1; scorer: string | null } | null = null;
+  interface ClipJob {
+    phase: 'seek' | 'rec';
+    start: number;
+    end: number;
+    goalTick: number | null;
+    rec: ClipRecorder | null;
+    savedSpeed: number;
+    thumbAt: number;
+  }
+  let clipJob: ClipJob | null = null;
+  const clipPanel = el('div.rp-menu.rp-hidden', { role: 'dialog', 'aria-modal': 'true', 'aria-label': t('replay.clipTitle') });
+  const recText = el('span.rp-rec-time', null, '');
+  const recCancel = el('button.rp-btn', { type: 'button' }, t('replay.clipCancel')) as HTMLButtonElement;
+  const recHud = el('div.rp-rec.rp-hidden', null, el('span.rp-rec-dot'), el('span', null, t('replay.clipRecording')), recText, recCancel);
+  app.append(clipPanel, recHud);
+
+  const goalLead = (g: { tick: number }): number => Math.max(0, g.tick - GOAL_LEAD_SECONDS * TICK_RATE);
+  const linkFor = (tick: number): string | null => (o.matchId === null ? null : shareUrl(location.href, o.matchId, tick));
+  /** Copy a link to the moment (the phone's share sheet where it has no clipboard), true when it went. */
+  const shareLink = async (tick: number): Promise<boolean> => {
+    const url = linkFor(tick);
+    if (url === null) return false;
+    try {
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      try {
+        await navigator.share({ url, title: 'Turbogol' });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  };
+  const closeClipPanel = (): void => {
+    clipPanel.classList.add('rp-hidden');
+    if (clipUrl !== null) {
+      URL.revokeObjectURL(clipUrl);
+      clipUrl = null;
+    }
+  };
+  const fitStage = (): void => {
+    const f = CLIP_FORMATS[clipFormat];
+    const b = fitBox(window.innerWidth, window.innerHeight, f.w, f.h);
+    const s = renderer.gpu.domElement.style;
+    s.inset = 'auto';
+    s.left = `${b.left}px`;
+    s.top = `${b.top}px`;
+    s.width = `${b.width}px`;
+    s.height = `${b.height}px`;
+  };
+  const enterClipMode = (): void => {
+    document.body.classList.add('rp-clip');
+    fitStage();
+  };
+  const leaveClipMode = (): void => {
+    document.body.classList.remove('rp-clip');
+    const s = renderer.gpu.domElement.style;
+    s.inset = s.left = s.top = s.width = s.height = '';
+    recHud.classList.add('rp-hidden');
+  };
+  window.addEventListener('resize', () => {
+    if (clipJob !== null) fitStage();
+  });
+  const cancelClip = (): void => {
+    const job = clipJob;
+    if (job === null) return;
+    clipJob = null;
+    job.rec?.cancel();
+    leaveClipMode();
+    speed = job.savedSpeed;
+    speedSel.value = String(speed);
+    setPlaying(false);
+  };
+  recCancel.addEventListener('click', cancelClip);
+
+  const startClip = (range: { start: number; end: number }, goalTick: number | null): void => {
+    closeClipPanel();
+    clipJob = { phase: 'seek', start: range.start, end: range.end, goalTick, rec: null, savedSpeed: speed, thumbAt: goalTick === null ? Math.round((range.start + range.end) / 2) : goalTick + Math.round(0.6 * TICK_RATE) };
+    speed = 1;
+    speedSel.value = '1';
+    setPlaying(false);
+    lastGoal = null;
+    enterClipMode();
+    recText.textContent = '';
+    recHud.classList.remove('rp-hidden');
+    seekTo(range.start);
+  };
+  /** The frame loop's clip step, once per drawn frame: begin recording when the seek landed, copy the frame, end at the range's end. */
+  const clipStep = (now: number): void => {
+    const job = clipJob;
+    if (job === null) return;
+    if (job.phase === 'seek') {
+      if (seekTarget >= 0 || restarting) return;
+      try {
+        job.rec = new ClipRecorder(renderer.gpu.domElement, clipFormat);
+        job.rec.start();
+      } catch (e) {
+        console.error('clip: cannot record', e);
+        cancelClip();
+        showClipSheet({ error: t('replay.clipFailed') });
+        return;
+      }
+      job.phase = 'rec';
+      setPlaying(true);
+      return;
+    }
+    const rec = job.rec;
+    if (rec === null) return;
+    const m = run.host.match;
+    const tick = run.host.currentTick;
+    const goal = lastGoal !== null && tick >= lastGoal.tick && tick - lastGoal.tick < 2.5 * TICK_RATE ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null } : null;
+    rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
+    if (tick >= job.thumbAt) rec.snapshot();
+    recText.textContent = `${Math.floor(rec.seconds)} s`;
+    if (tick >= job.end || tick >= endTick) {
+      clipJob = null;
+      leaveClipMode();
+      speed = job.savedSpeed;
+      speedSel.value = String(speed);
+      setPlaying(false);
+      rec.finish().then(
+        (res) => showClipSheet({ result: res, goalTick: job.goalTick, at: job.start }),
+        (e: unknown) => {
+          console.error('clip: recording failed', e);
+          showClipSheet({ error: t('replay.clipFailed') });
+        },
+      );
+    }
+  };
+
+  const mb = (n: number): string => `${(n / 1048576).toFixed(1)} MB`;
+  /** The sheet after a recording: the preview frame, the file and where it can go. */
+  function showClipSheet(s: { result?: ClipResult; error?: string; goalTick?: number | null; at?: number }): void {
+    const panel = el('div.rp-menu-panel.rp-clip-panel');
+    panel.append(el('span.rp-eyebrow', null, t(s.result ? 'replay.clipReady' : 'replay.clipTitle')));
+    if (!s.result) {
+      panel.append(el('p.rp-clip-note', null, s.error ?? t('replay.clipFailed')));
+    } else {
+      const r2 = s.result;
+      const name = clipFileName(o.matchId, s.goalTick ?? s.at ?? 0, r2.ext);
+      if (clipUrl !== null) URL.revokeObjectURL(clipUrl);
+      clipUrl = URL.createObjectURL(r2.blob);
+      panel.append(el('img.rp-clip-thumb', { alt: '', src: r2.thumb }), el('p.rp-clip-note', null, t('replay.clipMeta', { s: Math.round(r2.seconds), size: mb(r2.blob.size), ext: r2.ext.toUpperCase() })));
+      const main = el('div.rp-clip-open');
+      main.append(el('a.rp-btn.rp-primary', { href: clipUrl, download: name }, t('replay.clipDownload')));
+      panel.append(main);
+      const file = new File([r2.blob], name, { type: r2.blob.type });
+      if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
+        const share = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.clipShare'));
+        share.addEventListener('click', () => {
+          navigator.share({ files: [file], title: 'Turbogol' }).catch(() => undefined);
+        });
+        main.append(share);
+      }
+      const gt = s.goalTick ?? null;
+      if (gt !== null && o.matchId !== null) {
+        const link = el('button.rp-btn', { type: 'button' }, t('replay.clipLink')) as HTMLButtonElement;
+        link.addEventListener('click', () => {
+          void shareLink(gt).then((ok) => {
+            link.textContent = t(ok ? 'replay.clipLinkDone' : 'replay.clipLink');
+          });
+        });
+        main.append(link);
+      }
+      panel.append(el('p.rp-clip-note.rp-clip-dim', null, t('replay.clipHint')));
+      const open = el('div.rp-clip-open');
+      for (const [label, href] of [
+        ['TikTok', 'https://www.tiktok.com/upload'],
+        ['Instagram', 'https://www.instagram.com/'],
+        ['YouTube Studio', 'https://studio.youtube.com/'],
+      ]) {
+        open.append(el('a.rp-btn', { href, target: '_blank', rel: 'noopener noreferrer' }, label));
+      }
+      panel.append(open);
+    }
+    const close = el('button.rp-btn', { type: 'button' }, t('replay.clipClose'));
+    close.addEventListener('click', closeClipPanel);
+    panel.append(close);
+    clipPanel.replaceChildren(panel);
+    clipPanel.classList.remove('rp-hidden');
+  }
+
+  /** The panel: one row per goal, a row for this moment, and the clip's format. */
+  const openClipPanel = (): void => {
+    setPlaying(false);
+    const panel = el('div.rp-menu-panel.rp-clip-panel');
+    panel.append(el('span.rp-eyebrow', null, t('replay.clipTitle')));
+    const status = el('p.rp-clip-note.rp-clip-dim', null, o.matchId === null ? t('replay.clipNoLink') : '');
+    const rows = el('div.rp-clip-rows');
+    const addRow = (label: string, team: 0 | 1 | null, tick: number, onWatch: (() => void) | null, range: { start: number; end: number }, goalTick: number | null): void => {
+      const row = el('div.rp-clip-row');
+      row.append(el(`span.rp-dot${team === null ? '' : team === 0 ? '.rp-blue' : '.rp-red'}`), el('span.rp-clip-label', null, label));
+      const acts = el('span.rp-clip-acts');
+      if (onWatch) {
+        const w = el('button.rp-btn', { type: 'button' }, t('replay.clipWatch'));
+        w.addEventListener('click', onWatch);
+        acts.append(w);
+      }
+      if (o.matchId !== null) {
+        const l = el('button.rp-btn', { type: 'button' }, t('replay.clipLink')) as HTMLButtonElement;
+        l.addEventListener('click', () => {
+          void shareLink(tick).then((ok) => {
+            status.textContent = ok ? t('replay.clipLinkDone') : t('replay.clipLinkFailed');
+          });
+        });
+        acts.append(l);
+      }
+      const c = el('button.rp-btn.rp-primary', { type: 'button' }, t('replay.clipMake')) as HTMLButtonElement;
+      c.disabled = !clipSupported;
+      c.addEventListener('click', () => startClip(range, goalTick));
+      acts.append(c);
+      row.append(acts);
+      rows.append(row);
+    };
+    goals.forEach((g, i) => {
+      const who = g.slot >= 0 ? (shownName[g.slot] ?? '') : '';
+      addRow(
+        `${t('replay.clipGoal', { n: i + 1 })} · ${clockText(g.tick)}${who ? ` · ${who}` : ''}`,
+        g.team,
+        g.tick,
+        () => {
+          closeClipPanel();
+          seekTo(goalLead(g));
+          setPlaying(true);
+        },
+        clipWindow(g.tick, endTick),
+        g.tick,
+      );
+    });
+    const here = pos();
+    addRow(t('replay.clipHere', { time: clockText(here), s: CLIP_HERE_SECONDS }), null, here, null, clipFrom(here, endTick), null);
+    panel.append(rows);
+    const fmt = el('div.rp-fgroup', { role: 'radiogroup', 'aria-label': t('replay.clipFormat') });
+    for (const [key, label] of [
+      ['vertical', t('replay.clipVertical')],
+      ['square', '1:1'],
+      ['wide', '16:9'],
+    ] as Array<[ClipFormat, string]>) {
+      const b = el('button.rp-fchip', { type: 'button', role: 'radio', 'aria-pressed': String(clipFormat === key) }, label) as HTMLButtonElement;
+      b.addEventListener('click', () => {
+        clipFormat = key;
+        for (const x of fmt.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+      });
+      fmt.append(b);
+    }
+    const names = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    names.checked = clipNames;
+    names.addEventListener('change', () => {
+      clipNames = names.checked;
+    });
+    panel.append(fmt, el('label.rp-clip-check', null, names, t('replay.clipNames')), status);
+    if (!clipSupported) panel.append(el('p.rp-clip-note', null, t('replay.clipUnsupported')));
+    const close = el('button.rp-btn', { type: 'button' }, t('replay.clipClose'));
+    close.addEventListener('click', closeClipPanel);
+    panel.append(close);
+    clipPanel.replaceChildren(panel);
+    clipPanel.classList.remove('rp-hidden');
+  };
+  clipBtn.addEventListener('click', openClipPanel);
+  clipPanel.addEventListener('click', (e) => {
+    if (e.target === clipPanel) closeClipPanel();
+  });
+  if (o.startTick !== null) seekTo(Math.max(0, Math.min(endTick, o.startTick) - GOAL_LEAD_SECONDS * TICK_RATE));
+
   updateCamUi();
   let stopped = false;
   const frame = (now: number): void => {
@@ -783,6 +1070,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     lastDrawn = now;
     draw(seekTarget >= 0 || !playing ? 1 : acc / TICK_DT, playing && seekTarget < 0 ? drawDt * speed : 0);
     updateHud();
+    clipStep(now);
   };
   requestAnimationFrame(frame);
   return () => {

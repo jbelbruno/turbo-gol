@@ -110,6 +110,30 @@
       .rp-menu-panel .rp-btn { justify-content: center; min-height: 44px; }
       #notice { position: absolute; left: 50%; top: calc(var(--safe-top) + 96px); transform: translateX(-50%); max-width: min(640px, calc(100% - 32px)); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-panel); background: var(--surface-0-94); border: 1px solid var(--warn); color: var(--text); font-size: var(--t-small); text-align: center; pointer-events: auto; }
       #notice.rp-ok { border-color: var(--ok-glow, var(--ok)); color: var(--text-2); }
+      /* Clip / Share: the sheet (the pause menu's panel, wider), the recording indicator, and the clip mode (the canvas in the clip's shape, the page's chrome hidden: player.ts) */
+      .rp-clip-panel { width: min(560px, 100%); max-height: calc(100% - 32px); overflow-y: auto; }
+      .rp-clip-rows { display: grid; gap: var(--sp-2); }
+      .rp-clip-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-key); background: var(--surface-2); border: 1px solid var(--edge); }
+      .rp-clip-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: var(--t-small); }
+      .rp-clip-acts { display: inline-flex; gap: var(--sp-2); flex: none; }
+      .rp-clip-acts .rp-btn { min-height: 32px; padding: 0 var(--sp-3); }
+      .rp-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); }
+      .rp-dot.rp-blue { background: var(--blue); } .rp-dot.rp-red { background: var(--red); }
+      .rp-clip-check { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--t-small); }
+      .rp-clip-check input { accent-color: var(--brand); }
+      .rp-clip-note { margin: 0; color: var(--text-2); font-size: var(--t-small); }
+      .rp-clip-dim { color: var(--text-3); }
+      .rp-clip-thumb { width: 100%; max-height: 34vh; object-fit: contain; border-radius: var(--r-key); background: #05070d; }
+      .rp-clip-open { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+      .rp-clip-open .rp-btn { min-height: 32px; flex: 1 1 auto; justify-content: center; }
+      .rp-rec { position: absolute; left: 50%; top: calc(var(--safe-top) + 12px); transform: translateX(-50%); z-index: 9; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-pill); background: var(--surface-0-94); border: 1px solid var(--red); color: var(--text); font: 800 var(--t-small) / 1 var(--font-body); letter-spacing: 0.06em; pointer-events: auto; }
+      .rp-rec .rp-btn { min-height: 28px; padding: 0 var(--sp-3); }
+      .rp-rec { white-space: nowrap; }
+      @media (max-width: 520px) { .rp-clip-row { flex-wrap: wrap; } .rp-clip-label { flex-basis: calc(100% - 24px); } .rp-clip-acts { margin-left: auto; } }
+      .rp-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: rp-blink 1s steps(2, start) infinite; }
+      @keyframes rp-blink { to { opacity: 0.25; } }
+      body.rp-clip #bar, body.rp-clip #hud, body.rp-clip #tags, body.rp-clip #notice, body.rp-clip .rp-exit { display: none !important; }
+      body.rp-clip #app { background: #000; }
       #error { position: absolute; inset: 0; display: grid; place-content: center; gap: var(--sp-4); text-align: center; padding: 16px; pointer-events: auto; }
     </style>
   </head>
