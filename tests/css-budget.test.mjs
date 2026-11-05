@@ -340,9 +340,16 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // touch.css's place for the speed under the small buttons (157 B) and settings.css's "Se guarda
 // solo" card kept off computers under 700 tall, where the seventh tab takes its room (27 B):
 // 178,312 B. The cap rises by exactly those 647 B, keeping the 397 B it had to spare.
+// "Mis servidores" (Prompt 2, P2-3: the screen, the FINAL's REPORTAR SERVIDOR, JUEGO's "Solo
+// servidores del proyecto", the panel's Operadores and opening control) is drawn with the panel's
+// (nodes.css), PERFIL's (profile.css) and GARAJE's QR card (garage.css) classes, plus its review's
+// type-scale rules: the screen's buttons in the Heading role (nodes.css, 43 B: a .mn-btn's 15 px is
+// under a TV's floor), REPORTAR SERVIDOR in the scale at a finger's 44 px and the server's line
+// wrapping in every shell, the upright tabs' too (final.css, 131 B): 178,486 B (178,312 B before).
+// The cap rises by exactly those 174 B, keeping the 397 B it had to spare.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 178_709;
+const CSS_BUDGET = 178_883;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

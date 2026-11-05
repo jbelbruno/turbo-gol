@@ -340,6 +340,8 @@ export class BackGuard {
     // A join link typed or opened in this tab (#sala=ABC234: screens/lobby.ts installJoinLink) is a
     // navigation to it, not a Back.
     if (typeof location !== 'undefined' && /(?:^#|&)sala=/.test(location.hash)) return;
+    // So is "Mis servidores"' link (#servers: screens/servers.ts installServersLink), typed or opened here.
+    if (typeof location !== 'undefined' && /(?:^#|&)servers(?:&|$)/.test(location.hash)) return;
     // Off the sentinel, onto the page's own entry: one step back, then re-armed.
     this.armed = false;
     this.seq = 0;

@@ -1338,9 +1338,10 @@ test("the arbiter's 'account' step: an /account#reset link waits while #auth=con
   }
 });
 
-test("Game.ts runs the mailed links in the arbiter: 'auth', then 'account', then 'tv'", async () => {
+test("Game.ts runs the mailed links in the arbiter: 'auth', then 'account', then #servers (Prompt 2, B1), then 'tv'", async () => {
   const game = await readFile(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
-  assert.match(game, /new UrlSheets\(\['auth', 'account', 'tv'\] as const\)/);
+  assert.match(game, /new UrlSheets\(\['auth', 'account', 'servers', 'tv'\] as const\)/);
+  assert.match(game, /installServersLink\(this\.menu, \(\) => this\.urlSheets\.turn\('servers'\)\)[\s\S]{0,160}\.finally\(\(\) => this\.urlSheets\.done\('servers'\)\)/);
   assert.match(game, /installAccountLinks\(this\.menu, \(\) => this\.urlSheets\.turn\('account'\)\)[\s\S]{0,160}\.finally\(\(\) => this\.urlSheets\.done\('account'\)\)/);
   assert.match(game, /installTvLink\(this\.menu, \(\) => this\.urlSheets\.turn\('tv'\)\)/);
   assert.match(fnOf(LINKS, 'installAccountLinks'), /await turn\(\);[\s\S]*await openAccountLink\(menu, link\);\s*return sheetsClosed\(menu\);/, 'done once its sheets are over');

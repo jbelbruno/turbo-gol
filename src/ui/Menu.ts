@@ -193,6 +193,13 @@ export interface MenuConfig {
   queue?: QueueTimes | null;
   /** GET /api/config legal.terms: the terms version in force, null or absent until the owner publishes them (Inicio's footer links them then). */
   terms?: string | null;
+  /**
+   * GET /api/config's hosting (Prompt 2, decision 1): `open` once anyone outside the project may host
+   * (a canary or everyone); absent or closed, the game shows none of the hosting screens, nor
+   * "Solo servidores del proyecto" unless the player has it on (screens/serversModel.ts hostingOpen;
+   * the community server's mark and REPORTAR SERVIDOR follow the Worker's mark, never this).
+   */
+  hosting?: { open: boolean; stage: 'closed' | 'canary' | 'all' } | null;
 }
 
 /** What the menus see of the experimental features (Settings > Experimental). */
@@ -1895,12 +1902,12 @@ export class Menu {
   }
 
   /**
-   * The points pill: on GARAJE's and PERFIL's roots (a guest's 0 too), the balance the garage read
-   * last; an account's shop is read once when PERFIL comes first. Written on a change only.
+   * The points pill: on GARAJE's and PERFIL's roots and on "Mis servidores" (a guest's 0 too), the
+   * balance the garage read last; an account's shop is read once when PERFIL comes first. Written on a change only.
    */
   private renderPointsPill(): void {
     const id = this.top()?.id;
-    const show = this.visibleNow && (id === 'garage' || id === 'profile');
+    const show = this.visibleNow && (id === 'garage' || id === 'profile' || id === 'servers');
     const g = this.host.garage.store;
     if (show && g.signedIn && g.shop === null && !g.loading && g.error === null) void g.refresh();
     if (this.pointsPill.set(show ? formatPoints(g.shop?.wallet.balance ?? 0) : null)) this.fitNow();

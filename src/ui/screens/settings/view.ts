@@ -139,6 +139,13 @@ export interface SettingsOptions {
   setResolutionScale(pct: number): void;
   setFpsCap(cap: FpsCap): void;
   setMenuSceneAnimated(on: boolean): void;
+  /**
+   * JUEGO's "Solo servidores del proyecto" (Prompt 2, A15): present once GET /api/config says
+   * hosting is open (decision 1: the row stays hidden, and nothing is sent, before), and while the
+   * player has it on (serversModel.ts projectOnlyShown); the menus' prefs keep it, and a running
+   * search carries a change (Game.settingsOptions).
+   */
+  readonly projectOnly?: { get(): boolean; set(on: boolean): void };
 }
 
 /** What the host gives the view. */
@@ -326,6 +333,8 @@ export class SettingsView {
   /** The scorebug row's help: how to see it hidden, by the device (refreshHudRows). */
   private hudScoreHelp: HTMLElement | null = null;
   private langValue: HTMLElement | null = null;
+  /** JUEGO's "Solo servidores del proyecto" group and row: hidden while the options do not carry it (hosting dark). */
+  private projectOnlyRow: HTMLElement | null = null;
   private readonly savedLine: HTMLElement;
   private qualityLine: HTMLElement | null = null;
   private trialBar: HTMLElement | null = null;
@@ -717,7 +726,13 @@ export class SettingsView {
   }
 
   private buildGame(): [HTMLElement, HTMLElement | null] {
-    const page = h('div.mn-set-game', null, ...CONTROL_ROWS.game.map((r) => this.controlRow(r.key, r.label)), this.group(t('settings.groupInterface')));
+    // "Solo servidores del proyecto" (Prompt 2, A15): built once like every row, hidden until the
+    // options carry it (hosting open, or the switch on: refreshAll), so nothing of it shows while dark.
+    const onlyText = t('settings.projectOnly');
+    const only = toggleSwitch('set-project-only', onlyText, () => this.opts?.projectOnly?.get() ?? false, (v) => this.opts?.projectOnly?.set(v));
+    this.refreshers.push(only.refresh);
+    this.projectOnlyRow = h('div.mn-set-projectonly', { hidden: true }, this.group(t('settings.groupServers')), setRow(onlyText, only.el, t('settings.projectOnlyHelp')));
+    const page = h('div.mn-set-game', null, ...CONTROL_ROWS.game.map((r) => this.controlRow(r.key, r.label)), this.projectOnlyRow, this.group(t('settings.groupInterface')));
     const language = this.hooks.language;
     if (language !== undefined) {
       this.langValue = h('span.mn-set-picker-value');
@@ -1023,6 +1038,8 @@ export class SettingsView {
     }
     this.refreshSizes();
     this.refreshHudRows();
+    // "Solo servidores del proyecto" once hosting is open, or while it is on (the options carry it then).
+    if (this.projectOnlyRow !== null) this.projectOnlyRow.hidden = this.opts?.projectOnly === undefined;
   }
 
   /**

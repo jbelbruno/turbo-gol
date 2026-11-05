@@ -106,6 +106,87 @@ export interface MineAnswer {
   channel?: { stable: string; minimum: string } | null;
 }
 
+/**
+ * The opening of hosting as the maintainers see it (GET /nodes/admin/overview `hosting`, Prompt 2
+ * A1: nodeOverview.ts HostingView): the KV flag node_operators raw (a canary's account ids
+ * included), its stage, whether the terms in force describe hosting (closed below
+ * NODE_HOSTING_TERMS whatever the flag says), its latest changes and whether the community nodes'
+ * staff-only channel has its webhook. Absent from a server of before the opening's flag.
+ */
+export interface HostingView {
+  flag: string;
+  raw: string | null;
+  stage: 'closed' | 'canary' | 'all';
+  terms: { inForce: boolean; version: string | null; needed: string | null };
+  changes: Array<{ id: number; at: number; actor: string; flag: string; old: string | null; new: string | null; reason: string | null }>;
+  communityWebhook: boolean;
+}
+
+/** A player's report reason (server/src/nodeStore.ts REPORT_REASONS, the same list): its car did not answer, lag only for them, a drop, something else. */
+export const REPORT_REASONS = ['unresponsive', 'lag', 'disconnected', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+/** One community operator for the Operadores tab (GET /nodes/admin/operators: nodeOverview.ts operatorView). */
+export interface OperatorView {
+  operatorId: string;
+  name: string | null;
+  status: 'ok' | 'blocked';
+  reason: string | null;
+  actor: string | null;
+  at: number | null;
+  showPublic: boolean;
+  nodes: Array<{ nodeId: string; name: string; region: string; status: NodeStatus; online: boolean; retired: boolean; capacity: number; capacityEffective: number; assigned: number; refused: number; seenContinent: string | null }>;
+  refusalRate: number;
+  tokens: { today: number; unused: number };
+  running: { matches: number; max: number };
+  points: { today: number; cap: number | null; d30: number; matches30d: number; earned: number; concentration: number };
+  /** The players' reports of the last `days` (A16): never a sanction alone, several accounts about one server are the signal. */
+  reports: {
+    days: number;
+    count: number;
+    accounts: number;
+    byReason: Record<ReportReason, number>;
+    byNode: Array<{ nodeId: string; reports: number; accounts: number }>;
+    recent: Array<{ at: number; reporterId: string; matchId: string; nodeId: string; reason: ReportReason; ping: number | null; corrections: number | null }>;
+  };
+}
+
+/** GET /nodes/admin/operators's body, leniently: each operator with its lists there, a reason the client does not know counted as 'other'. */
+export function operatorsOf(b: unknown): { at: number; operators: OperatorView[] } {
+  const o = (b ?? {}) as { at?: unknown; operators?: unknown };
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const operators = arr<Partial<OperatorView>>(o.operators)
+    .filter((x) => typeof x?.operatorId === 'string')
+    .map((x): OperatorView => {
+      const r = (x.reports ?? {}) as Partial<OperatorView['reports']>;
+      const byReason = Object.fromEntries(REPORT_REASONS.map((k) => [k, num((r.byReason as Record<string, unknown> | undefined)?.[k])])) as Record<ReportReason, number>;
+      const p = (x.points ?? {}) as Partial<OperatorView['points']>;
+      return {
+        operatorId: x.operatorId as string,
+        name: typeof x.name === 'string' ? x.name : null,
+        status: x.status === 'blocked' ? 'blocked' : 'ok',
+        reason: typeof x.reason === 'string' ? x.reason : null,
+        actor: typeof x.actor === 'string' ? x.actor : null,
+        at: typeof x.at === 'number' ? x.at : null,
+        showPublic: x.showPublic === true,
+        nodes: arr(x.nodes),
+        refusalRate: num(x.refusalRate),
+        tokens: { today: num(x.tokens?.today), unused: num(x.tokens?.unused) },
+        running: { matches: num(x.running?.matches), max: num(x.running?.max) },
+        points: { today: num(p.today), cap: typeof p.cap === 'number' ? p.cap : null, d30: num(p.d30), matches30d: num(p.matches30d), earned: num(p.earned), concentration: num(p.concentration) },
+        reports: {
+          days: num(r.days) || 7,
+          count: num(r.count),
+          accounts: num(r.accounts),
+          byReason,
+          byNode: arr(r.byNode),
+          recent: arr<OperatorView['reports']['recent'][number]>(r.recent).map((e) => ({ ...e, reason: (REPORT_REASONS as readonly string[]).includes(e?.reason) ? e.reason : 'other' })),
+        },
+      };
+    });
+  return { at: num(o.at), operators };
+}
+
 /** A node in the overview (nodeOverview.ts overviewNode). */
 export interface AdminNode extends MineNode {
   operator: { id: string; name: string };
@@ -198,6 +279,8 @@ export interface Overview {
   warnings: OverviewWarning[];
   /** The last 24 h's voids by node and reason (the history, PR 4); [] from a server without it. */
   voids24h: Array<{ nodeId: string; name: string | null; reason: string; count: number }>;
+  /** The opening of hosting (Prompt 2, A1); absent from a server of before it. */
+  hosting?: HostingView;
 }
 
 // ---- the history (PR 4: GET /nodes/admin/events, /history, /alerts, /matches, /replay) ------------
@@ -387,14 +470,21 @@ export interface FrozenList {
   more: boolean;
 }
 
-/** POST /nodes/tokens's body. */
+/**
+ * POST /nodes/tokens's body. `name` left out: the server's default (`<region>-node-<k>`). A
+ * community account's code also carries the acceptance of the rules for hosts of the terms in force
+ * (Prompt 2, A3: `acceptHost`, its button) and the 18-or-older declaration (`adult`, its switch) until
+ * it holds them for that version (GET /nodes/mine `terms.accepted`).
+ */
 export interface TokenAsk {
   region: RegionId;
-  name: string;
+  name?: string;
   publicHost?: string;
   roles?: NodeRole[];
   matches?: number | 'auto';
   egressCapGB?: number;
+  acceptHost?: true;
+  adult?: boolean;
 }
 
 // ---- reading an answer leniently ------------------------------------------------------------------
@@ -441,6 +531,7 @@ export function overviewOf(b: unknown): Overview {
     alerts: o.alerts ?? { webhook: true },
     warnings: arr(o.warnings),
     voids24h: arr(o.voids24h),
+    ...(typeof o.hosting === 'object' && o.hosting !== null && !Array.isArray(o.hosting) ? { hosting: { ...o.hosting, changes: arr(o.hosting.changes) } } : {}),
   };
 }
 
@@ -505,6 +596,35 @@ export const NODE_ERROR_CODES = [
   'bad_account',
   'unknown_item',
   'no_user',
+  // a community account's hosting (Prompt 2: the token's gate, A1 to A5, A13)
+  'hosting_closed',
+  'operator_blocked',
+  'email_required',
+  'deletion_pending',
+  'account_too_new',
+  'terms_required',
+  'adult_required',
+  'too_many_tokens',
+  'name_taken',
+  'rtc_not_available',
+  'region_mismatch',
+  'bad_public_url',
+  // the owner's actions (A12) and the reports (A16)
+  'trusted',
+  'banned',
+  'suspended',
+  'project_server',
+  'host_deleted',
+  'already_reported',
+  'too_many_reports',
+  'bad_reason',
+  'bad_numbers',
+  // the opening's flag and the operators (A1, A4)
+  'hosting_terms',
+  'bad_flag',
+  'bad_value',
+  'flag_not_written',
+  'bad_action',
 ] as const;
 
 export type NodeErrorCode = (typeof NODE_ERROR_CODES)[number];
@@ -577,11 +697,16 @@ export interface TokenForm {
 
 export type FormIssue = 'region' | 'name' | 'host' | 'matches' | 'egress' | 'slots';
 
-/** Each field's problem (the first one per field), and no slot left; empty when the token may be asked for. */
-export function tokenFormIssues(f: TokenForm, slots: { used: number; max: number } | null): Array<{ field: FormIssue; host?: HostIssue }> {
+/**
+ * Each field's problem (the first one per field), and no slot left; empty when the token may be
+ * asked for. `nameOptional`: an empty name is the server's default (a community server's form,
+ * "Mis servidores"); the project's wizard names every machine.
+ */
+export function tokenFormIssues(f: TokenForm, slots: { used: number; max: number } | null, nameOptional = false): Array<{ field: FormIssue; host?: HostIssue }> {
   const out: Array<{ field: FormIssue; host?: HostIssue }> = [];
   if (f.region === null || !isRegion(f.region)) out.push({ field: 'region' });
-  if (!NODE_NAME_RE.test(f.name.trim())) out.push({ field: 'name' });
+  const name = f.name.trim();
+  if (!(nameOptional && name === '') && !NODE_NAME_RE.test(name)) out.push({ field: 'name' });
   const h = hostIssue(f.host);
   if (h !== null) out.push({ field: 'host', host: h });
   const m = f.matches.trim().toLowerCase();
@@ -596,9 +721,10 @@ export function tokenFormIssues(f: TokenForm, slots: { used: number; max: number
 export function tokenAskOf(f: TokenForm): TokenAsk {
   const m = f.matches.trim().toLowerCase();
   const e = f.egress.trim();
+  const name = f.name.trim();
   return {
     region: f.region as RegionId,
-    name: f.name.trim(),
+    ...(name !== '' ? { name } : {}),
     publicHost: f.host.trim().toLowerCase(),
     roles: f.roles === 'host' ? ['host'] : ['host', 'verify'],
     matches: m === 'auto' ? 'auto' : Number(m),
@@ -628,7 +754,7 @@ export function installLineMatches(line: string, ask: TokenAsk): boolean {
   if (ask.roles !== undefined && value('--roles') !== ask.roles.join(',')) return false;
   if (ask.matches !== undefined && value('--matches') !== String(ask.matches)) return false;
   if (ask.egressCapGB !== undefined && value('--egress-cap-gb') !== String(ask.egressCapGB)) return false;
-  if (ask.name !== '' && value('--name') !== ask.name) return false;
+  if (ask.name !== undefined && ask.name !== '' && value('--name') !== ask.name) return false;
   return true;
 }
 

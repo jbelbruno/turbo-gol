@@ -68,6 +68,7 @@ import { version } from '../../../package.json';
 import { openTvSignIn } from './tvSignIn';
 import { deletionDone, pendingSheet } from './deletion';
 import { legalPaths, legalState } from '../../net/terms';
+import { hostEntry, hostingOpen } from './serversModel';
 
 /** A node's state in words (nodes/shared/controlProtocol.ts NodeStatus). */
 const NODE_STATE: Readonly<Record<MyNode['status'], Key>> = {
@@ -217,6 +218,40 @@ export function openProfileTab(menu: Menu, tab: 'login' | 'register', email: str
   menu.open('profile');
 }
 
+/** The Correo row's action for `me` (§3.9): CAMBIAR a verified address, CONFIRMAR a hint the account has not confirmed, AGREGAR none. */
+export function emailModeOf(me: MeInfo | null): 'add' | 'change' | 'confirm' {
+  if (me?.emailVerified === true && typeof me.email === 'string') return 'change';
+  return typeof me?.emailHint === 'string' && me.emailHint.length > 0 ? 'confirm' : 'add';
+}
+
+/**
+ * AGREGAR, CAMBIAR or CONFIRMAR (§3.6 steps 2 to 4): "confirm it's you" first when this browser is
+ * not fresh enough (1 to add or confirm, 2 for the project account with a password: emailAddLevel;
+ * 2 to change; a password of before is re-keyed by itself first, level 2), then the address and
+ * its code. `direct`: the banner's ENVIAR CÓDIGO for a hint, the code straight away. A provider's
+ * round trip comes back to it (the marker keepResume). PERFIL's Correo row and banner open it, and
+ * so does "Mis servidores" for a host without a confirmed address (Prompt 2, B2: the same dialog,
+ * never a copy of it).
+ */
+export function emailDialog(menu: Menu, mode: 'add' | 'change' | 'confirm', direct = false): void {
+  const acc = menu.host.accounts;
+  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => confirmItsYou(menu, go, level, force, resume);
+  const me = acc.me;
+  const change = mode === 'change';
+  const legacy = me?.legacy === true;
+  const hooks: EmailHooks = { change, reauth: (level) => fresh(() => emailDialog(menu, mode, direct), level, true, 'email:' + mode) };
+  const hint = typeof me?.emailHint === 'string' ? me.emailHint : '';
+  const open = (): void => {
+    if (legacy) void acc.fetchMe().catch(() => undefined); // re-keyed by "confirm it's you": the row knows it
+    if (direct && hint.length > 0) {
+      void startEmailCode(menu, hint, hooks).then((err) => (err !== null ? menu.toast(err, 'error') : undefined));
+      return;
+    }
+    emailSheet(menu, change ? t('auth.emailChangeTitle') : mode === 'confirm' ? t('auth.emailConfirmTitle') : t('auth.emailAddTitle'), mode === 'confirm' ? hint : '', hooks);
+  };
+  fresh(open, change || legacy ? 2 : emailAddLevel(me), legacy, 'email:' + mode);
+}
+
 
 /**
  * Enter on a form's fields: the next field, the last one submits (`go`). Not the Enter / OK that
@@ -241,6 +276,8 @@ interface AccountData {
   name: string;
   me: MeInfo | null;
   nodes: readonly MyNode[];
+  /** GET /nodes/mine says hosting is open for this account and it is not the project's (Prompt 2, B1: MI SERVIDOR shows with no node too, with MIS SERVIDORES). */
+  hostOpen?: boolean;
 }
 
 export function profileScreen(menu: Menu): Screen {
@@ -256,8 +293,8 @@ export function profileScreen(menu: Menu): Screen {
    */
   const typesHere = (): boolean => !touch() && finePointer();
   let tab: GuestTab = 'login';
-  /** The signed-in account's community nodes (GET /nodes/mine), by account. */
-  let nodes: { who: string; list: MyNode[] } | null = null;
+  /** The signed-in account's community nodes (GET /nodes/mine), by account, and whether hosting is open for it (a community account's: not the project's). */
+  let nodes: { who: string; list: MyNode[]; hostOpen: boolean } | null = null;
   /** PRIVACIDAD's switch (GET /api/me/replay-name), by account: null until it is read; the switch on screen. */
   let replayHidden: { who: string; hidden: boolean } | null = null;
   let replaySwitch: { refresh(): void } | null = null;
@@ -846,7 +883,18 @@ export function profileScreen(menu: Menu): Screen {
       h('span.mn-picker-label', null, t('profile.accountSecurity')),
       icon('next', 'mn-prof-fold-chev'),
     );
-    const server = v.nodes.length > 0 ? section(t('profile.myServer'), h('div.mn-prof-nodes', null, ...v.nodes.map(nodeView))) : null;
+    // MI SERVIDOR (Prompt 2, B1): its nodes; once hosting is open (GET /api/config, decision 1: dark
+    // before) and GET /nodes/mine says it is open for this community account, with no node too, and
+    // MIS SERVIDORES ("Mis servidores", screens/servers.ts). The project's account stays as it was.
+    const open = hostingOpen(menu.cfg);
+    const toServers = open && v.hostOpen === true ? h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('profile.myServersNote')), secondary(t('profile.myServers'), () => menu.open('servers'), { 'data-key': 'profile-servers' })) : null;
+    const server = v.nodes.length > 0 || toServers !== null ? section(t('profile.myServer'), h('div.mn-prof-nodes', null, ...v.nodes.map(nodeView), toServers)) : null;
+    // COMUNIDAD's hosting entry: the guide while hosting is closed (its copy pinned by
+    // tests/garage-screen.test.mjs), "Mis servidores" once it is open (hostEntry).
+    const hostLink =
+      hostEntry(open) === 'servers'
+        ? h('button.mn-btn.mn-prof-link', { type: 'button', 'data-nav': true, 'data-key': 'profile-host', onclick: () => menu.open('servers') }, icon('server'), h('span', null, t('profile.hostServerOpen')))
+        : link(HOST_GUIDE(), 'server', t('profile.hostServer'), 'profile-host');
     // PRIVACIDAD: the public replays show 'Jugador N' for this account (src/net/replays.ts), the
     // matches already listed too. Off by default; a TV signed in with the phone may change it too.
     const who = sample !== null ? 'sample' : (acc.account?.playerId ?? '');
@@ -909,7 +957,7 @@ export function profileScreen(menu: Menu): Screen {
         privacy,
         section(
           t('profile.community'),
-          h('div.mn-prof-links', null, link(DISCORD_URL, 'friends', t('profile.discord'), 'profile-discord'), link(HOST_GUIDE(), 'server', t('profile.hostServer'), 'profile-host'), link(SOURCE_URL, 'code', t('profile.source'), 'profile-source')),
+          h('div.mn-prof-links', null, link(DISCORD_URL, 'friends', t('profile.discord'), 'profile-discord'), hostLink, link(SOURCE_URL, 'code', t('profile.source'), 'profile-source')),
         ),
       ),
     );
@@ -954,38 +1002,14 @@ export function profileScreen(menu: Menu): Screen {
     if (me === null || me.email === undefined) return null;
     const email = me.emailVerified === true && typeof me.email === 'string' ? me.email : null;
     const hint = email === null && typeof me.emailHint === 'string' && me.emailHint.length > 0 ? me.emailHint : null;
-    const mode = email !== null ? 'change' : hint !== null ? 'confirm' : 'add';
+    const mode = emailModeOf(me);
     const label = mode === 'change' ? t('profile.emailChangeBtn') : mode === 'confirm' ? t('profile.emailConfirmBtn') : t('profile.emailAddBtn');
     return h(
       'div.mn-prof-device',
       null,
       h('p', null, email ?? (hint !== null ? t('profile.emailHintRow', { email: hint }) : t('profile.emailNone'))),
-      mailOn() ? secondary(label, () => emailDialog(mode), { 'data-key': 'profile-email' }) : h('p.mn-note', null, mailOffText(menu)),
+      mailOn() ? secondary(label, () => emailDialog(menu, mode), { 'data-key': 'profile-email' }) : h('p.mn-note', null, mailOffText(menu)),
     );
-  };
-
-  /**
-   * AGREGAR, CAMBIAR or CONFIRMAR (§3.6 steps 2 to 4): "confirm it's you" first when this browser is
-   * not fresh enough (1 to add or confirm, 2 for the project account with a password: emailAddLevel;
-   * 2 to change; a password of before is re-keyed by itself first, level 2), then the address and
-   * its code. `direct`: the banner's ENVIAR CÓDIGO for a hint, the code straight away. A provider's
-   * round trip comes back to it (the marker keepResume).
-   */
-  const emailDialog = (mode: 'add' | 'change' | 'confirm', direct = false): void => {
-    const me = acc.me;
-    const change = mode === 'change';
-    const legacy = me?.legacy === true;
-    const hooks: EmailHooks = { change, reauth: (level) => fresh(() => emailDialog(mode, direct), level, true, 'email:' + mode) };
-    const hint = typeof me?.emailHint === 'string' ? me.emailHint : '';
-    const open = (): void => {
-      if (legacy) void acc.fetchMe().catch(() => undefined); // re-keyed by "confirm it's you": the row knows it
-      if (direct && hint.length > 0) {
-        void startEmailCode(menu, hint, hooks).then((err) => (err !== null ? menu.toast(err, 'error') : undefined));
-        return;
-      }
-      emailSheet(menu, change ? t('auth.emailChangeTitle') : mode === 'confirm' ? t('auth.emailConfirmTitle') : t('auth.emailAddTitle'), mode === 'confirm' ? hint : '', hooks);
-    };
-    fresh(open, change || legacy ? 2 : emailAddLevel(me), legacy, 'email:' + mode);
   };
 
   /** Right after a username's sign-in (§3.10 step 3): "Agrega tu correo", its date while there is one. */
@@ -1014,7 +1038,7 @@ export function profileScreen(menu: Menu): Screen {
     const title = nudge === 'confirm' ? t('auth.confirmEmailBanner', { email: me.emailHint ?? '' }) : t('auth.graceTitle');
     const text = me.hasPassword ? h('p.mn-note', null, graceText(authCfg?.legacyUntil ?? null, legacyPhase() === 'closed')) : null;
     const buttons = mailOn()
-      ? [nudge === 'confirm' ? secondary(t('auth.sendCode'), () => emailDialog('confirm', true), { 'data-key': 'profile-grace-email', 'data-autofocus': true }) : secondary(t('profile.emailAddBtn'), () => emailDialog('add'), { 'data-key': 'profile-grace-email', 'data-autofocus': true })]
+      ? [nudge === 'confirm' ? secondary(t('auth.sendCode'), () => emailDialog(menu, 'confirm', true), { 'data-key': 'profile-grace-email', 'data-autofocus': true }) : secondary(t('profile.emailAddBtn'), () => emailDialog(menu, 'add'), { 'data-key': 'profile-grace-email', 'data-autofocus': true })]
       : [h('p.mn-note', null, mailOffText(menu))];
     const links = nudge === 'add' ? unlinked(me).map((p) => secondary(t('profile.link', { provider: PROVIDER_NAMES[p].toUpperCase() }), () => linkProvider(p), { 'data-key': 'profile-grace-link-' + p })) : [];
     const body = h('div.mn-prof-acct.mn-prof-grace-body', { id: 'mn-prof-grace', hidden: !graceOpen }, text, ...buttons, ...links);
@@ -1332,7 +1356,7 @@ export function profileScreen(menu: Menu): Screen {
       sample !== null
         ? accountView(sample)
         : acc.signedIn
-          ? accountView({ name: acc.account?.name ?? '', me: acc.me, nodes: nodes !== null && nodes.who === who ? nodes.list : [] })
+          ? accountView({ name: acc.account?.name ?? '', me: acc.me, nodes: nodes !== null && nodes.who === who ? nodes.list : [], hostOpen: nodes !== null && nodes.who === who && nodes.hostOpen })
           : guestView();
     setChildren(body, view);
     menu.refit(); // a new view's name and titles (data-fit)
@@ -1344,9 +1368,10 @@ export function profileScreen(menu: Menu): Screen {
     const who = acc.account?.playerId ?? null;
     if (who === null) return;
     void acc.nodesMine().then(
-      ({ nodes: list }) => {
-        nodes = { who, list };
-        if (el.isConnected && list.length > 0) render();
+      ({ nodes: list, hosting, operator }) => {
+        const hostOpen = hosting?.open === true && operator?.trusted !== true;
+        nodes = { who, list, hostOpen };
+        if (el.isConnected && (list.length > 0 || hostOpen)) render();
       },
       () => undefined, // offline: MI SERVIDOR waits for the next visit
     );
@@ -1418,7 +1443,7 @@ export function profileScreen(menu: Menu): Screen {
         const resume = acc.takeResume();
         void acc.fetchMe().then(() => {
           render();
-          if (resume !== null && acc.signedIn) emailDialog(resume.slice('email:'.length) as 'add' | 'change' | 'confirm');
+          if (resume !== null && acc.signedIn) emailDialog(menu, resume.slice('email:'.length) as 'add' | 'change' | 'confirm');
         }, () => undefined);
         loadNodes();
         loadReplayName();

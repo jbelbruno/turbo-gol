@@ -59,9 +59,9 @@ export const DETOUR_KEY = STORAGE_PREFIX + 'auth.detour';
 /** A detour lasts this long: a provider's round trip, and the confirm step after it. */
 export const DETOUR_MS = 30 * 60_000;
 
-/** The screens a sign-in comes back to, and the tab it was on. */
+/** The screens a sign-in comes back to, and the tab it was on ('servers': "Mis servidores", Prompt 2 B1, whose `#servers` a round trip clears). */
 export interface Detour {
-  screen: 'modes' | 'garage';
+  screen: 'modes' | 'garage' | 'servers';
   tab?: string;
 }
 
@@ -70,7 +70,7 @@ export function detourOf(raw: string | null, now: number): Detour | null {
   if (raw === null) return null;
   try {
     const v = JSON.parse(raw) as { screen?: unknown; tab?: unknown; at?: unknown };
-    if ((v.screen !== 'modes' && v.screen !== 'garage') || typeof v.at !== 'number' || now - v.at > DETOUR_MS || now < v.at) return null;
+    if ((v.screen !== 'modes' && v.screen !== 'garage' && v.screen !== 'servers') || typeof v.at !== 'number' || now - v.at > DETOUR_MS || now < v.at) return null;
     return typeof v.tab === 'string' && /^[a-z]{1,16}$/.test(v.tab) ? { screen: v.screen, tab: v.tab } : { screen: v.screen };
   } catch {
     return null;

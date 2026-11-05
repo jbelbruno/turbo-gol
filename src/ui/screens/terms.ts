@@ -134,6 +134,17 @@ export async function termsGate(menu: Menu, guestTerms: GuestTerms, account: boo
   });
 }
 
+/**
+ * The re-accept sheet asked for by an account's own step, not by an online session: "Mis servidores"
+ * when the terms in force are what it still lacks (Prompt 2, B2: PR 2A's "the general re-accept sheet
+ * comes first"). Resolves once accepted (at once with no version in force); rejects when closed.
+ */
+export async function reacceptTerms(menu: Menu): Promise<void> {
+  const version = (await legalState(menu.host.accounts)).terms;
+  if (version === null) return;
+  return reacceptSheet(menu, version);
+}
+
 /** "Antes de jugar": the notice and JUGAR COMO INVITADO (the press accepts, kept in this browser), CANCELAR. */
 function guestSheet(menu: Menu, guestTerms: GuestTerms, version: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
