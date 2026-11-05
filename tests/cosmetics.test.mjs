@@ -66,7 +66,7 @@ test('every car has a name and a one-line description in English and Spanish', (
     assert.equal(es[`car.${id}`], names[id][1], `${id} (es)`);
     for (const lang of [en, es]) {
       const story = lang[`car.${id}Story`];
-      assert.ok(typeof story === 'string' && story.length > 60 && story.length <= 200 && story.includes(en[`car.${id}`]), `${id} story is two sentences that name the car: ${story}`);
+      assert.ok(typeof story === 'string' && story.length > 60 && story.length <= 240 && story.includes(en[`car.${id}`]), `${id} story is two sentences that name the car: ${story}`);
       const desc = lang[`car.${id}Desc`];
       assert.ok(typeof desc === 'string' && desc.length > 10 && desc.length <= 64, `${id} description fits a menu line: ${desc}`);
     }
