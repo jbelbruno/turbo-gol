@@ -59,7 +59,7 @@ server/
 cd server
 npm i
 npm run dev            # wrangler dev --port 8787 (workerd + miniflare, no account needed)
-npm test               # unit tests on node 24 (no wasm): JWT auth, RoomHost on a fake sim, the queue hub, phase 2 rooms
+npm test               # unit tests on node 26 (no wasm): JWT auth, RoomHost on a fake sim, the queue hub, phase 2 rooms
 npm run smoke -- --api=http://127.0.0.1:8787   # phase 1: two dev accounts queue (a 2v2 at once) -> leave -> WebSocket match for 10 s, snapshot / hash checks
 npm run smoke -- --api=http://127.0.0.1:8787 --duration=20   # longer capture; prints a SUMMARY line (see "Deploy")
 node test/smoke-p2p.mjs --api=http://127.0.0.1:8787          # phase 2: two guests -> a lobby room -> signal relay, ready/start, unreachable/drop; a lone host's start -> need_players

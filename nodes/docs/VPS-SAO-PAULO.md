@@ -79,7 +79,7 @@ ssh-add "$env:USERPROFILE\.ssh\<clave>"
 | fail2ban | `/etc/fail2ban/jail.d/turbogol.local` | Jaula `sshd` sobre el journal (`backend = systemd`) |
 | Firewall (ufw) | — | Entrada denegada por defecto; abiertos solo SSH, HTTP (el desafío ACME y la redirección) y HTTPS (jugadores, wss y el chequeo de alcance del plano de control), en IPv4 e IPv6. Ningún puerto UDP: el transporte wss no lo usa |
 | SSH | `/etc/ssh/sshd_config.d/00-turbogol.conf` | `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `X11Forwarding no` |
-| Node.js | NodeSource | Node 24, el mismo camino que usa `install/install.sh` |
+| Node.js | NodeSource | Node 26, el mismo camino que usa `install/install.sh` |
 | Caddy | Repositorio oficial | Retenido con `apt-mark hold`, como Node (ver "Después de instalar") |
 
 Dos detalles del SSH:
@@ -208,7 +208,7 @@ bash /tmp/turbogol-install.sh --control https://turbo-gol.com --token '<tgn1_...
   no muestra freno, `floor(cpu / 2)`. Las partidas reales cuestan más que el benchmark (la red no
   entra en él): compáralo con una partida de verdad antes de subirla. Para cambiarla después, ver
   "Cambiar la capacidad declarada".
-- **El `mv` del Caddyfile:** Node 24 y Caddy ya están y el instalador no los vuelve a instalar,
+- **El `mv` del Caddyfile:** Node 26 y Caddy ya están y el instalador no los vuelve a instalar,
   pero Caddy pasa a ser del nodo: el instalador escribe su propio `/etc/caddy/Caddyfile` en cada
   corrida (sin HTTP/3, con un certificado de 90 días para el nombre y `stream_close_delay`, para
   que recargar Caddy no corte partidas). Antes de gastar el token se detiene si encuentra un

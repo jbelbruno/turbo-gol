@@ -37,7 +37,7 @@ ninguna en los servidores del proyecto.
 
 ## Correrlo
 
-Desde `nodes/`, con Node 24. Primero `npm install` en la raíz del repo y en `server/`: el nodo usa
+Desde `nodes/`, con Node 26. Primero `npm install` en la raíz del repo y en `server/`: el nodo usa
 el wasm y el código del juego, el chequeo de tipos usa el TypeScript de la raíz y el build de
 releases usa el esbuild de `server/`. La única dependencia propia es `werift`, el WebRTC del nodo:
 
