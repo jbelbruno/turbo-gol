@@ -613,11 +613,12 @@ aviso.
 ### Confianza y disponibilidad
 
 - [ ] **Un nombre para cada VPS comunitario.** El chequeo de alcance corre en el Worker, que no
-  puede pedir una IP, y el instalador hoy usa la IP por defecto (el `/nodes/whoami` de `install/install.sh`). Un
-  VPS registrado por IP nunca pasa de pendiente. Opciones: que el operador traiga su dominio
-  (`--public-host`), que el plano de control le dé un subdominio del proyecto con la API de DNS de
-  Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el verificador.
-  Esfuerzo: medio.
+  puede pedir una IP: el plano de control rechaza una IP (`ip_not_supported`), y el instalador
+  pide un nombre (`--public-host`) para un nodo nuevo por wss y se detiene con una IP, salvo con
+  `--allow-ip`, que es para un plano de control de desarrollo. Hoy el operador trae su dominio.
+  Opciones para no pedírselo: que el plano de control le dé un subdominio del proyecto con la API
+  de DNS de Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el
+  verificador. Esfuerzo: medio.
 - [ ] **Un segundo verificador de confianza.** Con uno solo, si el VPS de São Paulo se cae, los
   resultados esperan hasta 6 horas y después se anulan. `docs/online/DECISIONS.md` ya lo pone en
   Hetzner (Ashburn o Falkenstein), con su presupuesto.

@@ -717,6 +717,16 @@ All notable changes to Turbogol are documented here. The format follows
   points ranking, never its username or the start of its account id. A server registered without a
   name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
   the legal texts that describe it.
+- Community nodes: the VPS installer registers a new wss server only under a DNS name
+  (`--public-host`). With none, or with an IP address, it stops before it installs anything, as the
+  control plane refuses an IP address anyway; it no longer falls back to the machine's IPv4.
+  `--allow-ip` takes an IP address for a development control plane, and a node already registered
+  on one still runs the installer again and restores with `--restore` as before. `--node-version`
+  sets the Node.js the node runs, from NodeSource (a major, a major and minor, or an exact version;
+  the last two are held with `apt-mark hold`), and the installer now checks the Node.js at
+  `/usr/bin/node`, the one the service runs. A run ends with the node's page on the website
+  (`/#servers`, "Mis servidores") and the operator guide. It reaches the machines with the next
+  node release.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,
