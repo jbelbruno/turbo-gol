@@ -170,6 +170,9 @@ function sqlOf(db) {
   return { sql, transactionSync };
 }
 
+/** The object's key-value storage (ctx.storage.get / put), one per database: a deploy keeps it with the tables. */
+const kvOf = new WeakMap();
+
 class FakeCtx {
   constructor(db = new DatabaseSync(':memory:'), sockets = []) {
     this.db = db;
@@ -177,9 +180,13 @@ class FakeCtx {
     this.alarm = null;
     this.waits = [];
     const { sql, transactionSync } = sqlOf(db);
+    if (!kvOf.has(db)) kvOf.set(db, new Map());
+    const kv = kvOf.get(db);
     this.storage = {
       sql,
       transactionSync,
+      get: async (k) => structuredClone(kv.get(k)),
+      put: async (k, v) => void kv.set(k, structuredClone(v)),
       getAlarm: async () => this.alarm,
       setAlarm: async (t) => {
         this.alarm = t;
@@ -1435,7 +1442,7 @@ test('the ledger survives a deploy: the leaderboard, the totals, /nodes/mine rew
   assert.equal(L.verifiedMatches(STRANGER), 2);
   assert.deepEqual(L.leaderboard(clock), [{ operatorId: STRANGER, points: e1.points }], 'the window only');
   const status = await call(h, 'GET', '/nodes/status');
-  assert.deepEqual(status.json.hosts, [{ name: STRANGER.slice(0, 6), points: e1.points }]);
+  assert.deepEqual(status.json.hosts, [{ name: 'Anfitrión 1', points: e1.points }], 'a community operator by a number, never the start of its id');
   const mine = await call(h, 'GET', '/nodes/mine', { headers: { 'x-operator-id': STRANGER } });
   assert.deepEqual([mine.json.rewards.operatorId, mine.json.rewards.points30d, mine.json.rewards.matches30d, mine.json.rewards.earned], [STRANGER, e1.points, 1, L.earned(STRANGER)]);
   // The same group again within 24 h: the entry and the note before the deploy both count.
@@ -1446,6 +1453,58 @@ test('the ledger survives a deploy: the leaderboard, the totals, /nodes/mine rew
   assert.equal(scoreOn(h, '12'.repeat(32)).repeat, 1);
   h = await boot(env, new FakeCtx(h.ctx.db));
   assert.equal(rows(h, 'ledger_notes').length, 0);
+});
+
+test('the public list: only the nodes in service (probation, active, never retired); the project by its name, any other operator as "Anfitrión <n>" in the nodes and in the hosts, never its name, its id or the start of it', async () => {
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${STRANGER}`, NODE_TRUSTED_MAX_NODES: '4' });
+  const h = await boot(env);
+  const { ws } = await liveNode(h);
+  const nodeNamed = async (name, ip, { op = PROJECT, roles = ['verify'], publicUrl = null } = {}) => {
+    const who = { 'x-operator-id': op, 'x-operator-name': encodeURIComponent(op === PROJECT ? 'Proyecto Señor' : 'Vecino Real') };
+    const t = await call(h, 'POST', '/nodes/tokens', { body: { region: 'SA', name }, headers: who });
+    assert.equal(t.status, 200, JSON.stringify(t.json));
+    const keys = await generateEd25519();
+    const body = { token: t.json.token, publicKey: keys.publicKey, roles, ...(publicUrl ? { transports: ['wss'], publicUrl } : {}), build: NODE_BUILD, specs: SPECS, capacity: CAP };
+    const r = await call(h, 'POST', '/nodes/register', { body, headers: { 'x-client-ip': ip } });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    return r.json.nodeId;
+  };
+  const maint = { 'x-operator-id': PROJECT, 'x-operator-name': encodeURIComponent('Proyecto Señor') };
+  const admin = async (what, body) => assert.equal((await call(h, 'POST', '/nodes/admin/' + what, { body, headers: maint })).status, 200, what);
+  await nodeNamed('pendiente', '203.0.113.31', { roles: ['host'], publicUrl: 'wss://sp2.turbo-gol.test' }); // never proven reachable
+  await admin('status', { nodeId: await nodeNamed('baneado', '203.0.113.32'), status: 'banned', reason: 'test' });
+  await admin('retire', { nodeId: await nodeNamed('retirado', '203.0.113.33'), reason: 'test' });
+  await admin('status', { nodeId: await nodeNamed('suspendido', '203.0.113.34'), status: 'suspended', reason: 'test' });
+  clock += 1000;
+  await nodeNamed('vecino-1', '203.0.113.35', { op: STRANGER });
+  // A deploy with STRANGER out of NODE_TRUSTED_OPERATORS: its node is a community one in probation.
+  ws.close(1012, 'deploy');
+  await h.ctx.settle();
+  const h2 = await boot({ ...env, NODE_TRUSTED_OPERATORS: PROJECT }, new FakeCtx(h.ctx.db));
+  const e = scoreOn(h2, 'ab'.repeat(32));
+  const s = await call(h2, 'GET', '/nodes/status');
+  assert.equal(s.status, 200);
+  assert.deepEqual(
+    s.json.nodes.map((n) => [n.name, n.status, n.operator, n.trusted]).sort(),
+    [
+      ['sao-paulo-1', 'active', 'Proyecto Señor', true],
+      ['vecino-1', 'probation', 'Anfitrión 1', false],
+    ],
+  );
+  assert.deepEqual(s.json.hosts, [{ name: 'Anfitrión 1', points: e.points }], 'the same number as in the nodes');
+  const text = JSON.stringify(s.json);
+  for (const id of [PROJECT, STRANGER]) assert.ok(!text.includes(id.slice(0, 6)), 'no operator id, not even its start');
+  assert.ok(!text.includes('Vecino Real'), "a community operator's name is never shown");
+  // The panel still sees every node, and each operator its own: only the public list is filtered.
+  assert.equal((await call(h2, 'GET', '/nodes/admin/nodes', { headers: maint })).json.nodes.length, 6);
+  assert.equal((await call(h2, 'GET', '/nodes/mine', { headers: { 'x-operator-id': PROJECT } })).json.nodes.length, 4, 'every node but the retired one');
+});
+
+test('the public list is a 200 with { build, nodes, hosts } when it is empty too: the deploy check asks for one (scripts/deploy-check.mjs)', async () => {
+  const h = await boot(makeEnv());
+  const s = await call(h, 'GET', '/nodes/status');
+  assert.equal(s.status, 200);
+  assert.deepEqual(s.json, { build: CLIENT_BUILD, nodes: [], hosts: [] });
 });
 
 test("the maintainers' inventory routes: grant, revoke and unfreeze go to AccountsDO as they are answered, each an ALERT naming the account; a trusted account only", async () => {
@@ -1634,8 +1693,8 @@ test('status guards: active for a node that is not trusted needs { force: true, 
   assert.deepEqual([forced.status, forced.json.status], [200, 'active']);
   assert.equal((await run({ status: 'banned', reason: 'cheating' })).json.status, 'banned');
   await h.ctx.settle();
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) active -> banned: cheating\``));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) active -> banned: cheating\``));
   // A trusted operator's banned node takes no slot: out of its ban it takes one again, so at the cap
   // (2 here) it stays banned, with an ALERT, as a token is refused there. Else ban, register, unban
   // would add a trusted node past the cap with every token.
@@ -2110,4 +2169,409 @@ test('replay uploads: a budget of bytes in flight across nodes (503 busy, tried 
   ok.open();
   assert.equal((await put(ok.body, bytes.length)).status, 200);
   assert.deepEqual(env.NODE_REPLAYS.objects.get(id), bytes);
+});
+
+// ---- the maintainers' history (prompt 1, PR 4: A9) ---------------------------------------------------
+
+const { HISTORY_DAYS, ALERT_RING_MAX } = await import('../src/nodeStore.ts');
+const DAY = 24 * 60 * MIN;
+const json200 = (v, status = 200) => new RealResponse(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
+
+test("the history: a settled match's row and seats are in the transaction that settles it (void ones too: reason, strike); GET /nodes/admin/history pages them newest first, one node's or one match's; a hidden name left out, every name when AccountsDO cannot say; a purged account's seat blanked", async () => {
+  const { h, env, node, ws } = await watched();
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody({ ranked: true }) })).json;
+  let atAck = null;
+  answer(h, ws, node, { onSend: (m) => m.t === 'ack' && (atAck = rows(h, 'node_match_history').map((r) => [r.match_id, r.result, r.reason])) });
+  await send(h, ws, { t: 'report', id: 'r1', report: { kind: 'lost', matchId: placement.matchId, reason: 'tick_error' } });
+  assert.deepEqual(atAck, [[placement.matchId, 'void', 'lost:tick_error']], 'written with the settled row, before the ack');
+  assert.deepEqual(rows(h, 'node_match_players').map((r) => [r.slot, r.player_id, r.name]), [[0, A, 'P0'], [1, B, 'P1']]);
+  // More than a page, each a millisecond apart.
+  const ids = [placement.matchId];
+  for (let i = 0; i < D.HISTORY_PAGE + 2; i++) {
+    clock += 1;
+    ids.unshift((await settleByHand(h)).assign.matchId);
+  }
+  env.ACCOUNTS.answer = (name, path, body) => (path === '/replay-hidden' ? json200({ ids: body.ids.filter((x) => x === B), names: [] }) : json200({ ok: true }));
+  const first = await call(h, 'GET', '/nodes/admin/history', { headers: ADMIN });
+  assert.deepEqual([first.status, first.headers.get('cache-control'), first.json.names], [200, 'no-store', 'shown']);
+  assert.equal(first.json.matches.length, D.HISTORY_PAGE);
+  assert.deepEqual(first.json.matches.map((m) => m.matchId), ids.slice(0, D.HISTORY_PAGE), 'newest first');
+  const top = first.json.matches[0];
+  assert.deepEqual([top.result, top.nodeName, top.verified, top.score, top.listed, top.published, top.delistedAt], ['unrated', 'sao-paulo-1', true, { blue: 1, red: 0 }, false, false, null]);
+  assert.deepEqual(top.seats, [
+    { slot: 0, team: 0, bot: false, name: 'P0', id: A, hidden: false },
+    { slot: 1, team: 1, bot: false, name: null, id: B, hidden: true },
+  ]);
+  const next = await call(h, 'GET', '/nodes/admin/history?before=' + first.json.next, { headers: ADMIN });
+  assert.deepEqual(next.json.matches.map((m) => m.matchId), ids.slice(D.HISTORY_PAGE));
+  assert.equal(next.json.next, null);
+  const lost = next.json.matches.at(-1);
+  assert.deepEqual([lost.result, lost.reason, lost.strike, lost.ranked, lost.score, lost.replay, lost.verified], ['void', 'lost:tick_error', 'tick_error', true, null, false, false]);
+  const one = await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN });
+  assert.deepEqual(one.json.matches.map((m) => m.matchId), [placement.matchId]);
+  assert.equal((await call(h, 'GET', '/nodes/admin/history?node=' + node.nodeId, { headers: ADMIN })).json.matches.length, D.HISTORY_PAGE);
+  assert.equal((await call(h, 'GET', '/nodes/admin/history?node=' + 'ab'.repeat(8), { headers: ADMIN })).json.matches.length, 0);
+  for (const q of ['before=nope', 'node=xyz', 'match=12']) assert.equal((await call(h, 'GET', '/nodes/admin/history?' + q, { headers: ADMIN })).status, 400, q);
+  // AccountsDO cannot say whose names are hidden: none is shown.
+  env.ACCOUNTS.answer = (name, path) => (path === '/replay-hidden' ? new RealResponse('down', { status: 503 }) : json200({ ok: true }));
+  h.obj.replayNames.clear();
+  const blind = await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN });
+  assert.deepEqual([blind.status, blind.json.names, blind.json.matches[0].seats.map((s) => [s.name, s.id])], [200, 'unavailable', [[null, A], [null, B]]]);
+  // A purged account (every one comes to /internal/operator-deleted): its name and id leave every seat.
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: A } })).status, 200);
+  assert.deepEqual(new Set(rows(h, 'node_match_players').filter((r) => r.slot === 0).map((r) => `${r.player_id}|${r.name}`)), new Set(['null|null']));
+  assert.equal(rows(h, 'node_match_players').filter((r) => r.player_id === B).length, ids.length, 'the others keep theirs');
+  // Every read in the one window: one line in the channel.
+  await h.ctx.settle();
+  assert.deepEqual(posted().filter((p) => p.includes(': read ')), [`**ALERT** \`${ACTOR}: read the match history (a maintainer's reads come here once per 30 min, every one is in the logs)\``]);
+});
+
+test("the node events: each change written as it happens (registration, its token, online, reachable, status, drain, link cuts...), a maintainer's with their name; GET /nodes/admin/events pages them newest first, one node's or all; a lost trust at a restart too", async () => {
+  const env = makeEnv({ NODE_ALERT_WEBHOOK: HOOK });
+  let h = await boot(env);
+  const { node, ws } = await liveNode(h);
+  const kinds = (list) => list.map((e) => e.kind);
+  let r = await call(h, 'GET', '/nodes/admin/events?node=' + node.nodeId, { headers: ADMIN });
+  assert.equal(r.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(kinds(r.json.events).reverse(), ['token_used', 'registered', 'online', 'status_change', 'reachable']);
+  assert.deepEqual(r.json.events.map((e) => [e.nodeId, e.nodeName]).at(0), [node.nodeId, 'sao-paulo-1']);
+  assert.equal(r.json.events.find((e) => e.kind === 'status_change').detail, 'pending -> active');
+  assert.ok(r.json.events.every((e) => e.actor === null), 'nobody made them happen');
+  // A maintainer's drain names them; the node's link closed is its offline.
+  assert.equal((await call(h, 'POST', '/nodes/admin/drain', { body: { nodeId: node.nodeId, reason: 'move' }, headers: ADMIN })).status, 200);
+  await h.obj.webSocketClose(ws, 1006, '', false);
+  r = await call(h, 'GET', '/nodes/admin/events', { headers: ADMIN });
+  assert.deepEqual(r.json.events.slice(0, 2).map((e) => [e.kind, e.detail, e.actor]), [
+    ['offline', null, null],
+    ['drain', 'move', 'Proyecto Señor (a1b2c3d4e5f60718)'],
+  ]);
+  // More than a page: the cursor walks back.
+  for (let i = 0; i < D.EVENTS_PAGE + 5; i++) h.obj.cp.registry.setStatus(node.nodeId, i % 2 === 0 ? 'suspended' : 'active', 'test');
+  r = await call(h, 'GET', '/nodes/admin/events', { headers: ADMIN });
+  assert.equal(r.json.events.length, D.EVENTS_PAGE);
+  const rest = await call(h, 'GET', '/nodes/admin/events?before=' + r.json.next, { headers: ADMIN });
+  assert.ok(rest.json.events.length > 0 && rest.json.events.every((e) => e.id < r.json.events.at(-1).id));
+  assert.equal((await call(h, 'GET', '/nodes/admin/events?before=x', { headers: ADMIN })).status, 400);
+  // A deploy with the account off the list: the lost trust is an event, and its ALERT is in the ring.
+  h = await boot({ ...env, NODE_TRUSTED_OPERATORS: 'ffffffffffffffff' }, new FakeCtx(h.ctx.db));
+  assert.equal(rows(h, 'node_events').filter((e) => e.kind === 'trust_removed').length, 1);
+  assert.ok(rows(h, 'node_alerts').some((a) => a.kind === 'audit' && a.line.includes('lost its trust')), 'logged before the store was up, kept all the same');
+});
+
+test('the alert lines: every ALERT the object posts (an alert once in 10 minutes, every audit line; with or without a webhook) into a ring of ALERT_RING_MAX, paged newest first; a start line too', async () => {
+  const bad = await boot(makeEnv({ NODE_CONTROL_PUBLIC_KEY: (await generateEd25519()).publicKey }));
+  assert.deepEqual(rows(bad, 'node_alerts').map((a) => [a.kind, a.line]), [['alert', 'ALERT NODE_CONTROL_PUBLIC_KEY is not the public half of NODE_CONTROL_PRIVATE_KEY: no placement, registration or rejoin until they match']], 'no webhook, and before the store was up');
+  const h = await boot(makeEnv());
+  await tokenFor(h);
+  const r = await call(h, 'GET', '/nodes/admin/alerts', { headers: ADMIN });
+  assert.deepEqual(r.json.alerts.map((a) => [a.kind, a.line]), [['audit', 'ALERT registration token created for trusted operator Proyecto Señor (a1b2c3d4e5f60718), region SA']]);
+  assert.deepEqual([r.json.next, r.json.webhook], [null, false]);
+  // The same alert again within 10 minutes (its numbers aside): one line, as the channel would get it; an audit line every time.
+  const before = rows(h, 'node_alerts').length;
+  h.obj.log('ALERT node sp1 (0123456789abcdef) lost 3 matches');
+  h.obj.log('ALERT node sp1 (0123456789abcdef) lost 4 matches');
+  h.obj.audit('ALERT admin x: drain');
+  h.obj.audit('ALERT admin x: drain');
+  assert.equal(rows(h, 'node_alerts').length, before + 3);
+  clock += 10 * MIN;
+  h.obj.log('ALERT node sp1 (0123456789abcdef) lost 5 matches');
+  assert.equal(rows(h, 'node_alerts').length, before + 4, 'ten minutes later: again');
+  for (let i = 0; i < ALERT_RING_MAX + 5; i++) h.obj.store.alertLine(clock, 'alert', `ALERT line ${i}`);
+  assert.equal(rows(h, 'node_alerts').length, ALERT_RING_MAX);
+  const page = await call(h, 'GET', '/nodes/admin/alerts', { headers: ADMIN });
+  assert.deepEqual([page.json.alerts.length, page.json.alerts[0].line], [D.ALERTS_PAGE, `ALERT line ${ALERT_RING_MAX + 4}`]);
+  const second = await call(h, 'GET', '/nodes/admin/alerts?before=' + page.json.next, { headers: ADMIN });
+  assert.equal(second.json.alerts[0].line, `ALERT line ${ALERT_RING_MAX + 4 - D.ALERTS_PAGE}`);
+});
+
+test('the raw replay: the TGR1 bytes as R2 keeps them, no-store, an ALERT every time (never in the read window); 404 for a match the history does not keep, once delisted (its R2 delete failed or not) and once pruned', async () => {
+  const { h, env, ws } = await watched();
+  const bytes = new TextEncoder().encode('TGR1 a replay');
+  const id = (await settleByHand(h)).assign.matchId;
+  // settleByHand settles one without a replay: this one has its upload, so it is listed in the public replays too.
+  const withReplay = async () => {
+    const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+    const x = h.obj.cp.matches.get(placement.matchId);
+    Object.assign(x, { state: 'done', doneAt: clock, replaySha: 'c'.repeat(64), outcome: { kind: 'unrated', matchId: placement.matchId, nodeId: x.nodeId, blue: 1, red: 0, verified: true } });
+    h.obj.store.finished(x, x.outcome);
+    await env.NODE_REPLAYS.put(placement.matchId, bytes);
+    return placement.matchId;
+  };
+  const rid = await withReplay();
+  const get = (matchId) => h.obj.fetch(new Request('https://nodes/nodes/admin/replay?matchId=' + matchId, { headers: { [INTERNAL_HEADER]: secret, ...ADMIN } }));
+  for (let i = 0; i < 2; i++) {
+    const res = await get(rid);
+    assert.equal(res.status, 200);
+    assert.deepEqual(new Uint8Array(await res.arrayBuffer()), bytes);
+    assert.deepEqual([res.headers.get('content-type'), res.headers.get('cache-control'), res.headers.get('content-disposition')], ['application/octet-stream', 'no-store', `attachment; filename="${rid}.tgr"`]);
+  }
+  const none = await get(id);
+  assert.deepEqual([none.status, none.headers.get('cache-control')], [404, 'no-store'], 'never uploaded: refused, and never kept either');
+  assert.equal((await get('9'.repeat(64))).status, 404, 'not in the history');
+  assert.equal((await get('nope')).status, 400);
+  await h.ctx.settle();
+  assert.deepEqual(posted().filter((p) => p.includes('replay of match')), [
+    `**ALERT** \`${ACTOR}: downloaded the replay of match ${rid} (${bytes.byteLength} bytes)\``,
+    `**ALERT** \`${ACTOR}: downloaded the replay of match ${rid} (${bytes.byteLength} bytes)\``,
+    `**ALERT** \`${ACTOR}: the replay of match ${id} was asked for, none served (never uploaded)\``,
+    `**ALERT** \`${ACTOR}: the replay of match ${'9'.repeat(64)} was asked for, none served (not in the history)\``,
+  ]);
+  // Its detail says where it is public; a delist (this bucket cannot delete: the object stays) ends the download.
+  clock += 3 * 60 * MIN;
+  const detail = (await call(h, 'GET', '/nodes/admin/history?match=' + rid, { headers: ADMIN })).json.matches[0];
+  assert.deepEqual([detail.replay, detail.listed, detail.published], [true, true, true]);
+  assert.equal((await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: rid, reason: 'a parent asked' }, headers: ADMIN })).status, 200);
+  assert.ok(env.NODE_REPLAYS.objects.has(rid), 'the R2 object is still there');
+  assert.equal((await get(rid)).status, 404, 'delisted');
+  const gone = (await call(h, 'GET', '/nodes/admin/history?match=' + rid, { headers: ADMIN })).json.matches[0];
+  assert.deepEqual([gone.listed, gone.published, gone.delistedAt], [false, false, clock]);
+  // Past HISTORY_DAYS the cron prunes the history: no download either.
+  await send(h, ws, { t: 'heartbeat', data: beat() });
+  const old = await withReplay();
+  clock += (HISTORY_DAYS + 1) * DAY;
+  assert.equal((await call(h, 'POST', '/internal/health')).status, 200);
+  assert.equal(rows(h, 'node_match_history').filter((r) => r.match_id === old).length, 0);
+  assert.equal((await get(old)).status, 404, 'pruned');
+});
+
+test('match void and verify: a maintainer voids a match not settled (its outbox in the settling transaction, no strike unless asked, the reason in the history) or asks for its verification now; each an ALERT; the overview counts the voids of 24 h', async () => {
+  const { h, env, node, ws } = await watched();
+  const place = async (ranked) => (await call(h, 'POST', '/internal/place', { body: placeBody({ ranked }) })).json.placement.matchId;
+  const run = (what, body) => call(h, 'POST', '/nodes/admin/match/' + what, { body, headers: ADMIN });
+  const a = await place(true);
+  assert.equal((await run('void', { matchId: a })).json.error, 'reason_required');
+  assert.equal((await run('void', { matchId: 'zz', reason: 'x' })).json.error, 'bad_match_id');
+  assert.equal((await run('void', { matchId: '9'.repeat(64), reason: 'x' })).status, 404);
+  let open = null;
+  env.ACCOUNTS.gate = env.MATCHMAKER.gate = new Promise((r) => (open = r));
+  const v = await run('void', { matchId: a, reason: 'stuck after a reboot' });
+  assert.deepEqual([v.status, v.json], [200, { matchId: a, voided: true, strike: false }]);
+  assert.deepEqual(rows(h, 'outbox').map((r) => r.path), ['/ranked-cancel', '/release'], 'written with the settled row');
+  open();
+  env.ACCOUNTS.gate = env.MATCHMAKER.gate = null;
+  await h.ctx.settle();
+  assert.equal(env.ACCOUNTS.calls.find((c) => c.path === '/ranked-cancel').body.reason, 'admin_void');
+  const n = h.obj.cp.registry.node(node.nodeId);
+  assert.deepEqual([n.counters.lost, n.strikeTimes.length], [0, 0], 'no strike');
+  let row = (await call(h, 'GET', '/nodes/admin/history?match=' + a, { headers: ADMIN })).json.matches[0];
+  assert.deepEqual([row.result, row.reason, row.adminReason, row.strike], ['void', 'admin_void', 'stuck after a reboot', null]);
+  assert.equal((await run('void', { matchId: a, reason: 'again' })).json.error, 'already_settled');
+  // With a strike: one, as the node's fault.
+  const b = await place(false);
+  assert.deepEqual((await run('void', { matchId: b, reason: 'fabricated', strike: true })).json, { matchId: b, voided: true, strike: true });
+  assert.deepEqual([n.counters.lost, n.strikeTimes.length], [1, 1]);
+  row = (await call(h, 'GET', '/nodes/admin/history?match=' + b, { headers: ADMIN })).json.matches[0];
+  assert.equal(row.strike, 'admin_void');
+  // Verify now: only a match waiting for its verification, and not one a verifier has.
+  const c = await place(false);
+  assert.equal((await run('verify', { matchId: c })).json.error, 'not_verifying');
+  Object.assign(h.obj.cp.matches.get(c), { state: 'verifying', queuedAt: clock, lastTry: clock, report: { kind: 'ended', matchId: c, replaySha256: 'ab'.repeat(32), result: { winner: 0, blue: 1, red: 0, endTick: 100, endReason: 'rules' }, stats: { slots: [], tickLagP99Ms: 1 } } });
+  assert.deepEqual((await run('verify', { matchId: c })).json, { matchId: c, queued: true });
+  assert.equal(ws.of('verify').at(-1)?.job.matchId, c, 'sent to a verifier now, not after its retry wait');
+  assert.equal((await run('verify', { matchId: c })).json.error, 'in_flight');
+  await h.ctx.settle();
+  const said = posted().filter((p) => p.includes(`${ACTOR}: match `));
+  assert.equal(said.length, 7, 'every call that named a match: the refused ones too');
+  assert.ok(said.includes(`**ALERT** \`${ACTOR}: match ${a} on sao-paulo-1 (${node.nodeId}) voided: stuck after a reboot\``), said.join('\n'));
+  assert.ok(said.includes(`**ALERT** \`${ACTOR}: match ${b} on sao-paulo-1 (${node.nodeId}) voided, a strike for its node: fabricated\``));
+  const o = (await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).json;
+  assert.deepEqual(o.voids24h, [{ nodeId: node.nodeId, reason: 'admin_void', count: 2, name: 'sao-paulo-1' }]);
+  assert.equal(typeof o.nodes[0].seenAt, 'number', 'when it was last seen, kept at its transitions');
+});
+
+test('the open matches: what the control plane holds and has not settled, newest first, with where each stands and its seats (a hidden name left out); a settled one leaves the list', async () => {
+  const { h, env } = await watched();
+  const place = async (over) => (await call(h, 'POST', '/internal/place', { body: placeBody(over) })).json.placement.matchId;
+  const first = await place({ ranked: true });
+  clock += 1000;
+  const second = await place();
+  env.ACCOUNTS.answer = (name, path, body) => (path === '/replay-hidden' ? json200({ ids: body.ids.filter((x) => x === A), names: [] }) : json200({ ok: true }));
+  const r = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual([r.status, r.headers.get('cache-control'), r.json.total, r.json.names], [200, 'no-store', 2, 'shown']);
+  assert.deepEqual(r.json.matches.map((m) => [m.matchId, m.state, m.ranked, m.nodeName, m.replay, m.verifying]), [
+    [second, 'assigned', false, 'sao-paulo-1', false, false],
+    [first, 'assigned', true, 'sao-paulo-1', false, false],
+  ]);
+  assert.deepEqual(r.json.matches[0].seats.map((s) => [s.slot, s.bot, s.name, s.id, s.hidden]), [
+    [0, false, null, A, true],
+    [1, false, 'P1', B, false],
+  ]);
+  await settleByHand(h);
+  h.obj.cp.matches.get(first).state = 'done';
+  const after = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual(after.json.matches.map((m) => m.matchId), [second]);
+});
+
+test('a player purged while their match is held: the open matches show their seat blank, and the seat the settle writes later has neither name nor id; the purged id goes after HISTORY_DAYS', async () => {
+  const { h, env, ws } = await watched();
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+  const asked = [];
+  env.ACCOUNTS.answer = (name, path, body) => (path === '/replay-hidden' ? (asked.push(...body.ids), json200({ ids: body.ids.filter((x) => x === A), names: [] })) : json200({ ok: true }));
+  // AccountsDO tells the purge once, while the match is still being played.
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: A } })).status, 200);
+  const open = await call(h, 'GET', '/nodes/admin/matches', { headers: ADMIN });
+  assert.deepEqual(open.json.matches[0].seats.map((s) => [s.slot, s.bot, s.name, s.id, s.hidden]), [
+    [0, false, null, null, false],
+    [1, false, 'P1', B, false],
+  ]);
+  assert.deepEqual(asked, [B], 'a purged id is not even asked about');
+  assert.deepEqual(h.obj.cp.matches.get(placement.matchId).assign.roster.find((e) => e.slot === 0).playerId, A, 'the roster keeps it: the outcome is delivered with it');
+  // It settles afterwards: the row is written with the seat blank, never with the id and the name.
+  await send(h, ws, { t: 'report', id: 'r1', report: { kind: 'lost', matchId: placement.matchId, reason: 'tick_error' } });
+  assert.deepEqual(rows(h, 'node_match_players').map((r) => [r.slot, r.player_id, r.name]), [[0, null, null], [1, B, 'P1']]);
+  assert.ok(!rows(h, 'node_match_history').some((r) => r.data.includes(A)));
+  h.obj.replayNames.clear();
+  const one = (await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN })).json.matches[0];
+  assert.deepEqual(one.seats[0], { slot: 0, team: 0, bot: false, name: null, id: null, hidden: false });
+  // Only the id is kept, and only HISTORY_DAYS: the cron's prune takes it with the history.
+  assert.deepEqual(rows(h, 'node_forgotten').map((r) => r.player_id), [A]);
+  assert.deepEqual([...h.obj.store.forgotten([B, A, A, ...Array.from({ length: 120 }, (_, i) => i.toString(16).padStart(16, '0'))])], [A], 'asked in parts, each id once');
+  clock += (HISTORY_DAYS + 1) * DAY;
+  assert.equal((await call(h, 'POST', '/internal/health')).status, 200);
+  assert.deepEqual(rows(h, 'node_forgotten'), []);
+});
+
+test("a replay listed before the history was kept (its index row, no history row): the panel's lookup by match id finds no row, and the delist still takes it", async () => {
+  const { h, env } = await watched();
+  const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+  const x = h.obj.cp.matches.get(placement.matchId);
+  Object.assign(x, { state: 'done', doneAt: clock, replaySha: 'c'.repeat(64), outcome: { kind: 'unrated', matchId: placement.matchId, nodeId: x.nodeId, blue: 1, red: 0, verified: true } });
+  h.obj.store.finished(x, x.outcome);
+  await env.NODE_REPLAYS.put(placement.matchId, new TextEncoder().encode('TGR1 old'));
+  // What a match settled before this build looks like: listed, with no row in the history.
+  h.ctx.db.prepare('DELETE FROM node_match_history WHERE match_id = ?').run(placement.matchId);
+  h.ctx.db.prepare('DELETE FROM node_match_players WHERE match_id = ?').run(placement.matchId);
+  clock += 3 * 60 * MIN;
+  const one = await call(h, 'GET', '/nodes/admin/history?match=' + placement.matchId, { headers: ADMIN });
+  assert.deepEqual([one.status, one.json.matches], [200, []]);
+  const d = await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: placement.matchId, reason: 'a player asked' }, headers: ADMIN });
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  assert.deepEqual(rows(h, 'replay_index'), []);
+  const again = await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: placement.matchId, reason: 'a player asked' }, headers: ADMIN });
+  assert.deepEqual([again.status, again.json.error], [404, 'no_replay'], 'what the lookup shows when it is not listed');
+});
+
+test("the cron's prune while nodes_off is set (POST /internal/prune): what is past HISTORY_DAYS goes from every table, the newer rows stay; no node is probed or told anything, no ALERT, where the health check probes", async () => {
+  // A bucket that deletes: the prune takes the R2 objects too.
+  const replays = bucket();
+  replays.delete = async (keys) => void [].concat(keys).forEach((k) => replays.objects.delete(k));
+  const { h, env, node, ws } = await watched({ NODE_REPLAYS: replays });
+  const start = clock;
+  const withReplay = async () => {
+    const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+    const x = h.obj.cp.matches.get(placement.matchId);
+    Object.assign(x, { state: 'done', doneAt: clock, replaySha: 'c'.repeat(64), outcome: { kind: 'unrated', matchId: placement.matchId, nodeId: x.nodeId, blue: 1, red: 0, verified: true } });
+    h.obj.store.finished(x, x.outcome);
+    await env.NODE_REPLAYS.put(placement.matchId, new TextEncoder().encode('TGR1 a replay'));
+    return placement.matchId;
+  };
+  const STARRER = 'cccccccccccccccc';
+  // The old rows: the registration's events and ALERT lines, a match with its replay, seats and a star, a purged id.
+  const old = await withReplay();
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'd'.repeat(16) } })).status, 200);
+  clock += 3 * 60 * MIN;
+  assert.equal(h.obj.store.setReplayStar(STARRER, old, true, 10), 1);
+  // Two days later, the newer ones (none of these writes reaches back 30 days).
+  clock += 2 * DAY;
+  await send(h, ws, { t: 'heartbeat', data: beat() });
+  const fresh = await withReplay();
+  h.obj.store.nodeEvent({ nodeId: node.nodeId, at: clock, kind: 'reachable', detail: null, actor: null });
+  h.obj.store.alertLine(clock, 'alert', 'ALERT a newer line');
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'e'.repeat(16) } })).status, 200);
+  clock += 3 * 60 * MIN;
+  assert.equal(h.obj.store.setReplayStar(STARRER, fresh, true, 10), 1);
+  // The old ones turn 31 days old; nothing pruned them yet (no cron, no write since).
+  clock = start + (HISTORY_DAYS + 1) * DAY;
+  const cutoff = clock - HISTORY_DAYS * DAY;
+  const timed = { replay_index: 'match_id', node_match_history: 'match_id', node_events: 'id', node_alerts: 'id', node_forgotten: 'player_id' };
+  const byMatch = (table) => [...new Set(rows(h, table).map((r) => r.match_id))].sort();
+  const kept = {};
+  for (const [t, k] of Object.entries(timed)) {
+    const all = rows(h, t);
+    assert.ok(all.some((r) => r.at < cutoff) && all.some((r) => r.at >= cutoff), `${t}: rows on both sides of the 30 days`);
+    kept[t] = all.filter((r) => r.at >= cutoff).map((r) => String(r[k])).sort();
+  }
+  for (const t of ['replay_players', 'replay_stars', 'node_match_players']) assert.deepEqual(byMatch(t), [old, fresh].sort(), t);
+  const probes = [];
+  const fetchFn = h.obj.fetchFn;
+  h.obj.fetchFn = (url, init) => (new URL(String(url)).pathname === '/healthz' && probes.push(String(url)), fetchFn(url, init));
+  const told = ws.sent.length;
+  lines.length = 0;
+  posts.length = 0;
+  const r = await call(h, 'POST', '/internal/prune');
+  assert.deepEqual([r.status, r.json], [200, { replays: 1, history: 1 }]);
+  for (const [t, k] of Object.entries(timed)) {
+    assert.deepEqual(rows(h, t).map((x) => String(x[k])).sort(), kept[t], `${t}: what is past 30 days gone, the rest kept`);
+  }
+  for (const t of ['replay_players', 'replay_stars', 'node_match_players']) assert.deepEqual(byMatch(t), [fresh], t);
+  assert.deepEqual([replays.objects.has(old), replays.objects.has(fresh)], [false, true], 'the R2 object with its row');
+  await h.ctx.settle();
+  assert.deepEqual([probes, ws.sent.length, alerts(), posts], [[], told, [], []], 'no probe, nothing sent to the node, no ALERT');
+  // The same object's health check would have probed it.
+  assert.deepEqual((await call(h, 'POST', '/internal/health')).json, { probed: 1, problems: 0 });
+  assert.equal(probes.length, 1);
+});
+
+test("the maintainers' lists hide what is past HISTORY_DAYS before any prune: the history (one match's lookup and its raw replay too), the node events and the alert lines", async () => {
+  const { h, node, ws } = await watched();
+  const start = clock;
+  const old = (await settleByHand(h)).assign.matchId;
+  clock += 2 * DAY;
+  await send(h, ws, { t: 'heartbeat', data: beat() });
+  const fresh = (await settleByHand(h)).assign.matchId;
+  h.obj.store.nodeEvent({ nodeId: node.nodeId, at: clock, kind: 'reachable', detail: 'newer', actor: null });
+  h.obj.store.alertLine(clock, 'alert', 'ALERT a newer line');
+  clock = start + (HISTORY_DAYS + 1) * DAY;
+  const cutoff = clock - HISTORY_DAYS * DAY;
+  for (const t of ['node_match_history', 'node_events', 'node_alerts']) assert.ok(rows(h, t).some((r) => r.at < cutoff), `${t}: an old row, not pruned yet`);
+  // The alert lines first: a read's own audit line prunes the ring on its way.
+  const a = (await call(h, 'GET', '/nodes/admin/alerts', { headers: ADMIN })).json.alerts;
+  assert.ok(a.some((x) => x.line === 'ALERT a newer line') && a.every((x) => x.at >= cutoff), JSON.stringify(a));
+  const e = (await call(h, 'GET', '/nodes/admin/events', { headers: ADMIN })).json.events;
+  assert.ok(e.some((x) => x.detail === 'newer') && e.every((x) => x.at >= cutoff), JSON.stringify(e));
+  assert.ok((await call(h, 'GET', '/nodes/admin/events?node=' + node.nodeId, { headers: ADMIN })).json.events.every((x) => x.at >= cutoff));
+  const ids = async (q) => (await call(h, 'GET', '/nodes/admin/history' + q, { headers: ADMIN })).json.matches.map((m) => m.matchId);
+  assert.deepEqual(await ids(''), [fresh]);
+  assert.deepEqual(await ids('?node=' + node.nodeId), [fresh]);
+  assert.deepEqual(await ids('?match=' + old), []);
+  assert.deepEqual(await ids('?match=' + fresh), [fresh]);
+  lines.length = 0;
+  assert.equal((await h.obj.fetch(new Request('https://nodes/nodes/admin/replay?matchId=' + old, { headers: { [INTERNAL_HEADER]: secret, ...ADMIN } }))).status, 404);
+  assert.ok(lines.some((l) => l.endsWith(`the replay of match ${old} was asked for, none served (not in the history)`)), lines.join('\n'));
+  // Hidden, not pruned: the cron's prune takes them.
+  assert.ok(rows(h, 'node_match_history').some((r) => r.match_id === old));
+  assert.ok(rows(h, 'node_events').some((r) => r.at < cutoff));
+});
+
+test("an idle object woken by the cron's prune (nodes_off set) starts again at each run: its start's ALERT reaches the channel and the ring once in 10 minutes, as one object's would; one that cannot start prunes nothing", async () => {
+  // Four of the cron's runs, 5 minutes apart, each on a new instance: nothing keeps the object awake between them.
+  const runs = async (env, db, answer) => {
+    lines.length = 0;
+    posts.length = 0;
+    let h;
+    for (let i = 0; i < 4; i++) {
+      h = await boot(env, new FakeCtx(db));
+      const r = await call(h, 'POST', '/internal/prune');
+      answer(r);
+      await h.ctx.settle();
+      clock += 5 * MIN;
+    }
+    return h;
+  };
+  // A state a newer build wrote: no start of this one reads it.
+  const db = new DatabaseSync(':memory:');
+  const { sql, transactionSync } = sqlOf(db);
+  new NodeStore(sql, transactionSync).migrate();
+  db.prepare("UPDATE meta SET v = '9' WHERE k = 'state_version'").run();
+  await runs(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }), db, (r) => assert.deepEqual([r.status, r.json.error], [503, 'nodes_unavailable'], 'nothing pruned until a start reads it'));
+  assert.equal(alerts().length, 4, 'the logs keep every one');
+  assert.equal(posted().length, 2, 'the first run and 10 minutes later');
+  assert.ok(posted().every((p) => p.includes('node control plane not started, its state is left as it is')), posted().join('\n'));
+  assert.equal(db.prepare("SELECT v FROM meta WHERE k = 'state_version'").get().v, '9');
+  // A control key that is not its pair: the start goes on and the prune runs; the ring keeps the line as the channel gets it.
+  const pair = makeEnv({ NODE_ALERT_WEBHOOK: HOOK, NODE_CONTROL_PUBLIC_KEY: (await generateEd25519()).publicKey });
+  const h = await runs(pair, new DatabaseSync(':memory:'), (r) => assert.deepEqual([r.status, r.json], [200, { replays: 0, history: 0 }]));
+  assert.equal(alerts().length, 4);
+  assert.deepEqual(posted(), Array(2).fill('**ALERT** `NODE_CONTROL_PUBLIC_KEY is not the public half of NODE_CONTROL_PRIVATE_KEY: no placement, registration or rejoin until they match`'));
+  assert.equal(rows(h, 'node_alerts').filter((a) => a.line.includes('not the public half')).length, 2);
 });

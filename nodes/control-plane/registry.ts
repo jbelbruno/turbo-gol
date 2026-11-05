@@ -5,7 +5,8 @@
  * production NodeRegistryDO calls the same methods (see docs/INTEGRACION.md) with a `store` that
  * writes every durable change to its SQLite storage as it happens (persist.ts), and `restore`
  * loads the rows back after a restart. Heartbeats never write: what they carry comes back with
- * the next one.
+ * the next one. A change of a node is also an event (`events`, NodeEventKind) for the maintainers'
+ * history, and so is each online / offline transition, the only time lastSeen is written (seenAt).
  *
  * Lifecycle of a node (status):
  *   pending    registered with a valid token; not proven reachable yet -> no matches
@@ -116,6 +117,42 @@ export function tokenState(t: TokenRecord, now: number): TokenState {
   return t.expiresAt < now ? 'expired' : 'unused';
 }
 
+/**
+ * What the maintainers' panel keeps of a node's story (the NodeRegistryDO's node_events): the
+ * registry's own (registered, token_used, status_change, strike, pause, offline, online, retire,
+ * trust_removed) and the control plane's (verify_failed, probe_failed, unreachable, reachable,
+ * drain, link_quiet, link_back, link_4408, late_messages, update_sent). Each is a change, never a
+ * heartbeat that repeats the last one.
+ */
+export type NodeEventKind =
+  | 'registered'
+  | 'token_used'
+  | 'status_change'
+  | 'strike'
+  | 'pause'
+  | 'verify_failed'
+  | 'probe_failed'
+  | 'unreachable'
+  | 'reachable'
+  | 'offline'
+  | 'online'
+  | 'drain'
+  | 'retire'
+  | 'trust_removed'
+  | 'link_quiet'
+  | 'link_back'
+  | 'link_4408'
+  | 'late_messages'
+  | 'update_sent';
+
+/**
+ * Where a node's events go (RegistryOptions.events, ControlPlaneOptions.events), as the log takes
+ * its lines: synchronous, and it never throws back (the NodeRegistryDO writes a row, and a row that
+ * fails costs the history one line, never a registration or a match). `detail`: a short line, never
+ * a player's name or id.
+ */
+export type NodeEventSink = (nodeId: string, kind: NodeEventKind, detail: string | null) => void;
+
 export interface Operator {
   /** The operator's account id (the session `sub`): reputation and rewards attach to it. */
   id: string;
@@ -199,6 +236,12 @@ export interface NodeRecord {
   retiredReason?: string | null;
   /** When it lost its operator's trust (restore), or null; cleared when the operator is trusted again. */
   trustRemovedAt?: number | null;
+  /**
+   * lastSeen as of the node's last online or offline transition, written then and only then (a
+   * heartbeat never writes; lastSeen itself is memory only): what a restart still knows of when an
+   * offline node was last heard. Null before its first transition, and in rows from before it.
+   */
+  seenAt?: number | null;
 }
 
 export type RegisterResult = { ok: true; node: NodeRecord } | { ok: false; code: string; message?: string };
@@ -223,6 +266,8 @@ export interface RegistryOptions {
    * wrangler dev); the reference server and the tests, which run on addresses, do not.
    */
   refuseIpUrls?: boolean;
+  /** A node's events, for the maintainers' history (none: not kept). */
+  events?: NodeEventSink;
 }
 
 function cleanName(s: unknown, fallback: string): string {
@@ -258,13 +303,30 @@ export class Registry {
   private readonly opts: RegistryOptions;
   private readonly trusted: Set<string>;
   private readonly log: (msg: string) => void;
+  private readonly event: NodeEventSink;
   private readonly maxTrusted: number;
 
   constructor(opts: RegistryOptions = {}) {
     this.opts = opts;
     this.trusted = new Set(opts.trustedOperators ?? []);
     this.log = opts.log ?? ((m) => console.log(`[control] ${m}`));
+    this.event = opts.events ?? (() => undefined);
     this.maxTrusted = trustedNodeCap(opts.maxTrustedNodes);
+  }
+
+  /** A status change for the history: `from` -> the node's status now, and its reason. Nothing when it stayed. */
+  private statusEvent(n: NodeRecord, from: NodeStatus): void {
+    if (n.status !== from) this.event(n.nodeId, 'status_change', `${from} -> ${n.status}${n.statusReason ? `: ${n.statusReason}` : ''}`);
+  }
+
+  /**
+   * The node goes in or out of placement (`online` changes): an event, and seenAt, which the caller
+   * writes (the one write a transition costs: lastSeen itself is never written).
+   */
+  private transition(n: NodeRecord, online: boolean, now: number): void {
+    n.online = online;
+    n.seenAt = online ? now : n.lastSeen > 0 ? n.lastSeen : (n.seenAt ?? null);
+    this.event(n.nodeId, online ? 'online' : 'offline', null);
   }
 
   /**
@@ -307,6 +369,8 @@ export class Registry {
     n.counters.probationVerified = 0;
     n.trustRemovedAt = now;
     this.save(n);
+    this.event(n.nodeId, 'trust_removed', `${was} -> ${n.status}, 0 of ${PROBATION_MATCHES} verified matches`);
+    this.statusEvent(n, was);
     this.log(
       `ALERT node ${n.name} (${n.nodeId}) of ${n.operatorName} (${n.operatorId}) lost its trust (the operator is no longer in NODE_TRUSTED_OPERATORS): ${was} -> ${n.status}, 0 of ${PROBATION_MATCHES} verified matches`,
     );
@@ -420,6 +484,20 @@ export class Registry {
     return true;
   }
 
+  /**
+   * The name of a node registered with none (no --name, a token without one): its region and a
+   * number, `sa-node-3`. Never its operator's name, which the public list (publicList.ts) would show
+   * beside the "Anfitrión <n>" that hides it, nor the start of the operator's id (the name a token
+   * carries when the account's could not be read). The number counts the region's records, which
+   * are never deleted, and skips a name already taken, so two nodes never share one.
+   */
+  private unnamedName(region: string): string {
+    const taken = new Set(this.list().map((n) => n.name));
+    let k = this.list().filter((n) => n.region === region).length + 1;
+    while (taken.has(`${region.toLowerCase()}-node-${k}`)) k++;
+    return `${region.toLowerCase()}-node-${k}`;
+  }
+
   async register(req: RegisterRequest, now: number): Promise<RegisterResult> {
     if (!req || typeof req.token !== 'string' || !req.token.startsWith(TOKEN_PREFIX) || req.token.length > 80) return { ok: false, code: 'bad_token' };
     const tok = this.tokens.get(await sha256Hex(req.token));
@@ -457,12 +535,11 @@ export class Registry {
     if (!c || !Number.isInteger(c.matches) || c.matches < 1 || c.matches > MAX_CAPACITY) return { ok: false, code: 'bad_capacity' };
 
     const nodeId = randomHexId(8);
-    const count = this.byOperator(tok.operatorId).length + 1;
     const node: NodeRecord = {
       nodeId,
       operatorId: tok.operatorId,
       operatorName: tok.operatorName,
-      name: cleanName(req.name ?? tok.name, `${tok.region.toLowerCase()}-${tok.operatorName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'node'}-${count}`),
+      name: cleanName(req.name ?? tok.name, this.unnamedName(tok.region)),
       region: tok.region,
       publicKey: req.publicKey,
       roles,
@@ -496,6 +573,7 @@ export class Registry {
       retiredAt: null,
       retiredReason: null,
       trustRemovedAt: null,
+      seenAt: null,
     };
     // A verify-only node needs no reachability: it only dials out.
     if (!roles.includes('host')) {
@@ -512,6 +590,8 @@ export class Registry {
     tok.usedBy = nodeId;
     this.nodes.set(nodeId, node);
     this.opts.store?.register(tok, node);
+    this.event(nodeId, 'token_used', `token ${tokenIdOf(tok)} (${tok.region}${tok.publicHost ? `, ${tok.publicHost}` : ''})`);
+    this.event(nodeId, 'registered', `${node.status}, roles ${roles.join('+')}, transports ${transports.join('+') || '-'}${node.trusted ? ', trusted' : ''}`);
     if (node.trusted) {
       this.log(`ALERT trusted node ${node.name} (${nodeId}) registered for ${node.operatorName} (${node.operatorId}), roles ${roles.join('+')}${node.publicUrl ? ' at ' + node.publicUrl : ''}`);
     }
@@ -543,7 +623,7 @@ export class Registry {
   connected(id: string, hello: HelloData, now: number, opts: { requireRelay?: boolean } = {}): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
-    n.online = true;
+    if (!n.online) this.transition(n, true, now); // written below with the hello
     n.lastSeen = now;
     n.build = hello.build;
     n.specs = hello.specs;
@@ -576,7 +656,11 @@ export class Registry {
   heartbeat(id: string, hb: HeartbeatData, now: number): void {
     const n = this.nodes.get(id);
     if (!n) return;
-    n.online = true;
+    if (!n.online) {
+      // Its heartbeats again after the sweep took it out (held on the way, most likely): back in placement.
+      this.transition(n, true, now);
+      this.save(n);
+    }
     n.lastSeen = now;
     n.active = Math.min(hb.active, n.capacity.matches);
     n.draining = hb.draining;
@@ -598,9 +682,12 @@ export class Registry {
     n.lastSeen = now;
   }
 
+  /** Its logged-in link ended. Out of placement if it was not already (the sweep may have taken it out first). */
   disconnected(id: string): void {
     const n = this.nodes.get(id);
-    if (n) n.online = false;
+    if (!n || !n.online) return;
+    this.transition(n, false, n.lastSeen);
+    this.save(n);
   }
 
   /**
@@ -626,6 +713,7 @@ export class Registry {
     n.retiredReason = reason;
     n.online = false;
     this.save(n);
+    this.event(n.nodeId, 'retire', reason);
     return n;
   }
 
@@ -639,7 +727,8 @@ export class Registry {
     const restored: NodeRecord[] = [];
     for (const n of this.nodes.values()) {
       if (n.online && now - n.lastSeen > HEARTBEAT_TIMEOUT_MS) {
-        n.online = false;
+        this.transition(n, false, now);
+        this.save(n);
         offline.push(n);
       }
       if (n.status === 'suspended' && n.suspendedUntil !== null && now >= n.suspendedUntil) {
@@ -651,6 +740,7 @@ export class Registry {
         n.strikeTimes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
         n.counters.strikes = n.strikeTimes.length;
         this.save(n);
+        this.statusEvent(n, 'suspended');
         restored.push(n);
       }
     }
@@ -681,16 +771,15 @@ export class Registry {
 
   private reach(n: NodeRecord, now: number): NodeStatus | null {
     n.reachableAt = now;
+    const from = n.status;
     if (n.status === 'pending') {
       n.status = n.trusted ? 'active' : 'probation';
       n.statusReason = null;
-      return n.status;
-    }
-    if (n.trusted && n.status === 'probation') {
+    } else if (n.trusted && n.status === 'probation') {
       n.status = 'active';
-      return n.status;
     }
-    return null;
+    this.statusEvent(n, from);
+    return n.status === from ? null : n.status;
   }
 
   onAssigned(id: string): void {
@@ -704,6 +793,7 @@ export class Registry {
   onVerified(id: string, ranked: boolean, ok: boolean): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
+    const from = n.status;
     let changed: NodeStatus | null = null;
     if (!ok) {
       n.counters.failedVerification++;
@@ -724,6 +814,7 @@ export class Registry {
       }
     }
     this.save(n);
+    this.statusEvent(n, from);
     return changed;
   }
 
@@ -735,10 +826,12 @@ export class Registry {
   onLost(id: string, reason: string, now: number): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
+    const from = n.status;
     n.counters.lost++;
     n.strikeTimes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
     n.strikeTimes.push(now);
     n.counters.strikes = n.strikeTimes.length;
+    this.event(n.nodeId, 'strike', `${reason} (${n.counters.strikes} in 7 days)`);
     let changed: NodeStatus | null = null;
     if (n.counters.strikes >= MAX_STRIKES && (n.status === 'probation' || n.status === 'active') && !n.trusted) {
       n.pauseTimes = (n.pauseTimes ?? []).filter((t) => now - t < REPEAT_PAUSE_WINDOW_MS);
@@ -751,8 +844,10 @@ export class Registry {
       n.statusReason = 'strikes:' + reason;
       n.suspendedUntil = now + STRIKE_COOLDOWN_MS;
       changed = n.status;
+      this.event(n.nodeId, 'pause', `${n.counters.strikes} strikes, for ${STRIKE_COOLDOWN_MS / 3_600_000} h${repeated ? ', the second pause in 30 days: back to probation after it' : ''}`);
     }
     this.save(n);
+    this.statusEvent(n, from);
     return changed;
   }
 
@@ -760,8 +855,10 @@ export class Registry {
   setStatus(id: string, status: NodeStatus, reason: string | null): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n || n.status === status) return null;
+    const from = n.status;
     this.applyStatus(n, status, reason);
     this.save(n);
+    this.statusEvent(n, from);
     return status;
   }
 

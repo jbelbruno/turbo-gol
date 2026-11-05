@@ -17,6 +17,16 @@
  *   RELEASE    the versions by node, REANUNCIAR CANAL (POST /nodes/admin/update), the CLI commands
  *   PUNTOS     an account's wallet and items by its id, the frozen wallets, grant / revoke / unfreeze
  *   CUENTAS Y COLAS  account-stats and queue-stats, asked when the tab opens and with ACTUALIZAR only
+ *   PARTIDAS   the matches held and not settled, then the settled ones (the history, PR 4), and the
+ *              voids of 24 h by node and reason; a press opens its detail (a sub-view Back closes):
+ *              its times, outcome, verdict and verifier, strike, seats (a hidden name as "Jugador
+ *              N"); VER LA REPETICIÓN (the public viewer, once published), DESCARGAR (the raw TGR1,
+ *              every download posted to the team's channel), DESLISTAR, and for an open one ANULAR
+ *              (with or without a strike) and VERIFICAR AHORA. A match id, or the replay link a
+ *              player sent, opens its detail: one the history does not keep (listed before it was,
+ *              or older than its 30 days) offers the viewer and DESLISTAR all the same
+ *   HISTORIAL  the nodes' events, newest first; ALERTAS the ALERT lines of the team's channel. These
+ *              three are asked when their tab opens, with ACTUALIZAR and MÁS, never by the refresh
  *
  * The overview is asked again every ADMIN_REFRESH_MS while the screen is on top, the menus are up
  * and the page is shown (the Menu's tick; nothing runs over a match). 403 reauth_required stops it,
@@ -45,6 +55,7 @@ import {
   accountIdOf,
   installLineMatches,
   maskAddress,
+  matchIdOf,
   nodeErrorKey,
   nodeFailure,
   probeHint,
@@ -53,17 +64,22 @@ import {
   tokenFormIssues,
   verificationMatch,
 } from '../../net/nodes';
-import type { AdminNode, AdminWallet, FrozenList, NodeFailure, NodeStatus, Overview, TokenAsk, TokenForm, Tone } from '../../net/nodes';
+import type { AdminNode, AdminWallet, AlertLine, FrozenList, HistoryMatch, MatchSeat, NamesState, NodeEvent, NodeFailure, NodeStatus, OpenMatch, OpenMatches, Overview, TokenAsk, TokenForm, Tone } from '../../net/nodes';
 import { sha256Hex } from '../../../nodes/shared/edcrypto';
 import { CATALOG } from '../../../nodes/control-plane/shop';
 import {
   ADMIN_TABS,
+  appendPage,
   checklistOf,
   confirmNeeds,
   countRows,
+  eventTone,
   flagCommands,
   followOf,
   kpisOf,
+  matchActions,
+  matchRows,
+  matchTone,
   minutesLeft,
   nameTyped,
   nodeActions,
@@ -77,6 +93,7 @@ import {
   regionRows,
   releaseRows,
   revocable,
+  seatName,
 } from './nodesAdminModel';
 import type { AdminTab, ConfirmAction, WizardStep } from './nodesAdminModel';
 import type { Menu, Screen } from '../Menu';
@@ -99,6 +116,9 @@ const TAB_KEY: Readonly<Record<AdminTab, Key>> = {
   release: 'nodesAdmin.tab.release',
   points: 'nodesAdmin.tab.points',
   stats: 'nodesAdmin.tab.stats',
+  matches: 'nodesAdmin.tab.matches',
+  history: 'nodesAdmin.tab.history',
+  alerts: 'nodesAdmin.tab.alerts',
 };
 
 const STATE_KEY: Readonly<Record<NodeStatus, Key>> = {
@@ -151,6 +171,9 @@ function errText(e: unknown): string {
 
 const failureOf = (e: unknown): NodeFailure => nodeFailure(e instanceof AccountError ? e : null);
 
+/** The history's tabs: their data are their own reads, not the overview's (PARTIDAS shows its voids of 24 h beside them). */
+const HISTORY_TABS: ReadonlySet<AdminTab> = new Set(['matches', 'history', 'alerts']);
+
 /** The wizard as it stands: kept through Back and a password sheet until LISTO or a new account. */
 interface Wizard {
   step: WizardStep;
@@ -169,7 +192,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
   const el = h('div.mn-na', { 'data-tablero': true }, screenHead(t('nodesAdmin.title')), who, status, body);
 
   let tab: AdminTab = 'summary';
-  let view: { kind: 'tabs' } | { kind: 'node'; nodeId: string } | { kind: 'wizard' } = { kind: 'tabs' };
+  let view: { kind: 'tabs' } | { kind: 'node'; nodeId: string } | { kind: 'match'; matchId: string } | { kind: 'wizard' } = { kind: 'tabs' };
   let data: Overview | null = null;
   /** The account the data are of: another one sees none of them. */
   let owner: string | null = null;
@@ -184,6 +207,12 @@ export function nodesAdminScreen(menu: Menu): Screen {
   let frozen: FrozenList | null = null;
   let stats: { accounts: Record<string, unknown> | null; days: unknown[] | null; error: string | null; loading: boolean } | null = null;
   let sample: Overview | null = null;
+  // The history (PR 4): asked when its tab opens, with ACTUALIZAR and MÁS, never by the 15 s refresh (its reads share the audit window).
+  let matches: { open: OpenMatches | null; settled: HistoryMatch[]; next: string | null; names: NamesState; error: string | null; loading: boolean } | null = null;
+  let events: { list: NodeEvent[]; next: string | null; error: string | null; loading: boolean } | null = null;
+  let alertLines: { list: AlertLine[]; next: string | null; webhook: boolean; error: string | null; loading: boolean } | null = null;
+  /** A match looked up by its id in PARTIDAS: its history row, or null when the history keeps none. */
+  let found: { matchId: string; row: HistoryMatch | null; names: NamesState } | null = null;
   /** The wizard's countdown and follow-up, repainted by the tick and the refresh without touching its fields. */
   let followEl: HTMLElement | null = null;
   let slotsEl: HTMLElement | null = null;
@@ -200,6 +229,10 @@ export function nodesAdminScreen(menu: Menu): Screen {
     lookup = null;
     frozen = null;
     stats = null;
+    matches = null;
+    events = null;
+    alertLines = null;
+    found = null;
     reveal = false;
     view = { kind: 'tabs' };
     tab = 'summary';
@@ -266,7 +299,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     if (view.kind === 'wizard') {
       paintFollow();
       paintSlots();
-    } else if (view.kind === 'node' || (tab !== 'points' && tab !== 'stats')) keepFocus(paintBody);
+    } else if (view.kind === 'node' || (view.kind === 'tabs' && !HISTORY_TABS.has(tab) && tab !== 'points' && tab !== 'stats')) keepFocus(paintBody);
   };
 
   /** A POST of the panel, with "confirm it's you" and once more when the server asks for it. Resolves whether the sheet may close. */
@@ -480,10 +513,10 @@ export function nodesAdminScreen(menu: Menu): Screen {
     const needs = confirmNeeds(a);
     const reason = field(t('nodesAdmin.confirm.reason'), { maxLength: 200, keypad: 'text', enterkeyhint: needs.typeName ? 'next' : 'done', hint: needs.reason ? undefined : t('nodesAdmin.confirm.optional') });
     const typed: Field | null = needs.typeName ? field(t('nodesAdmin.confirm.typeName', { name }), { maxLength: 40, keypad: 'text', enterkeyhint: 'done' }) : null;
-    const note = a === 'drain' ? 'nodesAdmin.confirm.drainNote' : a === 'retire' ? 'nodesAdmin.confirm.retireNote' : a === 'ban' ? 'nodesAdmin.confirm.banNote' : a === 'force' ? 'nodesAdmin.confirm.forceNote' : a === 'update' ? 'nodesAdmin.confirm.updateNote' : a === 'unfreeze' ? 'nodesAdmin.confirm.unfreezeNote' : 'nodesAdmin.confirm.note';
+    const note = a === 'drain' ? 'nodesAdmin.confirm.drainNote' : a === 'retire' ? 'nodesAdmin.confirm.retireNote' : a === 'ban' ? 'nodesAdmin.confirm.banNote' : a === 'force' ? 'nodesAdmin.confirm.forceNote' : a === 'update' ? 'nodesAdmin.confirm.updateNote' : a === 'unfreeze' ? 'nodesAdmin.confirm.unfreezeNote' : a === 'delist' ? 'nodesAdmin.confirm.delistNote' : a === 'voidMatch' ? 'nodesAdmin.confirm.voidNote' : a === 'voidStrike' ? 'nodesAdmin.confirm.voidStrikeNote' : a === 'download' ? 'nodesAdmin.confirm.downloadNote' : 'nodesAdmin.confirm.note';
     menu.modal({
       title: t('nodesAdmin.confirm.title', { action: label, name }),
-      body: [h('p.mn-note', null, t(note as Key)), a === 'update' || a === 'revokeToken' ? null : reason.el, typed?.el ?? null],
+      body: [h('p.mn-note', null, t(note as Key)), a === 'update' || a === 'revokeToken' || a === 'download' ? null : reason.el, typed?.el ?? null],
       actions: [
         {
           label,
@@ -698,6 +731,283 @@ export function nodesAdminScreen(menu: Menu): Screen {
       section(t('nodesAdmin.stats.accounts'), counts.length > 0 ? h('dl.mn-prof-node-facts', readOnly('na-stats-accounts'), ...counts.flatMap(([k, v]) => fact(k, String(v)))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
       section(t('nodesAdmin.stats.queues'), days.length > 0 ? h('div.mn-na-days', null, head, ...days.map((d) => h('div.mn-na-day', readOnly('na-day-' + d.date), h('span', null, d.date), h('span', null, String(d.searches)), h('span', null, String(d.formed)), h('span', null, String(d.onNode)), h('span', null, String(d.onCloud)), h('span', null, String(d.cancelled)), h('span', null, String(d.dropped))))) : h('p.mn-note', null, t(s?.loading ? 'nodesAdmin.loading' : 'nodesAdmin.stats.none'))),
     ].filter((x): x is HTMLElement => x !== null);
+  };
+
+  // ---- PARTIDAS, HISTORIAL, ALERTAS (the history, PR 4) ----------------------------------------------
+  // Their reads are asked when the tab opens, with ACTUALIZAR and MÁS (the next page), never by the
+  // refresh: each one is a maintainer's read of the audit window, and the open matches ask AccountsDO
+  // whose names are hidden. A session that changed meanwhile keeps nothing of the answer.
+
+  const loadMatches = async (more = false): Promise<void> => {
+    if (sample !== null) return;
+    const me = acc.account?.playerId ?? null;
+    const was = matches;
+    const before = more ? (was?.next ?? null) : null;
+    matches = { open: was?.open ?? null, settled: was?.settled ?? [], next: was?.next ?? null, names: was?.names ?? 'shown', error: null, loading: true };
+    keepFocus(paintBody);
+    try {
+      const [open, page] = await Promise.all([more && was?.open ? Promise.resolve(was.open) : acc.nodesMatches(), acc.nodesHistory(before !== null ? { before } : {})]);
+      if (me !== (acc.account?.playerId ?? null)) return;
+      const settled = more ? appendPage(was?.settled ?? [], page.matches, (m) => m.matchId) : page.matches;
+      matches = { open, settled, next: page.next, names: open.names === 'unavailable' || page.names === 'unavailable' ? 'unavailable' : 'shown', error: null, loading: false };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      matches = { open: was?.open ?? null, settled: was?.settled ?? [], next: was?.next ?? null, names: was?.names ?? 'shown', error: failureOf(e) === 'reauth' ? null : errText(e), loading: false };
+      if (failureOf(e) === 'reauth') return askPassword(() => void loadMatches(more));
+    }
+    if (el.isConnected && (tab === 'matches' || view.kind === 'match')) keepFocus(paintBody);
+  };
+
+  const loadEvents = async (more = false): Promise<void> => {
+    if (sample !== null) return;
+    const me = acc.account?.playerId ?? null;
+    const was = events;
+    const before = more ? (was?.next ?? null) : null;
+    events = { list: was?.list ?? [], next: was?.next ?? null, error: null, loading: true };
+    keepFocus(paintBody);
+    try {
+      const page = await acc.nodesEvents(before !== null ? { before } : {});
+      if (me !== (acc.account?.playerId ?? null)) return;
+      events = { list: more ? appendPage(was?.list ?? [], page.events, (x) => x.id) : page.events, next: page.next, error: null, loading: false };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      events = { list: was?.list ?? [], next: was?.next ?? null, error: failureOf(e) === 'reauth' ? null : errText(e), loading: false };
+      if (failureOf(e) === 'reauth') return askPassword(() => void loadEvents(more));
+    }
+    if (el.isConnected && tab === 'history') keepFocus(paintBody);
+  };
+
+  const loadAlerts = async (more = false): Promise<void> => {
+    if (sample !== null) return;
+    const me = acc.account?.playerId ?? null;
+    const was = alertLines;
+    const before = more ? (was?.next ?? null) : null;
+    alertLines = { list: was?.list ?? [], next: was?.next ?? null, webhook: was?.webhook ?? true, error: null, loading: true };
+    keepFocus(paintBody);
+    try {
+      const page = await acc.nodesAlerts(before !== null ? { before } : {});
+      if (me !== (acc.account?.playerId ?? null)) return;
+      alertLines = { list: more ? appendPage(was?.list ?? [], page.alerts, (x) => x.id) : page.alerts, next: page.next, webhook: page.webhook, error: null, loading: false };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      alertLines = { list: was?.list ?? [], next: was?.next ?? null, webhook: was?.webhook ?? true, error: failureOf(e) === 'reauth' ? null : errText(e), loading: false };
+      if (failureOf(e) === 'reauth') return askPassword(() => void loadAlerts(more));
+    }
+    if (el.isConnected && tab === 'alerts') keepFocus(paintBody);
+  };
+
+  /** A tab's REFRESH, its error and its MÁS (the next page), around its rows: buttons of their own (PARTIDAS), or lines in a box (HISTORIAL, ALERTAS, as TOKENS). */
+  const historyTab = (note: Key, refresh: () => void, s: { error: string | null; loading: boolean; next: string | null } | null, rows: HTMLElement[], more: () => void, key: string, extra: Array<HTMLElement | null> = [], lines = false): HTMLElement[] =>
+    [
+      h('p.mn-note', null, t(note)),
+      h('div.mn-na-tools', null, secondary(t('nodesAdmin.refresh'), refresh, { 'data-key': `na-${key}-refresh`, 'aria-busy': s?.loading ? 'true' : undefined })),
+      s?.error ? h('p.mn-field-error', null, s.error) : null,
+      ...extra,
+      h(lines ? 'section.mn-section.mn-na-rows' : 'div.mn-na-rows', { role: 'list' }, ...(rows.length > 0 ? rows : [h('p.mn-note', null, t(s === null || s.loading ? 'nodesAdmin.loading' : 'nodesAdmin.history.none'))])),
+      s?.next ? secondary(t('nodesAdmin.more'), more, { 'data-key': `na-${key}-more` }) : null,
+    ].filter((x): x is HTMLElement => x !== null);
+
+  /**
+   * One match of the history by its id (GET /nodes/admin/history?match=): its row, or null when the
+   * history keeps none. `then` opens its detail (a lookup); else its detail, if shown, repaints (after an action).
+   */
+  const askMatch = async (matchId: string, then: boolean): Promise<void> => {
+    const me = acc.account?.playerId ?? null;
+    try {
+      const page = await acc.nodesHistory({ match: matchId });
+      if (me !== (acc.account?.playerId ?? null)) return;
+      found = { matchId, row: page.matches.find((x) => x.matchId === matchId) ?? null, names: page.names };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      if (failureOf(e) === 'reauth') return askPassword(() => void askMatch(matchId, then));
+      if (then) matchField.error(errText(e));
+      return;
+    }
+    if (!el.isConnected) return;
+    if (then) openMatch(matchId);
+    else if (view.kind === 'match' && view.matchId === matchId) keepFocus(paintBody);
+  };
+
+  // A match id or the replay link a player sent (replay.html?id=): the pages need not be walked with MÁS.
+  const matchField = field(t('nodesAdmin.match.lookup'), { maxLength: 200, keypad: 'text', enterkeyhint: 'go' });
+  const goFind = (): void => {
+    matchField.error(null);
+    const id = matchIdOf(matchField.input.value);
+    if (id === null) return matchField.error(t('nodesAdmin.match.badId'));
+    if (matchRows(matches?.open ?? null, matches?.settled ?? []).some((r) => r.matchId === id)) return openMatch(id);
+    if (sample !== null) {
+      found = { matchId: id, row: null, names: 'shown' };
+      return openMatch(id);
+    }
+    void askMatch(id, true);
+  };
+  matchField.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.defaultPrevented) goFind();
+  });
+
+  const matchesView = (o: Overview): HTMLElement[] => {
+    const m = matches;
+    const now = Date.now();
+    const rows = matchRows(m?.open ?? null, m?.settled ?? []).map((r) =>
+      navButton(
+        'mn-na-row mn-na-match',
+        [
+          h('b.mn-na-name', null, h('span.mn-dot', { class: r.open ? 'on' : '' }), h('code', null, r.matchId.slice(0, 8))),
+          h('span.mn-na-c', null, r.nodeName),
+          h('span.mn-na-c.mn-na-x', null, regionLabel(r.region)),
+          h('span.mn-na-c', null, r.mode, r.ranked ? ` · ${t('nodesAdmin.match.ranked')}` : ''),
+          h('span.mn-na-tags', null, tag(r.tone, t(`nodesAdmin.match.state.${r.state}` as Key))),
+          h('span.mn-na-c.mn-na-x', null, ago(r.at, now)),
+        ],
+        () => openMatch(r.matchId),
+        { 'data-key': 'na-match-' + r.key },
+      ),
+    );
+    const voids = o.voids24h.map((v, i) => h('p', { 'data-key': 'na-void-' + i }, h('b', null, v.name ?? v.nodeId), ' · ', h('code.mn-na-raw', null, v.reason), ` · ${v.count}`));
+    return historyTab('nodesAdmin.match.note', () => void loadMatches(), m, rows, () => void loadMatches(true), 'matches', [
+      h('form.mn-form.mn-na-lookup', { onsubmit: (e: Event) => e.preventDefault() }, matchField.el, secondary(t('nodesAdmin.match.find'), goFind, { 'data-key': 'na-match-find' })),
+      m?.names === 'unavailable' ? h('p.mn-note', null, t('nodesAdmin.match.namesUnavailable')) : null,
+      section(t('nodesAdmin.match.voidsTitle'), ...(voids.length > 0 ? voids : [h('p.mn-note', null, t('nodesAdmin.match.noVoids'))])),
+    ]);
+  };
+
+  const openMatch = (matchId: string): void => {
+    view = { kind: 'match', matchId };
+    paint();
+  };
+
+  /** A seat as the detail lists it: its team, its name ("Jugador N" for a name its player hides, a purged account said so) and, for the maintainers, its player id. */
+  const seatLine = (s: MatchSeat): HTMLElement => {
+    const n = seatName(s);
+    const name = n.kind === 'name' ? h('b', null, n.name) : h('span', null, t(n.kind === 'bot' ? 'nodesAdmin.match.bot' : n.kind === 'gone' ? 'nodesAdmin.match.gone' : 'nodesAdmin.match.hidden', { n: n.n }));
+    return h('p', { 'data-key': 'na-seat-' + s.slot }, tag(s.team === 0 ? 'ok' : 'bad', t(s.team === 0 ? 'nodesAdmin.match.blue' : 'nodesAdmin.match.red')), ' ', name, s.id !== null ? ' ' : null, s.id !== null ? h('code.mn-na-raw', null, s.id) : null);
+  };
+
+  /** What only a settled match has: when, how, the verdict and its verifier, the strike, the points, the delist. */
+  const settledFacts = (x: HistoryMatch): Child[] => [
+    ...fact(t('nodesAdmin.match.settled'), when(x.settledAt)),
+    ...(x.reason !== null ? fact(t('nodesAdmin.detail.reason'), h('code.mn-na-raw', null, x.reason)) : []),
+    ...(x.score !== null ? fact(t('nodesAdmin.match.score'), `${x.score.blue} - ${x.score.red}`) : []),
+    ...fact(t('nodesAdmin.match.verified'), t(x.verified ? 'nodesAdmin.match.yes' : 'nodesAdmin.match.no'), x.verifierName !== null || x.verifiedBy !== null ? h('span', null, ` · ${x.verifierName ?? x.verifiedBy}`) : ''),
+    ...(x.verdict !== null ? fact(t('nodesAdmin.match.verdict'), h('code.mn-na-raw', null, x.verdict.code)) : []),
+    ...(x.strike !== null ? fact(t('nodesAdmin.match.strike'), h('code.mn-na-raw', null, x.strike)) : []),
+    ...(x.points !== null ? fact(t('nodesAdmin.points.earned'), formatPoints(x.points)) : []),
+    ...(x.frozen ? fact(t('nodesAdmin.points.frozen'), t('nodesAdmin.match.yes')) : []),
+    ...(x.adminReason !== null ? fact(t('nodesAdmin.match.adminReason'), h('span', null, x.adminReason)) : []),
+    ...fact(t('nodesAdmin.match.public'), t(x.delistedAt !== null ? 'nodesAdmin.match.delistedAt' : x.published ? 'nodesAdmin.match.published' : x.listed ? 'nodesAdmin.match.listed' : 'nodesAdmin.match.notListed'), x.delistedAt !== null ? ` · ${when(x.delistedAt)}` : ''),
+  ];
+
+  const matchDetail = (matchId: string): HTMLElement[] | null => {
+    const open = matches?.open?.matches.find((x) => x.matchId === matchId) ?? null;
+    const lookedUp = found !== null && found.matchId === matchId ? found : null;
+    const settled = open === null ? (matches?.settled.find((x) => x.matchId === matchId) ?? lookedUp?.row ?? null) : null;
+    const base: OpenMatch | HistoryMatch | null = open ?? settled;
+    // A match looked up by its id that the history does not keep: only its id, the viewer and DESLISTAR.
+    if (base === null && lookedUp === null) return null;
+    const a = open !== null ? matchActions({ open: true, match: open }) : matchActions({ open: false, match: settled });
+    const short = matchId.slice(0, 8);
+    const done = (key: Key) => (): void => {
+      menu.toast(t(key), 'ok');
+      void loadMatches();
+      if (found?.matchId === matchId) void askMatch(matchId, false);
+    };
+    // The public viewer's link: built from the match id once checked (64 hex), never from a server's text.
+    const href = a.viewer ? replayHref(matchId) : null;
+    const actions = h(
+      'div.mn-na-actions',
+      null,
+      href !== null ? h('a.mn-btn', { href, target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'na-match-viewer' }, t('nodesAdmin.match.viewer')) : null,
+      a.download ? secondary(t('nodesAdmin.match.download'), () => confirmSheet('download', short, t('nodesAdmin.match.download'), () => download(matchId)), { 'data-key': 'na-match-download' }) : null,
+      a.verify ? secondary(t('nodesAdmin.match.verify'), () => void act(() => acc.nodesAction('match/verify', { matchId }), done('nodesAdmin.match.verifyAsked')), { 'data-key': 'na-match-verify' }) : null,
+      a.delist ? secondary(t('nodesAdmin.match.delist'), () => confirmSheet('delist', short, t('nodesAdmin.match.delist'), (reason) => act(() => acc.nodesAction('delist', { matchId, reason }), done('nodesAdmin.match.delisted'))), { 'data-key': 'na-match-delist', class: 'mn-btn-cancel' }) : null,
+      a.void ? secondary(t('nodesAdmin.match.void'), () => confirmSheet('voidMatch', short, t('nodesAdmin.match.void'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void', class: 'mn-btn-cancel' }) : null,
+      a.void ? secondary(t('nodesAdmin.match.voidStrike'), () => confirmSheet('voidStrike', short, t('nodesAdmin.match.voidStrike'), (reason) => act(() => acc.nodesAction('match/void', { matchId, reason, strike: true }), done('nodesAdmin.match.voided'))), { 'data-key': 'na-match-void-strike', class: 'mn-btn-cancel' }) : null,
+    );
+    if (base === null) {
+      return [h('div.mn-prof-node', null, h('div.mn-prof-node-head', null, icon('ball', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, short)), h('dl.mn-prof-node-facts', null, ...fact(t('nodesAdmin.match.id'), h('code.mn-na-raw', null, matchId))), h('p.mn-note', null, t('nodesAdmin.match.noRow'))), actions];
+    }
+    const now = Date.now();
+    const state = open !== null ? open.state : (settled as HistoryMatch).result;
+    // A looked-up row's names were checked with it, a listed one's with its page.
+    const names = open === null && lookedUp !== null && lookedUp.row === settled ? lookedUp.names : matches?.names;
+    const facts = h(
+      'dl.mn-prof-node-facts',
+      null,
+      ...fact(t('nodesAdmin.match.id'), h('code.mn-na-raw', null, base.matchId)),
+      ...fact(t('nodesAdmin.match.node'), base.nodeName ?? base.nodeId),
+      ...fact(t('nodesAdmin.detail.region'), regionLabel(base.region)),
+      ...fact(t('nodesAdmin.match.mode'), base.mode, base.ranked ? ` · ${t('nodesAdmin.match.ranked')}` : '', ` · ${base.transport}`),
+      ...fact(t('nodesAdmin.match.placed'), when(base.placedAt)),
+      ...(base.reportedAt !== null ? fact(t('nodesAdmin.match.reported'), when(base.reportedAt)) : []),
+      ...(open !== null
+        ? [
+            ...fact(t('nodesAdmin.match.started'), t(open.started ? 'nodesAdmin.match.yes' : 'nodesAdmin.match.no')),
+            ...(open.queuedAt !== null ? fact(t('nodesAdmin.match.queued'), ago(open.queuedAt, now)) : []),
+            ...(open.verifierName !== null ? fact(t('nodesAdmin.match.verifier'), open.verifierName) : []),
+            ...fact(t('nodesAdmin.match.leaves'), String(open.leaves)),
+          ]
+        : settledFacts(settled as HistoryMatch)),
+      ...fact(t('nodesAdmin.match.replay'), t(base.replay ? 'nodesAdmin.match.yes' : 'nodesAdmin.match.no')),
+    );
+    return [
+      h('div.mn-prof-node', null, h('div.mn-prof-node-head', null, icon('ball', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, short), tag(matchTone(state), t(`nodesAdmin.match.state.${state}` as Key))), facts),
+      actions,
+      section(t('nodesAdmin.match.seats'), ...(names === 'unavailable' ? [h('p.mn-note', null, t('nodesAdmin.match.namesUnavailable'))] : []), ...base.seats.map(seatLine)),
+    ];
+  };
+
+  /**
+   * The raw replay, saved as <matchId>.tgr for `verify <file>` by hand (the server posts every
+   * download to the team's channel): the bytes go into a blob of this page, never a server's text in a link.
+   */
+  const download = async (matchId: string): Promise<boolean> => {
+    if (!/^[0-9a-f]{64}$/.test(matchId)) return false;
+    if (sample !== null) {
+      menu.toast(t('nodesAdmin.done'), 'ok');
+      return true;
+    }
+    try {
+      const bytes = await acc.nodesReplay(matchId);
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${matchId}.tgr`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      menu.toast(t('nodesAdmin.match.downloaded'), 'ok');
+      return true;
+    } catch (e) {
+      if (failureOf(e) === 'reauth') {
+        queueMicrotask(() => askPassword(() => void download(matchId)));
+        return true;
+      }
+      const text = errText(e);
+      menu.toast(e instanceof AccountError && e.code === 'no_replay' ? t('nodesAdmin.match.noRaw') : text, 'error');
+      return false;
+    }
+  };
+
+  const eventsView = (): HTMLElement[] => {
+    const rows = (events?.list ?? []).map((x) =>
+      h(
+        'div.mn-na-token',
+        { 'data-key': 'na-event-' + x.id },
+        h('small', null, when(x.at)),
+        h('b', null, x.nodeName ?? x.nodeId),
+        tag(eventTone(x.kind), t(`nodesAdmin.event.${x.kind}` as Key)),
+        x.detail !== null ? h('code.mn-na-raw', null, x.detail) : null,
+        x.actor !== null ? h('small', null, t('nodesAdmin.event.by'), ' ', h('span', null, x.actor)) : null,
+      ),
+    );
+    return historyTab('nodesAdmin.history.note', () => void loadEvents(), events, rows, () => void loadEvents(true), 'events', [], true);
+  };
+
+  const alertsView = (): HTMLElement[] => {
+    const a = alertLines;
+    const rows = (a?.list ?? []).map((x) => h('div.mn-na-token', { 'data-key': 'na-alert-' + x.id }, h('small', null, when(x.at)), tag(x.kind === 'audit' ? 'muted' : 'warn', t(x.kind === 'audit' ? 'nodesAdmin.alerts.audit' : 'nodesAdmin.alerts.alert')), h('code.mn-na-raw', null, x.line)));
+    return historyTab('nodesAdmin.alerts.note', () => void loadAlerts(), a, rows, () => void loadAlerts(true), 'alerts', [a !== null && !a.webhook ? h('div.mn-na-alert', null, icon('warning'), h('p', null, t('nodesAdmin.warn.noWebhook'))) : null], true);
   };
 
   // ---- the wizard: AGREGAR SERVIDOR DEL PROYECTO --------------------------------------------------------
@@ -915,6 +1225,9 @@ export function nodesAdminScreen(menu: Menu): Screen {
               tab = id;
               if (id === 'points' && frozen === null) void loadFrozen();
               if (id === 'stats' && stats === null) void loadStats();
+              if (id === 'matches' && matches === null) void loadMatches();
+              if (id === 'history' && events === null) void loadEvents();
+              if (id === 'alerts' && alertLines === null) void loadAlerts();
               keepFocus(paintBody);
             },
           },
@@ -941,7 +1254,31 @@ export function nodesAdminScreen(menu: Menu): Screen {
       if (n !== undefined) return setChildren(body, ...nodeDetail(n));
       view = { kind: 'tabs' };
     }
-    const content = tab === 'summary' ? summaryView(o) : tab === 'nodes' ? nodesView(o) : tab === 'tokens' ? tokensView(o) : tab === 'regions' ? regionsView(o) : tab === 'release' ? releaseView(o) : tab === 'points' ? pointsView() : statsView();
+    if (view.kind === 'match') {
+      const d = matchDetail(view.matchId);
+      if (d !== null) return setChildren(body, ...d);
+      view = { kind: 'tabs' };
+    }
+    const content =
+      tab === 'summary'
+        ? summaryView(o)
+        : tab === 'nodes'
+          ? nodesView(o)
+          : tab === 'tokens'
+            ? tokensView(o)
+            : tab === 'regions'
+              ? regionsView(o)
+              : tab === 'release'
+                ? releaseView(o)
+                : tab === 'points'
+                  ? pointsView()
+                  : tab === 'stats'
+                    ? statsView()
+                    : tab === 'matches'
+                      ? matchesView(o)
+                      : tab === 'history'
+                        ? eventsView()
+                        : alertsView();
     setChildren(body, tabsStrip(), ...content);
   };
 
@@ -973,6 +1310,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
       sample = sampleOverview();
       data = sample;
       problem = null;
+      found = null;
       view = { kind: 'tabs' };
       tab = (ADMIN_TABS as readonly string[]).includes(kind) ? (kind as AdminTab) : 'summary';
       if (kind === 'points') {
@@ -983,6 +1321,15 @@ export function nodesAdminScreen(menu: Menu): Screen {
       if (kind === 'detail') view = { kind: 'node', nodeId: sample.nodes[2].nodeId };
       if (kind === 'review') view = { kind: 'node', nodeId: sample.nodes[3].nodeId };
       if (kind === 'review') frozen = { frozen: [{ account: sample.nodes[3].operator.id, reason: 'verification_failed:' + 'c'.repeat(64), at: Date.now() - 3_600_000 }], more: false };
+      if (kind === 'matches' || kind === 'match' || kind === 'lone' || kind === 'history' || kind === 'alerts') {
+        const x = sampleHistory(sample);
+        matches = { open: x.open, settled: x.settled, next: 'more', names: 'shown', error: null, loading: false };
+        events = { list: x.events, next: 'more', error: null, loading: false };
+        alertLines = { list: x.alerts, next: null, webhook: false, error: null, loading: false };
+        if (kind === 'match') ((tab = 'matches'), (view = { kind: 'match', matchId: x.settled[0].matchId }));
+        // A replay listed before the history was kept, looked up by its link: no row, the viewer and DESLISTAR.
+        if (kind === 'lone') ((tab = 'matches'), (found = { matchId: '9'.repeat(64), row: null, names: 'shown' }), (view = { kind: 'match', matchId: '9'.repeat(64) }));
+      }
       if (kind === 'wizard' || kind === 'checklist' || kind === 'token') {
         wiz = { step: kind === 'wizard' ? 'form' : kind === 'checklist' ? 'checklist' : 'token', form: { region: 'EU', name: 'frankfurt-1', host: 'node-1.example.com', roles: 'host,verify', matches: '12', egress: '2000' }, checks: new Set(), token: null };
         if (kind === 'token') {
@@ -1002,7 +1349,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     el,
     show: (anew) => {
       if ((acc.account?.playerId ?? null) !== owner && sample === null) reset();
-      if (anew && view.kind === 'node') view = { kind: 'tabs' };
+      if (anew && (view.kind === 'node' || view.kind === 'match')) view = { kind: 'tabs' };
       // Every visit asks at once (its read is audited once per account per 30 minutes, not per visit).
       gen++;
       asked = false;
@@ -1096,6 +1443,79 @@ function sampleOverview(): Overview {
     flags: (['matchmaking_off', 'do_disabled', 'nodes_on', 'vm_disabled', 'nodes_off', 'replays_off', 'email_off', 'turn_cf_disabled'] as const).map((name) => ({ name, raw: name === 'nodes_on' ? '1' : null, set: name === 'nodes_on', meaning: '' })),
     alerts: { webhook: false },
     warnings: [{ kind: 'no_webhook' }, { kind: 'trusted_off_channel', nodeId: nodes[2].nodeId, name: 'frankfurt-1', version: '0.2.9', stable: '0.3.0' }],
+    voids24h: [
+      { nodeId: nodes[0].nodeId, name: 'sao-paulo-1', reason: 'node_offline', count: 2 },
+      { nodeId: nodes[3].nodeId, name: 'casa-de-ana-muy-largo', reason: 'verification_failed:report_mismatch', count: 1 },
+    ],
+  };
+}
+
+/** The history's samples (window.__nodesAdmin('matches' | 'match' | 'lone' | 'history' | 'alerts')): an open match, settled ones of every kind, events and alert lines. */
+function sampleHistory(o: Overview): { open: OpenMatches; settled: HistoryMatch[]; events: NodeEvent[]; alerts: AlertLine[] } {
+  const now = Date.now();
+  const sp = o.nodes[0];
+  const ana = o.nodes[3];
+  const id = (c: string): string => c.repeat(64);
+  const seats = (hidden: boolean): MatchSeat[] => [
+    { slot: 0, team: 0, bot: false, name: 'tero_veloz', id: 'a1a1a1a1a1a1a1a1', hidden: false },
+    { slot: 1, team: 0, bot: true, name: null, id: null, hidden: false },
+    { slot: 2, team: 1, bot: false, name: hidden ? null : 'Invitado 4821', id: 'b2b2b2b2b2b2b2b2', hidden },
+    { slot: 3, team: 1, bot: false, name: null, id: null, hidden: false },
+  ];
+  const settled = (c: string, at: number, x: Partial<HistoryMatch>): HistoryMatch => ({
+    matchId: id(c),
+    nodeId: sp.nodeId,
+    nodeName: sp.name,
+    region: 'SA',
+    mode: '2v2',
+    ranked: true,
+    transport: 'wss',
+    placedAt: at - 400_000,
+    reportedAt: at - 2000,
+    settledAt: at,
+    result: 'rated',
+    reason: 'rules',
+    score: { blue: 3, red: 2 },
+    verified: true,
+    verifiedBy: sp.nodeId,
+    verifierName: sp.name,
+    verdict: { ok: true, code: 'ok' },
+    strike: null,
+    replay: true,
+    points: null,
+    frozen: false,
+    adminReason: null,
+    seats: seats(true),
+    delistedAt: null,
+    listed: true,
+    published: true,
+    ...x,
+  });
+  return {
+    open: {
+      total: 1,
+      names: 'shown',
+      matches: [{ matchId: id('d'), nodeId: sp.nodeId, nodeName: sp.name, region: 'SA', mode: '1v1', ranked: false, transport: 'wss', state: 'verifying', placedAt: now - 420_000, deadline: now + 900_000, started: true, reportedAt: now - 30_000, queuedAt: now - 29_000, verifying: false, verifierName: null, replay: true, leaves: 0, seats: seats(false).filter((s) => s.slot === 0 || s.slot === 2) }],
+    },
+    settled: [
+      settled('e', now - 3_600_000, {}),
+      settled('f', now - 5_400_000, { result: 'void', reason: 'node_offline', score: null, verified: false, verifiedBy: null, verifierName: null, verdict: null, strike: 'node_offline', listed: false, published: false, ranked: false, mode: '3v3' }),
+      settled('a', now - 9_000_000, { nodeId: ana.nodeId, nodeName: ana.name, result: 'void', reason: 'verification_failed:report_mismatch', score: null, verdict: { ok: true, code: 'ok' }, frozen: true, listed: false, published: false }),
+      settled('b', now - 86_400_000, { result: 'unrated', ranked: false, reason: 'ttl', verified: false, verifiedBy: null, verifierName: null, verdict: null, delistedAt: now - 80_000_000, listed: false, published: false }),
+    ],
+    events: [
+      { id: 6, nodeId: ana.nodeId, nodeName: ana.name, at: now - 9_000_000, kind: 'status_change', detail: 'active -> suspended: verification_failed', actor: null },
+      { id: 5, nodeId: ana.nodeId, nodeName: ana.name, at: now - 9_000_001, kind: 'verify_failed', detail: `match ${id('a')}: report_mismatch`, actor: null },
+      { id: 4, nodeId: sp.nodeId, nodeName: sp.name, at: now - 20_000_000, kind: 'drain', detail: 'moving to a bigger plan', actor: 'Turbogol (f0e1d2c3b4a59687)' },
+      { id: 3, nodeId: sp.nodeId, nodeName: sp.name, at: now - 30_000_000, kind: 'link_4408', detail: 'silent 31 s', actor: null },
+      { id: 2, nodeId: o.nodes[2].nodeId, nodeName: o.nodes[2].name, at: now - 40_000_000, kind: 'probe_failed', detail: 'timeout', actor: null },
+      { id: 1, nodeId: o.nodes[2].nodeId, nodeName: o.nodes[2].name, at: now - 40_100_000, kind: 'registered', detail: 'pending, roles host+verify, transports wss, trusted', actor: null },
+    ],
+    alerts: [
+      { id: 3, at: now - 60_000, kind: 'audit', line: "ALERT admin Turbogol (f0e1d2c3b4a59687): read the match history (a maintainer's reads come here once per 30 min, every one is in the logs)" },
+      { id: 2, at: now - 9_000_000, kind: 'alert', line: `ALERT match ${id('a')} on casa-de-ana-muy-largo: verification report_mismatch` },
+      { id: 1, at: now - 30_000_000, kind: 'alert', line: 'ALERT trusted node sao-paulo-1 (1111111111111111) offline for 2 min (last heartbeat 03:12:09 UTC): no match goes to it' },
+    ],
   };
 }
 

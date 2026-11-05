@@ -217,7 +217,7 @@ import { base64urlEncode, checkInternal } from './auth';
 import { AccountStore, DEV_NAME_PROBLEM } from './accountStore';
 import { CODE_TRIES, LEGACY_CLOSED, LEGACY_REMIND_MS, legacyDateOf, markSlot, providerMark } from './accountStore';
 import type { DeletionRefusal, EmailApplied, LegacyState, MailOrder, MailProfile, MailTokenRow, MarkKind } from './accountStore';
-import { OPERATOR_DELETED_ROUTE, askNodes } from './nodeApi';
+import { OPERATOR_DELETED_ROUTE, REPLAY_HIDDEN_MAX, askNodes } from './nodeApi';
 import { FAILURES, MAIL_CAPS, RESEND, alertAfterFailures, dailyCap, laneAllows, mailDay, mailKilled, networkCap, pauseAfterFailures, takeSlot } from './mailCaps';
 import type { MailLane, MailWindow, WindowCap } from './mailCaps';
 import { mailLang, renderMail } from './mailTemplates';
@@ -237,8 +237,6 @@ import { ITEM_ID_RE } from '../../nodes/control-plane/shop';
 const LOGIN_WINDOW_MS = 15 * 60_000;
 /** The most accounts one /equipped asks for (a lobby's members: a 3v3). */
 const EQUIPPED_MAX = 6;
-/** /replay-hidden: a page of the public replays at most (31 rows of 8 seats), ids and names each. */
-const REPLAY_HIDDEN_MAX = 256;
 export const LOGIN_FAILS_FREE = 5;
 const LOGIN_LOCK_BASE_MS = 30_000;
 export const LOGIN_LOCK_MAX_MS = 15 * 60_000;
