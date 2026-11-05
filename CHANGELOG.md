@@ -719,6 +719,15 @@ All notable changes to Turbogol are documented here. The format follows
   points ranking, never its username or the start of its account id. A server registered without a
   name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
   the legal texts that describe it.
+- Community node docs: the operator guide the game links to (`nodes/README.md`, `README.es.md`)
+  gives the real state: the matchmaker sends matches to nodes, so far only to the project's servers,
+  today one per region (São Paulo, Germany and Malaysia host and verify and, for now, there are also
+  servers in South Africa, Australia and the United States, which only host), each taking its
+  region's Casual and Competitive matches, and hosting is not open to the community yet. The
+  production plan marks the first real ranked match on the São Paulo server done (2026-10-21, two
+  accounts that run no server, verified and rated) and the second trusted verifier too; the online
+  decisions record the six servers and their budget, without the old Hetzner plan; and the four
+  cars are no longer "coming soon" in the rewards docs.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,
