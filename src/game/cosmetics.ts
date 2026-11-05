@@ -8,8 +8,8 @@
  *
  * Every car is cosmetic: the same hitbox, wheels and physics (CarPreset.Standard) for all, ranked
  * or not. The bodies are in src/render/cars (docs/cars.md); a car whose body is not built yet
- * draws the default car. Names are invented English words of wild nature (Dune, Cyclone, Avalanche, Tempest,
- * Wildfire), the same in every language: no commercial car or game. The ids (pampero, carpincho, condor,
+ * draws the default car. Names are invented English words of wild nature (Dune, Cyclone, Vortex, Sirocco,
+ * Magma), the same in every language: no commercial car or game. The ids (pampero, carpincho, condor,
  * tero) are the first names of the models and stay: they are saved in accounts and loadouts.
  */
 

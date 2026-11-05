@@ -1,5 +1,5 @@
 /**
- * The Avalanche ('carpincho'): a friendly armoured off-road brute, chunky and calm like the
+ * The Vortex ('carpincho'): a friendly armoured off-road brute, chunky and calm like the
  * capybara. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
  * (a cream roof cap, a dark visor round the split windshield) whose roof rolls down into a round
  * rump; a tall, blunt, square muzzle with two oval nostril intakes and its round headlamps set high

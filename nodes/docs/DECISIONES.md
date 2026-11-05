@@ -41,7 +41,7 @@ Todas se pueden cambiar.
    jugadores cuesta todo el tráfico de la partida, pasados los 1.000 GB gratis por mes. La
    recomendación actualizada, con números, está en `PRODUCCION.md`: ocultar al anfitrión desde la
    beta con PCs de amigos y a los jugadores por defecto al abrir al público.
-2. **Cuál es el primer auto.** Resuelta: son cuatro, Cyclone, Avalanche, Tempest y Wildfire
+2. **Cuál es el primer auto.** Resuelta: son cuatro, Cyclone, Vortex, Sirocco y Magma
    (`src/game/cosmetics.ts`), a 1.500 puntos cada uno, y ya se canjean en GARAJE.
 3. **Precios de los demás ítems.** Con la fórmula actual y partidas de 3 minutos, una PC con lugar
    para una partida que hostea diez 1v1 por noche gana unos 90 puntos, y hasta 180 en una región que

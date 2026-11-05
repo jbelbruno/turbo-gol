@@ -56,9 +56,9 @@ test('every car has a name and a one-line description in English and Spanish', (
   const names = {
     dune: ['Dune', 'Dune'],
     pampero: ['Cyclone', 'Cyclone'],
-    carpincho: ['Avalanche', 'Avalanche'],
-    condor: ['Tempest', 'Tempest'],
-    tero: ['Wildfire', 'Wildfire'],
+    carpincho: ['Vortex', 'Vortex'],
+    condor: ['Sirocco', 'Sirocco'],
+    tero: ['Magma', 'Magma'],
   };
   assert.deepEqual(Object.keys(names), [...CAR_IDS]);
   for (const id of CAR_IDS) {

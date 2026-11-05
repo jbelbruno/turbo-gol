@@ -650,7 +650,7 @@ aviso.
 
 ### El primer auto de la tienda
 
-- [x] **Los autos:** cuatro modelos solo estéticos (Cyclone, Avalanche, Tempest y Wildfire, en
+- [x] **Los autos:** cuatro modelos solo estéticos (Cyclone, Vortex, Sirocco y Magma, en
   `src/game/cosmetics.ts`), con el mismo hitbox, así que el wasm y el verificador no cambian. Cuestan
   1.500 puntos cada uno, el precio decidido, y ya se canjean en GARAJE.
 - [x] **El inventario:** `GET /api/me/items`, con las tablas de `AccountsDO`.
@@ -819,4 +819,4 @@ Sin número D: no frenan la etapa 1.
 - **Segundo verificador:** ~~cuándo se levanta el de Hetzner~~ decidido 2026-11-04: Alemania y
   Malasia, del proyecto, también verifican.
 - **El primer auto:** ~~cuál es~~ decidido: los cuatro de `src/game/cosmetics.ts` (Cyclone,
-  Avalanche, Tempest y Wildfire), a 1.500 puntos cada uno.
+  Vortex, Sirocco y Magma), a 1.500 puntos cada uno.
