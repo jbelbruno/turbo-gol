@@ -13,7 +13,8 @@
  *                                and two per node at a time, 48 MiB of bodies in flight (REPLAY_*); a stored
  *                                replay's retry answers 200 unread
  *   GET  /nodes/replays/<id>     the replay, for the verifier node its job went to (signed the same way)
- *   GET  /nodes/status           the public list of nodes
+ *   GET  /nodes/status           the public list (publicList.ts): only the nodes in service (probation or active,
+ *                                never retired), the project by its name and any other operator as "Anfitrión <n>"
  *   POST /nodes/tokens           { region, name?, publicHost?, roles?, matches?, egressCapGB? } with x-operator-id /
  *                                x-operator-name (an account the Worker found in NODE_TRUSTED_OPERATORS; checked again
  *                                here) -> a one-time token and its install line, built here with every value checked
@@ -110,6 +111,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { ControlPlane, MAX_UNAUTHENTICATED, NodeRefused } from '../../nodes/control-plane/controlPlane';
 import type { NodeLink, PlaceRequest, Session } from '../../nodes/control-plane/controlPlane';
 import { Ledger } from '../../nodes/control-plane/ledger';
+import { publicStatus } from '../../nodes/control-plane/publicList';
 import { MAX_CAPACITY, Registry, TOKEN_TTL_MS, isRetired, trustedNodeCap, validPublicHost } from '../../nodes/control-plane/registry';
 import type { NodeEventKind, NodeRecord, RegistryOptions } from '../../nodes/control-plane/registry';
 import { compareVersions } from '../../nodes/shared/controlProtocol';
@@ -1329,29 +1331,13 @@ export class NodeRegistryDO extends DurableObject<Env> {
     return known;
   }
 
-  /** The public list (the reference server's GET /nodes/status): no address, no operator id. */
+  /**
+   * The public list (publicList.ts, as the reference server builds it): the nodes in service only,
+   * and no address, node id or operator id. Always a 200 with { build, nodes, hosts } while the
+   * object is up, an empty list too: the deploy's check asks for it (scripts/deploy-check.mjs).
+   */
   private status(cp: ControlPlane): Response {
-    const nodes = cp.registry.list();
-    const names = new Map(nodes.map((n) => [n.operatorId, n.operatorName]));
-    return json({
-      build: CLIENT_BUILD,
-      nodes: nodes.map((n) => ({
-        name: n.name,
-        operator: n.operatorName,
-        region: n.region,
-        status: n.status,
-        online: n.online,
-        roles: n.roles,
-        transports: n.transports,
-        active: n.active,
-        capacity: n.capacity.matches,
-        tickLagP99Ms: n.tickLagP99Ms,
-        version: n.build.version,
-        compatible: cp.sameBuildAs(n.build),
-        trusted: n.trusted,
-      })),
-      hosts: cp.ledger.leaderboard(Date.now()).map((e) => ({ name: names.get(e.operatorId) ?? e.operatorId.slice(0, 6), points: e.points })),
-    });
+    return json(publicStatus(cp, Date.now()));
   }
 
   /**
