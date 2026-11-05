@@ -248,6 +248,17 @@ src/render/
                         (ControlsCardPlan: the first 3 matches' kickoff countdown, free play until
                         the car moves, then a strip for 60 s of play; the count in localStorage)
                         and its rows from the live bindings of the device (controlsCardRows)
+  nameTags.ts           the names over the other cars (the matches and the replay viewer): a pure
+                        model (tagBucket: three distance steps with hysteresis; tagHasMeter: the
+                        lime boost meter on the viewer's teammates only, on every car for a
+                        spectator; tagAnchor / clampTag: the edge tag with its ‹‹ ››, mirrored
+                        behind the camera, held by a band at the edge; overBall: the fade over the
+                        ball; orderTags / declutterTags: no tag over another, nearer cars first in
+                        an order with hysteresis, a farther one lifted on screen, moved along its
+                        edge when pinned, a moved one held until TAG_STACK_HOLD clear of the tag
+                        it was moved off) and NameTags, a DOM layer under the HUD that writes a
+                        transform and an opacity per frame, a class only on a change
+                        (src/ui/styles/nametags.css)
 src/ai/
   Bot.ts                heuristic bot: produces CarControls from SimStateView + ball prediction;
                         stall / net / wall recovery; scans every car (nearest opponent, bump

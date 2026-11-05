@@ -275,9 +275,18 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // review's fixes (the read-only blocks as stops of the arrows with their ring inside them, a
 // tablet's node rows as a phone's, a frozen wallet's reason on a line of its own): 171,840 B (main
 // 168,525 B; 171,406 B before the fixes), the cap that plus about 0.6 KB.
+// The name tags over the cars (the owner's "Neón de arena" with the boost meter, 2026-11-05) add
+// styles/nametags.css (the layer, the safe-rect probe with a page's own insets, the name, line,
+// post, halo, meter with its fill on a layer of its own, robot, steps, the edge arrow, the TV's and
+// super low's rules: 4,594 B), their tokens in tokens.css (the teams' neon at each strength the
+// approved mockup draws, the halo, the rims and the track, the three steps' sizes and the TV's,
+// --r-hair and --r-tag-bot: 993 B) and style.css's import (35 B): 177,665 B (main 172,043 B). The
+// cap rises by exactly those 5,622 B, keeping the 397 B it had to spare (809 B of them come from
+// its review: the mockup's own glow per rule instead of three merged ones, the fill's layer, the
+// insets).
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 172_440;
+const CSS_BUDGET = 178_062;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

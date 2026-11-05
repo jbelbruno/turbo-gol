@@ -43,6 +43,12 @@
  * countdown and free play show the live bindings of the device in use, then a slim strip for a
  * minute of play (`controlsCard`, `updateControlsCard`); touch mode shows none.
  *
+ * Name tags (src/render/nameTags.ts, `nameTags`): every other car's name over it in any match on
+ * screen (against the AI, a server's, a P2P room's), from the scoreboard rows (name, team, bot: a
+ * takeover's bot shows at once) at the views' drawn positions; a teammate of the player's own team
+ * also shows its boost, read from the state every client simulates. Placed after the frame is drawn
+ * (`render`), on its camera; none in the menus, the showroom or training.
+ *
  * Long loads run behind the loading screen (src/ui/LoadingOverlay.ts, `withLoading`): a quality
  * switch (`switchQuality`: renderer tier, view rebuild, the world's new bake sizes, every pipeline
  * compiled in parallel) and a stadium switch (`switchTheme`: uniforms, then the world's re-bake or
@@ -250,6 +256,7 @@ import { ChaseCamera, SWIVEL_PITCH_MOUSE_DEG, SWIVEL_PITCH_STICK_DEG, clampToAre
 import { CarView } from '../render/Car';
 import { Effects } from '../render/Effects';
 import { Hud, netBars, type ClockMode, type OnlineKind, type PauseEntry, type ScoreboardData, type ScoreboardRow } from '../render/Hud';
+import { NameTags } from '../render/nameTags';
 import { SettingsView, type SettingsOptions } from '../ui/screens/settings/view';
 import { SettingsOverlay } from '../ui/screens/settings/overlay';
 import { settingsScreen } from '../ui/screens/settings/screen';
@@ -734,6 +741,8 @@ export class Game implements P2PGameHooks {
   /** Wait play's match against the bots: no time limit (Match length 0), so no whistle and no FINAL. */
   private readonly waitMatch = new Match({ lengthSeconds: 0 });
   readonly hud: Hud;
+  /** The other cars' names over them (src/render/nameTags.ts): a layer under the HUD's. */
+  private readonly nameTags: NameTags;
   /** On-screen touch controls; null without a touch screen (no DOM, no listeners). Debug: window.__game.touch. */
   readonly touch: TouchControls | null;
   readonly audio: Audio;
@@ -1178,6 +1187,10 @@ export class Game implements P2PGameHooks {
     this.timedMatch = new Match({ lengthSeconds: opts.matchLengthSeconds ?? DEFAULT_MATCH_SECONDS });
     this.match = this.timedMatch;
     this.hud = new Hud(opts.hudContainer);
+    // The name tags' layer goes first in the container: every HUD plate, the touch controls and the menus draw over it.
+    const tagsRoot = document.createElement('div');
+    opts.hudContainer.prepend(tagsRoot);
+    this.nameTags = new NameTags(tagsRoot);
     this.loading = opts.loading ?? new LoadingOverlay(overlayHost(opts.hudContainer));
     // Touch screens only: the controls layer goes right after the Hud root and drives Input like a keyboard.
     this.touch = hasTouchScreen() ? new TouchControls(this.hud.root, { kbm: () => settings.bindings.kbm, holdJump: () => settings.controls.touchHoldJump, settings: () => settings.touch }) : null;
@@ -4530,6 +4543,13 @@ export class Game implements P2PGameHooks {
       renderer.render(frameTime);
     }
     if (ds !== null) ds.add('render', performance.now() - tr);
+
+    // The other cars' names on the camera this frame was drawn with, teammates (the boost meter)
+    // by the player's own team. None in the menus, the showroom or training (only the player's car).
+    const tags = this.nameTags;
+    const tagsOn = !inMenu && this.showroom === null && this.training === null;
+    tags.setVisible(tagsOn);
+    if (tagsOn) tags.update(camera, this.sbRows, cars, offs, cur, this.ball.position, this.playerIndex, this.sbRows[this.playerIndex]?.team ?? 0);
   }
 
   /** The scorebug's score and clock (cached setters: nothing changes, nothing is written). */

@@ -1,9 +1,11 @@
 /* Turbogol: full-screen canvas + the DOM HUD (see src/render/Hud.ts). The tokens (colour, type,
    space, radii, layers, motion) and the one focus ring live in src/ui/styles/; this sheet is the
-   entry index.html links, so both reach the HUD, the loading screen and the menus. */
+   entry index.html links, so both reach the HUD, the loading screen and the menus. The name tags
+   over the cars come with it too, for the matches and the replay viewer (replay.html links it). */
 
 @import './ui/styles/tokens.css';
 @import './ui/styles/focus.css';
+@import './ui/styles/nametags.css';
 
 *,
 *::before,
