@@ -33,9 +33,9 @@ propuestos en los informes, que quedan vigentes salvo cambio explícito.
 | Workers Paid (base) | 5 |
 | ~~Hetzner (NA/EU ranked + coturn + verificador)~~ → **actualizada 2026-11-04**: sin Hetzner; EU y NA van en las filas de abajo | ~~6–12~~ 0 |
 | VPS São Paulo (ranked SAM): 24 meses pagados por adelantado (US$ 210,96); renueva a US$ 14,99 / mes | 8,79 + impuestos (con tarjeta argentina, 21 % de IVA: ≈ 10,64) |
-| VPS de Alemania (EU) y de Malasia (AS): alojan y verifican (**actualizada 2026-11-04**) | Precio por confirmar, con impuestos |
+| VPS de Alemania (EU) y de Malasia (AS): alojan y verifican (**actualizada 2026-11-04**). Cada uno, 24 meses pagados por adelantado (ARS 415.176 ≈ US$ 266,14); renueva a ARS 31.399 / mes (≈ US$ 20,13). En dólares al oficial del Banco Nación del 2/11/2026 (ARS 1.560) | 2 × 11,09 + impuestos (con tarjeta argentina, 21 % de IVA: 2 × 13,42 ≈ 26,84) |
 | Por ahora, Sudáfrica (AF), Australia (OC) y Estados Unidos (NA): solo alojan (**actualizada 2026-11-04**) | 0 de bolsillo: los paga el crédito de prueba de su proveedor, que vence el 8/12/2026. Antes de esa fecha se decide si siguen, con su precio en esta tabla, o se apagan |
-| Reserva para uso de Durable Objects (fase 1 y plan B) y TURN sobre los 1.000 GB gratis: lo que queda hasta el tope (~~con Hetzner en 12, 22; en 6, 28~~ → **actualizada 2026-11-04**: 50 − 5 − 10,64, menos Alemania y Malasia) | ~~22–28~~ 34,36 menos Alemania y Malasia (por confirmar) |
+| Reserva para uso de Durable Objects (fase 1 y plan B) y TURN sobre los 1.000 GB gratis: lo que queda hasta el tope (~~con Hetzner en 12, 22; en 6, 28~~ → **actualizada 2026-11-05**: 50 − 5 − 10,64 − 26,84) | ~~22–28~~ 7,52 |
 | **Total** | **≤ 50** |
 
 ## Netcode (defaults de los informes)
