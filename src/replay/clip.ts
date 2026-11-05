@@ -109,6 +109,36 @@ export function defaultClipRange(here: number, goalTicks: readonly number[], end
   return windows.length > 0 ? windows[windows.length - 1] : clipFrom(here, endTick, rate);
 }
 
+/** The range moved whole by `delta` ticks, kept inside the match. */
+export function moveClipRange(start: number, end: number, delta: number, endTick: number): { start: number; end: number } {
+  const len = end - start;
+  const s = Math.round(Math.min(Math.max(0, start + delta), Math.max(0, endTick - len)));
+  return { start: s, end: s + len };
+}
+
+const RULER_STEPS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0.25],
+  [2, 0.5],
+  [5, 1],
+  [10, 2],
+  [15, 5],
+  [30, 5],
+  [60, 10],
+  [120, 30],
+  [300, 60],
+  [600, 120],
+  [1800, 300],
+  [3600, 600],
+];
+
+/** The ruler's labelled step and its small ticks (s) for `pxPerSecond`: a label at least ~80 px from the next, ticks at least 6 px apart. */
+export function rulerStep(pxPerSecond: number): { major: number; minor: number } {
+  const pps = Math.max(1e-6, pxPerSecond);
+  const found = RULER_STEPS.find(([major]) => major * pps >= 80) ?? RULER_STEPS[RULER_STEPS.length - 1];
+  const [major, minor] = found;
+  return { major, minor: minor * pps >= 6 ? minor : major };
+}
+
 /** A time as m:ss.d (the range's sliders). */
 export function timeText(ticks: number, rate: number = TICK_RATE): string {
   const s = Math.max(0, ticks) / rate;

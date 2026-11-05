@@ -172,6 +172,23 @@ test('the goal caption: drops in big and settles, pulses, bursts then fades out,
   }
 });
 
+test('the timeline: the ruler picks a label step that keeps its labels apart, a range moves whole inside the match', () => {
+  let last = 0;
+  for (const pps of [0.2, 0.5, 1, 4, 10, 40, 160, 600]) {
+    const r = C.rulerStep(pps);
+    assert.ok(r.major * pps >= 80 || r.major === 3600, `label spacing at ${pps} px/s`);
+    assert.ok(r.minor <= r.major && r.major / r.minor === Math.round(r.major / r.minor), `ticks divide the label step at ${pps}`);
+    assert.ok(r.minor === r.major || r.minor * pps >= 6, `ticks apart at ${pps}`);
+    assert.ok(r.major >= last || pps === 0.2, 'a smaller step when zoomed in');
+    last = 0;
+  }
+  assert.ok(C.rulerStep(0.2).major > C.rulerStep(40).major);
+  const end = 100 * TICK_RATE;
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, 5 * TICK_RATE, end), { start: 15 * TICK_RATE, end: 25 * TICK_RATE });
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, -50 * TICK_RATE, end), { start: 0, end: 10 * TICK_RATE });
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, 500 * TICK_RATE, end), { start: 90 * TICK_RATE, end });
+});
+
 test('every clip line is in English and in Spanish, with the same placeholders', () => {
   const keys = Object.keys(en).filter((k) => k.startsWith('replay.clip'));
   assert.ok(keys.length >= 20, `${keys.length} clip lines`);

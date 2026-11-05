@@ -112,16 +112,6 @@
       #notice.rp-ok { border-color: var(--ok-glow, var(--ok)); color: var(--text-2); }
       /* Clip / Share: the sheet (the pause menu's panel, wider), the recording indicator, and the clip mode (the canvas in the clip's shape, the page's chrome hidden: player.ts) */
       .rp-clip-panel { width: min(560px, 100%); max-height: calc(100% - 32px); overflow-y: auto; }
-      .rp-menu.rp-clip-dock { background: rgba(5, 7, 13, 0.28); place-items: center end; }
-      @media (max-width: 760px) { .rp-menu.rp-clip-dock { place-items: end center; padding-top: calc(var(--safe-top) + 76px); } .rp-menu.rp-clip-dock .rp-clip-panel { max-height: 100%; } }
-      .rp-clip-slider { display: grid; grid-template-columns: 56px 1fr 64px; align-items: center; gap: var(--sp-3); }
-      .rp-clip-slider .rp-clip-sub { margin: 0; }
-      .rp-clip-slider input { width: 100%; accent-color: var(--brand); }
-      .rp-clip-time { font-variant-numeric: tabular-nums; font-size: var(--t-small); text-align: right; }
-      .rp-clip-sumrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-      .rp-clip-record { justify-content: center; min-height: 44px; }
-      .rp-clip-foot { position: sticky; bottom: calc(-1 * var(--sp-5)); display: grid; gap: var(--sp-2); margin: var(--sp-2) calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5)); padding: var(--sp-3) var(--sp-5) var(--sp-5); background: linear-gradient(180deg, transparent, var(--surface-1-94) 22%); }
-      .rp-clipband { position: absolute; top: 6px; height: 10px; border-radius: 2px; background: rgba(198, 255, 46, 0.3); border-left: 2px solid var(--brand); border-right: 2px solid var(--brand); pointer-events: none; }
       .rp-clip-rows { display: grid; gap: var(--sp-2); }
       .rp-clip-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-key); background: var(--surface-2); border: 1px solid var(--edge); }
       .rp-clip-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: var(--t-small); }
@@ -145,6 +135,56 @@
       @keyframes rp-blink { to { opacity: 0.25; } }
       body.rp-clip #bar, body.rp-clip #hud, body.rp-clip #tags, body.rp-clip #notice, body.rp-clip .rp-exit { display: none !important; }
       body.rp-clip #app { background: #000; }
+      /* The clip editor (src/replay/player.ts, timeline.ts): goals left, the player in the middle, the format and quality right, the timeline under it all. The stage cell is transparent: the canvas (placed over it) shows through. */
+      body.rp-editing #bar, body.rp-editing #hud, body.rp-editing #tags, body.rp-editing #notice, body.rp-editing .rp-exit { display: none !important; }
+      body.rp-editing #app { background: #05070d; }
+      .rp-ed { position: absolute; inset: 0; z-index: 7; display: grid; grid-template-columns: 272px minmax(0, 1fr) 304px; grid-template-rows: 54px minmax(0, 1fr) 248px; grid-template-areas: 'head head head' 'left center right' 'tl tl tl'; pointer-events: none; }
+      .rp-ed > * { pointer-events: auto; background: var(--surface-1); min-width: 0; min-height: 0; }
+      .rp-ed-head { border-bottom: 1px solid var(--edge); grid-area: head; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4); padding-top: var(--safe-top); }
+      .rp-ed-title { font: 800 var(--t-small) / 1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); }
+      .rp-ed-sum { color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
+      .rp-ed-export { min-height: 36px; padding: 0 var(--sp-6); }
+      .rp-ed-left { border-right: 1px solid var(--edge); grid-area: left; overflow: hidden auto; padding: var(--sp-4); display: grid; align-content: start; gap: var(--sp-3); }
+      .rp-ed-right { border-left: 1px solid var(--edge); grid-area: right; overflow: hidden auto; padding: var(--sp-4); display: grid; align-content: start; gap: var(--sp-3); }
+      .rp-ed-center { grid-area: center; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: transparent; pointer-events: none; }
+      .rp-ed > .rp-ed-center { background: transparent; }
+      .rp-ed-stage { min-height: 0; pointer-events: none; }
+      .rp-ed-transport { border-top: 1px solid var(--edge); display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); background: var(--surface-1); pointer-events: auto; }
+      .rp-ed-time { font: 700 var(--t-small) / 1 var(--font-body); font-variant-numeric: tabular-nums; color: var(--text); }
+      .rp-ed-time::first-line { color: var(--brand); }
+      .rp-ed-left .rp-clip-row { flex-wrap: wrap; } .rp-ed-left .rp-clip-label { flex-basis: calc(100% - 24px); } .rp-ed-left .rp-clip-acts { margin-left: 22px; flex-wrap: wrap; }
+      .rp-ed-tl { border-top: 1px solid var(--edge); grid-area: tl; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--surface-0); }
+      .rp-ed-tools { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); background: var(--surface-1); border-bottom: 1px solid var(--edge); }
+      .rp-ed-tools .rp-btn { min-height: 30px; padding: 0 var(--sp-3); }
+      .rp-ed-zoomlabel { color: var(--text-3); font-size: var(--t-caption); margin-left: var(--sp-3); }
+      .rp-ed-tools input[type='range'] { width: 120px; accent-color: var(--brand); }
+      .rp-tool kbd { margin-left: var(--sp-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--edge-hi); color: var(--text-3); font: 700 10px / 1.2 var(--font-body); }
+      .rp-ed-ovl { position: absolute; z-index: 2; pointer-events: none; }
+      .tl { position: relative; min-height: 0; }
+      .tl-scroll { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; }
+      .tl-inner { position: relative; height: 100%; min-width: 100%; user-select: none; touch-action: pan-x; cursor: pointer; }
+      .tl-ruler { position: absolute; left: 0; right: 0; top: 0; height: 30px; border-bottom: 1px solid var(--edge); }
+      .tl-tick { position: absolute; bottom: 0; width: 1px; height: 6px; background: var(--edge-hi); }
+      .tl-tick.tl-major { height: 12px; background: var(--text-3); }
+      .tl-label { position: absolute; top: 3px; transform: translateX(4px); font: 700 10px / 1 var(--font-body); color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .tl-track { position: absolute; left: 0; right: 0; top: 40px; height: 84px; border-radius: 6px; background: linear-gradient(180deg, #17202f, #0f1622); border-top: 1px solid var(--edge-hi); border-bottom: 1px solid var(--edge); }
+      .tl-goal { position: absolute; top: 6px; bottom: 6px; width: 3px; margin-left: -1px; border-radius: 2px; }
+      .tl-goal::after { content: ''; position: absolute; top: -4px; left: -3px; width: 9px; height: 9px; border-radius: 50%; background: inherit; }
+      .tl-goal.tl-blue { background: var(--blue); } .tl-goal.tl-red { background: var(--red); }
+      .tl-region { position: absolute; top: -4px; bottom: -4px; background: rgba(198, 255, 46, 0.18); border: 2px solid var(--brand); border-radius: 6px; cursor: grab; }
+      .tl-region-label { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); padding: 1px 8px; border-radius: 999px; background: var(--brand); color: var(--brand-ink); font: 800 11px / 1.4 var(--font-body); pointer-events: none; white-space: nowrap; }
+      .tl-handle { position: absolute; top: -2px; bottom: -2px; width: 16px; background: var(--brand); cursor: ew-resize; touch-action: none; }
+      .tl-handle::after { content: ''; position: absolute; left: 6px; top: 38%; width: 4px; height: 24%; border-left: 1px solid var(--brand-ink); border-right: 1px solid var(--brand-ink); }
+      .tl-h-start { left: -10px; border-radius: 6px 0 0 6px; } .tl-h-end { right: -10px; border-radius: 0 6px 6px 0; }
+      .tl-playhead { position: absolute; top: 0; bottom: 8px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4); pointer-events: none; }
+      .tl-playhead-cap { position: absolute; top: 0; left: -6px; width: 14px; height: 14px; background: #fff; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+      @media (max-width: 900px) {
+        .rp-ed { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 50px minmax(160px, 1fr) 214px minmax(0, 30%); grid-template-areas: 'head head' 'center center' 'tl tl' 'left right'; }
+        .rp-ed-tools { flex-wrap: wrap; }
+        .rp-ed-zoomlabel, .rp-ed-tools input[type='range'] { display: none; }
+        .rp-tool kbd { display: none; }
+        .rp-ed-sum { display: none; }
+      }
       #error { position: absolute; inset: 0; display: grid; place-content: center; gap: var(--sp-4); text-align: center; padding: 16px; pointer-events: auto; }
     </style>
   </head>
