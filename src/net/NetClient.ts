@@ -26,7 +26,7 @@
  *                   it came: a reloaded page's search too, whose waiter the hub still holds), then
  *                   each POST long-polls (25 s); a waiting answer's `wait` (QueueWait: the counts,
  *                   the estimate, the 5:00 countdown, the widening) is `lastWait` and its `region`
- *                   `lastWaitRegion`, a matched one's `mode` / `host` / `humans` are `lastMatched`.
+ *                   `lastWaitRegion`, a matched one's `mode` / `host` / `humans` / `server` are `lastMatched`.
  *                   The loop goes on through a network error, a 500 / 502 / 504 or a 503 without a
  *                   known code, its session's (a guest's registration, an account's refresh) too:
  *                   it waits QUEUE_RETRY_MS (1, 2, 4, 8, 15, then 30 s, forever while not
@@ -201,13 +201,15 @@ export function parseQueueWait(v: unknown): QueueWait | null {
   return out;
 }
 
-/** The matched answer's extras (the hub's: the format, the host region, how many humans), each only when well formed. */
+/** The matched answer's extras (the hub's: the format, the host region, how many humans, the server's mark), each only when well formed. */
 function matchedExtraOf(q: unknown): QueueMatchedExtra {
   const o = q as Record<string, unknown>;
   const out: QueueMatchedExtra = {};
   if (o.mode === '1v1' || o.mode === '2v2' || o.mode === '3v3') out.mode = o.mode;
   if (typeof o.host === 'string' && o.host.length > 0) out.host = o.host;
   if (typeof o.humans === 'number' && Number.isFinite(o.humans)) out.humans = o.humans;
+  const s = o.server as { name?: unknown; community?: unknown } | null | undefined;
+  if (typeof s === 'object' && s !== null && typeof s.name === 'string' && s.name.length > 0 && typeof s.community === 'boolean') out.server = { name: s.name.slice(0, 64), community: s.community };
   return out;
 }
 

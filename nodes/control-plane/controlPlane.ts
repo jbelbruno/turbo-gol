@@ -266,6 +266,13 @@ export interface PlaceRequest {
   kickoffCountdownSeconds?: number;
   goalPauseSeconds?: number;
   joinTimeoutMs?: number;
+  /**
+   * A player of the match chose "Solo servidores del proyecto" (Prompt 2, A15): only a project
+   * (trusted) node may take it, never a community one; no node of the project free, null: the
+   * matchmaker then creates a MatchDO, or with do_disabled asks SA's project nodes and waits.
+   * Absent: any node.
+   */
+  projectOnly?: boolean;
 }
 
 export interface PlayerTicket {
@@ -279,6 +286,8 @@ export interface Placement {
   matchId: string;
   nodeId: string;
   nodeName: string;
+  /** The node is the project's (its operator is trusted): the players' server mark says a community server otherwise (A15). */
+  trusted: boolean;
   transport: NodeTransport;
   /** wss: the node itself; rtc: <site>/nodes/rtc/<node>/<match>, which the WebRTC socket adapter recognises. */
   wsUrl: string;
@@ -1368,12 +1377,14 @@ export class ControlPlane {
    * No node took the match. It counts as unmet demand (it raises the region factor) only when the
    * region had no host at all, or its hosts were out only for load: full, at their egress cap or
    * offline. Requests no node could take by rule (transport, build, status, the operator playing)
-   * and refusals of 'assign' do not count: a node must not be able to raise its own factor.
+   * and refusals of 'assign' do not count: a node must not be able to raise its own factor. Nor do
+   * the project-only ones (projectOnly): no community node could ever take them, so they must not
+   * raise the factor its points are counted with.
    */
   private noPlace(req: PlaceRequest, refused: boolean, transports: NodeTransport[]): null {
     const now = this.now();
     this.unplaced = this.unplaced.filter((u) => now - u.at < UNPLACED_WINDOW_MS);
-    if (refused || this.unplaced.length >= 10_000) return null;
+    if (refused || req.projectOnly === true || this.unplaced.length >= 10_000) return null;
     const preq = { region: req.region, mode: req.mode, ranked: req.ranked, playerIds: req.humans.map((h) => h.playerId), build: this.o.build(), transports, now, communityRanked: this.o.community?.ranked };
     const hosts = this.registry.list().filter((n) => n.region === req.region && n.roles.includes('host'));
     const loadOnly = hosts.every((n) => {
@@ -1387,7 +1398,8 @@ export class ControlPlane {
   /**
    * Put a match on a community node: pick, assign (the node pre-warms the arena), mint one EdDSA
    * ticket per human. null when no node is eligible or the chosen one refused: the matchmaker then
-   * creates a MatchDO exactly as today (and the region counts it as unmet demand).
+   * creates a MatchDO exactly as today (and the region counts it as unmet demand). With
+   * `projectOnly` only the project's nodes are candidates (A15).
    */
   async place(req: PlaceRequest, tries = 2): Promise<Placement | null> {
     const perTeam = MODES[req.mode];
@@ -1416,6 +1428,8 @@ export class ControlPlane {
       const candidates = this.registry
         .list()
         .filter((n) => !tried.has(n.nodeId) && this.isOnline(n.nodeId) && !this.deferredUpdates.has(n.nodeId))
+        // "Solo servidores del proyecto": never a community node, whatever the policy says.
+        .filter((n) => req.projectOnly !== true || n.trusted)
         .filter((n) => !(req.ranked || n.status === 'probation') || this.verifiable(n.build))
         .filter((n) => !policy || n.trusted || this.communityPlaceable(n, policy, now, running, braked))
         .map((n) => ({ ...n, active: Math.max(n.active, this.loadOn(n)), capacity: { ...n.capacity, matches: this.effectiveCapacity(n) } }));
@@ -1503,7 +1517,7 @@ export class ControlPlane {
         };
         this.matches.set(assign.matchId, m);
         this.save(m); // before the tickets go out: a restart must still know the match their players join
-        return { matchId: assign.matchId, nodeId: node.nodeId, nodeName: node.name, transport, wsUrl: this.urlFor(node, transport, assign.matchId), tickets };
+        return { matchId: assign.matchId, nodeId: node.nodeId, nodeName: node.name, trusted: node.trusted, transport, wsUrl: this.urlFor(node, transport, assign.matchId), tickets };
       } finally {
         this.assignDone(node.nodeId);
       }
@@ -1553,10 +1567,11 @@ export class ControlPlane {
   /**
    * Host nodes online in `region` that may take matches (probation or active, reachable): the
    * `hosts` of POST /internal/place. While it is 0 the matchmaker stops asking for a while.
+   * `projectOnly`: the project's only (a project-only placement's own back-off, A15).
    */
-  hostsOnline(region: string): number {
+  hostsOnline(region: string, projectOnly = false): number {
     let n = 0;
-    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x)) n++;
+    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x) && (!projectOnly || x.trusted)) n++;
     return n;
   }
 

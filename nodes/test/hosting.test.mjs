@@ -518,3 +518,61 @@ test('the public list names an operator outside the project only when it chose t
   assert.deepEqual(s.hosts, [{ name: 'Juan', points: 20 }]);
   assert.equal(publicOperatorNames(reg.list(), () => false, [], shows)('op1'), 'Juan');
 });
+
+// ---- Prompt 2, PR 2: the project-only preference, the server's trust, an operator's rename -----------
+
+test("a project-only match goes to a project node, never a community one: none free is null, no unmet demand, nothing sent to the community; the placement says whose node it is; the project's hosts apart", async () => {
+  const policy = { ...COMMUNITY_POLICY, ranked: false };
+  const w = await world([{ capacity: 4 }, { op: 'project', capacity: 1 }], policy);
+  const [juan, project] = w.nodes.map((n) => n.nodeId);
+  const first = await w.place({ projectOnly: true });
+  assert.deepEqual([first?.nodeId, first?.trusted], [project, true]);
+  assert.equal(await w.place({ projectOnly: true }), null, "the project's node is full at its 1");
+  assert.equal(w.nodes[0].taken, 0, 'the community node was never sent one');
+  assert.equal(w.cp.regionView('SA').unplaced, 0, 'a match the community could never take is no demand of its factor');
+  const any = await w.place();
+  assert.deepEqual([any?.nodeId, any?.trusted], [juan, false], 'without the preference, the community node');
+  assert.deepEqual([w.cp.hostsOnline('SA'), w.cp.hostsOnline('SA', true)], [2, 1]);
+  // Every node of the region full: a project-only match no node took is still no demand, an open one is.
+  const f = await world([{ capacity: 1 }, { op: 'project', capacity: 1 }], policy);
+  assert.equal((await f.place({ projectOnly: true }))?.trusted, true);
+  assert.equal((await f.place())?.trusted, false);
+  assert.equal(await f.place({ projectOnly: true }), null);
+  assert.equal(f.cp.regionView('SA').unplaced, 0, 'project-only: not counted');
+  assert.equal(await f.place(), null);
+  assert.equal(f.cp.regionView('SA').unplaced, 1, 'an open one: unmet demand, as before');
+  // A region with community nodes only: a project-only match finds none, and its hosts are 0.
+  const c = await world([{ capacity: 4 }], policy);
+  assert.equal(await c.place({ projectOnly: true }), null);
+  assert.deepEqual([c.nodes[0].taken, c.cp.hostsOnline('SA'), c.cp.hostsOnline('SA', true), c.cp.regionView('SA').unplaced], [0, 1, 0, 0]);
+  // Ranked too (with the community allowed ranked one day: the preference still wins).
+  const r = await world([{ status: 'active' }], { ...policy, ranked: true });
+  assert.equal(await r.place({ ranked: true, humans: [human('a'), human('b')], projectOnly: true }), null);
+  assert.ok(await r.place({ ranked: true, humans: [human('a'), human('b')] }));
+});
+
+test("an operator renames its node: cleaned like a --name, never another server's of its region nor a project server's, whatever the case, its own case change allowed; written; a retired node not", async () => {
+  const saved = [];
+  const store = { node: (n) => saved.push(n.name), tokens() {}, register() {}, dropTokens() {} };
+  const reg = new Registry({ trustedOperators: ['project'], maxTrustedNodes: 8, log: quiet, community: RULES, store });
+  const regNode = async (op, region, name, url) => {
+    const { token } = await reg.createToken(op, region, 0, name);
+    const r = await reg.register(await request(token, url), 0, { continent: region });
+    assert.ok(r.ok, JSON.stringify(r));
+    return r.node;
+  };
+  await regNode({ id: 'project', name: 'Proyecto' }, 'EU', 'frankfurt-1', 'wss://f.example.org');
+  const juan = await regNode({ id: 'op1', name: 'Juan' }, 'SA', 'juan-1', 'wss://j.example.org');
+  await regNode({ id: 'op2', name: 'Ana' }, 'SA', 'ana-1', 'wss://a.example.org');
+  assert.deepEqual(reg.rename(juan.nodeId, 'FRANKFURT-1'), { ok: false, code: 'name_taken' }, "a project server's, in any region");
+  assert.deepEqual(reg.rename(juan.nodeId, 'Ana-1'), { ok: false, code: 'name_taken' }, 'another of its region');
+  assert.deepEqual(reg.rename(juan.nodeId, '!!'), { ok: false, code: 'bad_name' });
+  saved.length = 0;
+  const r = reg.rename(juan.nodeId, 'JUAN-1');
+  assert.deepEqual([r.ok, r.was, reg.node(juan.nodeId).name, saved], [true, 'juan-1', 'JUAN-1', ['JUAN-1']], 'its own name in another case, written');
+  assert.equal(reg.rename(juan.nodeId, 'casa-de-juan').node.name, 'casa-de-juan');
+  assert.equal(reg.nameTaken('SA', 'juan-1'), false, 'its old name is free again');
+  reg.retire(juan.nodeId, 'gone', 1);
+  assert.equal(reg.rename(juan.nodeId, 'otra'), null);
+  assert.equal(reg.rename('nope', 'otra'), null);
+});

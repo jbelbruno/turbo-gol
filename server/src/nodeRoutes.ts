@@ -59,9 +59,19 @@
  *                                     from the account's mailbox for an account that is not a maintainer; a
  *                                     provider's press is level 1) in the last MAINTAINER_FRESH_S; else 403
  *                                     reauth_required { level: 2 }. The session's `since` goes on (x-operator-since)
- *   GET      /nodes/mine              Bearer account session -> the caller's own nodes
+ *   GET      /nodes/mine              Bearer account session -> the caller's own hosting in full (the object's A11
+ *                                     view; the session's `since` goes on, x-operator-since)
  *   POST     /nodes/mine/public       { show }, Bearer account session, never a TV's: its name in the public list or
  *                                     not (the object's opt-in), 10 a minute per account
+ *   POST     /nodes/mine/drain        { nodeId }, /rename { nodeId, name }, /retire { nodeId }, and
+ *   POST     /nodes/tokens/revoke     { id }: the owner's actions on its own servers and codes (A12), Bearer account
+ *                                     session, never a TV's; 10 a minute per account together; the object decides
+ *                                     the rest (a project account's are the panel's: 409 trusted)
+ *   POST     /nodes/report            { matchId, reason, ping?, corrections? }, Bearer account session (a TV's too:
+ *                                     its player played the match): a community server reported (A16), 10 a minute
+ *                                     per account; 403 hosting_closed while the terms in force do not describe
+ *                                     hosting (env.ts hostingTermsInForce, no KV read: never the flag), the object
+ *                                     never asked
  *   GET      /nodes/status            the public list of nodes, cached 10 s
  *   GET      /nodes/admin/nodes       the maintainers' routes (ADMIN_ROUTES), Bearer account session of a
  *   GET      /nodes/admin/overview    NODE_TRUSTED_OPERATORS account through the maintainer gate below, 30 a minute
@@ -120,8 +130,8 @@
  *
  * The object trusts what the Worker forwards: only the headers a node sends get through
  * (FORWARDED), and x-client-ip, x-client-continent (registration), x-operator-id, x-operator-name
- * and x-operator-since (tokens, when the session has it) are only ever set here. CORS only on
- * tokens, mine (and its public switch), status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
+ * and x-operator-since (tokens and mine, when the session has it) are only ever set here. CORS only on
+ * tokens, mine (its public switch and the owner's actions too), the report, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
  * here are per isolate (index.ts rateLimited), per minute except two: registrations per address
  * per hour and tokens per account per day, the object's own limits, which only the object holds
  * across isolates (a day's tokens are the ones minted: a refused request is a try of the minute's).
@@ -136,7 +146,7 @@ import { accountsCall, requireAccount, requireFresh, requirePrimary, shopClaim, 
 import { STATS_OPERATORS_MAX, STATS_TRUSTED_MAX } from './AccountsDO';
 import type { SessionClaims } from './auth';
 import { INTERNAL_HEADER, internalSecret } from './auth';
-import { JSON_MAX_BYTES, error, flag, hostingMode, hostingOpenFor, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
+import { JSON_MAX_BYTES, error, flag, hostingMode, hostingOpenFor, hostingTermsInForce, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
 import type { Env, NodesEnv } from './env';
 import { NODE_ROUTES, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, nodesStub } from './nodeApi';
 import { accountGate, edgeCache, overLimit, sitePrefix, subjectsOf, widePrefix } from './limits';
@@ -180,6 +190,12 @@ const LIMIT_STATUS_PER_IP = 60;
 const LIMIT_MINE_PER_ACCOUNT = 30;
 /** POST /nodes/mine/public per account per minute (a switch: a few presses at most). */
 const LIMIT_PUBLIC_PER_ACCOUNT = 10;
+/** The owner's actions (drain, rename, retire, a code revoked) per account per minute, together. */
+const LIMIT_OWN_PER_ACCOUNT = 10;
+/** Reports of community servers per account per minute (the object's own limit is a day's). */
+const LIMIT_REPORT_PER_ACCOUNT = 10;
+/** The owner's actions on its own servers (A12): the object's routes of the same path. */
+const OWN_ROUTES = new Set(['/nodes/mine/drain', '/nodes/mine/rename', '/nodes/mine/retire', '/nodes/tokens/revoke']);
 const LIMIT_ADMIN_PER_ACCOUNT = 30;
 /**
  * A maintainer's session must come from a password proof (a sign-in or a re-authentication, level 2
@@ -243,7 +259,7 @@ const REPLAY_OWN_PATH = /^\/nodes\/replays\/(top|mine|stars)$/;
 /** An account's star and own-list calls per minute (per isolate). */
 const LIMIT_REPLAY_OWN_PER_ACCOUNT = 30;
 const REPLAY_TOP_TTL_MS = 30_000;
-const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/mine/public', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
+const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/mine/public', ...OWN_ROUTES, '/nodes/report', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
 /** Request headers the object may see from a caller (the WebSocket upgrade's, a node's signed upload). */
 const FORWARDED = new Set([
   'content-type',
@@ -361,7 +377,8 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     const s = requireAccount({ session: await c.session() });
     if (s instanceof Response) return s;
     if (c.limited('nmine:' + s.sub, LIMIT_MINE_PER_ACCOUNT)) return error(429, 'rate_limited');
-    return toRegistry(env, c.request, path, operator(s));
+    // The session's `since` too: the object tells a community account how many days it still lacks.
+    return toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
   }
   if (method === 'POST' && path === '/nodes/mine/public') {
     if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
@@ -369,6 +386,26 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     const s = requirePrimary({ session: await c.session() });
     if (s instanceof Response) return s;
     if (c.limited('npub:' + s.sub, LIMIT_PUBLIC_PER_ACCOUNT)) return error(429, 'rate_limited');
+    return toRegistry(env, c.request, path, operator(s));
+  }
+  if (method === 'POST' && OWN_ROUTES.has(path)) {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // The owner's actions on its own servers (A12): never from a TV.
+    const s = requirePrimary({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (c.limited('nown:' + s.sub, LIMIT_OWN_PER_ACCOUNT)) return error(429, 'rate_limited');
+    return toRegistry(env, c.request, path, operator(s));
+  }
+  if (method === 'POST' && path === '/nodes/report') {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // A player's report (A16), an account's (a TV's too: its player played the match there).
+    const s = requireAccount({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (c.limited('nrep:' + s.sub, LIMIT_REPORT_PER_ACCOUNT)) return error(429, 'rate_limited');
+    // Dark until the terms in force describe hosting (decisions.md: no reports before): the object is
+    // not asked and stores nothing; it checks again. Never the KV flag: closing it again after the
+    // opening, or a failed read, must not stop the reports of community servers that still host.
+    if (!hostingTermsInForce(env)) return error(403, 'hosting_closed', 'reports of community servers are not open yet');
     return toRegistry(env, c.request, path, operator(s));
   }
   if (method === 'GET' && path === '/nodes/status') return status(c, env, who);
