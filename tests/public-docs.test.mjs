@@ -71,9 +71,10 @@ test("the legal texts and their notices name the project's providers and countri
   // The privacy policy has to name each provider and country (docs/legal/README.md), so Hostinger
   // and Google Cloud may appear there. What would point an abuser at a machine may not: a name under
   // turbo-gol.com other than the site and its mailboxes, a cloud region or zone id, a machine type,
-  // a provider's plan, a declared capacity or a traffic cap.
+  // a provider's plan, a declared capacity or a traffic cap. The about page (docs/about/), which the
+  // Worker serves next to them, follows the same rules.
   const hits = [];
-  for (const f of docs.filter((d) => d.startsWith('docs/legal/'))) {
+  for (const f of docs.filter((d) => d.startsWith('docs/legal/') || d.startsWith('docs/about/'))) {
     const text = read(f);
     for (const [what, re] of [
       ['a host name under turbo-gol.com', /(?<![@\w.-])(?:[a-z0-9-]+\.)+turbo-gol\.com\b/i],

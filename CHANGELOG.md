@@ -7,6 +7,12 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- An about page at /about (and /acerca in Spanish), served by the Worker as plain HTML that needs no
+  script: what Turbogol is, links to the game, the privacy policy, the terms and the source code,
+  what Sign in with Google asks Google for (only the `openid` and `email` scopes) and why, how to
+  unlink Google or delete the account, and who offers the game, with privacy@turbo-gol.com. It is
+  the home page of Google's OAuth consent screen, in the legal pages' shell and served while they
+  are (`docs/about/`, `docs/legal/README.md`).
 - Full screen on the pitch: on a computer the game fills the screen when a match or a training
   starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
   tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
