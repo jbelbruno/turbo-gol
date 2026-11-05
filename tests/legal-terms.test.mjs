@@ -568,16 +568,24 @@ const noticeNumbers = (m) => m.match(/\d+(?:[.-]\d+)*/g);
 const noticeLinks = (m) => [...m.matchAll(/<(https:\/\/[^>]+)>/g)].map((x) => x[1]);
 
 test('every notice in docs/legal/avisos has its English translation, and both paste into Discord as they are: two messages under 2,000 characters, no hard wraps, no headings, links in < >, the version, only the public contact; the translation says the same as the official one, and the prefaces say which is which and how it is posted', () => {
-  const files = readdirSync(AVISOS);
+  const entries = readdirSync(AVISOS, { withFileTypes: true });
+  const files = entries.filter((e) => e.isFile()).map((e) => e.name);
   const notices = files.filter((f) => f.endsWith('.md') && !f.endsWith('.en.md'));
   assert.ok(notices.includes('2026-11-04-2.md'));
   for (const f of files) assert.match(f, /^\d{4}-\d{2}-\d{2}(?:-\d+)?(?:\.en)?\.md$/, `docs/legal/avisos/${f}: <version>.md or <version>.en.md`);
+  // A folder is the four texts of a version announced ahead, until its first day (docs/legal/README.md;
+  // server/test/legal-pages.test.mjs checks them): named after that version, beside its notice.
+  for (const d of entries.filter((e) => e.isDirectory()).map((e) => e.name)) {
+    assert.match(d, /^\d{4}-\d{2}-\d{2}(?:-\d+)?$/, `docs/legal/avisos/${d}/: <version>/`);
+    assert.ok(notices.includes(`${d}.md`), `docs/legal/avisos/${d}/: the texts its notice ${d}.md announces`);
+  }
   for (const es of notices) {
     const en = es.replace(/\.md$/, '.en.md');
     assert.ok(files.includes(en), `${es}: its English translation, ${en}`);
     const msgsEs = noticeMessages(es, 'Mensaje');
     const msgsEn = noticeMessages(en, 'Message');
-    for (const m of msgsEs) assert.doesNotMatch(m, /\b(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)\b/i, es);
+    // Letter boundaries, not \b: JS's \b is ASCII-only, so it never ends a word on "á".
+    for (const m of msgsEs) assert.doesNotMatch(m, /(?<!\p{L})(?:tenés|podés|querés|recargá|creá|aceptá|jugá|vos)(?!\p{L})/iu, es);
     // A translation, not another notice: the same paragraphs and bullets, each opening in bold where
     // the Spanish one does, the same numbers in the same order (dates, minutes, days, sections) and
     // the same links, message by message.
@@ -748,4 +756,177 @@ test(`version ${VERSION_A} of the texts: the six countries, the providers, the v
   assert.ok(pen.includes("in CASUAL the bots' difficulty you chose for your bots match"));
   // Only the country of the machines outside São Paulo (and never a site the node's name suggests).
   for (const t of [tes, ten, pes, pen]) assert.doesNotMatch(t, /frankfurt|kuala|johannesburg|joburg|sydney|melbourne|ashburn|virginia|iowa|oregon|council bluffs/i);
+});
+
+// Version 2026-11-13, version (b): the opening of the community server network to hosts that are not
+// the project (the owner's decisions of 5 November 2026). Announced 7 days ahead (Términos 18.2); its
+// four texts wait in docs/legal/avisos/2026-11-13/ until that day, when they move into place with
+// TERMS_VERSION. Both days are provisional until the owner approves the texts: if the notice's day
+// (2026-11-06) moves, both move with it, in the notice, its preface, the README, the drafts' headers
+// and here.
+const VERSION_B = '2026-11-13';
+test(`the notice of version ${VERSION_B} (the official text) and its English translation (the Discord post): 7 days ahead, the opening announced apart, the host rules and Annex B, COMPETITIVO for now on project servers only, the project-only choice, the host's name by choice, the points, the reports`, () => {
+  const es = noticeMessages(`${VERSION_B}.md`, 'Mensaje');
+  const en = noticeMessages(`${VERSION_B}.en.md`, 'Message');
+  assert.ok(es[0].startsWith(`**Reglas para anfitriones de servidores de la comunidad y cambian los Términos (versión ${VERSION_B})**\n`), 'the title is its first line, in bold');
+  assert.ok(en[0].startsWith(`**Rules for community server hosts, and the Terms are changing (version ${VERSION_B})**\n`), 'the title is its first line, in bold');
+  // The opening itself is announced apart (Términos 12.1.2), and may start with invited people.
+  assert.ok(es[0].includes('La apertura misma la anunciamos aparte, en este canal (Términos, sección 12.1.2), y puede empezar por personas invitadas. Hasta la apertura, solo el proyecto tiene servidores.'));
+  assert.ok(en[0].includes('We announce the opening itself separately, in this channel (Terms, section 12.1.2), and it may start with invited people. Until the opening, only the project has servers.'));
+  // Who can host (Prompt 2 A2, A3): declared, never checked; the rules and Annex B with the code's button.
+  assert.ok(es[0].includes('- **Puedes alojar un servidor si tienes 18 años o más:** lo pides en MIS SERVIDORES') && es[0].includes('No comprobamos la edad.'));
+  assert.ok(en[0].includes('- **You can host a server if you are 18 or older:** you ask for it in MY SERVERS') && en[0].includes('We do not check the age.'));
+  // What is declared is being 18 or older, not an age; the 7 days are the account's (Términos 12.2.1).
+  assert.ok(es[0].includes('con una cuenta de 7 días o más y con correo confirmado, y declaras que tienes 18 años o más y aceptas la sección 12 y el Anexo B'));
+  assert.ok(en[0].includes('with an account that is 7 days old or more and has a confirmed email, and you declare that you are 18 or older and accept section 12 and Annex B'));
+  // Only part of a server's CASUAL matches are verified (controlPlane.ts verifyRateOf), as the policy's 4.4 says.
+  assert.ok(es[0].includes('- Algunas de esas partidas de CASUAL (todas mientras el servidor está en prueba) también se verifican en un servidor del proyecto'));
+  assert.ok(en[0].includes('- Some of those CASUAL matches (all of them while the server is on probation) are also verified on a project server'));
+  for (const m of [es[0], en[0]]) assert.match(m, /Anexo B|Annex B/);
+  // COMPETITIVO "por ahora no" on their servers (A7), never with a date.
+  assert.ok(es[0].includes('- **COMPETITIVO, por ahora, se juega solo en servidores del proyecto o de Cloudflare.**'));
+  assert.ok(en[0].includes("- **COMPETITIVE, for now, is played only on project servers or on Cloudflare's.**"));
+  // What another person's server sees, and how to keep off it (A15: the choice and the mark).
+  assert.ok(es[0].includes('que ve tu nombre, el identificador de tu cuenta, tu equipo, tus controles y tu IP') && es[0].includes('activa «Solo servidores del proyecto» en Ajustes > Juego'));
+  assert.ok(en[0].includes("who sees your name, your account's identifier, your team, your controls and your IP") && en[0].includes('turn on "Project servers only" in Settings > Gameplay'));
+  // The host's name only by their choice (A14), "Anfitrión" and a number otherwise.
+  assert.ok(es[0].includes('un anfitrión que no es el proyecto se ve con su nombre de usuario solo si lo elige; si no, como «Anfitrión» y un número.'));
+  assert.ok(en[0].includes('a host that is not the project shows with their username only if they choose it; otherwise, as "Anfitrión" and a number.'));
+  // The points (A17): a daily cap without its number, the solo bots match at zero, the repeats.
+  const points = (m) => m.split('\n').find((l) => /puntos de servidor\*\*|Server points\*\*/.test(l));
+  assert.ok(points(es[0]).includes('tienen un tope por día') && points(en[0]).includes('have a cap per day'));
+  for (const m of [es[0], en[0]]) assert.doesNotMatch(points(m), /\d/, 'no number for the cap');
+  // A report never sanctions on its own (A16).
+  assert.ok(es[0].includes('Un reporte solo nunca sanciona a nadie.') && en[0].includes('A single report never sanctions anyone.'));
+  // Message 2: in force 7 days after the notice, accepted on the next online match; how to object; no apology this time.
+  assert.ok(es[1].includes(`Los Términos y la Política de privacidad tienen una versión nueva (${VERSION_B}) que vale desde el 13 de noviembre de 2026, 7 días después de este aviso (Términos, sección 18.2).`));
+  assert.ok(en[1].includes(`The Terms of Use and the Privacy Policy have a new version (${VERSION_B}), in force from November 13, 2026, 7 days after this notice (Terms, section 18.2).`));
+  assert.ok(es[1].includes('Si no estás de acuerdo, no la aceptes: puedes seguir jugando contra la IA y entrenando, y puedes borrar tu cuenta sin costo desde PERFIL.') && es[1].includes('Dudas u objeciones: privacy@turbo-gol.com o este canal.'));
+  assert.ok(en[1].includes('If you do not agree, do not accept it: you can keep playing VS AI and training, and you can delete your account at no cost from PROFILE.') && en[1].includes('Questions or objections: privacy@turbo-gol.com or this channel.'));
+  for (const m of [...es, ...en]) assert.doesNotMatch(m, /disculpas|apologi[sz]e/i, 'the 7 days were given');
+  assert.match(es[1], /\nTextos completos: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  assert.match(en[1], /\nThe Spanish texts are the official ones; the English translations are informative\. Full texts: <https:\/\/github\.com\/DonJaimeHash\/turbo-gol\/tree\/main\/docs\/legal>$/);
+  // The prefaces: posted 7 days ahead, and where the texts wait until their first day. The folder is
+  // named, not linked: it goes when the texts move, and the notice never changes after it is posted.
+  assert.ok(noticePreface(`${VERSION_B}.md`).includes('publicado en este repositorio el 6 de noviembre de 2026, 7 días antes de que empiece a valer, el 13 de noviembre de 2026'));
+  assert.ok(noticePreface(`${VERSION_B}.en.md`).includes('this is the text posted there on 6 November 2026, 7 days before the version takes effect on 13 November 2026'));
+  for (const f of [`${VERSION_B}.md`, `${VERSION_B}.en.md`]) {
+    assert.ok(noticePreface(f).includes(`\`docs/legal/avisos/${VERSION_B}/\``), `${f}: names the drafts' folder`);
+    assert.doesNotMatch(noticePreface(f), new RegExp(`\\]\\(${VERSION_B}/`), `${f}: no link to a folder that goes on ${VERSION_B}`);
+  }
+});
+
+test(`version ${VERSION_B} of the texts (the drafts in docs/legal/avisos/${VERSION_B}/): the opening's switch, the host rules and Annex B, COMPETITIVO "por ahora no" in every place, the host's name by choice, "Solo servidores del proyecto", server points, the new data's rows, and an English translation with the same outline`, () => {
+  const read = (f) => readFileSync(new URL(`${VERSION_B}/${f}`, AVISOS), 'utf8');
+  const flat = (t) => t.replace(/\s+/g, ' ');
+  const [tes, ten, pes, pen] = ['terminos.es.md', 'terms.en.md', 'privacidad.es.md', 'privacy.en.md'].map((f) => flat(read(f)));
+  // Version (b) is in force before the opening: "hasta la apertura..., desde ese día...", never "hoy" as if it never opened.
+  for (const t of [tes, pes]) assert.doesNotMatch(t, /Hoy solo el proyecto tiene servidores|hoy no puedes registrar uno|Nadie fuera del proyecto puede registrar un servidor todavía|Cuando la red se abra|cuando se abran los servidores de terceros/);
+  for (const t of [ten, pen]) assert.doesNotMatch(t, /Today only the project has servers|today you cannot register one|Nobody outside the project can register a server yet|When the network opens|once third-party servers open/);
+  assert.ok(tes.includes('La apertura la anunciamos en nuestro servidor de Discord, aparte del aviso de estos términos, y estas reglas valen desde ese día. Podemos abrirla primero a personas invitadas'));
+  assert.ok(ten.includes('We announce the opening on our Discord server, separately from the notice of these terms, and these rules apply from that day. We may open it first to invited people'));
+  // Terms 12.2 (Prompt 2 A1-A3): the code in MIS SERVIDORES, never from a TV; 18 or older declared, not checked; what is kept.
+  assert.ok(tes.includes('nunca desde una TV, después de confirmar que eres tú en los últimos 15 minutos') && ten.includes('never from a TV, after confirming it is you in the last 15 minutes'));
+  assert.ok(tes.includes('No comprobamos tu edad: la declaras tú.') && ten.includes('We do not check your age: you declare it yourself.'));
+  assert.ok(tes.includes('Guardamos que aceptaste esta sección y el Anexo B y declaraste tener 18 años o más, con la versión y la fecha.'));
+  assert.ok(ten.includes('We keep that you accepted this section and Annex B and declared you are 18 or older, with the version and the date.'));
+  // Annex B, at the end of the Terms (legalPages.ts serves only the four texts), for every host, with no clause model named.
+  for (const [t, head, model] of [
+    [tes, '## Anexo B. Cláusulas para quien aloja un servidor de la comunidad', /cláusulas (?:contractuales )?tipo|contratos? modelo|2021\/914|AAIP/i],
+    [ten, '## Annex B. Clauses for whoever hosts a community server', /standard contractual clauses|model (?:clauses|contracts)|2021\/914|AAIP/i],
+  ]) {
+    assert.ok(t.includes(head), head);
+    const annex = t.slice(t.indexOf(head));
+    assert.doesNotMatch(annex, model, 'no clause model until a lawyer picks one');
+    assert.match(annex, /48 (?:horas|hours)/);
+    assert.match(annex, /7 (?:días como máximo|days at most)/);
+  }
+  // COMPETITIVO "por ahora no" on servers that are not the project's (Prompt 2 A7): 7.6, 8.4, 12.3.3, 12.5.2, Annex A.3 and the policy's 4.4.
+  for (const s of [
+    '**COMPETITIVO:** por ahora, solo un servidor del proyecto de esa región puede tomarla',
+    '**Por ahora, las partidas de COMPETITIVO no se juegan en servidores de la comunidad que no son del proyecto:**',
+    'Por ahora, un servidor que no es del proyecto no recibe partidas de COMPETITIVO',
+    'Por ahora, un servidor que no es del proyecto solo recibe partidas de CASUAL',
+    'y por ahora tus servidores no reciben partidas de COMPETITIVO',
+  ])
+    assert.ok(tes.includes(s), s);
+  for (const s of [
+    '**COMPETITIVE:** for now, only a project server of that region can take it',
+    "**For now, COMPETITIVE matches are not played on community servers that are not the project's:**",
+    "For now, a server that is not the project's gets no COMPETITIVE matches",
+    "For now, a server that is not the project's gets only CASUAL matches",
+    'and for now your servers get no COMPETITIVE matches',
+  ])
+    assert.ok(ten.includes(s), s);
+  assert.ok(pes.includes('Las de COMPETITIVO van, por ahora, solo al servidor del proyecto de su región'));
+  assert.ok(pen.includes('COMPETITIVE matches go, for now, only to the project server of their region'));
+  // Only a node's matches are verified (controlPlane.ts:21-25): a COMPETITIVO on Cloudflare never is.
+  assert.ok(pes.includes('Cada partida de COMPETITIVO en un servidor de la comunidad vuelve a simularse en un servidor del proyecto'));
+  assert.ok(pen.includes('Each COMPETITIVE match on a community server is simulated again on a project server'));
+  // The 1 h exclusion is past a limit of recent refusals (Prompt 2 A8 bis), never for one refusal.
+  for (const t of [tes, pes]) assert.doesNotMatch(t, /rechaza (?:sin motivo las partidas|partidas sin motivo)/);
+  for (const t of [ten, pen]) assert.doesNotMatch(t, /refuses (?:with no reason the matches|matches with no reason)/);
+  // The host's name by choice (A14), always "Anfitrión" and a number after the account goes.
+  assert.ok(tes.includes('Cualquier otro anfitrión se ve con su nombre de usuario solo si lo elige en MIS SERVIDORES, y puede quitarlo cuando quiera; si no, como «Anfitrión» y un número. Si borras tu cuenta, siempre como «Anfitrión» y un número.'));
+  assert.ok(ten.includes('Any other host is shown with their username only if they choose it in MY SERVERS, and they can remove it whenever they want; otherwise, as "Anfitrión" (Spanish for "host") and a number. If you delete your account, always as "Anfitrión" and a number.'));
+  // "Solo servidores del proyecto" (A15), in the Terms and the policy.
+  for (const t of [tes, pes]) assert.ok(t.includes('«Solo servidores del proyecto» en Ajustes > Juego'));
+  for (const t of [ten, pen]) assert.ok(t.includes('"Project servers only" in Settings > Gameplay'));
+  // The game's word, "puntos de servidor"; the guests' weight is gone (guests cannot queue); the daily cap has no number.
+  for (const t of [tes, pes]) assert.doesNotMatch(t, /puntos de anfitrión|para el anfitrión \(con el tiempo|si es invitado|Los invitados y las cuentas nuevas/);
+  for (const t of [ten, pen]) assert.doesNotMatch(t, /host points?\b|for the host \(with each|if they are a guest|Guests and new accounts/i);
+  assert.ok(tes.includes('## Anexo A. Cómo se calculan los puntos de servidor') && ten.includes('## Annex A. How server points are calculated'));
+  for (const t of [tes, ten, pes, pen]) assert.doesNotMatch(t, /(?:tope (?:de puntos|diario)|cap (?:on points|per day)|daily cap)[^.]*\d/, 'no number for the daily cap');
+  // The policy: a row, a basis and a period for each new datum (Prompt 2 A3, A4, A6, A8 bis, A12, A16, A1).
+  for (const s of [
+    '| **Reportas un servidor de la comunidad** |',
+    '| Mostrar tu nombre de usuario en la lista de servidores, si eres anfitrión y lo eliges en MIS SERVIDORES | Tu consentimiento, que retiras con el mismo interruptor: art. 5.1 | Tu consentimiento: art. 7 I | Tu consentimiento: art. 6.1.a |',
+    '| La aceptación de un anfitrión: las reglas para anfitriones y el Anexo B, con su declaración de 18 años o más, la versión y la fecha | Mientras exista la cuenta.',
+    '| El estado de un anfitrión: si está bloqueado, el motivo, quién lo decidió y cuándo | Sin plazo, como la ficha de sus servidores. Al borrarse la cuenta, deja de llevar el identificador de la cuenta |',
+    '| Los códigos de registro de servidores (de cada uno, solo una huella, con el identificador y el nombre de usuario de la cuenta que lo pidió,',
+    '| Cuántos códigos pidió cada anfitrión en el día | 1 día |',
+    '| Los reportes de los jugadores sobre un servidor de la comunidad (con el identificador de la cuenta que reporta) | 30 días.',
+    'el valor anterior y el nuevo (que pueden ser identificadores de cuentas) y el motivo | 1 año. Al borrarse una cuenta, su identificador sale de esos valores |',
+    '| **El país de cada servidor de la comunidad que no es del proyecto** |',
+    'qué fue: novedades, Términos o reglas para anfitriones',
+    '- **Anfitriones:** para alojar un servidor de la comunidad tienes que tener 18 años o más',
+  ])
+    assert.ok(pes.includes(s), s);
+  for (const s of [
+    '| **You report a community server** |',
+    '| Showing your username in the server list, if you are a host and choose it in MY SERVERS | Your consent, which you withdraw with the same switch: art. 5.1 | Your consent: art. 7 I | Your consent: art. 6.1.a |',
+    "| A host's acceptance: the rules for hosts and Annex B, with their declaration that they are 18 or older, the version and the date | While the account exists.",
+    "| A host's status: whether they are blocked, the reason, who decided it and when | No time limit, like their servers' entries. When the account is deleted, it no longer carries the account's identifier |",
+    '| The server registration codes (of each one, only a hash, with the identifier and username of the account that asked for it,',
+    '| How many codes each host asked for in the day | 1 day |',
+    "| The players' reports about a community server (with the reporting account's identifier) | 30 days.",
+    'the old and the new value (which may be account identifiers) and the reason | 1 year. When an account is deleted, its identifier leaves those values |',
+    "| **The country of each community server that is not the project's** |",
+    'what it was: news, the Terms or the rules for hosts',
+    '- **Hosts:** to host a community server you must be 18 or older',
+  ])
+    assert.ok(pen.includes(s), s);
+  // legal.notice's rule (its test above) holds for (b) too: section 5's rows of the project's servers stay the countries the notice names.
+  for (const [file, rows] of [
+    ['privacidad.es.md', ['Brasil', 'Alemania', 'Malasia', 'Sudáfrica, Australia y Estados Unidos (Google Cloud)']],
+    ['privacy.en.md', ['Brazil', 'Germany', 'Malaysia', 'South Africa, Australia and the United States (Google Cloud)']],
+  ]) {
+    const policy = read(file);
+    const s5 = policy.slice(policy.search(/^## 5\. /m), policy.search(/^## 6\. /m));
+    const hosted = s5.split('\n').filter((l) => /^\| \*\*/.test(l) && /servidor(?:es)? del proyecto|project's servers?/.test(l)).map((l) => /^\| \*\*([^*]+)\*\*/.exec(l)[1]);
+    assert.deepEqual(hosted, rows, `${file}: section 5's rows of the project's servers`);
+  }
+  // A translation, not another text: the same headings, numbered items, bullets and table rows.
+  const outline = (t) => t.split('\n').filter((l) => /^#{1,3} /.test(l)).map((l) => {
+    const m = /^(#+) (?:(\d+(?:\.\d+)?)\.? |(?:Anexo|Annex) ([A-Z])\b)?/.exec(l);
+    return m[1] + (m[2] ?? (m[3] ? ' annex ' + m[3] : ''));
+  });
+  const counts = (t) => [/^\s*\d+\. /, /^\s*- /, /^\|/].map((re) => t.split('\n').filter((l) => re.test(l)).length);
+  for (const [es, en] of [['terminos.es.md', 'terms.en.md'], ['privacidad.es.md', 'privacy.en.md']]) {
+    assert.deepEqual(outline(read(en)), outline(read(es)), `${en}: the headings of ${es}`);
+    assert.deepEqual(counts(read(en)), counts(read(es)), `${en}: the items, bullets and rows of ${es}`);
+  }
+  // Never voseo, never the name of the game this one resembles.
+  for (const t of [tes, pes]) assert.doesNotMatch(t, /(?<!\p{L})(?:tenés|podés|querés|sabés|aceptá|leé|tocá|elegí|jugá|vos)(?!\p{L})/iu);
+  for (const t of [tes, ten, pes, pen]) assert.doesNotMatch(t, /rocket\s*league/i);
 });
