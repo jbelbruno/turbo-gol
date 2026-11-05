@@ -72,7 +72,7 @@ Versión 2026-11-05. Vigente desde el 5 de noviembre de 2026. Este texto en espa
 | **Juegas COMPETITIVO** | Tu puntaje, tus partidas, victorias y derrotas, tu mejor puntaje, tus abandonos y tus bloqueos de la cola | Emparejarte con rivales parejos. La clasificación. Las sanciones por abandonar |
 | **Usas una sala personalizada** | El código de la sala, su título, su contraseña (guardamos solo una huella), los miembros (su identificador de sesión, su nombre, su auto y su equipo), a quién sacó el anfitrión y los intentos fallidos de contraseña de cada jugador. Si la creas tú y tu conexión usa IPv6, el prefijo de tu red. Al crearla eliges si es pública o privada. Las salas se juegan P2P | Hacer funcionar la sala. Limitar cuántas salas abre una misma red y una misma sesión |
 | **Buscas partida (CASUAL o COMPETITIVO)** | Mientras buscas, en la memoria del servidor: el identificador de tu cuenta, tu nombre, tu auto, cuántos días tiene tu cuenta, en COMPETITIVO tu puntaje, tu región, los formatos que buscas y el que prefieres, en CASUAL la dificultad de los bots que elegiste para tu partida contra bots, desde cuándo buscas, cuándo llegó tu último pedido, si estás jugando contra bots o entrenando, si tienes el juego a la vista y si tu partida espera lugar en los servidores. Si la búsqueda se corta, o si nadie juega la partida contra bots que te tocó (por ejemplo, porque el teléfono se bloqueó; esto, una vez por búsqueda), el servidor guarda 10 minutos el identificador de tu cuenta, desde cuándo buscabas, la cola, tu región y cuál de las dos cosas pasó, para que tu búsqueda siga con su reloj cuando vuelves. Para eso, el servidor anota junto a la partida contra bots el identificador de tu cuenta, desde cuándo buscabas, tu región y cuándo empezó: 90 segundos si se juega en un servidor de la comunidad, o lo que dura si se juega en uno de Cloudflare. Para estimar la espera, el servidor guarda cuándo empezó cada búsqueda de la última hora, en qué cola y desde qué región, sin tu cuenta, tu nombre ni tu IP (como máximo 2.000; una búsqueda cancelada sale de ahí). Además contamos por día, sin tu cuenta, tu nombre ni tu IP, cuántas búsquedas empiezan y terminan, cuántas partidas se arman y con cuántas personas, cuánto se esperó (por tramos) y cuántas veces se juega contra bots o se entrena mientras se espera; esos totales se guardan 90 días | Armar tu partida y estimar la espera. Saber si la espera funciona y mejorarla |
-| **Juegas en un servidor de la comunidad** | Tu nombre, tu identificador de jugador (el mismo en todas tus partidas), tu equipo, tus controles y tu dirección IP, que ve quien opera el servidor. Una partida de COMPETITIVO también vuelve a simularse, para verificarla, en un servidor del proyecto que puede estar en otro país (sección 4.4): ese servidor recibe la repetición, con tu nombre, tu identificador de jugador, tu equipo y tus controles, no tu IP. Después, la repetición de la partida y, sin publicarse, qué cuenta (o sesión de invitado) ocupó cada lugar. Si el anfitrión no es el proyecto, para calcular sus puntos también anotamos cuánto tiempo jugaste y, si tienes cuenta, cuántos días tiene tu cuenta. La repetición, los lugares y esas notas se guardan 30 días. Además, el equipo guarda 30 días, en un historial interno de los servidores que no se publica, cada partida terminada (el servidor, los tiempos, el resultado y su verificación) con el nombre y el identificador de jugador de cada jugador: si ocultas tu nombre en las repeticiones públicas, el equipo tampoco lo ve ahí. Hoy esos servidores son solo los del proyecto (sección 4.4) | Jugar la partida. Verificar que el resultado sea limpio. Publicar la repetición. Calcular los puntos del anfitrión, cuando el anfitrión no es el proyecto. Que el equipo revise cómo funciona cada servidor y cada partida |
+| **Juegas en un servidor de la comunidad** | Tu nombre, tu identificador de jugador (el mismo en todas tus partidas), tu equipo, tus controles y tu dirección IP, que ve quien opera el servidor. Una partida de COMPETITIVO también vuelve a simularse, para verificarla, en un servidor del proyecto que puede estar en otro país (sección 4.4): ese servidor recibe la repetición, con tu nombre, tu identificador de jugador, tu equipo y tus controles, no tu IP. Después, la repetición de la partida y, sin publicarse, qué cuenta (o sesión de invitado) ocupó cada lugar. Si el anfitrión no es el proyecto, para calcular sus puntos también anotamos cuánto tiempo jugaste y, si tienes cuenta, cuántos días tiene tu cuenta. La repetición, los lugares y esas notas se guardan 30 días. Además, el equipo guarda 30 días, en un historial interno de los servidores que no se publica, cada partida terminada (el servidor, los tiempos, el resultado y su verificación) con el nombre y el identificador de jugador de cada jugador: si ocultas tu nombre en las repeticiones públicas, el historial no lo muestra, pero sí lo lleva la repetición completa, que el equipo puede descargar desde ahí. Hoy esos servidores son solo los del proyecto (sección 4.4) | Jugar la partida. Verificar que el resultado sea limpio. Publicar la repetición. Calcular los puntos del anfitrión, cuando el anfitrión no es el proyecto. Que el equipo revise cómo funciona cada servidor y cada partida |
 | **Marcas una repetición como favorita (una estrella) o miras «Mis repeticiones»** | El identificador de tu cuenta junto al de la partida, nunca tu nombre. Puedes marcar hasta 500 repeticiones. Cuántas cuentas marcaron cada partida es público; cuáles, no | Mostrar las partidas más marcadas y tu lista de partidas. Se borran cuando la repetición cumple 30 días, también si borras tu cuenta antes |
 | **Conectas una TV con tu teléfono** | El código de la TV. El país, la ciudad, la red y el nombre del proveedor de internet aproximados de la TV. La dirección IP de la TV (de IPv6, solo el prefijo de la red), mientras vive el código. La de tu teléfono solo se compara con la de la TV; si te equivocas de código, se guarda 15 minutos, para frenar los intentos fallidos. Todo en memoria | Que tu teléfono te muestre qué TV vas a conectar y si está en tu misma red, para que nadie te engañe con un código ajeno. Frenar los intentos fallidos |
 | **Cambias tus opciones** | Tus ajustes de física experimentales (con sus nombres), tus récords de entrenamiento, el interruptor de funciones experimentales, tu auto, «Ocultar mi nombre en repeticiones públicas» y «Novedades por correo» | Que tus opciones te sigan en cualquier dispositivo |
@@ -199,11 +199,14 @@ reportes de errores de red (sección 9.4).
 
 **Lo que llega al canal del equipo en Discord:** los nombres de usuario de los anfitriones, sus
 servidores y la dirección de cada uno, el país de cada ingreso del equipo a su cuenta de
-mantenimiento, el identificador de una cuenta a la que el equipo le da o le quita un ítem o cuyos
-puntos consulta, el identificador de la cuenta de un anfitrión que se borró, los identificadores
-de partidas y el motivo que escribe el equipo cuando saca una repetición, anula una partida o
-cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo retira). Ese motivo puede nombrar
-a un jugador.
+mantenimiento, el identificador de una cuenta a la que el equipo le da o le quita un ítem, cuyos
+puntos consulta o cuyos canjes reactiva, el identificador de la cuenta de un anfitrión que se
+borró, los identificadores de partidas y el motivo que escribe el equipo cuando saca una
+repetición, anula una partida, cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo
+retira) o da, quita o reactiva algo en una cuenta. Ese motivo puede nombrar a un jugador. Si al
+terminar una partida en un servidor de la comunidad no se puede registrar algo de ella (por
+ejemplo, su resultado o los puntos de su anfitrión), el aviso lleva además los identificadores de
+las cuentas de sus jugadores o el de la cuenta de su anfitrión.
 
 La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/subprocessors/>.
 
@@ -279,11 +282,12 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
   en la partida y tu dirección IP. Las condiciones para anfitriones (sección 12 de los Términos) les
   prohíben guardar o usar esos datos para otra cosa.
 - **De los anfitriones** guardamos su nombre de usuario, los datos de cada servidor (nombre,
-  región, dirección pública, que puede ser una IP, capacidad, versión, datos de la máquina y
-  cuántas partidas verificó, perdió o falló), las direcciones IP desde las que entran sus servidores
-  (30 días), un historial de sus servidores y de sus partidas (30 días, sección 6) y sus puntos. Un
-  servidor se queda en nuestros registros aunque se apague o lo retiremos. Hoy eso vale solo para
-  la cuenta del proyecto.
+  región, dirección pública, que puede ser una IP, capacidad, versión, datos de la máquina,
+  cuántas partidas verificó, perdió o falló y el último motivo que escribió el equipo al cambiar su
+  estado, que también ve su anfitrión, o al retirarlo), las direcciones IP desde las que entran sus
+  servidores (30 días), un historial de sus servidores y de sus partidas (30 días, sección 6) y sus
+  puntos. Un servidor se queda en nuestros registros aunque se apague o lo retiremos. Hoy eso vale
+  solo para la cuenta del proyecto.
 - **Es público,** para cualquiera que lo pida en turbo-gol.com/nodes/status: cada servidor en
   servicio (en prueba o activo), con quién lo opera, y los puntos de los últimos 30 días de los 50
   anfitriones que más sumaron (sección 4.5). Una cuenta del proyecto se ve con su nombre de
@@ -417,10 +421,10 @@ art. 33 IX).
 
 | Dato | Cuánto |
 |---|---|
-| Puntos de cada partida para el anfitrión (con el tiempo de cada jugador) | 30 días. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
+| Puntos de cada partida para el anfitrión (con el tiempo de cada jugador) | 30 días. Sin datos de los jugadores, quedan además en la cuenta del anfitrión mientras exista. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
 | El registro de cuántos puntos ganó cada anfitrión (si se borra la cuenta, ya no se pueden usar) | Sin plazo, también después de borrar la cuenta. Hoy solo el proyecto tiene servidores |
-| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que lo retiremos. Un servidor bloqueado o retirado sale de la lista pública |
-| Historial interno de los servidores: lo que pasó con cada servidor, cada partida terminada (con el nombre y el identificador de jugador de cada jugador) y las líneas de aviso del equipo (pueden llevar identificadores de cuentas, como los avisos de la sección 4.1). Solo lo ve el equipo | 30 días. De las líneas de aviso, las últimas 2.000 como mucho. Un nombre que su jugador ocultó en las repeticiones públicas no se muestra, y al borrarse una cuenta su nombre y su identificador salen de las partidas del historial |
+| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que puede nombrar a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que lo retiremos. Un servidor bloqueado o retirado sale de la lista pública |
+| Historial interno de los servidores: lo que pasó con cada servidor, cada partida terminada (con el nombre y el identificador de jugador de cada jugador) y las líneas de aviso del equipo (pueden llevar identificadores de cuentas, como los avisos de la sección 4.1). Solo lo ve el equipo | 30 días. De las líneas de aviso, las últimas 2.000 como mucho. Un nombre que su jugador ocultó en las repeticiones públicas no se muestra (sí está en la repetición completa, que el equipo puede descargar), y al borrarse una cuenta su nombre y su identificador salen de las partidas del historial |
 | Direcciones IP desde las que entran los servidores de la comunidad | 30 días |
 
 **Registros y copias**
@@ -607,7 +611,7 @@ Ninguna de las nuestras la puede leer el código de la página: solo viajan a nu
 | «Este navegador entró como…» (`turbogol.account`): tu nombre y tu identificador de cuenta | Saber quién entró en este navegador | Al cerrar sesión, o cuando tu sesión deja de valer |
 | Tus funciones experimentales y ajustes de física (`turbogol.experimental.v1.` y el identificador de tu cuenta) | Usarlos sin conexión | Quedan después de cerrar sesión |
 | Tus récords de entrenamiento (`turbogol.training.v1` como invitado, y una copia por cada cuenta que usaste en este navegador, con su identificador) | Mostrártelos | Los de invitado, cuando borras los datos del sitio. La copia de una cuenta queda después de cerrar sesión |
-| Tus opciones: idioma, gráficos, controles, región, modo, el formato y la dificultad de los bots que prefieres en CASUAL, qué haces mientras buscas, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
+| Tus opciones: idioma, gráficos, sonido, cámara del juego, controles, interfaz (tamaño, movimiento reducido y pantalla completa al jugar), región, modo, el formato y la dificultad de los bots que prefieres en CASUAL, qué haces mientras buscas, auto, ayudas vistas y la cámara del visor de repeticiones | Recordarlas | Cuando borras los datos del sitio |
 | El nivel de gráficos que falló en esta placa de video (con el nombre de la placa) | No volver a usarlo | A los 30 días, o cuando borras los datos del sitio |
 
 ### 9.3 Almacenamiento de la pestaña (se borra al cerrarla)
@@ -672,8 +676,12 @@ cierra tu sesión y vuelves a las opciones de fábrica.
 - **Los correos no tienen imágenes,** píxeles de seguimiento ni enlaces rastreados.
 - **Los registros técnicos nunca guardan tu contraseña** ni el cuerpo de lo que envías al servidor
   (lo que escribes en los formularios). Nuestras propias líneas de registro no llevan IP, correo ni
-  contraseña. Pocas llevan el nombre de usuario de una cuenta del equipo, o el identificador de una
-  cuenta que se borró (completo si era anfitrión; los primeros 6 caracteres en los demás casos).
+  contraseña. Pocas llevan un dato de una cuenta: el nombre de usuario de un anfitrión; el nombre
+  de usuario y el identificador de una cuenta del equipo; el identificador de una cuenta a la que
+  el equipo le da, le quita o le reactiva algo, o cuyos puntos consulta; los de las cuentas de los
+  jugadores o del anfitrión de una partida de la que no se pudo registrar algo (sección 4.1); el
+  motivo que escribe el equipo, que puede nombrar a un jugador (sección 4.1), y el de una cuenta
+  que se borró (completo si era anfitrión; los primeros 6 caracteres en los demás casos).
 - **Los registros técnicos guardan las direcciones pedidas.** Algunas llevan un identificador: el
   código de un solo uso de Discord o Google al volver a Turbogol, el código de una sala, el de una
   partida y, cuando empecemos a mandar novedades, el identificador del enlace de baja, que no cambia
@@ -771,13 +779,16 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
     puntos de anfitrión de esas partidas, también con el identificador y sin tu nombre: hasta
     30 días;
   - las partidas del historial interno de los servidores: tu nombre y tu identificador salen de
-    él cuando se borra la cuenta, y la partida queda, sin ellos, hasta 30 días;
-  - las líneas de aviso del equipo que lleven el identificador de tu cuenta (hasta 30 días en el
-    historial interno y 90 días en Discord, sección 6);
+    él cuando se borra la cuenta, y la partida queda, sin ellos, hasta 30 días (con el motivo que
+    haya escrito el equipo si la anuló, que puede nombrarte);
+  - las líneas de aviso del equipo que lleven el identificador de tu cuenta o un motivo que te
+    nombre (hasta 30 días en el historial interno y 90 días en Discord, sección 6);
   - los registros técnicos de Cloudflare (7 días) y los de las máquinas de los servidores del
     proyecto (sección 6);
   - el registro de envíos de correo (hasta 30 días);
   - las copias de seguridad de Cloudflare (hasta 30 días).
+- **Un motivo que te nombre en la ficha de un servidor** (el último que escribió el equipo al
+  cambiar su estado o al retirarlo): queda sin plazo, como la ficha (sección 6).
 - **Si eras anfitrión:** hoy solo el proyecto tiene servidores, así que esto todavía no afecta a
   ningún jugador. Cuando se abra a otras personas: el registro de cuántos puntos ganaron tus
   servidores (que ya no puedes usar) y la ficha de tus servidores, con tu nombre de usuario,

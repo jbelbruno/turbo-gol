@@ -218,12 +218,13 @@ cannot:**
    can register servers. The ones in service are listed, with their region, at
    turbo-gol.com/nodes/status (section 12.4). A CASUAL or COMPETITIVE match is played in the region
    of most of its players (on a tie, the region of whoever waited longest). If that region has a
-   project server in service with room, the match goes there; otherwise, it goes to a Cloudflare
-   server: we ask Cloudflare to place it near that region, but Cloudflare decides where. It never
-   goes to the project server of another region, except in an emergency: if we turn off matches on
-   Cloudflare servers, the match goes to the project server of its region and, if that one cannot
-   take it, to the one in São Paulo, and waits until one of them has room (or, if the project's
-   servers are not available either, you cannot search for a match).
+   project server that can take it, the match goes there; otherwise (for example, if that server is
+   not connected, has no room or is not compatible with the game's current version), it goes to a
+   Cloudflare server: we ask Cloudflare to place it near that region, but Cloudflare decides where.
+   It never goes to the project server of another region, except in an emergency: if we turn off
+   matches on Cloudflare servers, the match goes to the project server of its region and, if that
+   one cannot take it, to the one in São Paulo, and waits until one of them has room (or, if the
+   project's servers are not available either, you cannot search for a match).
 
 ## 8. COMPETITIVE: abandons and verification
 
@@ -274,9 +275,9 @@ cannot:**
 ## 10. Public replays
 
 1. Matches played on community servers are recorded in full, with each player's controls, so that
-   they can be watched again: COMPETITIVE ones and CASUAL ones. Every CASUAL match is played there
-   when the region of most of its players has a project server in service with room (section 7.6),
-   so it is recorded too. Lobby matches (which are P2P) and matches on Cloudflare servers are not
+   they can be watched again: COMPETITIVE ones and CASUAL ones. A CASUAL match is played there when
+   the region of most of its players has a project server that can take it (section 7.6), so it is
+   recorded too. Lobby matches (which are P2P) and matches on Cloudflare servers are not
    recorded.
 2. Anyone, without an account, can watch them at turbo-gol.com, from 1 to 2 hours after the match
    and **for 30 days**. A voided match is not published. We ask search engines not to index
@@ -314,8 +315,9 @@ cannot:**
    section 18.2, unless it fixes a bug or a cheat.
 8. **You lose your points and items** if you delete your account, if we close it for breaking these
    terms or if Turbogol stops running. Since they are worth no money, there is no refund. Of the
-   host points, the only thing left, which you cannot use, is the record of the total your servers
-   earned (Privacy Policy, section 12.3).
+   host points, what remains, which you cannot use, is the record of the total your servers earned,
+   and your points may stay in the hosts' table for up to 30 days, as "Anfitrión" and a number
+   (section 12.6.3; Privacy Policy, section 12.3).
 
 ## 12. Community server hosts
 

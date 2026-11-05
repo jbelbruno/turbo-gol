@@ -73,7 +73,7 @@ Version 2026-11-05. In force from November 5, 2026. The Spanish text is the offi
 | **You play COMPETITIVE** | Your rating, your matches, wins and losses, your best rating, your abandoned matches and your queue blocks | Match you with evenly matched opponents. The leaderboard. The sanctions for abandoning |
 | **You use a custom lobby** | The lobby's code, its title, its password (we keep only a hash), the members (their session identifier, their name, their car and their team), who the host removed and each player's failed password attempts. If you create it and your connection uses IPv6, your network's prefix. When you create it you choose public or private. Lobbies are played P2P | Run the lobby. Limit how many lobbies one network and one session open |
 | **You search for a match (CASUAL or COMPETITIVE)** | While you search, in the server's memory: your account identifier, your name, your car, how many days old your account is, in COMPETITIVE your rating, your region, the formats you search and the one you prefer, in CASUAL the bots' difficulty you chose for your bots match, since when you are searching, when your last request came in, whether you are playing bots or training, whether the game is in view and whether your match is waiting for room on the servers. If the search drops, or if nobody plays the bots match you got (for example, because the phone locked; this, once per search), the server keeps for 10 minutes your account identifier, since when you were searching, the queue, your region and which of the two happened, so that your search goes on with its clock when you are back. For that, the server notes next to the bots match your account identifier, since when you were searching, your region and when it started: 90 seconds if it is played on a community server, or as long as it lasts if it is played on a Cloudflare one. To estimate the wait, the server keeps when each search of the last hour started, in which queue and from which region, without your account, your name or your IP (at most 2,000; a cancelled search leaves it). We also count per day, without your account, your name or your IP, how many searches start and end, how many matches form and with how many people, how long people waited (in ranges) and how often people play bots or train while waiting; those totals are kept 90 days | Form your match and estimate the wait. Learn whether the wait works and improve it |
-| **You play on a community server** | Your name, your player identifier (the same in all your matches), your team, your controls and your IP address, which whoever operates the server sees. A COMPETITIVE match is also simulated again, to verify it, on a project server that may be in another country (section 4.4): that server receives the replay, with your name, your player identifier, your team and your controls, not your IP. Afterwards, the match replay and, unpublished, which account (or guest session) took each seat. If the host is not the project, to compute their points we also note how long you played and, if you have an account, how many days old your account is. The replay, the seats and those notes are kept for 30 days. In addition, the team keeps for 30 days, in an internal history of the servers that is not published, each finished match (the server, the times, the result and its verification) with each player's name and player identifier: if you hide your name in public replays, the team does not see it there either. Today those servers are only the project's own (section 4.4) | Play the match. Check that the result is clean. Publish the replay. Compute the host's points, when the host is not the project. Let the team review how each server and each match works |
+| **You play on a community server** | Your name, your player identifier (the same in all your matches), your team, your controls and your IP address, which whoever operates the server sees. A COMPETITIVE match is also simulated again, to verify it, on a project server that may be in another country (section 4.4): that server receives the replay, with your name, your player identifier, your team and your controls, not your IP. Afterwards, the match replay and, unpublished, which account (or guest session) took each seat. If the host is not the project, to compute their points we also note how long you played and, if you have an account, how many days old your account is. The replay, the seats and those notes are kept for 30 days. In addition, the team keeps for 30 days, in an internal history of the servers that is not published, each finished match (the server, the times, the result and its verification) with each player's name and player identifier: if you hide your name in public replays, the history does not show it, but the full replay, which the team can download from there, does carry it. Today those servers are only the project's own (section 4.4) | Play the match. Check that the result is clean. Publish the replay. Compute the host's points, when the host is not the project. Let the team review how each server and each match works |
 | **You mark a replay as a favorite (a star) or look at "My replays"** | Your account's identifier next to the match's, never your name. You can mark up to 500 replays. How many accounts marked each match is public; which ones is not | Show the most starred matches and your list of matches. They are deleted when the replay turns 30 days old, even if you delete your account before then |
 | **You connect a TV with your phone** | The TV's code. The TV's approximate country, city, network and internet provider name. The TV's IP address (for IPv6, only the network prefix), while the code is valid. Your phone's IP is only compared with the TV's; if you enter the wrong code, it is kept for 15 minutes, to stop failed attempts. All in memory | Let your phone show you which TV you are about to connect and whether it is on your same network, so nobody tricks you with someone else's code. Stop failed attempts |
 | **You change your options** | Your experimental physics presets (with their names), your training records, the experimental features switch, your car, "Hide my name in public replays" and "News by email" | So your options follow you to any device |
@@ -198,10 +198,13 @@ receives the network error reports (section 9.4).
 
 **What reaches the team's channel on Discord:** the hosts' usernames, their servers and each one's
 address, the country of each sign-in by the team to its maintenance account, the identifier of an
-account the team gives an item to, takes an item from or looks up the points of, the identifier of
-a host's account that was deleted, match identifiers and the reason the team writes when it takes
-down a replay, voids a match or changes something about a server (for example, when it blocks or
-retires it). That reason may name a player.
+account the team gives an item to, takes an item from, looks up the points of or reactivates the
+redemptions of, the identifier of a host's account that was deleted, match identifiers and the
+reason the team writes when it takes down a replay, voids a match, changes something about a
+server (for example, when it blocks or retires it) or gives, takes or reactivates something on an
+account. That reason may name a player. If, when a match on a community server ends, something
+about it cannot be recorded (for example, its result or its host's points), the alert also carries
+the account identifiers of its players or that of its host's account.
 
 Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocessors/>.
 
@@ -275,10 +278,11 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
   in the match and your IP address. The conditions for hosts (section 12 of the Terms) forbid them
   to keep or use that data for anything else.
 - **About hosts** we keep their username, each server's data (name, region, public address, which
-  may be an IP, capacity, version, machine data and how many matches it verified, lost or failed),
-  the IP addresses their servers connect from (30 days), a history of their servers and of their
-  matches (30 days, section 6) and their points. A server stays in our records even if it is shut
-  down or we retire it. Today that applies only to the project's account.
+  may be an IP, capacity, version, machine data, how many matches it verified, lost or failed and
+  the last reason the team wrote when it changed its status, which its host also sees, or when it
+  retired it), the IP addresses their servers connect from (30 days), a history of their servers
+  and of their matches (30 days, section 6) and their points. A server stays in our records even
+  if it is shut down or we retire it. Today that applies only to the project's account.
 - **It is public,** for anyone who asks for it at turbo-gol.com/nodes/status: each server in
   service (on probation or active), with who runs it, and the points of the last 30 days of the 50
   hosts who earned the most (section 4.5). A project account is shown with its username; any other
@@ -412,10 +416,10 @@ art. 33 IX).
 
 | Data | How long |
 |---|---|
-| Points of each match for the host (with each player's time) | 30 days. They are kept only when the host is not the project. The notes against repeated matches to farm points, 24 hours |
+| Points of each match for the host (with each player's time) | 30 days. Without the players' data, they also stay in the host's account while it exists. They are kept only when the host is not the project. The notes against repeated matches to farm points, 24 hours |
 | The record of how many points each host earned (if the account is deleted, they can no longer be used) | No time limit, also after the account is deleted. Today only the project has servers |
-| Each community server's entry (with its host's username) | No time limit, also after the account is deleted (the server stays blocked) or after we retire it. A blocked or retired server leaves the public list |
-| The servers' internal history: what happened to each server, each finished match (with each player's name and player identifier) and the team's alert lines (they may carry account identifiers, like the alerts of section 4.1). Only the team sees it | 30 days. Of the alert lines, the last 2,000 at most. A name its player hid in public replays is not shown, and when an account is deleted its name and its identifier leave the history's matches |
+| Each community server's entry (with its host's username and the last reason the team wrote when it changed its status or retired it, which may name a player) | No time limit, also after the account is deleted (the server stays blocked) or after we retire it. A blocked or retired server leaves the public list |
+| The servers' internal history: what happened to each server, each finished match (with each player's name and player identifier) and the team's alert lines (they may carry account identifiers, like the alerts of section 4.1). Only the team sees it | 30 days. Of the alert lines, the last 2,000 at most. A name its player hid in public replays is not shown (it is in the full replay, which the team can download), and when an account is deleted its name and its identifier leave the history's matches |
 | IP addresses community servers connect from | 30 days |
 
 **Logs and copies**
@@ -608,7 +612,7 @@ None of ours can be read by the page's code: they only travel to our server.
 | "This browser signed in as…" (`turbogol.account`): your name and your account identifier | Know who signed in on this browser | When you sign out, or when your session stops being valid |
 | Your experimental features and physics presets (`turbogol.experimental.v1.` and your account identifier) | Use them offline | They stay after you sign out |
 | Your training records (`turbogol.training.v1` as a guest, and a copy for each account you used on this browser, with its identifier) | Show them to you | The guest ones, when you clear the site's data. An account's copy stays after you sign out |
-| Your options: language, graphics, controls, region, mode, the format and the bots' difficulty you prefer in CASUAL, what you do while you search, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
+| Your options: language, graphics, sound, game camera, controls, interface (size, reduced motion and full screen when playing), region, mode, the format and the bots' difficulty you prefer in CASUAL, what you do while you search, car, tips seen and the replay viewer's camera | Remember them | When you clear the site's data |
 | The graphics level that failed on this graphics card (with the card's name) | Not use it again | After 30 days, or when you clear the site's data |
 
 ### 9.3 Tab storage (deleted when you close the tab)
@@ -672,9 +676,13 @@ signed out and go back to the default options.
   unlink Discord or Google. An email change can be undone for 7 days.
 - **Our emails have no images,** tracking pixels or tracked links.
 - **Technical logs never keep your password** or the body of what you send to the server (what you
-  type in forms). Our own log lines carry no IP, email or password. Only a few carry the username of a
-  team account, or the identifier of an account that was deleted (in full if it was a host; the
-  first 6 characters in other cases).
+  type in forms). Our own log lines carry no IP, email or password. A few carry data about an
+  account: the username of a host; the username and the identifier of a team account; the
+  identifier of an account the team gives something to, takes something from or reactivates
+  something on, or whose points it looks up; those of the accounts of the players or the host of a
+  match of which something could not be recorded (section 4.1); the reason the team writes, which
+  may name a player (section 4.1), and that of an account that was deleted (in full if it was a
+  host; the first 6 characters in other cases).
 - **Technical logs keep the addresses requested.** Some carry an identifier: the single-use code
   from Discord or Google when you come back to Turbogol, a lobby's code, a match's and, when we
   start sending news, the identifier of the unsubscribe link, which does not change until you
@@ -774,13 +782,16 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
     of those matches, also with the identifier and without your name: up to
     30 days;
   - the matches of the servers' internal history: your name and your identifier leave it when the
-    account is deleted, and the match stays, without them, for up to 30 days;
-  - the team's alert lines that carry your account's identifier (up to 30 days in the internal
-    history and 90 days on Discord, section 6);
+    account is deleted, and the match stays, without them, for up to 30 days (with the reason the
+    team wrote if it voided it, which may name you);
+  - the team's alert lines that carry your account's identifier or a reason that names you (up to
+    30 days in the internal history and 90 days on Discord, section 6);
   - Cloudflare's technical logs (7 days) and those of the machines of the project's servers
     (section 6);
   - the email sending log (up to 30 days);
   - Cloudflare's backups (up to 30 days).
+- **A reason that names you in a server's entry** (the last one the team wrote when it changed its
+  status or retired it): it stays with no time limit, like the entry (section 6).
 - **If you were a host:** today only the project has servers, so this does not yet affect any
   player. When it opens to other people: the record of how many points your servers earned (which
   you can no longer use) and your servers' entries, with your username, remain, and the servers

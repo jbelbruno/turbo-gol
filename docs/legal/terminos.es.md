@@ -220,12 +220,14 @@ otros jugadores, **no puedes:**
    Unidos. Solo el proyecto puede registrar servidores. Los que están en servicio aparecen, con su
    región, en turbo-gol.com/nodes/status (sección 12.4). Una partida de CASUAL o COMPETITIVO se
    juega en la región de la mayoría de sus jugadores (si empatan, la de quien esperó más). Si esa
-   región tiene un servidor del proyecto en servicio y con lugar, la partida va ahí; si no, va a un
-   servidor de Cloudflare: le pedimos que lo ponga cerca de esa región, pero el lugar lo decide
-   Cloudflare. Nunca va al servidor del proyecto de otra región, salvo en una emergencia: si
-   apagamos las partidas en servidores de Cloudflare, la partida va al servidor del proyecto de su
-   región y, si ese no puede tomarla, al de São Paulo, y espera hasta que alguno tenga lugar (o, si
-   los servidores del proyecto tampoco están disponibles, no se puede buscar partida).
+   región tiene un servidor del proyecto que puede tomarla, la partida va ahí; si no (por ejemplo,
+   si ese servidor no está conectado, no tiene lugar o no es compatible con la versión actual del
+   juego), va a un servidor de Cloudflare: le pedimos que lo ponga cerca de esa región, pero el
+   lugar lo decide Cloudflare. Nunca va al servidor del proyecto de otra región, salvo en una
+   emergencia: si apagamos las partidas en servidores de Cloudflare, la partida va al servidor del
+   proyecto de su región y, si ese no puede tomarla, al de São Paulo, y espera hasta que alguno
+   tenga lugar (o, si los servidores del proyecto tampoco están disponibles, no se puede buscar
+   partida).
 
 ## 8. COMPETITIVO: abandonos y verificación
 
@@ -278,9 +280,9 @@ otros jugadores, **no puedes:**
 ## 10. Repeticiones públicas
 
 1. Las partidas que se juegan en servidores de la comunidad se graban enteras, con los controles de
-   cada jugador, para que se puedan volver a ver: las de COMPETITIVO y las de CASUAL. Toda partida
+   cada jugador, para que se puedan volver a ver: las de COMPETITIVO y las de CASUAL. Una partida
    de CASUAL se juega ahí cuando la región de la mayoría de sus jugadores tiene un servidor del
-   proyecto en servicio y con lugar (sección 7.6), así que también se graba. Las partidas de salas
+   proyecto que puede tomarla (sección 7.6), así que también se graba. Las partidas de salas
    (que son P2P) y las de servidores de Cloudflare no se graban.
 2. Cualquiera, sin cuenta, puede verlas en turbo-gol.com, de 1 a 2 horas después de la partida y
    **durante 30 días**. Una partida anulada no se publica. Pedimos a los buscadores que no las
@@ -320,8 +322,9 @@ otros jugadores, **no puedes:**
    la sección 18.2, salvo que corrija un error o una trampa.
 8. **Pierdes los puntos y los objetos** si borras tu cuenta, si la cerramos por romper estos
    términos o si Turbogol deja de funcionar. Como no valen dinero, no hay devolución. De los puntos
-   de anfitrión solo queda, sin que puedas usarlo, el registro del total que ganaron tus servidores
-   (Política de privacidad, sección 12.3).
+   de anfitrión queda, sin que puedas usarlo, el registro del total que ganaron tus servidores, y
+   tus puntos pueden seguir hasta 30 días en la tabla de anfitriones, como «Anfitrión» y un número
+   (sección 12.6.3; Política de privacidad, sección 12.3).
 
 ## 12. Anfitriones de servidores de la comunidad
 
