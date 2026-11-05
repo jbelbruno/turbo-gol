@@ -2682,7 +2682,6 @@ export default {
   'replay.clip': 'Clip / Share',
   'replay.moreControls': 'More controls',
   'replay.clipTitle': 'Clip or share',
-  'replay.clipCta': 'Play free at',
   'replay.clipGoal': 'Goal {n}',
   'replay.clipWatch': 'Watch',
   'replay.clipLink': 'Copy link',

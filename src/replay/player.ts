@@ -1024,7 +1024,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     const tick = run.host.currentTick;
     const age = lastGoal === null ? -1 : (tick - lastGoal.tick) / TICK_RATE;
     const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
-    rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal, elapsed: (tick - job.start) / TICK_RATE, total: (job.end - job.start) / TICK_RATE, cta: t('replay.clipCta') });
+    rec.capture(now, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
     if (tick >= job.thumbAt) rec.snapshot();
     recText.textContent = `${Math.floor(rec.seconds)} / ${Math.round((job.end - job.start) / TICK_RATE)} s`;
     if (tick >= job.end || tick >= endTick) {
@@ -1171,8 +1171,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       const tick = run.host.currentTick;
       const age = lastGoal === null ? -1 : (tick - lastGoal.tick) / TICK_RATE;
       const goal = lastGoal !== null && age >= 0 && age < GOAL_CAPTION_SECONDS ? { team: lastGoal.team, scorer: clipNames ? lastGoal.scorer : null, word: t('hud.goal'), age } : null;
-      const r = clipRange;
-      drawOverlay(ovlCtx, ovl.width, ovl.height, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal, elapsed: r === null ? 0 : (tick - r.start) / TICK_RATE, total: r === null ? 0 : (r.end - r.start) / TICK_RATE, cta: t('replay.clipCta') });
+      drawOverlay(ovlCtx, ovl.width, ovl.height, { blue: m.score.blue, red: m.score.red, clock: clockText(Math.round(m.displaySeconds * TICK_RATE)), goal });
     }
   };
 
