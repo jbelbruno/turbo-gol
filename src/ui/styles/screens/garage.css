@@ -721,10 +721,19 @@ html[data-layout='portrait'] .mn-gar-det-head {
   display: none;
 }
 
-/* No room for the car's story either. */
+/* A phone has room for the car's story only upright and tall (the list keeps two rows): above the action, small. */
 html[data-shell='rail'] .mn-gar-story,
 html[data-layout='portrait'] .mn-gar-story {
   display: none;
+}
+
+@media (min-height: 800px) {
+  html[data-layout='portrait'] .mn-gar-story {
+    display: block;
+    margin: 0;
+    font-size: var(--t-label);
+    line-height: 1.3;
+  }
 }
 
 html[data-shell='rail'] .mn .mn-gar-act,
