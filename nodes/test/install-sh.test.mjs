@@ -224,12 +224,12 @@ const MOVED = /^\/(etc|var|opt|usr\/share|usr\/bin)\//;
 const PATH_IN_CODE = /(?:^|[\s"'=(>])(\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]*)*)/g;
 
 const STUBS = {
-  // An install of nodejs=<version>, or of nodejs (NodeSource's 24), leaves that Node.js at
+  // An install of nodejs=<version>, or of nodejs (NodeSource's 26), leaves that Node.js at
   // /usr/bin/node for its stub below; FAKE_NODE_STUCK: it leaves the one that was there.
   'apt-get': [
     'echo "apt-get $*" >> "$LOG"',
     '[ -z "${FAKE_NODE_STUCK:-}" ] || exit 0',
-    'for a in "$@"; do case "$a" in nodejs=*) v=${a#nodejs=}; echo "${v%%[-+]*}" > "$ROOT/node-version" ;; nodejs) echo 24.14.0 > "$ROOT/node-version" ;; esac; done',
+    'for a in "$@"; do case "$a" in nodejs=*) v=${a#nodejs=}; echo "${v%%[-+]*}" > "$ROOT/node-version" ;; nodejs) echo 26.14.0 > "$ROOT/node-version" ;; esac; done',
   ],
   'apt-mark': ['echo "apt-mark $*" >> "$LOG"'],
   // FAKE_MADISON: the nodejs package versions the repositories have.
@@ -357,7 +357,7 @@ async function fakeMachine() {
           TGN_NODE: process.execPath.replace(/\\/g, '/'),
           FAKE_IP: '203.0.113.7',
           FAKE_ADDR4: '10.0.0.5',
-          FAKE_NODE: '24.14.0',
+          FAKE_NODE: '26.14.0',
           ...env,
         },
       });
@@ -551,12 +551,12 @@ describe('install.sh on a fake machine', { skip, concurrency: true }, () => {
       { why: /--public-host 203\.0\.113\.7 is an IP address, .*only under a DNS name.*--allow-ip is only for a development control plane/, args: [...TOKEN, '--public-host', '203.0.113.7'], early: true },
       { why: /--public-host 2001:db8::7 is an IP address/, args: [...TOKEN, '--public-host', '[2001:db8::7]'], env: { FAKE_ADDR6: '2001:db8::7' }, early: true },
       // Nothing but a version reaches the NodeSource URL and the apt-get arguments.
-      ...['22', 'v24.14.0', '24.014', '24.14.0.1', '24.x', '24;id', '$(id)', '24.14.0-1'].map((v) => ({ why: /--node-version: Node\.js 24 or newer/, args: [...name, '--node-version', v], env: HERE, early: true })),
+      ...['22', 'v24.14.0', '26.014', '26.14.0.1', '26.x', '26;id', '$(id)', '26.14.0-1'].map((v) => ({ why: /--node-version: Node\.js 26 or newer/, args: [...name, '--node-version', v], env: HERE, early: true })),
       // In the major here: NodeSource's repository stays the one it was.
-      { why: /Node\.js 24\.99\.0 is not in NodeSource's repository for this system/, not: /repository is now/, args: [...name, '--node-version', '24.99.0'], env: { ...HERE, FAKE_MADISON: '24.14.0-1nodesource1 24.9.1-1nodesource1' } },
-      { why: /Node\.js 25\.99\.0 is not in NodeSource's repository .*This machine's NodeSource repository is now the one for Node\.js 25, and an apt upgrade would move Node\.js 24\.14\.0 to it unless nodejs is held: .* or with --node-version 24\.14\.0, which holds the one here/, args: [...name, '--node-version', '25.99.0'], env: { ...HERE, FAKE_MADISON: '25.1.0-1nodesource1' } },
+      { why: /Node\.js 26\.99\.0 is not in NodeSource's repository for this system/, not: /repository is now/, args: [...name, '--node-version', '26.99.0'], env: { ...HERE, FAKE_MADISON: '26.14.0-1nodesource1 26.9.1-1nodesource1' } },
+      { why: /Node\.js 27\.99\.0 is not in NodeSource's repository .*This machine's NodeSource repository is now the one for Node\.js 27, and an apt upgrade would move Node\.js 26\.14\.0 to it unless nodejs is held: .* or with --node-version 26\.14\.0, which holds the one here/, args: [...name, '--node-version', '27.99.0'], env: { ...HERE, FAKE_MADISON: '27.1.0-1nodesource1' } },
       // The package went in, but /usr/bin/node, which the service runs, is still another Node.js.
-      { why: /NodeSource's nodejs 24\.9\.1-1nodesource1 is installed, but \S+\/usr\/bin\/node, the Node\.js the service runs, is Node\.js 24\.14\.0: something other than that package provides it/, args: [...name, '--node-version', '24.9'], env: { ...HERE, FAKE_MADISON: '24.9.1-1nodesource1', FAKE_NODE_STUCK: '1' } },
+      { why: /NodeSource's nodejs 26\.9\.1-1nodesource1 is installed, but \S+\/usr\/bin\/node, the Node\.js the service runs, is Node\.js 26\.14\.0: something other than that package provides it/, args: [...name, '--node-version', '26.9'], env: { ...HERE, FAKE_MADISON: '26.9.1-1nodesource1', FAKE_NODE_STUCK: '1' } },
       { why: /NodeSource's nodejs is installed, but \S+\/usr\/bin\/node, the Node\.js the service runs, is Node\.js 22\.11\.0:/, args: name, env: { ...HERE, FAKE_NODE: '22.11.0', FAKE_NODE_STUCK: '1' } },
     ];
     const machines = await Promise.all(cases.map(() => fakeMachine()));
@@ -601,61 +601,61 @@ describe('install.sh on a fake machine', { skip, concurrency: true }, () => {
     const m = await fakeMachine();
     try {
       // apt-cache madison's order, not the version order; a distribution package is never taken.
-      const node = { ...HERE, FAKE_NODE: '24.14.0', FAKE_MADISON: '24.9.0-1nodesource1 24.14.0-1nodesource1 24.9.1-1nodesource1 24.9.2+dfsg-1ubuntu1' };
+      const node = { ...HERE, FAKE_NODE: '26.14.0', FAKE_MADISON: '26.9.0-1nodesource1 26.14.0-1nodesource1 26.9.1-1nodesource1 26.9.2+dfsg-1ubuntu1' };
       const nodesource = (r) => r.log.filter((l) => l.includes('nodesource') || l.includes('nodejs'));
-      const kept = await m.run([...NAMED, '--node-version', '24'], node);
+      const kept = await m.run([...NAMED, '--node-version', '26'], node);
       assert.equal(kept.code, 0, show(kept));
-      assert.match(kept.out, /==> Node\.js 24\.14\.0 \(--node-version 24\)\n/);
+      assert.match(kept.out, /==> Node\.js 26\.14\.0 \(--node-version 26\)\n/);
       assert.deepEqual(nodesource(kept), [], show(kept));
       assert.ok(registered(kept));
       assert.match(kept.log.find((l) => l.startsWith('runuser ')), /^runuser -u turbogol -- \S+\/usr\/bin\/node \S+\/launcher\.mjs register /, 'it registers on the Node.js the service runs');
       assert.match(await execStart(m), /^ExecStart=\S+\/usr\/bin\/node \S+\/launcher\.mjs run /);
 
       const running = { ...node, FAKE_ACTIVE: 'caddy turbogol-node' };
-      const older = await m.run([...RERUN, '--node-version', '24.9'], running);
+      const older = await m.run([...RERUN, '--node-version', '26.9'], running);
       assert.equal(older.code, 0, show(older));
       assert.deepEqual(nodesource(older), [
-        'curl https://deb.nodesource.com/setup_24.x',
-        'apt-get -o DPkg::Lock::Timeout=600 install -y -qq --allow-downgrades --allow-change-held-packages nodejs=24.9.1-1nodesource1',
+        'curl https://deb.nodesource.com/setup_26.x',
+        'apt-get -o DPkg::Lock::Timeout=600 install -y -qq --allow-downgrades --allow-change-held-packages nodejs=26.9.1-1nodesource1',
         'apt-mark hold nodejs',
       ]);
-      assert.match(older.out, /==> Node\.js 24\.9\.1 \(--node-version 24\.9; held with apt-mark hold\)\n/);
+      assert.match(older.out, /==> Node\.js 26\.9\.1 \(--node-version 26\.9; held with apt-mark hold\)\n/);
       assert.ok(restarted(older), `the node restarts on the new Node.js:\n${show(older)}`);
       assert.match(older.out, /restarts with the new Node\.js, launcher or settings/);
 
       // Already there: nothing installed, but held all the same (an apt upgrade would move it).
-      const same = await m.run([...RERUN, '--node-version', '24.9.1'], running);
+      const same = await m.run([...RERUN, '--node-version', '26.9.1'], running);
       assert.equal(same.code, 0, show(same));
       assert.deepEqual(nodesource(same), ['apt-mark hold nodejs'], show(same));
       assert.match(same.out, /nothing changed: not restarted/);
 
       // Another major: its own repository, and a major alone is not held.
-      const next = await m.run([...RERUN, '--node-version', '25'], { ...running, FAKE_MADISON: '25.0.0-1nodesource1 25.1.0-1nodesource1' });
+      const next = await m.run([...RERUN, '--node-version', '27'], { ...running, FAKE_MADISON: '27.0.0-1nodesource1 27.1.0-1nodesource1' });
       assert.equal(next.code, 0, show(next));
       assert.deepEqual(nodesource(next), [
-        'curl https://deb.nodesource.com/setup_25.x',
-        'apt-get -o DPkg::Lock::Timeout=600 install -y -qq --allow-downgrades --allow-change-held-packages nodejs=25.1.0-1nodesource1',
+        'curl https://deb.nodesource.com/setup_27.x',
+        'apt-get -o DPkg::Lock::Timeout=600 install -y -qq --allow-downgrades --allow-change-held-packages nodejs=27.1.0-1nodesource1',
       ]);
-      assert.match(next.out, /==> Node\.js 25\.1\.0 \(--node-version 25\)\n/);
+      assert.match(next.out, /==> Node\.js 27\.1\.0 \(--node-version 27\)\n/);
       assert.ok(restarted(next), show(next));
     } finally {
       await m.cleanup();
     }
   });
 
-  test('no --node-version: a Node.js older than 24 becomes NodeSource\'s 24, and a re-run restarts the node on it', async () => {
+  test('no --node-version: a Node.js older than 26 becomes NodeSource\'s 26, and a re-run restarts the node on it', async () => {
     const m = await fakeMachine();
     try {
       const nodesource = (r) => r.log.filter((l) => l.includes('nodesource') || l.includes('nodejs'));
       const first = await m.run(NAMED, HERE);
       assert.equal(first.code, 0, show(first));
-      assert.deepEqual(nodesource(first), [], 'Node.js 24.14.0 is kept');
+      assert.deepEqual(nodesource(first), [], 'Node.js 26.14.0 is kept');
 
       const running = { ...HERE, FAKE_ACTIVE: 'caddy turbogol-node' };
       const old = await m.run(RERUN, { ...running, FAKE_NODE: '22.11.0' });
       assert.equal(old.code, 0, show(old));
-      assert.deepEqual(nodesource(old), ['curl https://deb.nodesource.com/setup_24.x', 'apt-get -o DPkg::Lock::Timeout=600 install -y -qq nodejs'], 'and never held');
-      assert.ok(restarted(old), `the node restarts on Node.js 24:\n${show(old)}`);
+      assert.deepEqual(nodesource(old), ['curl https://deb.nodesource.com/setup_26.x', 'apt-get -o DPkg::Lock::Timeout=600 install -y -qq nodejs'], 'and never held');
+      assert.ok(restarted(old), `the node restarts on Node.js 26:\n${show(old)}`);
       assert.match(old.out, /restarts with the new Node\.js, launcher or settings/);
 
       const again = await m.run(RERUN, { ...running, FAKE_NODE: '22.11.0' });

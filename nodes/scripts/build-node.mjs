@@ -163,7 +163,7 @@ export async function buildRelease(o = {}) {
 
   // CommonJS dependencies (werift's) call require('tty') & co.: give the ESM bundle a real `require`.
   const banner = { js: "import { createRequire as __tgnCreateRequire } from 'node:module'; const require = __tgnCreateRequire(import.meta.url);" };
-  const common = { bundle: true, platform: 'node', format: 'esm', target: 'node24', legalComments: 'inline', logLevel: 'warning', banner };
+  const common = { bundle: true, platform: 'node', format: 'esm', target: 'node26', legalComments: 'inline', logLevel: 'warning', banner };
   // absWorkingDir: the metafile lists inputs relative to the repo root, as git names them.
   const node = await esbuild.build({ ...common, entryPoints: [join(root, 'node', 'main.ts')], outfile: join(rel, 'node.mjs'), metafile: true, absWorkingDir: repo });
   await esbuild.build({ ...common, entryPoints: [join(root, 'node', 'launcherMain.ts')], outfile: join(out, 'launcher.mjs') });
@@ -186,7 +186,7 @@ export async function buildRelease(o = {}) {
     version,
     protocol,
     wasmSha256: files.find((f) => f.path === 'rocketsim.wasm').sha256,
-    nodeMajor: 24,
+    nodeMajor: 26,
     entry: 'node.mjs',
     createdAt: new Date().toISOString(),
     ...(commit ? { commit } : {}),

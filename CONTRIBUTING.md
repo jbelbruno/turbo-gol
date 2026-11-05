@@ -25,7 +25,7 @@ and what we expect from a pull request. By participating you agree to follow our
 
 ## Development setup
 
-Requirements: Node.js 24+, git, and a browser with WebGPU (or at least WebGL2).
+Requirements: Node.js 26+, git, and a browser with WebGPU (or at least WebGL2).
 
 ```sh
 git clone --recurse-submodules https://github.com/DonJaimeHash/turbo-gol.git
