@@ -413,6 +413,12 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- The white rail on top of the stadium boards no longer shows as dashes from across the pitch (on
+  every quality tier, worse at low resolutions). It was 7 uu thick, under a pixel at that distance,
+  and drawn with a hard cut in the shader, which MSAA does not smooth: each pixel caught it or missed
+  it. The boards' bands (the LED face, its dark frame, the rail) are now drawn by their coverage of
+  the pixel, and the rail is 21 uu thick and a little calmer, so it reads as one soft continuous
+  line (`src/render/stadium/boards.ts`, `layout.ts`, `palette.ts`).
 - Firefox: a stadium baked while the grass and cloud shaders failed to compile (before the Firefox fix) is discarded: the world cache version is raised, so the sky and the skyline are baked again on the next visit (the first load after this takes a moment longer).
 - Firefox (WebGPU): the Ultra grass and the sky's clouds no longer fail to compile. Two shader expressions called a math function with only literal numbers (a smoothstep and a mix), which Firefox's validator rejects ("Abstract types may only appear in constant expressions"); the game fell back to a lower tier and the sky and background looked wrong. Both are evaluated in JavaScript or written differently now; every shader the game compiles passes Firefox 159's validator.
 - Community nodes (from node release 0.3.1): a node the control plane refuses for good (banned,
@@ -574,6 +580,12 @@ All notable changes to Turbogol are documented here. The format follows
   or older (`install.sh`: NodeSource 26; Windows: the winget LTS, now 26), and `--node-version`
   takes 26 or newer. The project's six servers already run 26.13.0: the same replays verify on 24
   and 26 with the same hashes, and a 3v3 with bots costs about 11 % less CPU per second.
+- A softer picture on High and Ultra, to fix the hard, cut look of far edges: a fine film grain
+  (hides the banding of the gradients and the stair steps of far edges), a light sharpening of the
+  scene colour so it stays crisp, wider and softer car shadows (PCF radius 7 on High, 14 on Ultra),
+  and no live fog over the stadium (the baked sky keeps its haze). Low and Super low are untouched
+  and pay nothing for it: the passes are only built on the tiers that ask for them (`grain`,
+  `sharpen`, `fogScale` in `TierSpec`, `src/render/quality.ts`, `src/render/post/pipeline.ts`).
 - Casual: the bots that fill the free seats, and the 5:00 match against bots, now play hard (they
   played normal), on the project's servers and on community nodes alike; the owner can change their
   level without a deploy (KV `bot_level`, server/README.md). A Competitive match keeps normal bots
