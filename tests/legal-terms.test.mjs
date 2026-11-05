@@ -823,8 +823,11 @@ test(`version ${VERSION_B} of the texts (the drafts in docs/legal/avisos/${VERSI
   // Version (b) is in force before the opening: "hasta la apertura..., desde ese día...", never "hoy" as if it never opened.
   for (const t of [tes, pes]) assert.doesNotMatch(t, /Hoy solo el proyecto tiene servidores|hoy no puedes registrar uno|Nadie fuera del proyecto puede registrar un servidor todavía|Cuando la red se abra|cuando se abran los servidores de terceros/);
   for (const t of [ten, pen]) assert.doesNotMatch(t, /Today only the project has servers|today you cannot register one|Nobody outside the project can register a server yet|When the network opens|once third-party servers open/);
-  assert.ok(tes.includes('La apertura la anunciamos en nuestro servidor de Discord, aparte del aviso de estos términos, y estas reglas valen desde ese día. Podemos abrirla primero a personas invitadas'));
-  assert.ok(ten.includes('We announce the opening on our Discord server, separately from the notice of these terms, and these rules apply from that day. We may open it first to invited people'));
+  // The opening is the first code given to someone outside the project, invited or not (an invited host's server already takes any player's CASUAL).
+  assert.ok(tes.includes('La apertura de la red es el día en que dejamos pedir el código para registrar un servidor a la primera persona que no es del proyecto, aunque sea una persona que invitamos.'));
+  assert.ok(tes.includes('La apertura la anunciamos en nuestro servidor de Discord, aparte del aviso de estos términos, a más tardar ese mismo día. Desde ese día, estas reglas valen para todos los anfitriones y todos los jugadores'));
+  assert.ok(ten.includes('The opening of the network is the day we let the first person who is not the project ask for the code to register a server, even a person we invited.'));
+  assert.ok(ten.includes('We announce the opening on our Discord server, separately from the notice of these terms, on that same day at the latest. From that day, these rules apply to every host and every player'));
   // Terms 12.2 (Prompt 2 A1-A3): the code in MIS SERVIDORES, never from a TV; 18 or older declared, not checked; what is kept.
   assert.ok(tes.includes('nunca desde una TV, después de confirmar que eres tú en los últimos 15 minutos') && ten.includes('never from a TV, after confirming it is you in the last 15 minutes'));
   assert.ok(tes.includes('No comprobamos tu edad: la declaras tú.') && ten.includes('We do not check your age: you declare it yourself.'));

@@ -23,8 +23,9 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 - **Quien opera un servidor de la comunidad, sea del proyecto o no, ve tu nombre, el identificador
   de tu cuenta, tu equipo, tus controles y tu dirección IP.** Hasta la apertura de la red
   (Términos 12.1.2) esos servidores son solo los del proyecto; desde ese día, también pueden ser de
-  otras personas, que trabajan por encargo nuestro. Si no quieres jugar en ellos, activa «Solo
-  servidores del proyecto» en Ajustes > Juego (sección 4.4).
+  otras personas, que tratan tus datos solo por encargo nuestro. Si no quieres jugar en ellos,
+  activa «Solo servidores del proyecto» en Ajustes > Juego, en cada navegador o TV donde juegas
+  (sección 4.4).
 - **Medimos las visitas con Cloudflare Web Analytics,** que según Cloudflare no usa cookies. Le
   pedimos a Cloudflare que deje fuera a los visitantes de la Unión Europea (sección 9.4).
 - **Tus datos se guardan fuera de Argentina:** en Cloudflare (incluido Estados Unidos), en los
@@ -82,7 +83,7 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 | **Conectas una TV con tu teléfono** | El código de la TV. El país, la ciudad, la red y el nombre del proveedor de internet aproximados de la TV. La dirección IP de la TV (de IPv6, solo el prefijo de la red), mientras vive el código. La de tu teléfono solo se compara con la de la TV; si te equivocas de código, se guarda 15 minutos, para frenar los intentos fallidos. Todo en memoria | Que tu teléfono te muestre qué TV vas a conectar y si está en tu misma red, para que nadie te engañe con un código ajeno. Frenar los intentos fallidos |
 | **Cambias tus opciones** | Tus ajustes de física experimentales (con sus nombres), tus récords de entrenamiento, el interruptor de funciones experimentales, tu auto, «Ocultar mi nombre en repeticiones públicas» y «Novedades por correo» | Que tus opciones te sigan en cualquier dispositivo |
 | **Alojas un servidor de la comunidad** | Ver la sección 4.4 | Hacer funcionar la red de servidores |
-| **Reportas un servidor de la comunidad** | Desde la apertura, al terminar una partida en un servidor de la comunidad que no es del proyecto: el servidor, su anfitrión, la partida, el motivo que eliges, tu ping, cuántas veces el juego tuvo que corregir la posición de tu auto y el identificador de tu cuenta. Un reporte por partida. Lo ve el equipo, no el anfitrión. Se guarda 30 días, y antes se borra si borras tu cuenta | Revisar los servidores que fallan a los jugadores. Un reporte solo nunca sanciona a un anfitrión (Términos 12.6.2) |
+| **Reportas un servidor de la comunidad** | Desde la apertura, al terminar una partida en un servidor de la comunidad que no es del proyecto: el servidor, su anfitrión, la partida, el motivo que eliges, tu ping, cuántas veces el juego tuvo que corregir la posición de tu auto y el identificador de tu cuenta. Un reporte por partida. Lo ve el equipo, no el anfitrión. Se guarda 30 días, y antes se borra si borras tu cuenta | Revisar los servidores que fallan a los jugadores. Un reporte nunca sanciona por sí solo a un anfitrión (Términos 12.6.2) |
 | **Usas el sitio** | En los registros técnicos de Cloudflare: la dirección que pides, la hora, la respuesta y lo que Cloudflare agrega a cada pedido, como tu dirección IP, tu navegador y tu país y ciudad aproximados | Hacer funcionar el servicio y encontrar errores |
 | **Abres la pantalla de inicio, empiezas como invitado, conectas una TV, creas una cuenta, entras con contraseña o pides una contraseña nueva** | Las señales del navegador que lee Cloudflare Turnstile, el control contra bots: tu IP, tu navegador y datos de la conexión. Al abrir la pantalla de inicio corre por adelantado si no tienes una sesión de invitado guardada ni una cuenta abierta, antes de que aceptes los Términos; en una TV también al abrir MODOS > SALAS, y vuelve a correr cada 4 minutos mientras una de las dos sigue abierta (sección 9.4) | Frenar bots |
 | **Abres una página** | Cloudflare Web Analytics, que está activo en nuestro sitio y cuenta las visitas: la página, de qué sitio vienes, tu navegador, tu sistema, el tipo de dispositivo, tu país aproximado y cuánto tarda en cargar. Elegimos la opción de Cloudflare que deja fuera los datos de los visitantes de la Unión Europea, pero no podemos asegurar a quién deja fuera. Cloudflare también recibe reportes de errores de red (sección 9.4) | Medir visitas y velocidad. Encontrar fallas de la red |
@@ -210,7 +211,9 @@ mantenimiento, el identificador de una cuenta a la que el equipo le da o le quit
 puntos consulta o cuyos canjes reactiva, el identificador de la cuenta de un anfitrión que se
 borró, los identificadores de partidas y el motivo que escribe el equipo cuando saca una
 repetición, anula una partida, cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo
-retira) o da, quita o reactiva algo en una cuenta. Ese motivo puede nombrar a un jugador. Si al
+retira) o da, quita o reactiva algo en una cuenta. Ese motivo puede nombrar a un jugador, salvo el
+que escribe al cambiar el estado de un servidor, al retirarlo o al bloquear a un anfitrión: ese
+motivo también lo ve el anfitrión, y por eso nunca nombra ni identifica a un jugador. Si al
 terminar una partida en un servidor de la comunidad no se puede registrar algo de ella (por
 ejemplo, su resultado o los puntos de su anfitrión), el aviso lleva además los identificadores de
 las cuentas de sus jugadores o el de la cuenta de su anfitrión. Desde la apertura (Términos 12.1.2),
@@ -290,9 +293,11 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
   al de São Paulo; y espera hasta que alguno tenga lugar (Términos 7.6). Las partidas de salas no
   pasan por ahí.
 - **Solo servidores del proyecto.** Desde la apertura, si no quieres jugar en el servidor de otra
-  persona, activa «Solo servidores del proyecto» en Ajustes > Juego: tus partidas van a un servidor
-  del proyecto o a uno de Cloudflare, nunca a uno de la comunidad que no es del proyecto (en una
-  emergencia, esperan un servidor del proyecto). Si un jugador de la partida lo activa, vale para
+  persona, activa «Solo servidores del proyecto» en Ajustes > Juego: las partidas que buscas desde ese
+  navegador o esa TV van a un servidor del proyecto o a uno de Cloudflare, nunca a uno de la
+  comunidad que no es del proyecto (en una emergencia, esperan un servidor del proyecto). La opción
+  se guarda solo en ese navegador o esa TV, no en tu cuenta (sección 9.2): actívala en cada uno
+  donde juegues. Si un jugador de la partida lo activa, vale para
   toda la partida. PARTIDO ENCONTRADO y el FINAL te dicen cuándo una partida se juega en un
   servidor de la comunidad que no es del proyecto.
 - **La verificación, también en otro país.** Cada partida de COMPETITIVO en un servidor de la
@@ -310,14 +315,20 @@ La lista de proveedores de Cloudflare está en <https://www.cloudflare.com/gdpr/
   identificador de tu cuenta, el mismo en todas tus partidas), tu equipo, tus controles, lo que
   pasa en la partida y tu dirección IP. Hasta la apertura, es solo el proyecto. Desde ese día,
   también un anfitrión que no es el proyecto, que trata esos datos solo por encargo nuestro, para
-  alojar la partida: la sección 12 y el Anexo B de los Términos le prohíben guardarlos o usarlos
-  para otra cosa, y respondemos ante ti por esa partida y por tus datos como si la alojáramos
-  nosotros (Términos 16.3). Su servidor puede estar en cualquier país (sección 5).
+  alojar la partida. La sección 12 y el Anexo B de los Términos le prohíben usarlos para otra cosa
+  y guardarlos después de la partida, salvo los registros técnicos de su máquina que tengan
+  direcciones IP: 7 días como máximo, salvo que una ley lo obligue a más (sección 6). Seguimos
+  siendo los responsables de tus datos y respondemos ante ti según la ley, y el anfitrión también
+  responde ante ti si no cumple esas reglas (Términos 16.3). Su servidor suele estar en una
+  máquina que alquila a un proveedor de alojamiento: ese proveedor tiene acceso técnico a la
+  máquina, pero el anfitrión no puede darle tus datos para otra cosa (Términos, Anexo B, punto 6).
+  El servidor se registra desde un país del continente de la región de la partida (en una
+  emergencia, de Sudamérica), según Cloudflare (sección 5).
 - **De los anfitriones** guardamos su nombre de usuario, los datos de cada servidor (nombre,
   región, dirección pública, que es un nombre DNS, capacidad, versión, datos de la máquina, el
   continente desde el que llegó su registro, según Cloudflare, cuántas partidas verificó, perdió,
-  falló o rechazó y el último motivo que escribió el equipo al cambiar su estado, que también ve su
-  anfitrión, o al retirarlo), las direcciones IP desde las que entran sus servidores (30 días), un
+  falló o rechazó y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que
+  también ve su anfitrión y por eso nunca nombra ni identifica a un jugador), las direcciones IP desde las que entran sus servidores (30 días), un
   historial de sus servidores y de sus partidas (30 días, sección 6), sus puntos, los códigos de
   registro que pidió (solo una huella) y cuántos pidió cada día. De un anfitrión que no es el
   proyecto también guardamos que aceptó las reglas para anfitriones y el Anexo B y declaró tener
@@ -393,7 +404,7 @@ Damos datos a una autoridad solo cuando la ley nos obliga, con un pedido formal.
 | **Estados Unidos (Discord)** | Los avisos técnicos del equipo (sección 4.1): nombres de usuario de anfitriones, direcciones de servidores, identificadores de cuentas y de partidas, y el motivo que escribe el equipo | Avisar al equipo de fallas, de los servidores de los anfitriones y de lo que hace con los servidores, las partidas, las cuentas de anfitrión y las repeticiones |
 | **Estados Unidos (Google)** | Lo que nos escribes | Leer y responder tus pedidos |
 | **El país de cada jugador** | Tu IP, en las partidas de sala (P2P) | La conexión directa |
-| **El país de cada servidor de la comunidad que no es del proyecto** | Desde la apertura (Términos 12.1.2), cuando juegas en uno de ellos: tu nombre, tu identificador de jugador, tu equipo, tus controles, tu IP y la partida. Puede ser cualquier país | Jugar la partida |
+| **El país de cada servidor de la comunidad que no es del proyecto** | Desde la apertura (Términos 12.1.2), cuando juegas en uno de ellos: tu nombre, tu identificador de jugador, tu equipo, tus controles, tu IP y la partida. Es el país donde está ese servidor. Al registrarse, tiene que estar, según Cloudflare, en el continente de la región de la partida (en una emergencia, en Sudamérica) | Jugar la partida |
 
 **Para Argentina:** Estados Unidos, Brasil, Malasia, Sudáfrica y Australia no están en la lista de
 países con protección adecuada de la AAIP (Disposición DNPDP 60-E/2016, con la Resolución AAIP
@@ -401,10 +412,12 @@ países con protección adecuada de la AAIP (Disposición DNPDP 60-E/2016, con l
 pedimos tu consentimiento expreso para que tus datos se guarden y se traten en los países de esta
 tabla: el aviso que está encima del botón con que aceptas los Términos lo dice, y tocar ese botón es
 darlo (Decreto 1558/2001, art. 12). Desde la apertura, un servidor de la comunidad que no es del
-proyecto puede estar en cualquier país, también en uno que no está en esa lista: el aviso nombra
-también el país de cada servidor de la comunidad en que juegues, y su anfitrión acepta el Anexo B
-de los Términos, que lo obliga a tratar tus datos solo por encargo nuestro. Si no quieres que tus
-datos lleguen a esos servidores, activa «Solo servidores del proyecto» (sección 4.4). Sin ese
+proyecto se registra desde un país del continente de la región de la partida, según Cloudflare (en
+una emergencia, de Sudamérica). Ese país puede no estar en esa lista: por eso el consentimiento del
+aviso incluye también «el país de cada servidor de la comunidad en que juegues». Su anfitrión acepta
+el Anexo B de los Términos, que lo obliga a tratar tus datos solo por encargo nuestro. Si no
+quieres que tus datos lleguen a esos servidores, activa «Solo servidores del proyecto»
+(sección 4.4) en cada navegador o TV donde juegas. Sin ese
 consentimiento no puedes jugar en línea, porque el juego funciona sobre esos servidores; sí puedes
 entrenar y jugar contra la computadora sin conexión. Además, para lo que Cloudflare trata por
 nosotros rige su contrato de tratamiento de datos.
@@ -415,8 +428,10 @@ de Privacidad de Datos UE-EE. UU. y su contrato incluye cláusulas contractuales
 adecuación de la UE desde enero de 2026. Alemania es un Estado de la Unión Europea. Malasia,
 Sudáfrica y Australia no tienen una decisión de adecuación de la Comisión Europea. Desde la
 apertura, un servidor de la comunidad que no es del proyecto puede estar en un país sin esa
-decisión: su anfitrión acepta el Anexo B de los Términos, con las obligaciones de quien trata datos
-por encargo de otro, también fuera de Argentina. Puedes pedirnos una copia de estas garantías a
+decisión, que puede no proteger tus datos como la Unión Europea o el Reino Unido. Su anfitrión
+acepta el Anexo B de los Términos, que lo obliga a tratar tus datos solo por encargo nuestro. Tus
+datos llegan a uno de esos servidores solo cuando juegas en él. Si no quieres, activa «Solo
+servidores del proyecto» (sección 4.4). Puedes pedirnos una copia de las garantías de Cloudflare a
 <mailto:privacy@turbo-gol.com>.
 
 **Para Brasil:** las transferencias se apoyan en que son necesarias para el contrato (LGPD,
@@ -470,7 +485,7 @@ art. 33 IX).
 |---|---|
 | Puntos de servidor de cada partida (con el tiempo de cada jugador) | 30 días. Sin datos de los jugadores, quedan además en la cuenta del anfitrión mientras exista. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
 | El registro de cuántos puntos ganó cada anfitrión (si se borra la cuenta, ya no se pueden usar) | Sin plazo, también después de borrar la cuenta. Hasta la apertura (Términos 12.1.2), solo el proyecto tiene servidores |
-| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión, el continente desde el que llegó su registro, las partidas que rechazó y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que puede nombrar a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que se retire. Un servidor bloqueado o retirado sale de la lista pública |
+| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión, el continente desde el que llegó su registro, las partidas que rechazó y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que nunca nombra ni identifica a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que se retire. Un servidor bloqueado o retirado sale de la lista pública |
 | La aceptación de un anfitrión: las reglas para anfitriones y el Anexo B, con su declaración de 18 años o más, la versión y la fecha | Mientras exista la cuenta. Al borrarla, queda la prueba mínima (ver «Borrado») |
 | El estado de un anfitrión: si está bloqueado, el motivo, quién lo decidió y cuándo | Sin plazo, como la ficha de sus servidores. Al borrarse la cuenta, deja de llevar el identificador de la cuenta |
 | Si un anfitrión eligió mostrar su nombre de usuario en la lista de servidores | Hasta que lo cambie, mientras exista la cuenta. Se borra con la cuenta, y desde entonces se ve como «Anfitrión» y un número |
@@ -487,9 +502,10 @@ art. 33 IX).
 |---|---|
 | Registros técnicos de Cloudflare | 7 días |
 | Registro de envíos de correo de Cloudflare (a quién, cuándo y si llegó) | Hasta 30 días, también después de borrar la cuenta |
-| Registros de la máquina de São Paulo (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
-| Registros de las máquinas de Alemania y Malasia, en Hostinger (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
-| Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP) | 7 días. Esas máquinas no tienen copias de seguridad |
+| Registros de la máquina de São Paulo (pueden tener direcciones IP y, a veces, el nombre y el identificador de la cuenta de un jugador) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
+| Registros de las máquinas de Alemania y Malasia, en Hostinger (pueden tener direcciones IP y, a veces, el nombre y el identificador de la cuenta de un jugador) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
+| Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP y, a veces, el nombre y el identificador de la cuenta de un jugador) | 7 días. Esas máquinas no tienen copias de seguridad |
+| Registros técnicos de la máquina de un servidor de la comunidad que no es del proyecto (pueden tener direcciones IP y, a veces, el nombre y el identificador de la cuenta de un jugador) | 7 días como máximo, salvo que una ley obligue a su anfitrión a más. Los guarda su anfitrión, por encargo nuestro (Términos 12.3.2 y Anexo B, punto 9) |
 | Señales de Turnstile que Cloudflare usa por su cuenta | Las fija Cloudflare. Su anexo no da un plazo |
 | Reportes de errores de red y Cloudflare Web Analytics | Los fija Cloudflare |
 | Avisos técnicos al equipo en Discord (también los de los servidores de la comunidad que no son del proyecto, en su canal aparte) | 1 año, para investigar fallas y abusos |
@@ -504,7 +520,7 @@ art. 33 IX).
 | Un pedido de borrado de la cuenta | 14 días. Después se borra la cuenta, en el siguiente borrado automático (corre una vez al día) |
 | Marcas de sanción | Hasta que termina la sanción, 1 año como máximo (sección 12.4) |
 | El identificador de una cuenta borrada | Sin plazo: solo el número al azar y la fecha, sin nombre ni correo, para no volver a darlo |
-| Prueba mínima de lo que aceptaste y retiraste (qué fue: novedades, Términos o reglas para anfitriones; la versión, si fue un sí o un no, y la fecha; sin nombre, sin correo y sin de dónde vino) | 2 años desde el borrado de la cuenta, unida solo al identificador de la cuenta borrada |
+| Prueba mínima de lo que aceptaste y retiraste (qué fue: novedades, Términos o reglas para anfitriones; la versión, si fue un sí o un no, y la fecha; sin nombre, sin correo y sin de dónde vino) | 2 años desde el borrado de la cuenta (3 años, si eran las reglas para anfitriones), unida solo al identificador de la cuenta borrada |
 | Los lugares de las repeticiones, las estrellas y los registros de puntos de servidor de tus partidas (con el identificador de tu cuenta, nunca tu nombre) | 30 días desde la partida, también después de borrar la cuenta |
 | El almacenamiento de tu navegador | Hasta que lo borras. El de la pestaña, hasta que la cierras (sección 9) |
 
@@ -570,7 +586,8 @@ Estas decisiones las toma el juego solo, sin una persona:
   falta un requisito (Términos 12.2); el registro de un servidor se rechaza si su región no
   coincide con el continente desde el que llega, según Cloudflare; un servidor que no es del
   proyecto y rechaza sin motivo demasiadas de las últimas partidas que le asignamos sale de la
-  colocación por 1 hora; una partida contra bots de un solo jugador, y lo que pasa del tope diario
+  colocación por 1 hora; uno que pierde varias partidas en pocos días se suspende por un tiempo y,
+  si vuelve a pasar, vuelve a estar en prueba; una partida contra bots de un solo jugador, y lo que pasa del tope diario
   de puntos de servidor, no dan puntos (Términos, Anexo A). El bloqueo de un anfitrión, en cambio,
   lo decide una persona del equipo.
 - **Marcas de sanción:** si una cuenta usa un correo o una cuenta de Discord o Google con una marca
@@ -629,7 +646,8 @@ Puedes reclamar ante la autoridad de tu país:
   cajas de recompensas al azar ni chat.
 - **Consejo:** si eres menor, usa un nombre que no sea tu nombre real, activa «Ocultar mi nombre en
   repeticiones públicas» (PERFIL > PRIVACIDAD) y, si no quieres mostrar tu IP, no juegues en salas
-  con gente que no conoces.
+  con gente que no conoces y, desde la apertura, activa «Solo servidores del proyecto» en
+  Ajustes > Juego.
 
 > **Si tienes entre 13 y 17 años, lo importante:**
 > - Usamos tu correo, tu nombre de usuario, tu dirección IP, el país y la ciudad aproximados de
@@ -638,8 +656,12 @@ Puedes reclamar ante la autoridad de tu país:
 > - Tu nombre se ve en la clasificación si estás entre los 100 mejores, y hoy no se puede ocultar.
 >   En las repeticiones de las partidas en servidores de la comunidad también se ve, salvo que lo
 >   ocultes en PERFIL > PRIVACIDAD.
-> - En una sala, los otros jugadores pueden ver tu IP. Si no quieres, juega CASUAL (con cuenta),
->   contra la IA o entrena.
+> - En una sala, los otros jugadores pueden ver tu IP: si no quieres, no juegues en salas con gente
+>   que no conoces. En CASUAL los otros jugadores no la ven, pero desde la apertura de la red
+>   (Términos 12.1.2) la partida puede jugarse en el servidor de un anfitrión que no es del
+>   proyecto, y esa persona sí la ve. Si no quieres, activa «Solo servidores del proyecto» en
+>   Ajustes > Juego, en cada navegador o TV donde juegas. También puedes jugar contra la IA o
+>   entrenar.
 > - Puedes pedirnos que borremos todo. Pídele ayuda a un adulto si lo necesitas.
 
 ---
@@ -708,9 +730,9 @@ Ninguna de las nuestras la puede leer el código de la página: solo viajan a nu
   dirección de la página, de qué sitio vienes, tu navegador, tu sistema, el tipo de dispositivo y
   tu país aproximado. Lo opera Cloudflare en nuestro sitio y está activo. Cloudflare dice que no usa
   cookies ni el almacenamiento local de tu navegador. Configuramos el sitio en Cloudflare con la
-  opción que deja fuera los datos de los visitantes de la Unión Europea. No lo probamos desde una
-  dirección de la Unión Europea, y Cloudflare no dice qué países cuenta como la Unión Europea: no
-  podemos asegurar a quién deja fuera.
+  opción que deja fuera los datos de los visitantes de la Unión Europea. Cloudflare no dice
+  qué países cuenta como la Unión Europea, así que no podemos asegurar a quién deja fuera. Si te
+  mide igual, la base es el interés legítimo (sección 3).
 - **Reportes de errores de red:** Cloudflare agrega a las respuestas de turbo-gol.com un
   encabezado (*Network Error Logging*) que le pide a tu navegador que guarde una regla para
   avisarle a Cloudflare cuando un pedido a turbo-gol.com falla (la dirección y el tipo de error).
@@ -739,7 +761,7 @@ cierra tu sesión y vuelves a las opciones de fábrica.
 - **Los correos no tienen imágenes,** píxeles de seguimiento ni enlaces rastreados.
 - **Los registros técnicos nunca guardan tu contraseña** ni el cuerpo de lo que envías al servidor
   (lo que escribes en los formularios). Nuestras propias líneas de registro no llevan IP, correo ni
-  contraseña. Pocas llevan un dato de una cuenta: el nombre de usuario de un anfitrión; el nombre
+  contraseña. Pocas llevan un dato de una cuenta: el nombre de usuario y el identificador de la cuenta de un anfitrión; el nombre
   de usuario y el identificador de una cuenta del equipo; el identificador de una cuenta a la que
   el equipo le da, le quita o le reactiva algo, o cuyos puntos consulta; los de las cuentas de los
   jugadores o del anfitrión de una partida de la que no se pudo registrar algo (sección 4.1); el
@@ -754,8 +776,10 @@ cierra tu sesión y vuelves a las opciones de fábrica.
   interno y en nuestros registros, con el nombre de usuario, el identificador de la cuenta, el
   método y el país, nunca la IP ni el correo.
 
-Ningún sistema es perfecto. **Si pasa algo que pueda afectarte, te avisamos** y lo informamos a la
-autoridad cuando la ley lo pida. Si encuentras una falla de seguridad, escríbenos a
+Ningún sistema es perfecto. **Si sabemos de un incidente de seguridad que afecta tus datos y puede
+perjudicarte, también en el servidor de un anfitrión, te avisamos:** por el correo de tu cuenta, si
+lo tenemos, o con un aviso público en nuestro servidor de Discord. Y lo informamos a la autoridad
+cuando la ley lo pida. Si encuentras una falla de seguridad, escríbenos a
 <mailto:privacy@turbo-gol.com>. Si tienes una cuenta de GitHub, también puedes usar el aviso privado de
 seguridad del repositorio (<https://github.com/DonJaimeHash/turbo-gol/security>).
 
@@ -781,7 +805,8 @@ seguridad del repositorio (<https://github.com/DonJaimeHash/turbo-gol/security>)
   vino y la fecha. Es para poder probar lo que pediste. **Cuando borras tu cuenta, ese registro se
   borra, salvo una prueba mínima:** qué fue (novedades, Términos o reglas para anfitriones), la versión, si
   fue un alta o una baja y la fecha, junto al número al azar de la cuenta borrada, sin tu nombre, tu
-  correo ni de dónde vino. Esa prueba se guarda 2 años desde el borrado.
+  correo ni de dónde vino. Esa prueba se guarda 2 años desde el borrado (3 años, si eran las
+  reglas para anfitriones).
 - **Los correos de tu cuenta no son novedades.** Los códigos, los enlaces y los avisos de
   seguridad te llegan aunque no pidas novedades. No llevan publicidad.
 
@@ -835,7 +860,8 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
   reglas para anfitriones, con tu declaración de 18 años o más) y de cada permiso de novedades que
   diste o retiraste, guardamos qué fue, la versión, si fue un sí o un no y la fecha,
   unidas solo al identificador de la cuenta borrada: sin tu nombre, sin tu correo y sin de dónde
-  vino. Se guarda 2 años desde el borrado y sirve para probar lo que pediste.
+  vino. Se guarda 2 años desde el borrado (3 años, si eran las reglas para
+  anfitriones) y sirve para probar lo que pediste.
 - **Copias que vencen solas:**
   - las repeticiones de tus partidas: el público las ve con tu nombre oculto, pero nuestra copia
     interna guarda tu nombre y tu identificador de jugador hasta que vence; los lugares que ocupaste en ellas y las
@@ -847,12 +873,11 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
     haya escrito el equipo si la anuló, que puede nombrarte);
   - las líneas de aviso del equipo que lleven el identificador de tu cuenta o un motivo que te
     nombre (hasta 30 días en el historial interno y 1 año en Discord, sección 6);
-  - los registros técnicos de Cloudflare (7 días) y los de las máquinas de los servidores del
-    proyecto (sección 6);
+  - los registros técnicos de Cloudflare (7 días), los de las máquinas de los servidores del
+    proyecto y los de las máquinas de los servidores de la comunidad que no son del proyecto
+    (sección 6);
   - el registro de envíos de correo (hasta 30 días);
   - las copias de seguridad de Cloudflare (hasta 30 días).
-- **Un motivo que te nombre en la ficha de un servidor** (el último que escribió el equipo al
-  cambiar su estado o al retirarlo): queda sin plazo, como la ficha (sección 6).
 - **Si eras anfitrión:** hasta la apertura (Términos 12.1.2) solo el proyecto tiene servidores, así
   que esto no afecta a ningún jugador antes de ese día. Desde entonces: el registro de cuántos
   puntos ganaron tus servidores (que ya no puedes usar), tu estado de anfitrión (sin el

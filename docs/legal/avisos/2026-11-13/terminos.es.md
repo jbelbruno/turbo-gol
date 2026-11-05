@@ -20,7 +20,7 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 - Desde la apertura de la red (sección 12.1.2), una partida de CASUAL puede jugarse en el servidor
   de un anfitrión que no es el proyecto, que ve tu nombre, el identificador de tu cuenta, tu
   equipo, tus controles y tu dirección IP. Si no quieres, activa «Solo servidores del proyecto» en
-  Ajustes > Juego (sección 7.6).
+  Ajustes > Juego, en cada navegador o TV donde juegas (sección 7.6).
 - Tu nombre de usuario se ve en la clasificación (hoy no puedes ocultarlo ahí) y, durante 30 días,
   en las repeticiones públicas de las partidas de COMPETITIVO y CASUAL en servidores de la
   comunidad (ahí sí puedes ocultarlo).
@@ -59,9 +59,9 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 5. La **Política de privacidad** explica qué datos usamos, para qué y qué derechos tienes. **No es
    una cláusula que aceptas: es información que te damos.** Aceptar estos términos no es dar tu
    consentimiento para nada que la Política diga que necesita un consentimiento aparte, como las
-   novedades por correo. El consentimiento para que tus datos se guarden fuera de Argentina lo das
-   aparte, con el mismo botón, porque el aviso que está encima lo dice (Política de privacidad,
-   sección 5). Los Términos y la Política tienen una misma versión: si cambia cualquiera
+   novedades por correo. El consentimiento para que tus datos se guarden fuera de Argentina no es
+   parte de estos términos: lo das con el mismo botón, porque el aviso que está encima lo dice de
+   forma expresa (Política de privacidad, sección 5). Los Términos y la Política tienen una misma versión: si cambia cualquiera
    de los dos, el juego te muestra los enlaces a los dos textos y te pide aceptar los Términos
    (sección 18.3).
 
@@ -85,8 +85,7 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 5. Si no estás de acuerdo, no uses Turbogol.
 6. Si tienes menos de 18 años, lee la sección 3.
 7. **Si quieres ser anfitrión** de un servidor de la comunidad, aceptas además la sección 12 y el
-   Anexo B con el botón que pide el código para registrarlo, o con el que te pide aceptarlos de
-   nuevo en MIS SERVIDORES (sección 12.2).
+   Anexo B con el botón que pide el código para registrarlo (sección 12.2).
 
 ## 3. Edad
 
@@ -206,7 +205,9 @@ otros jugadores, **no puedes:**
    la dirección IP pública de los demás. Con una IP se puede saber, más o menos, en qué ciudad estás
    y cuál es tu proveedor de internet. Pasa igual si creas la sala o si entras a la de otra
    persona. **Si no quieres que otros jugadores vean tu IP, no juegues en salas, o juega solo con
-   gente que conoces.** CASUAL y COMPETITIVO nunca son P2P.
+   gente que conoces.** CASUAL y COMPETITIVO nunca son P2P. Pero desde la apertura
+   (sección 12.1.2), una partida de CASUAL puede jugarse en el servidor de un anfitrión que no es
+   el proyecto, que recibe tu IP y puede jugar en ella (sección 7.6).
 3. **COMPETITIVO** siempre se juega en un servidor, con la física oficial del juego. Necesita una
    cuenta. Buscamos primero en tu región y, después de 2 minutos, en todas. El resultado cambia tu
    puntaje. Los 100 mejores de cada modo, con al menos 5 partidas en la temporada, se ven con su
@@ -247,9 +248,11 @@ otros jugadores, **no puedes:**
    tenga lugar (o, si esos servidores tampoco están disponibles, no se puede buscar partida).
 
    **Solo servidores del proyecto.** Desde la apertura, si activas «Solo servidores del proyecto»
-   en Ajustes > Juego, tus partidas nunca van a un servidor de la comunidad que no es del proyecto:
-   van a uno del proyecto o a uno de Cloudflare (en la emergencia de arriba, esperan un servidor del
-   proyecto). Si un jugador de la partida lo activa, vale para toda la partida. En PARTIDO
+   en Ajustes > Juego, las partidas que buscas desde ese navegador o esa TV nunca van a un servidor
+   de la comunidad que no es del proyecto: van a uno del proyecto o a uno de Cloudflare (en la
+   emergencia de arriba, esperan un servidor del proyecto). La opción se guarda solo en ese
+   navegador o esa TV, no en tu cuenta: actívala en cada uno donde juegues, y otra vez si borras
+   los datos del sitio. Si un jugador de la partida la activa, vale para toda la partida. En PARTIDO
    ENCONTRADO y en el FINAL te decimos cuándo la partida se juega en un servidor de la comunidad
    que no es del proyecto.
 
@@ -287,16 +290,18 @@ otros jugadores, **no puedes:**
    El juego también aplica solo los bloqueos de la sección 8; una partida de un servidor de la
    comunidad que no pasa la verificación no da puntos, y un servidor que no es del proyecto y
    rechaza sin motivo demasiadas de las últimas partidas que le asignamos sale de la colocación por
-   1 hora (sección 12.6).
+   1 hora, y uno que pierde varias partidas en pocos días se suspende por un tiempo (sección 12.6).
 2. **Te decimos el motivo.** Los bloqueos automáticos de COMPETITIVO los ves en el juego, con el
    tiempo que falta; el juego dice siempre «por abandonar partidas», también cuando el bloqueo viene
-   de una marca de sanción (sección 9.4). Las demás sanciones te las explicamos por correo, si tu
-   cuenta tiene un correo confirmado, salvo que decírtelo ponga en riesgo a otros jugadores o al
+   de una marca de sanción (sección 9.4). Las medidas automáticas sobre un servidor de la
+   comunidad (su suspensión por una verificación fallida o por partidas perdidas, y su salida de la
+   colocación por 1 hora) las ves en MIS SERVIDORES. Las demás sanciones te las explicamos por
+   correo, si tu cuenta tiene un correo confirmado, salvo que decírtelo ponga en riesgo a otros jugadores o al
    servicio.
-3. **Puedes pedir una revisión** escribiendo a <mailto:privacy@turbo-gol.com> o por nuestro
-   servidor de Discord, dentro de los 30 días corridos desde que te enteras de la sanción (por el
-   aviso, por el juego o porque no puedes jugar). Una persona la revisa y te responde en 15 días
-   corridos. **Pedirla es opcional y gratis, y no te impide reclamar en cualquier momento** ante la
+3. **Puedes pedir una revisión** escribiendo a <mailto:privacy@turbo-gol.com>, dentro de los
+   30 días corridos desde que te enteras de la sanción (por el aviso, por el juego o porque no
+   puedes jugar). Una persona la revisa y te responde en 15 días corridos. Si el caso necesita más
+   tiempo, te lo decimos dentro de ese plazo y te respondemos en 30 días corridos como máximo. **Pedirla es opcional y gratis, y no te impide reclamar en cualquier momento** ante la
    autoridad de defensa del consumidor, la de protección de datos o la justicia.
 4. **Si borras tu cuenta con una sanción activa,** guardamos una huella con clave secreta de su
    correo y de sus cuentas de Discord y Google, hasta que la sanción termina y por 1 año como
@@ -343,11 +348,13 @@ otros jugadores, **no puedes:**
    intercambiar.
 5. **No hay cajas de recompensas ni premios al azar.** Cada objeto tiene un precio fijo en puntos.
 6. **Mientras tengas tu cuenta, tus puntos no vencen.** Un objeto que retiramos del catálogo lo
-   conserva quien ya lo tiene.
+   conserva quien ya lo tiene, salvo que tengamos que sacarlo por una ley, por una orden de una
+   autoridad o por un reclamo fundado de otra persona sobre sus derechos.
 7. **Podemos cambiar** el catálogo, los precios y las reglas para ganar puntos solo por un motivo
-   concreto: la seguridad, una trampa o un abuso, los costos o el equilibrio del juego. Si un
-   cambio te quita algo que ya tienes, te avisamos al menos 30 días antes, con un aviso como el de
-   la sección 18.2, salvo que corrija un error o una trampa.
+   concreto: la seguridad, una trampa o un abuso, los costos, el equilibrio del juego, una ley, una
+   orden de una autoridad o un reclamo fundado de otra persona sobre sus derechos. Si un cambio te
+   quita algo que ya tienes, te avisamos al menos 30 días antes, con un aviso como el de la
+   sección 18.2, con las mismas excepciones de la sección 15.2.
 8. **Pierdes los puntos y los objetos** si borras tu cuenta, si la cerramos por romper estos
    términos o si Turbogol deja de funcionar. Como no valen dinero, no hay devolución. De los puntos
    de servidor queda, sin que puedas usarlo, el registro del total que ganaron tus servidores, y
@@ -365,12 +372,16 @@ otros jugadores, **no puedes:**
    (sección 12.4.2), por ejemplo un servidor alquilado (un VPS); las conexiones WebRTC, que
    permitirían alojar sin nombre DNS ni puertos abiertos (por ejemplo, desde una computadora de tu
    casa), todavía no están disponibles.
-2. **La apertura.** Hasta la apertura de la red, solo el proyecto tiene servidores: los de la
-   sección 7.6. Nadie más puede registrar uno, y las reglas de esta sección no se aplican a nadie
-   fuera del proyecto. La apertura la anunciamos en nuestro servidor de Discord, aparte del aviso
-   de estos términos, y estas reglas valen desde ese día. Podemos abrirla primero a personas
-   invitadas: para las demás, la red sigue cerrada hasta que la abramos para todos. La apertura no
-   tiene una fecha fijada.
+2. **La apertura.** La apertura de la red es el día en que dejamos pedir el código para
+   registrar un servidor a la primera persona que no es del proyecto, aunque sea una persona que
+   invitamos. Hasta ese día, solo el proyecto tiene servidores: los de la sección 7.6. Nadie más
+   puede registrar uno, y las reglas de esta sección no se aplican a nadie fuera del proyecto. La
+   apertura la anunciamos en nuestro servidor de Discord, aparte del aviso de estos términos, a
+   más tardar ese mismo día. Desde ese día, estas reglas valen para todos los anfitriones y todos
+   los jugadores, y la partida de CASUAL de cualquier jugador puede jugarse en el servidor de un
+   anfitrión que no es el proyecto, salvo con «Solo servidores del proyecto» (sección 7.6).
+   Podemos abrirla primero solo a personas que invitamos: mientras tanto, las demás todavía no
+   pueden registrar un servidor. La apertura no tiene una fecha fijada.
 3. Los servidores del proyecto no ganan puntos. Por eso, hasta la apertura, nadie puede ganar
    puntos (sección 11.1). Desde ese día, los gana el anfitrión de un servidor que no es del
    proyecto (sección 12.5).
@@ -392,33 +403,43 @@ ese día, para ser anfitrión necesitas:
    código. No comprobamos tu edad: la declaras tú.
 
 Guardamos que aceptaste esta sección y el Anexo B y declaraste tener 18 años o más, con la versión
-y la fecha. Si estos términos cambian de versión, te pedimos en MIS SERVIDORES que vuelvas a
-aceptar esta sección y el Anexo B y a declarar que tienes 18 años o más: hasta que lo hagas, no
-puedes pedir otro código y tus servidores no reciben partidas nuevas.
+y la fecha. Si estos términos cambian de versión, para pedir otro código tienes que volver a
+aceptar esta sección y el Anexo B y declarar otra vez que tienes 18 años o más. Mientras no lo
+hagas, podemos dejar de mandar partidas a tus servidores, y sigue valiendo el Anexo B que ya
+aceptaste.
 
 ### 12.3 Qué te comprometes a hacer
 
 1. **Usar solo el programa oficial y firmado** para conectarte a la red de Turbogol, y mantenerlo
    actualizado. La licencia AGPL-3.0 te deja cambiar el código, pero no conectes un servidor
-   cambiado a nuestra red.
+   cambiado a nuestra red. El programa se actualiza solo: baja de turbo-gol.com cada versión nueva
+   firmada y pasa a ella cuando terminan sus partidas, sin preguntarte. Para instalarlo necesitas
+   acceso como root, y el instalador también cambia tu máquina: agrega los repositorios de Node.js
+   y de Caddy (un servidor web), los instala, crea un usuario, escribe la configuración de Caddy y,
+   si el firewall ufw está activo, abre los puertos 80 y 443. La lista completa está al principio
+   del instalador, en inglés: léela antes de usarlo. Si no quieres esos cambios, no lo instales en
+   esa máquina.
 2. **Cuidar los datos de los jugadores.** Tu servidor recibe el nombre, el identificador de jugador
-   (el identificador de su cuenta), el equipo, los controles y la dirección IP de cada jugador. Con
-   esos datos trabajas por encargo nuestro:
+   (el identificador de su cuenta), el equipo, los controles y la dirección IP de cada jugador. Esos
+   datos los tratas solo por encargo nuestro:
    - úsalos solo para alojar las partidas que te asignamos, como lo hace el programa oficial;
    - no los guardes después de la partida, no los copies, no los publiques y no se los des a
      nadie. La única excepción son los registros técnicos de tu sistema que tengan direcciones IP:
      puedes conservarlos 7 días como máximo, salvo que la ley te obligue a más;
    - guárdalos en secreto, y pide lo mismo a quien tenga acceso a tu máquina;
-   - no le pases este trabajo a otra persona (puedes usar la máquina que alquilas a un proveedor de
+   - no le pases este tratamiento ni esos datos a otra persona (puedes usar la máquina que alquilas a un proveedor de
      alojamiento: Anexo B, punto 6);
    - avísanos a <mailto:privacy@turbo-gol.com> en 48 horas si alguien entra a tu máquina o se
      pierden datos, y ayúdanos a responder a los jugadores;
    - cuando dejes de ser anfitrión, borra todo lo que quede de los jugadores;
    - si te lo pedimos, dinos qué hiciste con esos datos.
 
-   El programa oficial no escribe nombres ni direcciones IP en sus propios registros. Si tu máquina
-   los guarda por otro lado (el sistema, el firewall o un servidor intermedio), esos registros
-   entran en estas reglas.
+   El programa oficial no escribe nombres ni direcciones IP en sus propios registros. Otros programas de
+   tu máquina sí pueden guardarlos: el sistema, el firewall o el servidor web que agrega el
+   instalador oficial (Caddy), que, por ejemplo cuando el programa no responde, puede guardar la
+   dirección IP de un jugador y los datos de su conexión, que pueden incluir su nombre y el
+   identificador de su cuenta. Esos registros entran en estas reglas: haz que se borren a los 7
+   días como máximo.
 
    El Anexo B, al final de estos términos, pone estas obligaciones como las cláusulas de quien trata
    datos por encargo de otro, también para un servidor fuera de Argentina. Lo aceptas junto con
@@ -430,7 +451,8 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
 4. **Cuidar tu máquina:** mantenerla segura y actualizada, y guardar en secreto la clave de tu
    servidor.
 5. **Cumplir las reglas de tu proveedor de internet y las leyes de tu país.** La electricidad, la
-   conexión y el servidor alquilado los pagas tú.
+   conexión y el servidor alquilado los pagas tú. El tope de tráfico de tu servidor es una ayuda, no
+   una garantía: lo que te cobre tu proveedor también lo pagas tú.
 
 ### 12.4 Qué es público y qué guardamos de ti
 
@@ -447,8 +469,9 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
    con su región y un número (por ejemplo, «sa-node-3»). El nombre que elijas no puede ser el de
    otro servidor de su región (sin contar mayúsculas) ni el de un servidor del proyecto.
 2. **La dirección de tu servidor es un nombre DNS,** con conexiones seguras (wss) en el puerto 443:
-   nunca una IP ni un nombre bajo turbo-gol.com. Los jugadores que se conectan ven la IP a la que
-   apunta ese nombre. La región que eliges para tu servidor tiene que coincidir con el continente
+   nunca una IP ni un nombre bajo turbo-gol.com. Los jugadores que se conectan ven ese nombre y la
+   IP a la que apunta. Si no quieres que te reconozcan, no pongas tu nombre en él ni en el nombre
+   de tu servidor. La región que eliges para tu servidor tiene que coincidir con el continente
    desde el que llega su registro, según Cloudflare: si no coincide, el registro se rechaza.
 3. **Guardamos:** los datos de cada servidor (también los de la máquina, el continente desde el que
    se registró y cuántas partidas verificó, perdió, falló o rechazó), las direcciones IP desde las
@@ -462,7 +485,7 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
 ### 12.5 Puntos
 
 1. Un punto por cada minuto que un jugador real jugó en tu servidor, en partidas verificadas, con
-   factores por región, calidad y repetición. Las reglas exactas están en el Anexo A, al final de
+   factores por región, calidad y repetición. Las reglas están en el Anexo A, al final de
    estos términos.
 2. Por ahora, un servidor que no es del proyecto solo recibe partidas de CASUAL (sección 8.4).
    Cuando es nuevo está en prueba, y se verifican todas sus partidas hasta que suma 20 partidas
@@ -482,6 +505,10 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
    **Si tu servidor rechaza sin motivo demasiadas de las últimas partidas que le asignamos** (está
    conectado y, según nuestro sistema, tiene lugar, no se está drenando y no pasó su tope de
    tráfico), el sistema lo saca de la colocación por 1 hora. También lo decide el sistema solo.
+
+   **Si tu servidor pierde varias partidas en pocos días** (por ejemplo, porque se apaga o se corta
+   en medio de una partida), el sistema lo suspende por un tiempo y, si vuelve a pasar, lo pone
+   otra vez en prueba. También lo decide el sistema solo. MIS SERVIDORES te muestra tus faltas.
 2. **Podemos suspender o bloquear un servidor tuyo, o bloquearte como anfitrión,** si rompes estas
    reglas o si pones en riesgo a los jugadores. El bloqueo de un anfitrión lo decide una persona
    del equipo y vale para todos sus servidores: dejan de conectarse a la red, no puede pedir
@@ -489,16 +516,20 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
    (sección 9).
 
    Los jugadores pueden reportar un servidor de la comunidad que no es del proyecto al terminar una
-   partida en él. Un reporte solo nunca alcanza para sancionarte, porque puede ser falso: varios
-   reportes de cuentas distintas sobre un mismo servidor son una señal para que una persona lo
-   revise.
+   partida en él. Ningún reporte te sanciona por sí solo, porque puede ser falso. Una persona
+   del equipo puede revisar un servidor por un reporte, por varios o por otra información y, si
+   comprueba que rompiste estas reglas, podemos tomar las medidas de este punto.
 3. **Puedes dejar de ser anfitrión cuando quieras:** apaga y desinstala el programa, o retira tu
    servidor en MIS SERVIDORES. Tu servidor sigue en la lista pública, sin conexión, hasta que lo
    retires o lo retiremos, lo suspendamos o lo bloqueemos. Si borras tu cuenta, tus servidores
    quedan bloqueados en cuanto se borra (a los 14 días de pedirlo, o antes si nos lo pides) y salen
    de la lista pública; tus puntos pueden seguir hasta 30 días en la tabla de anfitriones, siempre
    como «Anfitrión» y un número.
-4. **No eres empleado ni proveedor nuestro.** No te pagamos: solo hay puntos de servidor.
+4. **No eres empleado nuestro.** Alojar es tu decisión: eliges si alojas, cuándo, con qué máquina
+   y por cuánto tiempo, a tu costo, y puedes dejar cuando quieras (sección 12.6.3). No te pagamos y
+   no hay un precio: los puntos de servidor no son un pago y no tienen valor en dinero
+   (sección 11.2). Para los datos de los jugadores, y solo para eso, eres el encargado de su
+   tratamiento (Anexo B).
 5. **Respondes por tu máquina** y por lo que pase si no cumples estas reglas. Alojar un servidor es
    tu decisión: los costos y los riesgos de tu máquina, tu conexión, tu proveedor y los otros
    programas que uses son tuyos. Usa una máquina sin datos importantes o ten copias de seguridad.
@@ -559,8 +590,11 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
    esté siempre disponible (sección 16).
 2. **Podemos cambiar el juego** (agregar o sacar funciones, o apagar una parte un tiempo) por
    seguridad, por una ley, por costos o para mejorarlo. Si un cambio te quita algo que ya tienes,
-   te avisamos al menos 30 días antes, con un aviso como el de la sección 18.2, salvo que corrija
-   un error o una trampa.
+   te avisamos al menos 30 días antes, con un aviso como el de la sección 18.2. No esperamos esos
+   30 días si el cambio corrige un error o una trampa, o si no puede esperar por la seguridad de los
+   jugadores o de sus datos, por una ley, por una orden de una autoridad o por un reclamo fundado de
+   otra persona sobre sus derechos (por ejemplo, si hay que pausar los servidores de la comunidad
+   que no son del proyecto). Entonces te avisamos lo antes posible y te decimos el motivo.
 3. **Si cerramos Turbogol,** te avisamos al menos 30 días antes, con un aviso como el de la sección
    18.2, salvo fuerza mayor o una orden de una autoridad. Los datos se tratan como dice la Política de
    privacidad (sección 13). El código sigue disponible según su licencia.
@@ -592,11 +626,13 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
      de privacidad, sección 4.2).
 2. Los puntos y los objetos no tienen valor en dinero (sección 11), y tampoco el puntaje ni las
    estadísticas.
-3. Cada jugador y cada anfitrión responde por lo que hace. Si alguien rompe estas reglas, avísanos y
-   actuamos. Por lo que otros escriben o publican en Turbogol respondemos solo si, después de que
-   nos avisan de algo claramente ilegal, no lo sacamos a tiempo. **Cuando un anfitrión aloja una
-   partida que le asignamos, respondemos ante ti por esa partida y por tus datos como si la
-   alojáramos nosotros, con lo que dice esta sección.**
+3. Cada jugador y cada anfitrión responde por lo que hace. Si alguien rompe estas reglas, avísanos:
+   podemos tomar las medidas de la sección 9. Por lo que otros escriben o publican en Turbogol
+   respondemos solo si, después de que nos avisan de algo claramente ilegal, no lo sacamos a
+   tiempo. **Cuando un anfitrión aloja una partida que le asignamos, seguimos siendo los
+   responsables de tus datos y respondemos ante ti según la ley y esta sección. Si un anfitrión
+   usa tus datos para algo que no le encargamos, o no cumple la sección 12 o el Anexo B, también
+   responde él por eso, ante ti y ante nosotros.**
 4. **Tú respondes, según la ley, por los daños que causes al romper estos términos o la ley,** ante
    otros jugadores y ante nosotros. Si otra persona nos reclama por algo que hiciste tú, respondes
    ante nosotros por lo que tengamos que pagar por tu culpa.
@@ -604,10 +640,9 @@ puedes pedir otro código y tus servidores no reciben partidas nuevas.
    siempre por los daños que causemos con dolo o culpa grave, nosotros o las personas por las que
    debemos responder, y por los daños a tu vida, tu cuerpo o tu salud. Valen siempre los derechos
    que te dan las normas de protección del consumidor y de los datos personales, también las de tu
-   país (sección 19.1). Esta sección tampoco cambia lo que te prometemos en otras partes de estos
-   términos y de la Política de privacidad, como los avisos de 30 días (secciones 11.7 y 15) y el
-   de 7 días (sección 18.2), que tus puntos no vencen (sección 11.6) y la seguridad de tus datos (Política de
-   privacidad, sección 10). Si una parte de esta sección no vale para ti, el resto sigue valiendo.
+   país (sección 19.1). Esta sección tampoco cambia estos compromisos: los avisos de 30 días
+   (secciones 11.7 y 15), con sus excepciones, el de 7 días (sección 18.2) y que tus puntos no
+   vencen (sección 11.6). Si una parte de esta sección no vale para ti, el resto sigue valiendo.
 
 ## 17. Cómo termina esto
 
@@ -672,7 +707,8 @@ la versión en español.
 Estos son los valores de hoy. La sección 11.7 dice cómo pueden cambiar.
 
 1. **Base:** un punto por cada minuto que un jugador real estuvo en una partida de tu servidor. Los
-   minutos los cuenta el verificador al volver a simular la partida, no tu servidor. No cuentan los
+   minutos los cuenta el verificador al volver a simular la partida; lo que mide tu servidor solo
+   puede bajarlos. No cuentan los
    tramos de 10 segundos o más en que el jugador no toca ningún control, que es lo que pasa, por
    ejemplo, cuando se desconecta.
 2. **Esos minutos se multiplican por:**
@@ -705,8 +741,7 @@ Estos son los valores de hoy. La sección 11.7 dice cómo pueden cambiar.
 ## Anexo B. Cláusulas para quien aloja un servidor de la comunidad
 
 Este anexo vale para cada anfitrión que no es el proyecto, esté donde esté su servidor. Lo aceptas
-junto con la sección 12, con el botón que pide el código para registrar tu servidor o con el que te
-pide aceptarlos de nuevo en MIS SERVIDORES (sección 12.2). Vale mientras seas anfitrión y hasta que
+junto con la sección 12, con el botón que pide el código para registrar tu servidor (sección 12.2). Vale mientras seas anfitrión y hasta que
 borres lo que quede de los jugadores. Si este anexo y la sección 12 no dicen lo mismo, vale lo que
 más protege a los jugadores.
 
@@ -716,21 +751,23 @@ más protege a los jugadores.
 2. **Qué datos y para qué.** El nombre, el identificador de jugador (el identificador de su
    cuenta), el equipo, los controles y la dirección IP de cada jugador de las partidas que te
    asignamos. Los usas para una sola cosa: alojar esas partidas, como lo hace el programa oficial.
-3. **Nuestras instrucciones** son las de la sección 12.3, las del programa oficial y las de su
-   guía. Si una ley de tu país te obliga a hacer otra cosa con esos datos, avísanos antes, salvo
+3. **Nuestras instrucciones** son las de este anexo y las de la sección 12.3, y usar el programa
+   oficial tal como viene. Si otro texto del proyecto (una guía, un documento del repositorio o una
+   pantalla del juego) dice otra cosa, valen este anexo y la sección 12.3. Si una ley de tu país te obliga a hacer otra cosa con esos datos, avísanos antes, salvo
    que esa misma ley te lo prohíba.
 4. **Confidencialidad.** Guarda esos datos en secreto, y pide lo mismo a quien tenga acceso a tu
    máquina.
 5. **Seguridad.** Usa solo el programa oficial y firmado, y mantenlo actualizado. Mantén tu máquina
    segura y actualizada, y guarda en secreto la clave de tu servidor.
-6. **Nadie más.** No le pases este trabajo ni esos datos a otra persona. Puedes usar para tu
+6. **Nadie más.** No le pases este tratamiento ni esos datos a otra persona. Puedes usar para tu
    servidor la máquina que alquilas a un proveedor de alojamiento, sin darle otro acceso a esos
    datos.
 7. **Incidentes.** Si alguien entra a tu máquina o se pierden datos, avísanos a
    <mailto:privacy@turbo-gol.com> en 48 horas, con lo que sepas, y ayúdanos a responder a los
    jugadores y a avisarles.
-8. **Los pedidos de los jugadores.** Si un jugador te pide algo sobre sus datos, mándanos su pedido
-   a <mailto:privacy@turbo-gol.com> y ayúdanos a responderle.
+8. **Los pedidos de los jugadores.** Si un jugador te pide algo sobre sus datos, no lo respondas tú:
+   mándanos su pedido a <mailto:privacy@turbo-gol.com> en 48 horas como máximo, dile que nos lo
+   mandaste y ayúdanos a responderle.
 9. **Cuánto guardas.** Nada después de la partida, salvo los registros técnicos de tu sistema que
    tengan direcciones IP: 7 días como máximo, salvo que la ley te obligue a más. Cuando dejas de
    ser anfitrión, borra todo lo que quede de los jugadores.
@@ -741,7 +778,8 @@ más protege a los jugadores.
     pida menos. Si una autoridad te pide esos datos, avísanos antes de darlos, salvo que la ley te
     lo prohíba, y da solo lo que te obliguen a dar.
 12. **Si no cumples este anexo,** podemos bloquearte como anfitrión (sección 12.6.2), y respondes
-    por los daños que causes (sección 12.6.5). Ante los jugadores, respondemos nosotros por esa
-    partida y por sus datos (sección 16.3).
+    por los daños que causes, ante los jugadores y ante nosotros. Si tenemos que pagar algo por tu
+    culpa, nos lo devuelves (sección 16.4). Que sigamos siendo los responsables de sus datos ante
+    los jugadores (sección 16.3) no te libera de eso.
 13. **Ley y tribunales:** valen la ley y los tribunales de la sección 19 y, si alojas como
     actividad profesional y no como consumidor, los tribunales de la sección 12.6.6.

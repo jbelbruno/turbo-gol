@@ -22,8 +22,9 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 - **Whoever operates a community server, the project or not, sees your name, your account's
   identifier, your team, your controls and your IP address.** Until the opening of the network
   (Terms 12.1.2) those servers are only the project's own; from that day, they may also belong to
-  other people, who work on our behalf. If you do not want to play on them, turn on "Project
-  servers only" in Settings > Gameplay (section 4.4).
+  other people, who process your data only on our behalf. If you do not want to play on them, turn
+  on "Project servers only" in Settings > Gameplay, in each browser or TV you play on
+  (section 4.4).
 - **We measure visits with Cloudflare Web Analytics,** which, according to Cloudflare, uses no
   cookies. We ask Cloudflare to leave out visitors from the European Union (section 9.4).
 - **Your data is stored outside Argentina:** at Cloudflare (including the United States), on the
@@ -83,7 +84,7 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 | **You connect a TV with your phone** | The TV's code. The TV's approximate country, city, network and internet provider name. The TV's IP address (for IPv6, only the network prefix), while the code is valid. Your phone's IP is only compared with the TV's; if you enter the wrong code, it is kept for 15 minutes, to stop failed attempts. All in memory | Let your phone show you which TV you are about to connect and whether it is on your same network, so nobody tricks you with someone else's code. Stop failed attempts |
 | **You change your options** | Your experimental physics presets (with their names), your training records, the experimental features switch, your car, "Hide my name in public replays" and "News by email" | So your options follow you to any device |
 | **You host a community server** | See section 4.4 | Run the server network |
-| **You report a community server** | From the opening, when a match on a community server that is not the project's ends: the server, its host, the match, the reason you pick, your ping, how many times the game had to correct your car's position and your account's identifier. One report per match. The team sees it, not the host. It is kept for 30 days, and deleted sooner if you delete your account | Review the servers that fail the players. A single report never sanctions a host (Terms 12.6.2) |
+| **You report a community server** | From the opening, when a match on a community server that is not the project's ends: the server, its host, the match, the reason you pick, your ping, how many times the game had to correct your car's position and your account's identifier. One report per match. The team sees it, not the host. It is kept for 30 days, and deleted sooner if you delete your account | Review the servers that fail the players. A report never sanctions a host on its own (Terms 12.6.2) |
 | **You use the site** | In Cloudflare's technical logs: the address you request, the time, the response and what Cloudflare adds to each request, such as your IP address, your browser and your approximate country and city | Run the service and find bugs |
 | **You open the start screen, start as a guest, connect a TV, create an account, sign in with a password or ask for a new password** | The browser signals read by Cloudflare Turnstile, the anti-bot check: your IP, your browser and connection data. When you open the start screen it runs ahead of time if you have no saved guest session and no account signed in, before you accept the Terms; on a TV also when you open MODES > LOBBIES, and it runs again every 4 minutes while either stays open (section 9.4) | Stop bots |
 | **You open a page** | Cloudflare Web Analytics, which is active on our site and counts visits: the page, the site you come from, your browser, your system, the device type, your approximate country and how long it takes to load. We chose the Cloudflare option that leaves out the data of visitors from the European Union, but we cannot guarantee whom it leaves out. Cloudflare also receives network error reports (section 9.4) | Measure visits and speed. Find network failures |
@@ -209,7 +210,9 @@ account the team gives an item to, takes an item from, looks up the points of or
 redemptions of, the identifier of a host's account that was deleted, match identifiers and the
 reason the team writes when it takes down a replay, voids a match, changes something about a
 server (for example, when it blocks or retires it) or gives, takes or reactivates something on an
-account. That reason may name a player. If, when a match on a community server ends, something
+account. That reason may name a player, except the one written when the team changes a server's
+status, retires it or blocks a host: the host also sees that reason, so it never names or
+identifies a player. If, when a match on a community server ends, something
 about it cannot be recorded (for example, its result or its host's points), the alert also carries
 the account identifiers of its players or that of its host's account. From the opening (Terms
 12.1.2), it also gets a line for each new server of a host that is not the project (its host, its
@@ -285,9 +288,11 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
   that one cannot take it, to the one in São Paulo; and it waits until one of them has room (Terms
   7.6). Lobby matches do not go through them.
 - **Project servers only.** From the opening, if you do not want to play on another person's
-  server, turn on "Project servers only" in Settings > Gameplay: your matches go to a project
-  server or to a Cloudflare one, never to a community server that is not the project's (in an
-  emergency, they wait for a project server). If one player in the match turns it on, it applies
+  server, turn on "Project servers only" in Settings > Gameplay: the matches you search for from that
+  browser or that TV go to a project server or to a Cloudflare one, never to a community server
+  that is not the project's (in an emergency, they wait for a project server). The option is kept
+  only in that browser or on that TV, not in your account (section 9.2): turn it on in each one you
+  play on. If one player in the match turns it on, it applies
   to the whole match. MATCH FOUND and the FINAL tell you when a match is played on a community
   server that is not the project's.
 - **Verification, also in another country.** Each COMPETITIVE match on a community server is
@@ -303,15 +308,20 @@ Cloudflare's list of providers is at <https://www.cloudflare.com/gdpr/subprocess
 - **Whoever operates a community server sees** your name, your player identifier (your account's
   identifier, the same in all your matches), your team, your controls, what happens in the match
   and your IP address. Until the opening, that is only the project. From that day, also a host that
-  is not the project, who processes that data only on our behalf, to host the match: section 12
-  and Annex B of the Terms forbid them to keep or use it for anything else, and we answer to you
-  for that match and for your data as if we hosted it ourselves (Terms 16.3). Their server may be
-  in any country (section 5).
+  is not the project, who processes that data only on our behalf, to host the match. Section 12
+  and Annex B of the Terms forbid them to use it for anything else and to keep it after the match,
+  except their machine's technical logs that contain IP addresses: 7 days at most, unless a law
+  requires them to keep them longer (section 6). We are still the controller of your data and we
+  answer to you under the law, and the host is also liable to you if they break those rules
+  (Terms 16.3). Their server is usually on a machine they rent from a hosting provider: that
+  provider has technical access to the machine, but the host may not give it your data for
+  anything else (Terms, Annex B, point 6). The server registers from a country of the continent of
+  the match's region (in an emergency, of South America), according to Cloudflare (section 5).
 - **About hosts** we keep their username, each server's data (name, region, public address, which
   is a DNS name, capacity, version, machine data, the continent its registration came from,
   according to Cloudflare, how many matches it verified, lost, failed or refused and the last
-  reason the team wrote when it changed its status, which its host also sees, or when it retired
-  it), the IP addresses their servers connect from (30 days), a history of their servers and of
+  reason the team wrote when it changed its status or retired it, which its host also sees and
+  which therefore never names or identifies a player), the IP addresses their servers connect from (30 days), a history of their servers and of
   their matches (30 days, section 6), their points, the registration codes they asked for (only a
   hash) and how many they asked for each day. About a host that is not the project we also keep
   that they accepted the rules for hosts and Annex B and declared they are 18 or older, with the
@@ -386,7 +396,7 @@ We give data to an authority only when the law requires us to, with a formal req
 | **The United States (Discord)** | The team's technical alerts (section 4.1): hosts' usernames, server addresses, account and match identifiers, and the reason the team writes | Alerting the team to failures, to the hosts' servers and to what it does with servers, matches, host accounts and replays |
 | **The United States (Google)** | What you write to us | Reading and answering your requests |
 | **Each player's country** | Your IP, in lobby matches (P2P) | The direct connection |
-| **The country of each community server that is not the project's** | From the opening (Terms 12.1.2), when you play on one of them: your name, your player identifier, your team, your controls, your IP and the match. It may be any country | Playing the match |
+| **The country of each community server that is not the project's** | From the opening (Terms 12.1.2), when you play on one of them: your name, your player identifier, your team, your controls, your IP and the match. It is the country where that server is. When it registers, it has to be, according to Cloudflare, on the continent of the match's region (in an emergency, in South America) | Playing the match |
 
 **For Argentina:** the United States, Brazil, Malaysia, South Africa and Australia are not on the
 AAIP's list of countries with adequate protection (Disposición DNPDP 60-E/2016 [Provision 60-E/2016
@@ -395,10 +405,12 @@ Resolution 34/2019]). That is
 why we ask for your express consent for your data to be stored and processed in the countries in
 this table: the notice above the button you accept the Terms with says so, and pressing that
 button gives it (Decreto 1558/2001, art. 12). From the opening, a community server that is not the
-project's may be in any country, also in one that is not on that list: the notice also names the
-country of each community server you play on, and its host accepts Annex B of the Terms, which
-binds them to process your data only on our behalf. If you do not want your data to reach those
-servers, turn on "Project servers only" (section 4.4). Without that consent you cannot play
+project's registers from a country of the continent of the match's region, according to Cloudflare
+(in an emergency, of South America). That country may not be on that list: that is why the
+notice's consent also covers "the country of each community server you play on". Its host accepts
+Annex B of the Terms, which binds them to process your data only on our behalf. If you do not want
+your data to reach those servers, turn on "Project servers only" (section 4.4) in each browser or
+TV you play on. Without that consent you cannot play
 online, because the game runs on those servers; you can still train and play against the computer
 offline. In addition, Cloudflare's data processing agreement governs what Cloudflare processes for
 us.
@@ -408,9 +420,11 @@ European Commission (Decision 2003/490/EC), which the United Kingdom keeps. Clou
 EU-U.S. Data Privacy Framework and its agreement includes standard contractual clauses. Brazil has
 had EU adequacy since January 2026. Germany is a member state of the European Union. Malaysia,
 South Africa and Australia have no adequacy decision of the European Commission. From the opening,
-a community server that is not the project's may be in a country without that decision: its host
-accepts Annex B of the Terms, with the duties of someone who processes data on another's behalf,
-also outside Argentina. You can ask us for a copy of these safeguards at
+a community server that is not the project's may be in a country without that decision, which may
+not protect your data as the European Union or the United Kingdom does. Its host accepts Annex B
+of the Terms, which binds them to process your data only on our behalf. Your data reaches one of
+those servers only when you play on it. If you do not want that, turn on "Project servers only"
+(section 4.4). You can ask us for a copy of Cloudflare's safeguards at
 <mailto:privacy@turbo-gol.com>.
 
 **For Brazil:** the transfers rest on their being necessary for the contract (LGPD,
@@ -464,7 +478,7 @@ art. 33 IX).
 |---|---|
 | Server points of each match (with each player's time) | 30 days. Without the players' data, they also stay in the host's account while it exists. They are kept only when the host is not the project. The notes against repeated matches to farm points, 24 hours |
 | The record of how many points each host earned (if the account is deleted, they can no longer be used) | No time limit, also after the account is deleted. Until the opening (Terms 12.1.2), only the project has servers |
-| Each community server's entry (with its host's username, the continent its registration came from, the matches it refused and the last reason the team wrote when it changed its status or retired it, which may name a player) | No time limit, also after the account is deleted (the server stays blocked) or after it is retired. A blocked or retired server leaves the public list |
+| Each community server's entry (with its host's username, the continent its registration came from, the matches it refused and the last reason the team wrote when it changed its status or retired it, which never names or identifies a player) | No time limit, also after the account is deleted (the server stays blocked) or after it is retired. A blocked or retired server leaves the public list |
 | A host's acceptance: the rules for hosts and Annex B, with their declaration that they are 18 or older, the version and the date | While the account exists. When it is deleted, the minimal proof remains (see "Deletion") |
 | A host's status: whether they are blocked, the reason, who decided it and when | No time limit, like their servers' entries. When the account is deleted, it no longer carries the account's identifier |
 | Whether a host chose to show their username in the server list | Until they change it, while the account exists. It is deleted with the account, and from then on they show as "Anfitrión" and a number |
@@ -481,9 +495,10 @@ art. 33 IX).
 |---|---|
 | Cloudflare's technical logs | 7 days |
 | Cloudflare's email sending log (to whom, when and whether it arrived) | Up to 30 days, also after the account is deleted |
-| Logs of the São Paulo machine (they may contain IP addresses) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
-| Logs of the machines in Germany and Malaysia, at Hostinger (they may contain IP addresses) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
-| Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses) | 7 days. Those machines have no backups |
+| Logs of the São Paulo machine (they may contain IP addresses and, sometimes, a player's name and account identifier) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
+| Logs of the machines in Germany and Malaysia, at Hostinger (they may contain IP addresses and, sometimes, a player's name and account identifier) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
+| Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses and, sometimes, a player's name and account identifier) | 7 days. Those machines have no backups |
+| Technical logs of the machine of a community server that is not the project's (they may contain IP addresses and, sometimes, a player's name and account identifier) | 7 days at most, unless a law requires its host to keep them longer. Its host keeps them, on our behalf (Terms 12.3.2 and Annex B, point 9) |
 | Turnstile signals that Cloudflare uses on its own account | Set by Cloudflare. Its addendum gives no period |
 | Network error reports and Cloudflare Web Analytics | Set by Cloudflare |
 | Technical alerts to the team on Discord (also those about the community servers that are not the project's, in their separate channel) | 1 year, to investigate failures and abuse |
@@ -498,7 +513,7 @@ art. 33 IX).
 | An account deletion request | 14 days. Then the account is deleted, in the next automatic deletion (it runs once a day) |
 | Sanction marks | Until the sanction ends, 1 year at most (section 12.4) |
 | The identifier of a deleted account | No time limit: only the random number and the date, with no name or email, so it is not given out again |
-| Minimal proof of what you accepted and withdrew (what it was: news, the Terms or the rules for hosts; the version, whether it was a yes or a no, and the date; with no name, no email and nothing on where it came from) | 2 years from the account's deletion, linked only to the deleted account's identifier |
+| Minimal proof of what you accepted and withdrew (what it was: news, the Terms or the rules for hosts; the version, whether it was a yes or a no, and the date; with no name, no email and nothing on where it came from) | 2 years from the account's deletion (3 years, if it was the rules for hosts), linked only to the deleted account's identifier |
 | The replay seats, the stars and the server point records of your matches (with your account's identifier, never your name) | 30 days from the match, also after the account is deleted |
 | Your browser's storage | Until you clear it. The tab's, until you close it (section 9) |
 
@@ -566,7 +581,8 @@ The game takes these decisions on its own, without a person:
   missing a requirement (Terms 12.2); a server's registration is refused if its region does not
   match the continent it comes from, according to Cloudflare; a server that is not the project's
   and refuses with no reason too many of the latest matches we assign it is taken out of placement
-  for 1 hour; a bots match with a single player, and what goes over the daily cap of server points,
+  for 1 hour; one that loses several matches in a few days is suspended for a while and, if it
+  happens again, goes back on probation; a bots match with a single player, and what goes over the daily cap of server points,
   give no points (Terms, Annex A).
   Blocking a host, on the other hand, is decided by a person on the team.
 - **Sanction marks:** if an account uses an email or a Discord or Google account with a sanction
@@ -629,7 +645,8 @@ You can complain to the authority of your country:
   purchases, random reward boxes or chat.
 - **Tip:** if you are a minor, use a name that is not your real name, turn on "Hide my name in
   public replays" (PROFILE > PRIVACY) and, if you do not want to show your IP, do not play in
-  lobbies with people you do not know.
+  lobbies with people you do not know and, from the opening, turn on "Project servers only" in
+  Settings > Gameplay.
 
 > **If you are between 13 and 17, what matters:**
 > - We use your email, your username, your IP address, the approximate country and city of your
@@ -638,8 +655,12 @@ You can complain to the authority of your country:
 > - Your name shows on the leaderboard if you are in the top 100, and today it cannot be hidden.
 >   In the replays of matches on community servers it also shows, unless you hide it in
 >   PROFILE > PRIVACY.
-> - In a lobby, other players can see your IP. If you do not want that, play CASUAL (with an
->   account), against the AI or train.
+> - In a lobby, other players can see your IP: if you do not want that, do not play in lobbies
+>   with people you do not know. In CASUAL the other players do not see it, but from the opening of
+>   the network (Terms 12.1.2) the match may be played on the server of a host who is not the
+>   project, and that person does see it. If you do not want that, turn on "Project servers only"
+>   in Settings > Gameplay, in each browser or TV you play on. You can also play against the AI or
+>   train.
 > - You can ask us to delete everything. Ask an adult for help if you need it.
 
 ---
@@ -708,9 +729,9 @@ None of ours can be read by the page's code: they only travel to our server.
   page's address, the site you come from, your browser, your system, the device type and your
   approximate country. Cloudflare operates it on our site and it is active. Cloudflare says it does
   not use cookies or your browser's local storage. We set up the site on Cloudflare with the option
-  that leaves out the data of visitors from the European Union. We have not tested it from an
-  address in the European Union, and Cloudflare does not say which countries it counts as the
-  European Union: we cannot guarantee whom it leaves out.
+  that leaves out the data of visitors from the European Union. Cloudflare does not say
+  which countries it counts as the European Union, so we cannot guarantee whom it leaves out. If it
+  measures you anyway, the basis is legitimate interest (section 3).
 - **Network error reports:** Cloudflare adds to turbo-gol.com's responses a header
   (*Network Error Logging*) that asks your browser to store a rule to tell Cloudflare when a
   request to turbo-gol.com fails (the address and the type of error). Cloudflare receives those
@@ -739,7 +760,7 @@ signed out and go back to the default options.
 - **Our emails have no images,** tracking pixels or tracked links.
 - **Technical logs never keep your password** or the body of what you send to the server (what you
   type in forms). Our own log lines carry no IP, email or password. A few carry data about an
-  account: the username of a host; the username and the identifier of a team account; the
+  account: the username and the account identifier of a host; the username and the identifier of a team account; the
   identifier of an account the team gives something to, takes something from or reactivates
   something on, or whose points it looks up; those of the accounts of the players or the host of a
   match of which something could not be recorded (section 4.1); the reason the team writes, which
@@ -754,8 +775,9 @@ signed out and go back to the default options.
   channel and in our logs, with the username, the account identifier, the method and the country,
   never the IP or the email.
 
-No system is perfect. **If something happens that may affect you, we tell you** and we report it to
-the authority when the law requires it. If you find a security flaw, write to us at
+No system is perfect. **If we learn of a security incident that affects your data and may harm you,
+also on a host's server, we tell you:** by your account's email, if we have it, or with a public
+notice on our Discord server. And we report it to the authority when the law requires it. If you find a security flaw, write to us at
 <mailto:privacy@turbo-gol.com>. If you have a GitHub account, you can also use the repository's private
 security advisory (<https://github.com/DonJaimeHash/turbo-gol/security>).
 
@@ -782,7 +804,7 @@ security advisory (<https://github.com/DonJaimeHash/turbo-gol/security>).
   account, that record is deleted, except for a minimal proof:** what it was (news, the Terms or
   the rules for hosts), the version, whether it was an opt-in or an opt-out and the date, next to the random
   number of the deleted account, without your name, your email or where it came from. That proof
-  is kept for 2 years from the deletion.
+  is kept for 2 years from the deletion (3 years, if it was the rules for hosts).
 - **Your account's emails are not news.** Codes, links and security notices reach you even if you
   do not ask for news. They carry no advertising.
 
@@ -836,7 +858,8 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
   for hosts, with your declaration that you are 18 or older) and each news permission you gave or
   withdrew, we keep what it was, the version, whether it was a yes or a no and the date,
   linked only to the deleted account's identifier: without your name, without your email and
-  without where it came from. It is kept for 2 years from the deletion and serves to prove what you
+  without where it came from. It is kept for 2 years from the deletion (3 years, if it was the rules
+  for hosts) and serves to prove what you
   asked for.
 - **Copies that expire on their own:**
   - the replays of your matches: the public sees them with your name hidden, but our internal copy
@@ -849,12 +872,10 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
     team wrote if it voided it, which may name you);
   - the team's alert lines that carry your account's identifier or a reason that names you (up to
     30 days in the internal history and 1 year on Discord, section 6);
-  - Cloudflare's technical logs (7 days) and those of the machines of the project's servers
-    (section 6);
+  - Cloudflare's technical logs (7 days), those of the machines of the project's servers and
+    those of the machines of the community servers that are not the project's (section 6);
   - the email sending log (up to 30 days);
   - Cloudflare's backups (up to 30 days).
-- **A reason that names you in a server's entry** (the last one the team wrote when it changed its
-  status or retired it): it stays with no time limit, like the entry (section 6).
 - **If you were a host:** until the opening (Terms 12.1.2) only the project has servers, so this
   does not affect any player before that day. From then on: the record of how many points your
   servers earned (which you can no longer use), your status as a host (without your account's

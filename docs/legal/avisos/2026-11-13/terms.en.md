@@ -20,7 +20,7 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 - From the opening of the network (section 12.1.2), a CASUAL match may be played on the server of
   a host that is not the project, who sees your name, your account's identifier, your team, your
   controls and your IP address. If you do not want that, turn on "Project servers only" in
-  Settings > Gameplay (section 7.6).
+  Settings > Gameplay, in each browser or TV you play on (section 7.6).
 - Your username is shown on the leaderboard (today you cannot hide it there) and, for 30 days, in
   the public replays of COMPETITIVE and CASUAL matches on community servers (there you can hide
   it).
@@ -58,8 +58,8 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 5. The **Privacy Policy** explains what data we use, what for, and what rights you have. **It is
    not a clause you accept: it is information we give you.** Accepting these terms is not giving
    your consent to anything that the Policy says needs a separate consent, such as news by email.
-   You give your consent to your data being kept outside Argentina separately, with the same
-   button, because the notice above it says so (Privacy Policy, section 5).
+   Your consent to your data being kept outside Argentina is not part of these terms: you give it
+   with the same button, because the notice above it says so expressly (Privacy Policy, section 5).
    The Terms and the Policy share one version: if either of them changes, the game shows you the
    links to both texts and asks you to accept the Terms (section 18.3).
 
@@ -83,8 +83,7 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 5. If you do not agree, do not use Turbogol.
 6. If you are under 18, read section 3.
 7. **If you want to be a host** of a community server, you also accept section 12 and Annex B with
-   the button that asks for the code to register it, or with the one that asks you to accept them
-   again in MY SERVERS (section 12.2).
+   the button that asks for the code to register it (section 12.2).
 
 ## 3. Age
 
@@ -204,7 +203,9 @@ cannot:**
    the public IP address of the others. From an IP it is possible to tell, roughly, which city you
    are in and who your internet provider is. It is the same whether you create the lobby or join
    someone else's. **If you do not want other players to see your IP, do not play in lobbies, or
-   play only with people you know.** CASUAL and COMPETITIVE are never P2P.
+   play only with people you know.** CASUAL and COMPETITIVE are never P2P. But from the
+   opening (section 12.1.2), a CASUAL match may be played on the server of a host who is not the
+   project, who receives your IP and may play in it (section 7.6).
 3. **COMPETITIVE** is always played on a server, with the game's official physics. It needs an
    account. We search your region first and, after 2 minutes, every region. The result changes
    your rating. The top 100 of each mode, with at least 5 matches in the season, are shown with
@@ -245,8 +246,10 @@ cannot:**
    (or, if those servers are not available either, you cannot search for a match).
 
    **Project servers only.** From the opening, if you turn on "Project servers only" in Settings >
-   Gameplay, your matches never go to a community server that is not the project's: they go to a
-   project server or to a Cloudflare one (in the emergency above, they wait for a project server).
+   Gameplay, the matches you search for from that browser or that TV never go to a community server
+   that is not the project's: they go to a project server or to a Cloudflare one (in the emergency
+   above, they wait for a project server). The option is kept only in that browser or on that TV,
+   not in your account: turn it on in each one you play on, and again if you clear the site's data.
    If one player in the match turns it on, it applies to the whole match. MATCH FOUND and the FINAL
    tell you when the match is played on a community server that is not the project's.
 
@@ -283,15 +286,18 @@ cannot:**
 
    The game also applies the blocks of section 8 on its own; a match on a community server that
    fails verification gives no points, and a server that is not the project's and refuses with no
-   reason too many of the latest matches we assign it is taken out of placement for 1 hour
-   (section 12.6).
+   reason too many of the latest matches we assign it is taken out of placement for 1 hour, and
+   one that loses several matches in a few days is suspended for a while (section 12.6).
 2. **We tell you the reason.** You see the automatic COMPETITIVE blocks in the game, with the time
    left; the game always says "For leaving matches", including when the block comes from a sanction mark
-   (section 9.4). We explain the other sanctions to you by email, if your account has a confirmed
-   email, unless telling you puts other players or the service at risk.
-3. **You can ask for a review** by writing to <mailto:privacy@turbo-gol.com> or through our Discord
-   server, within 30 calendar days from when you learn of the sanction (from the notice, from the
-   game or because you cannot play). A person reviews it and answers you within 15 calendar days.
+   (section 9.4). The automatic measures on a community server (its
+   suspension for a failed verification or for lost matches, and its being taken out of placement
+   for 1 hour) are shown to you in MY SERVERS. We explain the other sanctions to you by email, if
+   your account has a confirmed email, unless telling you puts other players or the service at risk.
+3. **You can ask for a review** by writing to <mailto:privacy@turbo-gol.com>, within 30 calendar
+   days from when you learn of the sanction (from the notice, from the game or because you cannot
+   play). A person reviews it and answers you within 15 calendar days. If the case needs more time,
+   we tell you within that period and answer you within 30 calendar days at most.
    **Asking for it is optional and free, and it does not stop you from bringing a complaint at any
    time** to the consumer protection authority, the data protection authority or the courts.
 4. **If you delete your account while a sanction is active,** we keep a fingerprint, made with a
@@ -337,11 +343,13 @@ cannot:**
    traded.
 5. **There are no reward boxes or random prizes.** Each item has a fixed price in points.
 6. **While you have your account, your points do not expire.** If we remove an item from the
-   catalog, whoever already has it keeps it.
+   catalog, whoever already has it keeps it, unless we have to remove it because of a law, an order
+   from an authority or a well-founded claim by someone else about their rights.
 7. **We may change** the catalog, the prices and the rules for earning points only for a concrete
-   reason: security, a cheat or an abuse, costs or the game's balance. If a change takes away
+   reason: security, a cheat or an abuse, costs, the game's balance, a law, an order from an
+   authority or a well-founded claim by someone else about their rights. If a change takes away
    something you already have, we tell you at least 30 days ahead, with a notice like the one in
-   section 18.2, unless it fixes a bug or a cheat.
+   section 18.2, with the same exceptions as section 15.2.
 8. **You lose your points and items** if you delete your account, if we close it for breaking these
    terms or if Turbogol stops running. Since they are worth no money, there is no refund. Of the
    server points, what remains, which you cannot use, is the record of the total your servers
@@ -358,11 +366,15 @@ cannot:**
    (section 7.4). Today the program installs only on a Linux machine with a DNS name (section
    12.4.2), for example a rented server (a VPS); WebRTC connections, which would allow hosting
    without a DNS name or open ports (for example, from a computer at home), are not available yet.
-2. **The opening.** Until the opening of the network, only the project has servers: those in
-   section 7.6. Nobody else can register one, and the rules in this section do not apply to anyone
-   outside the project. We announce the opening on our Discord server, separately from the notice
-   of these terms, and these rules apply from that day. We may open it first to invited people: for
-   everyone else, the network stays closed until we open it to all. The opening has no set date.
+2. **The opening.** The opening of the network is the day we let the first person who is not
+   the project ask for the code to register a server, even a person we invited. Until that day,
+   only the project has servers: those in section 7.6. Nobody else can register one, and the rules
+   in this section do not apply to anyone outside the project. We announce the opening on our
+   Discord server, separately from the notice of these terms, on that same day at the latest. From
+   that day, these rules apply to every host and every player, and any player's CASUAL match may be
+   played on the server of a host who is not the project, except with "Project servers only"
+   (section 7.6). We may open it first only to people we invite: meanwhile, everyone else cannot
+   register a server yet. The opening has no set date.
 3. The project's servers earn no points. That is why, until the opening, nobody can earn points
    (section 11.1). From that day, the host of a server that is not the project's earns them
    (section 12.5).
@@ -384,33 +396,41 @@ day, to be a host you need:
    asks for the code. We do not check your age: you declare it yourself.
 
 We keep that you accepted this section and Annex B and declared you are 18 or older, with the
-version and the date. If these terms change version, we ask you in MY SERVERS to accept this
-section and Annex B again and to declare again that you are 18 or older: until you do, you cannot
-ask for another code and your servers get no new matches.
+version and the date. If these terms change version, to ask for another code you must accept this
+section and Annex B again and declare again that you are 18 or older. Until you do, we may stop
+sending matches to your servers, and the Annex B you already accepted still applies.
 
 ### 12.3 What you commit to
 
 1. **Use only the official, signed program** to connect to the Turbogol network, and keep it up to
    date. The AGPL-3.0 license lets you change the code, but do not connect a modified server to our
-   network.
+   network. The program updates itself: it downloads each new signed version from turbo-gol.com and
+   switches to it when its matches end, without asking you. To install it you need root access, and
+   the installer also changes your machine: it adds the Node.js and Caddy (a web server)
+   repositories, installs them, creates a user, writes Caddy's configuration and, if the ufw
+   firewall is active, opens ports 80 and 443. The full list is at the start of the installer, in
+   English: read it before you use it. If you do not want those changes, do not install it on that
+   machine.
 2. **Look after the players' data.** Your server receives each player's name, player identifier
-   (their account's identifier), team, controls and IP address. With that data you work on our
+   (their account's identifier), team, controls and IP address. You process that data only on our
    behalf:
    - use it only to host the matches we assign you, as the official program does;
    - do not keep it after the match, do not copy it, do not publish it and do not give it to anyone.
      The only exception is your system's technical logs that contain IP addresses: you may keep
      them for 7 days at most, unless the law requires you to keep them longer;
    - keep it confidential, and ask the same of anyone who has access to your machine;
-   - do not hand this work over to another person (you may use the machine you rent from a hosting
+   - do not hand this processing or that data over to another person (you may use the machine you rent from a hosting
      provider: Annex B, point 6);
    - tell us at <mailto:privacy@turbo-gol.com> within 48 hours if someone gets into your machine or
      data is lost, and help us answer the players;
    - when you stop being a host, delete everything that is left about the players;
    - if we ask you, tell us what you did with that data.
 
-   The official program does not write names or IP addresses in its own logs. If your machine
-   stores them some other way (the system, the firewall or an intermediate server), those logs fall
-   under these rules.
+   The official program does not write names or IP addresses in its own logs. Other programs on
+   your machine may still keep them: the system, the firewall or the web server the official
+   installer adds (Caddy), which, for example when the program does not answer, may keep a player's
+   IP address and the data of their connection, which may include their name and account
+   identifier. Those logs fall under these rules: have them deleted after 7 days at most.
 
    Annex B, at the end of these terms, sets out these duties as the clauses of someone who
    processes data on another's behalf, also for a server outside Argentina. You accept it together
@@ -421,7 +441,8 @@ ask for another code and your servers get no new matches.
    play in.
 4. **Look after your machine:** keep it secure and up to date, and keep your server's key secret.
 5. **Follow your internet provider's rules and your country's laws.** You pay for the electricity,
-   the connection and the rented server.
+   the connection and the rented server. Your server's traffic cap is a help, not a guarantee: what
+   your provider charges you, you also pay.
 
 ### 12.4 What is public and what we keep about you
 
@@ -439,7 +460,8 @@ ask for another code and your servers get no new matches.
    "sa-node-3"). The name you choose cannot be that of another server in its region (ignoring
    upper and lower case) or that of a project server.
 2. **Your server's address is a DNS name,** with secure connections (wss) on port 443: never an IP
-   or a name under turbo-gol.com. The players who connect see the IP that name points to. The
+   or a name under turbo-gol.com. The players who connect see that name and the IP it points to.
+   If you do not want to be recognized, do not put your name in it or in your server's name. The
    region you choose for your server must match the continent its registration comes from,
    according to Cloudflare: if it does not match, the registration is refused.
 3. **We keep:** each server's data (including the machine's data, the continent it registered
@@ -454,7 +476,7 @@ ask for another code and your servers get no new matches.
 ### 12.5 Points
 
 1. One point for each minute a real player played on your server, in verified matches, with factors
-   for region, quality and repetition. The exact rules are in Annex A, at the end of these terms.
+   for region, quality and repetition. The rules are in Annex A, at the end of these terms.
 2. For now, a server that is not the project's gets only CASUAL matches (section 8.4). When it is
    new it is on probation, and all its matches are verified until it reaches 20 verified matches.
    After that, a random share of its matches is picked to be verified (today, one in five): only
@@ -473,20 +495,30 @@ ask for another code and your servers get no new matches.
    **If your server refuses with no reason too many of the latest matches we assign it** (it is
    connected and, according to our system, has room, is not draining and is not over its traffic
    cap), the system takes it out of placement for 1 hour. The system decides this on its own too.
+
+   **If your server loses several matches in a few days** (for example, because it shuts down or
+   drops in the middle of a match), the system suspends it for a while and, if it happens again,
+   puts it back on probation. The system decides this on its own too. MY SERVERS shows you your
+   strikes.
 2. **We may suspend or block a server of yours, or block you as a host,** if you break these rules
    or if you put players at risk. Blocking a host is decided by a person on the team and applies to
    all their servers: they stop connecting to the network, the host cannot ask for new codes and
    their redemptions are paused. We tell you the reason and you can ask for a review (section 9).
 
-   Players can report a community server that is not the project's when a match on it ends. A
-   single report is never enough to sanction you, because it may be false: several reports from
-   different accounts about the same server are a signal for a person to review it.
+   Players can report a community server that is not the project's when a match on it ends. No
+   report sanctions you on its own, because it may be false. A person on the team may review a
+   server because of one report, several or other information and, if they find that you broke
+   these rules, we may take the measures in this point.
 3. **You can stop being a host whenever you want:** shut down and uninstall the program, or retire
    your server in MY SERVERS. Your server stays in the public list, offline, until you retire it or
    we retire, suspend or block it. If you delete your account, your servers are blocked as soon as
    it is deleted (14 days after you ask, or sooner if you ask us) and leave the public list; your
    points may stay in the hosts' table for up to 30 days, always as "Anfitrión" and a number.
-4. **You are not our employee or our supplier.** We do not pay you: there are only server points.
+4. **You are not our employee.** Hosting is your decision: you choose whether you host, when, with
+   which machine and for how long, at your own cost, and you can stop whenever you want
+   (section 12.6.3). We do not pay you and there is no price: server points are not a payment and
+   have no money value (section 11.2). For the players' data, and only for it, you are the
+   processor (Annex B).
 5. **You are responsible for your machine** and for what happens if you do not follow these rules.
    Hosting a server is your decision: the costs and risks of your machine, your connection, your
    provider and the other programs you use are yours. Use a machine without important data, or keep
@@ -546,8 +578,11 @@ ask for another code and your servers get no new matches.
    always available (section 16).
 2. **We may change the game** (add or remove features, or switch a part off for a while) for
    security, because of a law, for costs or to improve it. If a change takes away something you
-   already have, we tell you at least 30 days ahead, with a notice like the one in section 18.2,
-   unless it fixes a bug or a cheat.
+   already have, we tell you at least 30 days ahead, with a notice like the one in section 18.2. We
+   do not wait those 30 days if the change fixes a bug or a cheat, or if it cannot wait because of
+   the safety of the players or of their data, a law, an order from an authority or a well-founded
+   claim by someone else about their rights (for example, if we have to pause the community servers
+   that are not the project's). Then we tell you as soon as we can and we tell you the reason.
 3. **If we close Turbogol,** we tell you at least 30 days ahead, with a notice like the one in
    section 18.2, except in case of force majeure or an order from an authority. The data is handled as the Privacy Policy
    says (section 13). The code stays available under its license.
@@ -578,10 +613,12 @@ ask for another code and your servers get no new matches.
      on them, such as the bot on our Discord server, is still ours (Privacy Policy, section 4.2).
 2. Points and items have no money value (section 11), and neither do the rating or the stats.
 3. Each player and each host is responsible for what they do. If someone breaks these rules, tell
-   us and we act. For what others write or post on Turbogol, we are liable only if, after being
-   told about something clearly illegal, we do not remove it in time. **When a host hosts a match
-   we assigned to them, we answer to you for that match and for your data as if we hosted it
-   ourselves, as this section says.**
+   us: we may take the measures of section 9. For what others write or post on Turbogol, we are
+   liable only if, after being told about something clearly illegal, we do not remove it in time.
+   **When a host hosts a match we assigned to them, we are still the controller of your data and
+   we answer to you under the law and this section. If a host uses your data for something we did
+   not ask of them, or does not comply with section 12 or Annex B, the host also answers for it,
+   to you and to us.**
 4. **You are liable, under the law, for the damage you cause by breaking these terms or the law,**
    to other players and to us. If someone else makes a claim against us for something you did, you
    answer to us for what we have to pay because of your fault.
@@ -589,10 +626,9 @@ ask for another code and your servers get no new matches.
    We are always liable for damage that we, or the people we are answerable for, cause
    intentionally or through gross negligence, and for harm to your life, body or health. The rights
    that consumer protection and personal data laws give you always apply, including those of your
-   country (section 19.1). Nor does this section change what we promise you elsewhere in these
-   terms and in the Privacy Policy, such as the 30-day notices (sections 11.7 and 15) and the 7-day
-   one (section 18.2), that your points do not expire (section 11.6) and the security of your data (Privacy Policy, section
-   10). If part of this section does not apply to you, the rest still does.
+   country (section 19.1). Nor does this section change these commitments: the 30-day notices
+   (sections 11.7 and 15), with their exceptions, the 7-day one (section 18.2) and that your points
+   do not expire (section 11.6). If part of this section does not apply to you, the rest still does.
 
 ## 17. How this ends
 
@@ -657,7 +693,8 @@ match, the Spanish version prevails.
 These are today's values. Section 11.7 says how they can change.
 
 1. **Base:** one point for each minute a real player was in a match on your server. The minutes are
-   counted by the verifier when it simulates the match again, not by your server. Stretches of 10
+   counted by the verifier when it simulates the match again; what your server measures can only
+   lower them. Stretches of 10
    seconds or more in which the player touches no control do not count; that is what happens, for
    example, when they disconnect.
 2. **Those minutes are multiplied by:**
@@ -691,8 +728,7 @@ These are today's values. Section 11.7 says how they can change.
 ## Annex B. Clauses for whoever hosts a community server
 
 This annex applies to each host that is not the project, wherever their server is. You accept it
-together with section 12, with the button that asks for the code to register your server or with
-the one that asks you to accept them again in MY SERVERS (section 12.2). It applies while you are
+together with section 12, with the button that asks for the code to register your server (section 12.2). It applies while you are
 a host and until you delete whatever is left about the players. If this annex and section 12 do
 not say the same, whatever protects the players more applies.
 
@@ -702,21 +738,23 @@ not say the same, whatever protects the players more applies.
 2. **What data and what for.** The name, the player identifier (their account's identifier), the
    team, the controls and the IP address of each player in the matches we assign you. You use them
    for one thing only: hosting those matches, as the official program does.
-3. **Our instructions** are those of section 12.3, those of the official program and those of its
-   guide. If a law of your country requires you to do something else with that data, tell us
+3. **Our instructions** are those of this annex and of section 12.3, and to use the official
+   program as it comes. If another text of the project (a guide, a document in the repository or a
+   game screen) says something else, this annex and section 12.3 prevail. If a law of your country requires you to do something else with that data, tell us
    beforehand, unless that same law forbids it.
 4. **Confidentiality.** Keep that data confidential, and ask the same of anyone who has access to
    your machine.
 5. **Security.** Use only the official, signed program, and keep it up to date. Keep your machine
    secure and up to date, and keep your server's key secret.
-6. **Nobody else.** Do not hand this work or that data over to another person. You may use for your
+6. **Nobody else.** Do not hand this processing or that data over to another person. You may use for your
    server the machine you rent from a hosting provider, without giving it any other access to that
    data.
 7. **Incidents.** If someone gets into your machine or data is lost, tell us at
    <mailto:privacy@turbo-gol.com> within 48 hours, with what you know, and help us answer the
    players and tell them.
-8. **The players' requests.** If a player asks you for something about their data, send us their
-   request at <mailto:privacy@turbo-gol.com> and help us answer them.
+8. **The players' requests.** If a player asks you for something about their data, do not answer it
+   yourself: send us their request at <mailto:privacy@turbo-gol.com> within 48 hours at most, tell
+   them you sent it to us and help us answer them.
 9. **How long you keep it.** Nothing after the match, except your system's technical logs that
    contain IP addresses: 7 days at most, unless the law requires you to keep them longer. When you
    stop being a host, delete everything that is left about the players.
@@ -727,7 +765,8 @@ not say the same, whatever protects the players more applies.
     for less. If an authority asks you for that data, tell us before you hand it over, unless the
     law forbids it, and give only what you are required to give.
 12. **If you do not comply with this annex,** we may block you as a host (section 12.6.2), and you
-    are liable for the damage you cause (section 12.6.5). Towards the players, we answer for that
-    match and for their data (section 16.3).
+    are liable for the damage you cause, to the players and to us. If we have to pay something
+    because of your fault, you pay it back to us (section 16.4). That we are still the controller
+    of their data towards the players (section 16.3) does not release you from that.
 13. **Law and courts:** the law and the courts of section 19 apply and, if you host as a
     professional activity and not as a consumer, the courts of section 12.6.6.
