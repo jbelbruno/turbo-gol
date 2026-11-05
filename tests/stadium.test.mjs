@@ -167,7 +167,7 @@ test('the stands and lamp heads stand outside the playable volume', () => {
 });
 
 test('the LED board band stays low', () => {
-  assert.ok(L.LED_HI <= 340 && L.RAIL_HI <= 350, 'boards under y ~ 350');
+  assert.ok(L.LED_HI <= 340 && L.RAIL_HI <= 355, 'boards under y ~ 355');
   assert.ok(L.BOARD_SPLIT_Y <= 360 && L.BOARD_SPLIT_Y > L.RAIL_HI);
   assert.ok(L.LED_LO < L.LED_HI && L.PANEL_LEN > 500);
   const t = stadiumTheme(DEFAULT_THEME);

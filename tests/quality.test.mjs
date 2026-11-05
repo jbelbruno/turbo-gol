@@ -65,9 +65,18 @@ test('low renders straight to the canvas; high keeps the old quality tier (0)', 
   assert.equal(high.pixelBudget, 6e6);
   // Two 2048 keys on the desktop default (67 MB); ultra keeps the 4096 maps (268 MB).
   assert.equal(high.shadowMapSize, 2048);
-  assert.equal(high.shadowRadius, 3);
+  assert.equal(high.shadowRadius, 7);
   assert.equal(tier('ultra').shadowMapSize, 4096);
-  assert.equal(tier('ultra').shadowRadius, 4);
+  assert.equal(tier('ultra').shadowRadius, 14);
+  // The softer picture (grain, sharpen, no live fog) only on the post tiers; the others pay nothing.
+  for (const q of ['high', 'ultra']) {
+    const s = tier(q);
+    assert.ok(s.grain > 0 && s.sharpen > 0 && s.fogScale === 0, `${q}: soft picture`);
+  }
+  for (const q of ['superlow', 'low']) {
+    const s = tier(q);
+    assert.ok(s.grain === 0 && s.sharpen === 0 && s.fogScale === 1, `${q}: untouched`);
+  }
   assert.equal(high.detail, 'high');
   assert.equal(high.netDetail, true);
   assert.equal(high.particles, 1536);

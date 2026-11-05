@@ -95,6 +95,16 @@ export interface TierSpec {
    */
   readonly shadowMapSize: number;
   readonly shadowRadius: number;
+  /**
+   * Softer, smoother picture on the post tiers (they cost a few texture reads per pixel, so the
+   * cheaper tiers keep 0): film grain amplitude (a hash of the pixel and the clock added to the final
+   * image, it hides the banding of the gradients and the stair steps of far edges), unsharp-mask
+   * amount on the scene colour, and the multiplier of the live stadium fog's density (the baked sky
+   * keeps its own haze).
+   */
+  readonly grain: number;
+  readonly sharpen: number;
+  readonly fogScale: number;
   /** Size of one face of the baked sky + backdrop cube map, and of the PMREM environment. */
   readonly skyCubeSize: number;
   readonly envSize: number;
@@ -194,6 +204,9 @@ export const TIERS: Readonly<Record<Quality, TierSpec>> = {
     shadowedKeys: 0,
     shadowMapSize: 512,
     shadowRadius: 1,
+    grain: 0,
+    sharpen: 0,
+    fogScale: 1,
     skyCubeSize: 64,
     envSize: 32,
     turfRelief: false,
@@ -234,6 +247,9 @@ export const TIERS: Readonly<Record<Quality, TierSpec>> = {
     shadowedKeys: 0,
     shadowMapSize: 2048,
     shadowRadius: 3,
+    grain: 0,
+    sharpen: 0,
+    fogScale: 1,
     skyCubeSize: 512,
     envSize: 128,
     turfRelief: false,
@@ -270,7 +286,10 @@ export const TIERS: Readonly<Record<Quality, TierSpec>> = {
     minResolutionScale: 0.6,
     shadowedKeys: 2,
     shadowMapSize: 2048,
-    shadowRadius: 3,
+    shadowRadius: 7,
+    grain: 0.06,
+    sharpen: 0.4,
+    fogScale: 0,
     skyCubeSize: 1024,
     envSize: 256,
     turfRelief: true,
@@ -307,7 +326,10 @@ export const TIERS: Readonly<Record<Quality, TierSpec>> = {
     minResolutionScale: 0.6,
     shadowedKeys: 2,
     shadowMapSize: 4096,
-    shadowRadius: 4,
+    shadowRadius: 14,
+    grain: 0.06,
+    sharpen: 0.4,
+    fogScale: 0,
     skyCubeSize: 1024,
     envSize: 256,
     turfRelief: true,
