@@ -1301,7 +1301,8 @@ frame closes the socket with 1008.
 ## Online (phase 2: P2P rollback)
 
 Topology: no simulation server. Every human peer runs the same wasm, the same two `BotTeam`s
-(seeded `seed` / `seed + 1000003`, difficulty medium) and the same `Match`; peers exchange only
+(seeded `seed` / `seed + 1000003`, at the room's `botDifficulty`: the lobby host's pick, hard by
+default, every peer the same since protocol 6) and the same `Match`; peers exchange only
 packed inputs over a full WebRTC mesh (`Mesh.ts`), signalled through a hibernating `RoomDO`
 (`RoomClient.ts`). `P2PSession` drives the loop from the wall clock: tick 0 is `start.startAt`
 (server clock, placed locally through the room's ping / pong offset) and each frame simulates

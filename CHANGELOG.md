@@ -505,6 +505,12 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- Casual: the bots that fill the free seats, and the 5:00 match against bots, now play hard (they
+  played normal), on the project's servers and on community nodes alike; the owner can change their
+  level without a deploy (KV `bot_level`, server/README.md). A Competitive match keeps normal bots
+  for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
+  default) and every player's game runs it; the lobby's line shows it, the public list does not. The
+  P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%

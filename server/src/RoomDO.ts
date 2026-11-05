@@ -11,8 +11,9 @@
  *   create    POST /internal/create (matchmaker): roster (slots: peer / bot, names, playerIds, a peer's car), mode,
  *             seed (random uint32), region, createdAt, physics (a custom lobby's experimental rules,
  *             null = standard: checked strictly again, 400 bad_physics; with rules every peer slot
- *             must carry guest: false, else 403 account_required) -> storage; 'unused'
- *             cleanup in 90 s
+ *             must carry guest: false, else 403 account_required), botDifficulty (the lobby
+ *             host's level, every welcome carries it: 400 bad_bots for another value; a record
+ *             without it, of an older build, plays medium) -> storage; 'unused' cleanup in 90 s
  *   upgrade   GET /room/<id> forwarded by the Worker with the verified ticket claims in x-* headers
  *             + the internal header: slot check, a slot already `left` or dropped is refused (403
  *             'left': its lock may have been freed and the player seated elsewhere; a ticket
@@ -104,8 +105,9 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { TURN_ASK_GAP_MS, TURN_MIN_TTL_SECONDS, TURN_PER_SLOT, error, iceServersFor, isMode, json, readJson, revokeTurnCredential, stunOnly, turnConfigured, turnKilled, turnUsernames } from './env';
+import { TURN_ASK_GAP_MS, TURN_MIN_TTL_SECONDS, TURN_PER_SLOT, error, iceServersFor, isBotLevel, isMode, json, readJson, revokeTurnCredential, stunOnly, turnConfigured, turnKilled, turnUsernames } from './env';
 import type { GameModeId } from './env';
+import type { Difficulty } from '../../src/ai/Bot';
 import { INTERNAL_HEADER, checkInternal, internalSecret, randomHex } from './auth';
 import { TICK_RATE, WS_SUBPROTOCOL } from '../../src/net/protocol';
 import { MAX_CARS } from '../../src/sim/types';
@@ -121,7 +123,7 @@ import type { CarId } from '../../src/game/cosmetics';
 import type { P2P_ERROR_RELOAD, P2P_HASH_EVERY, P2P_INPUT_DELAY_DEFAULT, P2P_NO_SHOW_MS, P2P_PROTOCOL_VERSION, P2P_WINDOW_DEFAULT, ROOM_ERROR_PHYSICS_MISMATCH, ROOM_ERROR_SIGNAL_DROPPED, RoomServerMessage, RoomSlot, RoomWelcome, SignalData } from '../../src/net/p2p/protocol';
 
 /** Mirrors protocol.ts P2P_PROTOCOL_VERSION (the welcome's `protocol`; the Worker's queue gate checks the client's against it). */
-export const ROOM_PROTOCOL: typeof P2P_PROTOCOL_VERSION = 5;
+export const ROOM_PROTOCOL: typeof P2P_PROTOCOL_VERSION = 6;
 /** Mirrors protocol.ts P2P_ERROR_RELOAD: the error code of a stale page (another P2P protocol). */
 export const RELOAD_REQUIRED: typeof P2P_ERROR_RELOAD = 'reload_required';
 /** Mirrors protocol.ts P2P_NO_SHOW_MS: a peer slot not connected this long after create is declared left. */
@@ -194,6 +196,8 @@ export interface RoomRecord {
   createdAt: number;
   /** A custom lobby's experimental rules (null = standard; absent in records of older builds). */
   physics?: RulesSnapshot | null;
+  /** The bots' level every peer runs (the lobby host's pick); absent in records of older builds: medium (roomBots). */
+  botDifficulty?: Difficulty;
 }
 
 export interface UnreachableReport {
@@ -292,6 +296,7 @@ interface CreateBody {
   matchLengthSeconds?: unknown;
   createdAt?: unknown;
   physics?: unknown;
+  botDifficulty?: unknown;
 }
 
 // ---- pure decisions (unit-tested in server/test/room.test.mjs) ----------------------------------
@@ -299,6 +304,11 @@ interface CreateBody {
 /** The room's experimental rules (null = standard physics). */
 export function roomPhysics(rec: RoomRecord): RulesSnapshot | null {
   return rec.physics ?? null;
+}
+
+/** The level the room's bots run at on every peer (a record of an older build has none: the medium every room played before). */
+export function roomBots(rec: RoomRecord): Difficulty {
+  return rec.botDifficulty ?? 'medium';
 }
 
 /**
@@ -651,6 +661,8 @@ export class RoomDO extends DurableObject<Env> {
     if (physics === 'bad') return error(400, 'bad_physics', 'invalid experimental rules');
     // ... and signed-in players only: every peer seat must say guest: false (the matchmaker's flag).
     if (physics !== null && guests > 0) return error(403, 'account_required', 'experimental rules are for signed-in players only');
+    // The bots' level every peer runs (the matchmaker always sends the lobby's).
+    if (body.botDifficulty !== undefined && !isBotLevel(body.botDifficulty)) return error(400, 'bad_bots', "botDifficulty must be 'easy' | 'medium' | 'hard'");
     const now = Date.now();
     const rec: RoomRecord = {
       roomId: body.roomId,
@@ -661,6 +673,7 @@ export class RoomDO extends DurableObject<Env> {
       matchLengthSeconds: typeof body.matchLengthSeconds === 'number' && body.matchLengthSeconds >= 0 ? Math.floor(body.matchLengthSeconds) : DEFAULT_MATCH_SECONDS,
       createdAt: typeof body.createdAt === 'number' ? body.createdAt : now,
       physics,
+      ...(body.botDifficulty !== undefined ? { botDifficulty: body.botDifficulty } : {}),
     };
     this.record = rec;
     this.state = freshState();
@@ -738,6 +751,7 @@ export class RoomDO extends DurableObject<Env> {
       region: rec?.region ?? null,
       createdAt: rec?.createdAt ?? null,
       physics: rec ? roomPhysics(rec) : null,
+      botDifficulty: rec ? roomBots(rec) : null,
       slots: rec ? this.roomSlots() : [],
       connected: this.connectedCount(),
       startAt: this.state.startAt,
@@ -866,6 +880,8 @@ export class RoomDO extends DurableObject<Env> {
       now,
       // Every welcome carries the rules (first, late and replacement sockets alike).
       physics: roomPhysics(rec),
+      // ... and the bots' level: every peer builds its BotTeams with it.
+      botDifficulty: roomBots(rec),
     };
     this.send(server, welcome);
     if (st.startAt !== null) {

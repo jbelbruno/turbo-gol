@@ -269,6 +269,33 @@ const A = { slot: 0, team: 0, kind: 'player', name: 'A', playerId: 'pa' };
 const B = { slot: 1, team: 1, kind: 'player', name: 'B', playerId: 'pb' };
 const BOT = { slot: 1, team: 1, kind: 'bot', name: 'Bot 1' };
 
+test("MatchDO /internal/create: the bots' level is stored with the record and drives the host's BotTeams; absent (ranked, an older matchmaker) RoomHost's medium; junk is 400", async () => {
+  const hard = await makeMatch([A, BOT], { botDifficulty: 'hard' });
+  try {
+    assert.equal(hard.storage.map.get('record').botDifficulty, 'hard', 'stored');
+    assert.equal(hard.mdo.host.botDifficulty, 'hard', 'the host runs it');
+    assert.equal(hard.mdo.host.teams.length, 1, 'the red bot');
+    for (const team of hard.mdo.host.teams) assert.equal(team.difficulty, 'hard');
+    assert.equal((await hard.internal('/internal/status')).json.botDifficulty, 'hard');
+  } finally {
+    await hard.shutdown();
+  }
+  const plain = await makeMatch([A, BOT]);
+  try {
+    assert.equal('botDifficulty' in plain.storage.map.get('record'), false, 'no field');
+    assert.equal(plain.mdo.host.botDifficulty, 'medium', "RoomHost's default");
+    assert.equal((await plain.internal('/internal/status')).json.botDifficulty, null);
+  } finally {
+    await plain.shutdown();
+  }
+  for (const bad of ['x', 'Hard', 2, null]) {
+    const mdo = new MatchDO({ storage: new FakeStorage(), blockConcurrencyWhile: (fn) => fn(), waitUntil: () => undefined }, { JWT_SECRET: SECRET });
+    const res = await mdo.fetch(new Request('https://match/internal/create', { method: 'POST', headers: { [INTERNAL_HEADER]: await internalSecret(SECRET), 'content-type': 'application/json' }, body: JSON.stringify({ matchId: MATCH_ID, mode: '1v1', region: 'test', roster: [A, BOT], matchLengthSeconds: 300, botDifficulty: bad }) }));
+    assert.deepEqual([res.status, (await res.json()).error], [400, 'bad_request'], JSON.stringify(bad));
+    assert.equal(mdo.record, null, 'nothing stored');
+  }
+});
+
 test('MatchDO /internal/leave: socket closed 1000 left, slot flagged (rejoin + upgrade 410 left, persisted, status), bots drive the car, the others get botTakeover; idempotent', async () => {
   const h = await makeMatch([A, B]);
   try {

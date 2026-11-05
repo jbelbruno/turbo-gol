@@ -52,7 +52,8 @@ Root causes, roughly in order of impact:
 Goals:
 
 - A **difficulty ladder** where each level is a clear step: easy beatable by a first-time player,
-  medium for casual play (it fills online matches), hard a real opponent, and room for an
+  medium for casual play, hard a real opponent (it fills online matches since 2026-11: KV
+  `bot_level`, server/README.md), and room for an
   "expert" level on top. Measured as an Elo ladder (below).
 - **Visible skills by level:** aerials and aerial saves, saves on the line, power shots aimed away
   from the keeper, passes and centres, rotation in 2v2 / 3v3.
@@ -245,7 +246,8 @@ numbers say to switch it on.
 - Target: assists in the scenarios, passes in matches up, bench "A better" in 2v2 and 3v3.
 
 **Phase 6: difficulty ladder** (4.6)
-- [ ] Knobs; round-robin bench of the levels; Elo gaps; decide the online fill level (medium today).
+- [ ] Knobs; round-robin bench of the levels; Elo gaps; decide the online fill level (hard since
+  the 2026-11 deploy: KV `bot_level`, default hard; lobbies at the host's pick, default hard).
 
 **Phase 7 (optional):** wall play, dribble and flick, kickoff variants (speed flip), demos.
 
