@@ -625,6 +625,61 @@ test('the panel routes (overview, wallet, frozen, retire, tokens/revoke): the ma
   assert.equal(env.NODES.seen.length, routes.length);
 });
 
+/** A fourth project account: the history routes below spend its limits, not the others'. */
+const HISTORIAN = 'c2b2c3d4e5f60718';
+
+test('the history routes (events, history, alerts, matches, replay, match/void, match/verify): the maintainer gate in order (413, 401, account_required, tv_session, not_trusted, reauth_required), then forwarded with the operator headers and a read’s query; the raw replay passes through as bytes, no-store; no CORS', async () => {
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${HISTORIAN}` });
+  env.NODES.handler = (r) => {
+    const u = new URL(r.url);
+    if (u.pathname === '/nodes/admin/replay') return new RealResponse(new Uint8Array([0x54, 0x47, 0x52, 0x31]), { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' } });
+    return new RealResponse(JSON.stringify({ path: u.pathname, search: u.search, method: r.method }), { headers: { 'content-type': 'application/json' } });
+  };
+  const now = () => Math.floor(Date.now() / 1000);
+  const token = (sub, extra = {}) => signJwt(SECRET, { sub, name: 'Proyecto', iat: now(), exp: now() + 3600, acct: 1, aat: now(), aal: 2, ...extra });
+  const routes = [
+    ['GET', 'events?node=abababababababab&before=12'],
+    ['GET', 'history?before=1.' + 'a'.repeat(64)],
+    ['GET', 'alerts'],
+    ['GET', 'matches'],
+    ['POST', 'match/void'],
+    ['POST', 'match/verify'],
+  ];
+  const ask = (m, w, auth, headers = {}) => req(env, m, '/nodes/admin/' + w, { body: m === 'POST' ? JSON.stringify({ matchId: 'a'.repeat(64), reason: 'x' }) : undefined, headers: { ...(auth ? { authorization: 'Bearer ' + auth } : {}), ...headers } });
+  const guest = (await createSession(SECRET, HISTORIAN, 'Proyecto')).token;
+  const refusals = [
+    [null, 401, 'unauthorized'],
+    [guest, 403, 'account_required'],
+    [await token(HISTORIAN, { tv: 1 }), 403, 'tv_session'],
+    [await accountToken(PLAYER, 'Jugador'), 403, 'not_trusted'],
+    [await token(HISTORIAN, { aat: now() - 16 * 60 }), 403, 'reauth_required'],
+    [await token(HISTORIAN, { aal: 1 }), 403, 'reauth_required'],
+  ];
+  for (const [m, w] of [...routes, ['GET', 'replay?matchId=' + 'a'.repeat(64)]]) {
+    for (const [auth, status, code] of refusals) {
+      const res = await ask(m, w, auth);
+      const body = await jsonOf(res);
+      assert.deepEqual([res.status, body.error], [status, code], `${m} ${w}: ${code}`);
+      if (code === 'reauth_required') assert.equal(body.level, 2);
+    }
+    assert.equal((await ask(m, w, await token(HISTORIAN), { 'content-length': '4097' })).status, 413, `${w}: 413 first`);
+  }
+  assert.equal(env.NODES.seen.length, 0, 'nothing refused reached the object');
+  const auth = await token(HISTORIAN);
+  for (const [m, w] of routes) {
+    const res = await ask(m, w, auth, { 'x-operator-id': PLAYER });
+    const [path, query] = w.split('?');
+    assert.deepEqual([res.status, await jsonOf(res)], [200, { path: '/nodes/admin/' + path, search: query ? '?' + query : '', method: m }], w);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+    assert.equal(env.NODES.seen.at(-1).headers['x-operator-id'], HISTORIAN);
+  }
+  const raw = await ask('GET', 'replay?matchId=' + 'a'.repeat(64), auth);
+  assert.deepEqual([raw.status, raw.headers.get('content-type'), raw.headers.get('cache-control'), raw.headers.get('access-control-allow-origin')], [200, 'application/octet-stream', 'no-store', null]);
+  assert.deepEqual(new Uint8Array(await raw.arrayBuffer()), new Uint8Array([0x54, 0x47, 0x52, 0x31]));
+  for (const [m, w] of [['POST', 'events'], ['POST', 'replay'], ['GET', 'match/void'], ['GET', 'match/verify'], ['POST', 'match'], ['GET', 'match/void/x']]) assert.equal((await ask(m, w, auth)).status, 404, `${m} ${w}`);
+  assert.equal(env.NODES.seen.length, routes.length + 1);
+});
+
 test('the cron: one call to the object, with the internal header; never a throw; nothing at all without the node settings', async () => {
   const run = async (env) => {
     const waits = [];
@@ -1449,6 +1504,91 @@ test('retention: the cron prunes the rows past 30 days and their R2 objects with
   assert.equal((await req(env, 'GET', `/nodes/replays/${fresh}/view`)).status, 200);
 });
 
+test('retention with the kill switch nodes_off: the cron still has the object prune what is past 30 days in every table (replay rows, seats, stars and R2 objects; history matches and seats, node events, alert lines, purged ids), and asks it nothing else; the newer rows stay', async () => {
+  const old = hex64('a');
+  const fresh = hex64('b');
+  // Every outbox call delivered: no ALERT line of the outbox's own comes in between.
+  const ok = { idFromName: (name) => ({ name }), get: () => ({ fetch: async () => new RealResponse('{"ok":true}') }) };
+  const { env, reg } = await replayWorld([{ id: fresh, doneAt: BASE, bytes: tgr(fresh) }], {
+    accounts: ok,
+    over: { MATCHMAKER: ok, FLAGS: { get: async (name) => (name === 'nodes_off' ? '1' : null) } },
+  });
+  const store = reg.obj.store;
+  const NODE = 'feedfacefeedface';
+  // The newer rows first: each write prunes what is past 30 days at its own time.
+  assert.equal(store.setReplayStar(ACCOUNT_A, fresh, true, 10), 1);
+  store.nodeEvent({ nodeId: NODE, at: Date.now(), kind: 'online', detail: 'fresh', actor: null });
+  store.alertLine(Date.now(), 'alert', 'ALERT fresh');
+  store.forgetPlayer('e'.repeat(16));
+  // Then the rows of a match settled 31 days ago, each written then.
+  await env.NODE_REPLAYS.put(old, tgr(old));
+  const realNow = Date.now;
+  const then = realNow() - 31 * DAY;
+  try {
+    Date.now = () => then;
+    store.finished(settled(old, { doneAt: then }), rated(old));
+    store.nodeEvent({ nodeId: NODE, at: then, kind: 'online', detail: 'old', actor: null });
+    store.alertLine(then, 'alert', 'ALERT old');
+    store.forgetPlayer('d'.repeat(16));
+    Date.now = () => then + 3 * HOUR;
+    assert.equal(store.setReplayStar(ACCOUNT_B, old, true, 10), 1, 'starred while it was served');
+  } finally {
+    Date.now = realNow;
+  }
+  const keys = (sql) => store.sql.exec(sql).toArray().map((r) => r.k);
+  const tables = () => ({
+    replay_index: keys('SELECT match_id AS k FROM replay_index ORDER BY k'),
+    replay_players: keys('SELECT DISTINCT match_id AS k FROM replay_players ORDER BY k'),
+    replay_stars: keys('SELECT DISTINCT match_id AS k FROM replay_stars ORDER BY k'),
+    node_match_history: keys('SELECT match_id AS k FROM node_match_history ORDER BY k'),
+    node_match_players: keys('SELECT DISTINCT match_id AS k FROM node_match_players ORDER BY k'),
+    node_events: keys('SELECT detail AS k FROM node_events ORDER BY k'),
+    node_alerts: keys('SELECT line AS k FROM node_alerts ORDER BY k'),
+    node_forgotten: keys('SELECT player_id AS k FROM node_forgotten ORDER BY k'),
+  });
+  const both = [old, fresh];
+  assert.deepEqual(tables(), {
+    replay_index: both,
+    replay_players: both,
+    replay_stars: both,
+    node_match_history: both,
+    node_match_players: both,
+    node_events: ['fresh', 'old'],
+    node_alerts: ['ALERT fresh', 'ALERT old'],
+    node_forgotten: ['d'.repeat(16), 'e'.repeat(16)],
+  }, 'nothing pruned them yet');
+  const asked = [];
+  env.NODES.handler = async (r) => {
+    const res = await reg.obj.fetch(r);
+    asked.push([new URL(r.url).pathname, res.status, await res.clone().json()]);
+    return res;
+  };
+  const errors = [];
+  const realError = console.error;
+  console.error = (...args) => errors.push(args.map(String).join(' '));
+  try {
+    const waits = [];
+    await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => waits.push(p), passThroughOnException() {} });
+    await Promise.all(waits);
+  } finally {
+    console.error = realError;
+  }
+  assert.deepEqual(errors, []);
+  assert.deepEqual(asked, [['/internal/prune', 200, { replays: 1, history: 1 }]], 'the prune alone: no health check');
+  assert.deepEqual(tables(), {
+    replay_index: [fresh],
+    replay_players: [fresh],
+    replay_stars: [fresh],
+    node_match_history: [fresh],
+    node_match_players: [fresh],
+    node_events: ['fresh'],
+    node_alerts: ['ALERT fresh'],
+    node_forgotten: ['e'.repeat(16)],
+  });
+  assert.equal(env.NODE_REPLAYS.objects.has(old), false, 'its R2 object went with its row');
+  assert.equal(env.NODE_REPLAYS.objects.has(fresh), true);
+});
+
 test('without the node settings the replay routes are a 404', async () => {
   const env = makeEnv({ NODES: undefined });
   assert.equal((await req(env, 'GET', '/nodes/replays')).status, 404);
@@ -1456,7 +1596,7 @@ test('without the node settings the replay routes are a 404', async () => {
 });
 
 
-test('the kill switch nodes_off: every route that reaches the object answers 503 nodes_off before it, the cron calls nothing; releases and the shop go on', async () => {
+test('the kill switch nodes_off: every route that reaches the object answers 503 nodes_off before it, the cron asks it only for the prune; releases and the shop go on', async () => {
   const reads = [];
   const env = makeEnv({ FLAGS: { get: async (name) => (reads.push(name), name === 'nodes_off' ? '1' : null) } });
   const op = { Authorization: 'Bearer ' + (await accountToken(PROJECT)) };
@@ -1479,7 +1619,11 @@ test('the kill switch nodes_off: every route that reaches the object answers 503
   const waits = [];
   await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => waits.push(p), passThroughOnException() {} });
   await Promise.all(waits);
-  assert.equal(env.NODES.seen.length, 0, 'nor of the cron');
+  assert.deepEqual(
+    env.NODES.seen.map((s) => [s.path, s.req.method, s.headers[INTERNAL_HEADER]]),
+    [['/internal/prune', 'POST', secret]],
+    'the cron asks only for the prune of what is past 30 days: no health check',
+  );
   assert.equal((await req(env, 'GET', '/nodes/releases/install.sh')).status, 200, 'the installers go on');
   assert.ok(reads.every((n) => n === 'nodes_off'));
 });

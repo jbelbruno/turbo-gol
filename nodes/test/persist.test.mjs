@@ -149,16 +149,16 @@ test('a node row keeps every durable field and drops the heartbeat ones', async 
   assert.equal(nodeFromRow(row, new Set([OP.id])).trusted, true, 'trust comes from the operators of this load, not from the row');
 
   // Rows without the fields added later load with the registry's own defaults.
-  const { capacityMax, pauseTimes, publicHost, retiredAt, retiredReason, trustRemovedAt, ...older } = JSON.parse(row.data);
-  assert.deepEqual([publicHost, retiredAt, retiredReason, trustRemovedAt], [null, null, null, null], 'a new row writes them');
+  const { capacityMax, pauseTimes, publicHost, retiredAt, retiredReason, trustRemovedAt, seenAt, ...older } = JSON.parse(row.data);
+  assert.deepEqual([publicHost, retiredAt, retiredReason, trustRemovedAt, seenAt], [null, null, null, null, 2_000], 'a new row writes them (seenAt: its hello, the online transition)');
   delete older.counters.probationVerified;
   const old = nodeFromRow({ ...row, data: JSON.stringify(older) }, new Set());
   assert.equal(old.capacityMax, CAP.matches);
   assert.deepEqual(old.pauseTimes, []);
   assert.equal(old.counters.probationVerified, 0);
-  // A row of before the panel (no publicHost, no retirement, no lost trust): the same node, none of them.
-  assert.deepEqual([old.publicHost, old.retiredAt, old.retiredReason, old.trustRemovedAt], [null, null, null, null]);
-  assert.deepEqual({ ...old, capacityMax: back.capacityMax, pauseTimes: back.pauseTimes, counters: back.counters }, back);
+  // A row of before the panel (no publicHost, no retirement, no lost trust, no seenAt): the same node, none of them.
+  assert.deepEqual([old.publicHost, old.retiredAt, old.retiredReason, old.trustRemovedAt, old.seenAt], [null, null, null, null, null]);
+  assert.deepEqual({ ...old, capacityMax: back.capacityMax, pauseTimes: back.pauseTimes, counters: back.counters, seenAt: back.seenAt }, back);
 });
 
 test('an old row in a registry: it loads, counts toward its cap and registers nothing new by itself; a retired one survives a restart retired', async () => {
@@ -303,18 +303,29 @@ test('the MemoryStore keeps, replaces and drops rows', async () => {
 
 // ---- Registry write-through and restore ---------------------------------------------------------
 
-test('heartbeats and disconnects never write; a hello writes once', async () => {
-  const { store, calls } = counted();
+test('heartbeats never write, an online or offline transition writes once (when the node was last seen), a hello writes once', async () => {
+  const { mem, store, calls } = counted();
   const reg = boot(store);
   const n = await regNode(reg, OP, 0);
   assert.deepEqual(calls, { node: 0, register: 1, tokens: 1, dropTokens: 0 });
   reg.connected(n.nodeId, hello(), 10);
-  assert.equal(calls.node, 1, 'one write per hello');
+  assert.equal(calls.node, 1, 'one write per hello, its online transition included');
+  assert.equal(reg.node(n.nodeId).seenAt, 10);
   const before = calls.node;
   for (let i = 1; i <= 200; i++) reg.heartbeat(n.nodeId, beat({ active: i % 4, egressGB: i / 100 }), 10 + i * 5_000);
+  assert.equal(calls.node, before, '200 heartbeats: 0 writes');
+  reg.disconnected(n.nodeId);
   reg.disconnected(n.nodeId);
   reg.sweep(10 + 201 * 5_000 + 60_000);
-  assert.equal(calls.node, before, '200 heartbeats, a disconnect and an offline sweep: 0 writes');
+  assert.equal(calls.node, before + 1, 'a disconnect: one write; again, or an offline sweep after it: none');
+  assert.equal(nodeFromRow(mem.nodeRows.get(n.nodeId), new Set()).seenAt, 10 + 200 * 5_000, 'its last heartbeat, kept through a restart');
+  // A link that goes quiet: the sweep takes the node out (one write), its heartbeat brings it back (one write).
+  reg.connected(n.nodeId, hello(), 2_000_000);
+  const quiet = calls.node;
+  reg.sweep(2_000_000 + 60_000);
+  reg.heartbeat(n.nodeId, beat(), 2_000_000 + 61_000);
+  reg.heartbeat(n.nodeId, beat(), 2_000_000 + 66_000);
+  assert.equal(calls.node, quiet + 2);
   // An rtc host that proves itself in its hello: still one write.
   const home = await regNode(reg, OP, 0, { publicUrl: null });
   const w = calls.node;

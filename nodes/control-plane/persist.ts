@@ -14,7 +14,9 @@
  *            NODE_TRUSTED_OPERATORS revokes its nodes at the next start; the row's own `trusted`
  *            (rowWasTrusted) tells Registry.restore which ones just lost it (back to probation).
  *            Fields added since the first rows (publicHost, retiredAt, retiredReason,
- *            trustRemovedAt, ...) default in nodeFromRow: an old row loads as it was.
+ *            trustRemovedAt, seenAt, ...) default in nodeFromRow: an old row loads as it was.
+ *            seenAt is lastSeen as of the last online / offline transition, the only time it is
+ *            written.
  *   matches  without the verification dispatch in flight (inFlight, lastTry, verifiedBy): it does
  *            not survive a restart, the queue sends the job again. A match caught in 'reporting'
  *            (a state that only lasts across the replay read in ControlPlane.onReport) loads as
@@ -131,6 +133,7 @@ export function nodeFromRow(row: NodeRow, trustedOps: ReadonlySet<string>): Node
     retiredAt: d.retiredAt ?? null,
     retiredReason: d.retiredReason ?? null,
     trustRemovedAt: d.trustRemovedAt ?? null,
+    seenAt: d.seenAt ?? null,
   };
 }
 

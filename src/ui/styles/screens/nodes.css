@@ -199,6 +199,11 @@ dl.mn-na-read {
   gap: 0.25rem;
 }
 
+/* A match (PARTIDAS): its id, node, region, mode, state and time; a phone keeps the node row's columns. */
+.mn-na-match {
+  grid-template-columns: minmax(0, 2fr) repeat(5, minmax(0, 1fr));
+}
+
 /* A frozen wallet's row (PUNTOS): its account and date first, the freeze's reason on a line of its
    own under them (in a column of its own it pushed the account over the next cell). */
 .mn-na-row > .mn-na-raw {

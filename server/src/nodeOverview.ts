@@ -57,6 +57,8 @@ export function adminNodeView(cp: ControlPlane, n: NodeRecord, open: ReadonlyMap
     operator: { id: n.operatorId, name: n.operatorName },
     createdAt: n.createdAt,
     lastSeen: n.lastSeen > 0 ? n.lastSeen : null,
+    // When it was last heard as of its last online / offline transition: what a restart still knows (lastSeen is memory only).
+    seenAt: n.seenAt ?? null,
     draining: n.draining,
     egressCapGB: n.egressCapGB,
     cpuLoad: n.cpuLoad,
@@ -134,7 +136,7 @@ const FLAG_ON: Record<Exclude<KvFlag, 'nodes_on'>, string> = {
   matchmaking_off: 'no new match, room or lobby (POST /api/queue and /api/lobbies answer 503)',
   do_disabled: "no new match or socket on the Worker's own servers; with the nodes on, searches wait for a node",
   vm_disabled: 'no new match goes to a community node, whatever nodes_on says',
-  nodes_off: 'every /nodes/* route that reaches the control plane answers 503, the cron calls nothing',
+  nodes_off: 'every /nodes/* route that reaches the control plane answers 503; the cron only wakes it to prune what is past 30 days',
   replays_off: 'the public replay list and viewer answer 404',
   email_off: 'no mail goes out on any lane (sign-up, reset, codes)',
   turn_cf_disabled: 'no TURN credential is minted (STUN only)',
@@ -197,6 +199,8 @@ export interface OverviewInput {
   outbox: Array<{ path: string; rows: number; oldestAt: number }>;
   flags: ReadonlyMap<string, string | null>;
   webhook: boolean;
+  /** The voids of the last 24 h by node and reason (the history, NodeStore.voidsSince); none before it existed. */
+  voids?: Array<{ nodeId: string; reason: string; count: number }>;
 }
 
 /** GET /nodes/admin/overview. */
@@ -235,5 +239,7 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     flags: flagViews(i.flags),
     alerts: { webhook: i.webhook },
     warnings: warningsOf(nodes, i.channel, i.webhook),
+    // node_offline, empty, unverified, a strike's lost:*...: which node's matches went void, and why.
+    voids24h: (i.voids ?? []).map((v) => ({ ...v, name: nodes.find((n) => n.nodeId === v.nodeId)?.name ?? null })),
   };
 }

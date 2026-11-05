@@ -418,3 +418,45 @@ test('ledger restore: what the store kept (entries, notes, totals) rebuilds the 
   assert.equal(R.record({ ...next, matchId: 'm3', at: t0 + 30 }, 1).repeat, 1 / 4);
   assert.equal(R.record({ ...next, matchId: 'm4', at: t0 + DAY + 25 }, 1).repeat, 1 / 2, 'a day after the first ones only m3 is still in the window');
 });
+
+test("a node's events (the maintainers' history): registration, its token, every status change and its reason, strikes, a pause, online and offline transitions, retirement; never a heartbeat that changes nothing", async () => {
+  const events = [];
+  const reg = new Registry({ ...quiet, events: (nodeId, kind, detail) => events.push([nodeId, kind, detail]) });
+  const op = { id: 'op1', name: 'Juan' };
+  const n = await regNode(reg, op, 0);
+  const id = n.nodeId;
+  const tok = R.tokenIdOf(reg.tokenList()[0]);
+  assert.deepEqual(events.splice(0), [
+    [id, 'token_used', `token ${tok} (SA)`],
+    [id, 'registered', 'pending, roles host, transports wss'],
+  ]);
+  reg.connected(id, hello({ transports: ['wss'], publicUrl: 'wss://203.0.113.7', rtcReady: false }), 1_000);
+  reg.connected(id, hello({ transports: ['wss'], publicUrl: 'wss://203.0.113.7', rtcReady: false }), 1_500);
+  reg.markReachable(id, 2_000);
+  for (let i = 0; i < 50; i++) reg.heartbeat(id, { active: 0, capacity: 4, draining: false, egressGB: 0, egressCapGB: null, tickLagP99Ms: 1, cpuLoad: 0, rssMB: 80, matches: [] }, 2_000 + i * 1_000);
+  assert.deepEqual(events.splice(0), [
+    [id, 'online', null],
+    [id, 'status_change', 'pending -> probation'],
+  ], 'a second hello and 50 heartbeats: nothing');
+  for (let i = 0; i < MAX_STRIKES; i++) reg.onLost(id, 'crash', 60_000 + i);
+  assert.deepEqual(events.splice(0), [
+    [id, 'strike', 'crash (1 in 7 days)'],
+    [id, 'strike', 'crash (2 in 7 days)'],
+    [id, 'strike', 'crash (3 in 7 days)'],
+    [id, 'pause', `3 strikes, for ${STRIKE_COOLDOWN_MS / 3_600_000} h`],
+    [id, 'status_change', 'probation -> suspended: strikes:crash'],
+  ]);
+  reg.sweep(60_002 + STRIKE_COOLDOWN_MS);
+  assert.deepEqual(events.splice(0), [
+    [id, 'offline', null],
+    [id, 'status_change', 'suspended -> probation'],
+  ], 'its heartbeats stopped long ago, and the pause is over');
+  assert.equal(reg.node(id).seenAt, 2_000 + 49 * 1_000, 'when it was last heard');
+  reg.setStatus(id, 'banned', 'cheating');
+  reg.setStatus(id, 'banned', 'again');
+  reg.retire(id, 'gone', 70_000);
+  assert.deepEqual(events.splice(0), [
+    [id, 'status_change', 'probation -> banned: cheating'],
+    [id, 'retire', 'gone'],
+  ]);
+});
