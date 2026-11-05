@@ -8,6 +8,7 @@ import { trainingScreen } from './screens/training';
 import { profileScreen } from './screens/profile';
 import { leaderboardScreen } from './screens/leaderboard';
 import { garageScreen } from './screens/garage';
+import { nodesAdminScreen } from './screens/nodesAdmin';
 
 export { Menu } from './Menu';
 export type { MenuHost, MenuConfig, SearchRequest, SearchView } from './Menu';
@@ -22,5 +23,7 @@ export function createMenu(host: MenuHost, container: HTMLElement): Menu {
   m.register('profile', profileScreen);
   m.register('leaderboard', leaderboardScreen);
   m.register('garage', garageScreen);
+  // PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS (stacked on PERFIL: shell/sections.ts SCREEN_SECTION).
+  m.register('nodes-admin', nodesAdminScreen);
   return m;
 }

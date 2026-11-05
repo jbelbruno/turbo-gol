@@ -94,7 +94,9 @@
  *            oldest 6 of every region; then each region's oldest 6 when it has 2 or more; then a
  *            lone waiter of SOLO_AFTER_MS with its tab visible gets its solo match (its `prefer`,
  *            bots everywhere else). Format by humans: 2-4 = 2v2, 5-6 = 3v3 (casualFormat), bots in
- *            the free seats. Always a MatchDO or a community node, never P2P.
+ *            the free seats. Always a MatchDO or a community node, never P2P. The bots play at
+ *            the level of the KV flag bot_level (env.ts casualBotLevel: hard when unset), pooled
+ *            and solo, MatchDO and node alike; ranked sends no level (a leaver's car stays medium).
  *   Ranked:  per playlist, humans only, the MMR windows as before (pickRankedGroup, balanceTeams):
  *            own region first, then, among waiters of RANKED_WIDEN_MS, any region.
  *   Where:   the host region of a match is its humans' majority (hostRegion; a tie: the longest
@@ -107,7 +109,8 @@
  *            Kept in storage too ('recent:<playerId>'): the idle hub is evicted long before 10 min.
  *   Counters: anonymous daily totals (queueStats.ts), in this object's storage as 'stats:<day>'.
  * Custom lobbies (/custom) form RoomDO signaling rooms (P2P, 2 humans at least): a random uint32
- * seed (kickoff deal + bot RNG on every peer) and tickets with role 'peer'. The P2P queue of phase
+ * seed (kickoff deal + bot RNG on every peer), the bots' level the host picked (every peer runs
+ * it: RoomWelcome.botDifficulty) and tickets with role 'peer'. The P2P queue of phase
  * 2 (decideP2pFormation, P2P_FILL_WAIT) is gone; its pure helpers stay, unused.
  * The cross-instance blind spot (backlog): a lobby's room forms in ITS region's matchmaker
  * (LobbyDO: 'mm:' + the lobby's region), the public queues in the hub. For a lobby outside SA the
@@ -186,7 +189,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, error, flag, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, casualBotLevel, error, flag, isBotLevel, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
 import type { GameModeId, LockKind, NodesMode, PublicQueueKind, QueueKind, RoomKind } from './env';
 import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, arrivalOf, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
 import type { Arrival, PlanGroup } from './queuePlan';
@@ -207,6 +210,8 @@ import type { RulesSnapshot } from '../../src/game/physicsRules';
 import { carsBySlot, seatCar } from '../../src/net/cosmetics';
 import type { CosmeticQueueResult } from '../../src/net/cosmetics';
 import type { CarId } from '../../src/game/cosmetics';
+import type { Difficulty } from '../../src/ai/Bot';
+import { LOBBY_BOTS_DEFAULT } from '../../src/net/account';
 // Type-only (node's strip-only loader rejects that module's const enum; server/test/room.test.mjs
 // imports this file). P2P_FILL_WAIT mirrors P2P_FILL_WAIT_MS and is checked against it by tsc.
 import type { P2P_FILL_WAIT_MS, QueueResultP2p } from '../../src/net/p2p/protocol';
@@ -568,6 +573,8 @@ interface CustomBody {
   matchLengthSeconds?: unknown;
   /** The lobby's experimental rules (null / absent = standard): P2P with >= 2 humans only. */
   physics?: unknown;
+  /** The bots' level the host picked (LobbySettings.bots): 'easy' | 'medium' | 'hard', absent = LOBBY_BOTS_DEFAULT. */
+  bots?: unknown;
 }
 
 // ---- ranked matchmaking (pure, unit-tested in server/test/ranked.test.mjs) --------------------------
@@ -736,6 +743,8 @@ interface FormOptions {
   host?: RegionId;
   /** formMatch: a solo bots match (SOLO_ROOMS_MAX) of this search. */
   solo?: Omit<SoloInfo, 'at'>;
+  /** formRoom only (a custom lobby's P2P room): the bots' level the host picked (LobbySettings.bots); formMatch reads its own (botLevelOf). */
+  bots?: Difficulty;
 }
 
 /**
@@ -1839,7 +1848,8 @@ export class MatchmakerDO extends DurableObject<Env> {
 
   /**
    * POST /custom { kind, mode, members: [{ playerId, name, team, guest }], matchLengthSeconds,
-   * physics } (LobbyDO start): a P2P room with the lobby's teams (bots in the free slots), the
+   * physics, bots } (LobbyDO start): a P2P room with the lobby's teams (bots in the free slots, at
+   * the host's level `bots`: absent = LOBBY_BOTS_DEFAULT, another value 400 'bad_bots'), the
    * members locked like queue matches. Lobbies are P2P only since the modes redesign: any `kind`
    * is read as 'p2p', one human is 400 'need_players' (no MatchDO for a lone member any more).
    * Answers { results: { [playerId]: AnyQueueResult } } at once (no long-poll), 409 'member_busy'
@@ -1867,6 +1877,9 @@ export class MatchmakerDO extends DurableObject<Env> {
     const length = typeof body.matchLengthSeconds === 'number' && body.matchLengthSeconds >= 0 && body.matchLengthSeconds <= 1800 ? Math.floor(body.matchLengthSeconds) : undefined;
     const physics = parseLobbyRules(body.physics);
     if (physics === 'bad') return error(400, 'bad_physics', 'invalid experimental rules');
+    // The host's bots level (LobbySettings.bots): every peer runs it (RoomWelcome.botDifficulty).
+    if (body.bots !== undefined && !isBotLevel(body.bots)) return error(400, 'bad_bots', "bots must be 'easy' | 'medium' | 'hard'");
+    const bots: Difficulty = body.bots ?? LOBBY_BOTS_DEFAULT;
     // A P2P room needs two humans to have peers (LobbyDO checks it first: need_players).
     if (seen.size < 2) return error(400, 'need_players', NEED_PLAYERS_TEXT);
     // Experimental rules: signed-in players only (LobbyDO refuses guests at every door; checked again here).
@@ -1885,7 +1898,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     if (this.serverFull(now, kind, false, humans.every((h) => h.guest === true))) return error(503, 'capacity', 'all rooms are busy, try again in a minute');
     for (const h of humans) this.forming.set(h.playerId, { mode, kind });
     try {
-      await this.formRoom(mode, humans, now, { teams, matchLengthSeconds: length, physics });
+      await this.formRoom(mode, humans, now, { teams, matchLengthSeconds: length, physics, bots });
     } catch (e) {
       if (e instanceof NoRoom && e.players.length > 0) {
         const h = humans.find((x) => x.playerId === e.players[0]);
@@ -2452,7 +2465,9 @@ export class MatchmakerDO extends DurableObject<Env> {
    * await in between: concurrent formations never pass a cap together); NoRoom when the Worker's
    * own servers are off (do_disabled: never a MatchDO, whether the nodes were asked or are not on
    * for the group), when a cap is reached, or when one of the humans left meanwhile. The results
-   * carry the hub's extras (mode, host, humans).
+   * carry the hub's extras (mode, host, humans). The bots' level goes with the match (botLevelOf;
+   * ranked none), read once per formation: before the first node ask when the nodes are on for
+   * the group, else past the cap's check and reservation.
    */
   private async formMatch(mode: GameModeId, humans: readonly HumanEntry[], now: number, opts: FormOptions = {}): Promise<FormedMatch> {
     // A MatchDO and a community node run the standard physics only (/custom never sends rules here).
@@ -2463,15 +2478,19 @@ export class MatchmakerDO extends DurableObject<Env> {
     const host = opts.host ?? normalizeHome(this.region);
     const extra: QueueMatchedExtra = { mode, host, humans: humans.length };
     const solo = opts.solo;
+    // One KV read per formation at most (a node that does not take it, its own region's or SA's
+    // under do_disabled, falls back with the same level).
+    let level: Promise<Difficulty | undefined> | null = null;
+    const bots = (): Promise<Difficulty | undefined> => (level ??= this.botLevelOf(opts));
     if (opts.nodes !== false && this.nodesFor(humans.map((h) => h.playerId))) {
-      const own = await this.placeOnNode(mode, humans, now, length, opts, host);
+      const own = await this.placeOnNode(mode, humans, now, length, opts, host, await bots());
       const doOff = own === null && (await flag(env, 'do_disabled'));
       // No MatchDO may take it: SA's nodes next (asked at once while the host region backs off).
       const toSa = doOff && host !== QUEUE_HUB;
       // One of them left while the first ask was out: no second placement with it.
       if (toSa && humans.some((h) => this.cancels.has(h.playerId))) throw new NoRoom('left');
       const at: RegionId = toSa ? QUEUE_HUB : host;
-      const placed = toSa ? await this.placeOnNode(mode, humans, now, length, opts, at) : own;
+      const placed = toSa ? await this.placeOnNode(mode, humans, now, length, opts, at, await bots()) : own;
       if (placed) {
         const hosted: QueueMatchedExtra = { ...extra, host: at };
         if (opts.ranked) await this.rankedLock(placed.matchId, humans, until);
@@ -2520,12 +2539,15 @@ export class MatchmakerDO extends DurableObject<Env> {
         if (held.refused.length > 0) throw new NoRoom('left', held.refused, held.net);
       }
       const secret = await internalSecret(env.JWT_SECRET);
+      // Read here, past the cap's synchronous check and reservation (a KV read before it would let
+      // a concurrent formation pass the cap check too).
+      const botDifficulty = await bots();
       // Near its players (best effort: a hint counts only when the object is created). Its `region`
       // stays this hub's, so its release comes back here; `host` is what its ranked result names.
       const res = await env.MATCH.get(id, { locationHint: locationHintOf(host) }).fetch('https://match/internal/create', {
         method: 'POST',
         headers: { [INTERNAL_HEADER]: secret, 'content-type': 'application/json' },
-        body: JSON.stringify({ matchId, mode, region: this.region, host, roster, matchLengthSeconds: length, createdAt: now, ranked: opts.ranked === true }),
+        body: JSON.stringify({ matchId, mode, region: this.region, host, roster, matchLengthSeconds: length, createdAt: now, ranked: opts.ranked === true, ...(botDifficulty !== undefined ? { botDifficulty } : {}) }),
       });
       if (!res.ok) throw new Error(`MatchDO create -> ${res.status} ${await res.text()}`);
       if (opts.ranked) await this.rankedLock(matchId, humans, until);
@@ -2547,6 +2569,17 @@ export class MatchmakerDO extends DurableObject<Env> {
       this.creatingRooms--;
       if (solo) this.creatingSolo--;
     }
+  }
+
+  /**
+   * The bots' level of a match formMatch forms: none for ranked (its only bots are the cars of
+   * players who left, driven at RoomHost's default, medium, and never by the flag: a flip must not
+   * change how the counted mode plays), else the KV flag bot_level (env.ts casualBotLevel: hard
+   * when unset or unusable), for pooled and solo Casual matches alike, on a MatchDO or a node.
+   */
+  private botLevelOf(opts: FormOptions): Promise<Difficulty | undefined> {
+    if (opts.ranked === true) return Promise.resolve(undefined);
+    return casualBotLevel(this.env);
   }
 
   /** The ranked lock in AccountsDO: one ranked match per account across every region, until it is rated or cancelled. */
@@ -2611,8 +2644,10 @@ export class MatchmakerDO extends DurableObject<Env> {
    * node: whether it is an account and its age (the rewards weight of a community node's points,
    * ledger.ts; the project's nodes earn nothing) and its car (MatchEntry.humans, for the rejoin's
    * `cars`: the assignment's roster is built field by field, so a node's is the same as without).
+   * `bots`: the match's bots level (botLevelOf; none for ranked: the control plane's default,
+   * medium), which the assignment carries to the node (node 0.3.0 reads it: no node release).
    */
-  private async placeOnNode(mode: GameModeId, humans: readonly HumanEntry[], now: number, length: number, opts: FormOptions, host: string): Promise<Placement | null> {
+  private async placeOnNode(mode: GameModeId, humans: readonly HumanEntry[], now: number, length: number, opts: FormOptions, host: string, bots: Difficulty | undefined): Promise<Placement | null> {
     const env = this.env;
     if (!nodesConfigured(env) || now < (this.noHostsUntil.get(host) ?? 0)) return null;
     const body: PlaceBody = {
@@ -2628,6 +2663,7 @@ export class MatchmakerDO extends DurableObject<Env> {
         ...(h.car !== undefined ? { car: h.car } : {}),
       })),
       ...(opts.teams ? { teams: { blue: opts.teams[0].map((h) => h.playerId), red: opts.teams[1].map((h) => h.playerId) } } : {}),
+      ...(bots !== undefined ? { botDifficulty: bots } : {}),
     };
     try {
       const r = await askNodes(env, NODE_ROUTES.place, body, this.nodeTimeoutMs);
@@ -2645,12 +2681,16 @@ export class MatchmakerDO extends DurableObject<Env> {
     }
   }
 
-  /** Phase 2: a RoomDO signaling room; every peer simulates (bots included) from the shared seed. */
+  /**
+   * Phase 2: a RoomDO signaling room; every peer simulates (bots included) from the shared seed,
+   * its bots at the room's level (opts.bots, the lobby host's; RoomWelcome.botDifficulty).
+   */
   private async formRoom(mode: GameModeId, humans: readonly HumanEntry[], now: number, opts: FormOptions = {}): Promise<string> {
     const env = this.env;
     const slots: RoomSlotRecord[] = opts.teams ? buildTeamRoster(MODES[mode], opts.teams, 'peer') : buildRoster(MODES[mode], humans, 'peer');
     // Experimental rules: every peer seat says whether its player is a guest (RoomDO refuses one).
     const physics = opts.physics ?? null;
+    const botDifficulty = opts.bots ?? LOBBY_BOTS_DEFAULT;
     const guestOf = new Map(humans.map((h) => [h.playerId, h.guest]));
     const id = env.ROOM.newUniqueId();
     const roomId = id.toString();
@@ -2659,7 +2699,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     const res = await env.ROOM.get(id).fetch('https://room/internal/create', {
       method: 'POST',
       headers: { [INTERNAL_HEADER]: secret, 'content-type': 'application/json' },
-      body: JSON.stringify({ roomId, mode, region: this.region, seed, slots: physics === null ? slots : slots.map((s) => (s.kind === 'peer' ? { ...s, guest: guestOf.get(s.playerId as string) !== false } : s)), matchLengthSeconds: opts.matchLengthSeconds ?? matchLengthSeconds(env), createdAt: now, physics }),
+      body: JSON.stringify({ roomId, mode, region: this.region, seed, slots: physics === null ? slots : slots.map((s) => (s.kind === 'peer' ? { ...s, guest: guestOf.get(s.playerId as string) !== false } : s)), matchLengthSeconds: opts.matchLengthSeconds ?? matchLengthSeconds(env), createdAt: now, physics, botDifficulty }),
     });
     if (!res.ok) throw new Error(`RoomDO create -> ${res.status} ${await res.text()}`);
     await this.issue(

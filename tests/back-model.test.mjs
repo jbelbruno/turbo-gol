@@ -140,6 +140,22 @@ test('sections: five, JUGAR first, each with its root; the stacked screens belon
   assert.equal(S.sectionOf('leaderboard'), 'leaderboard');
 });
 
+test("PERFIL's CONTROL DE NODOS (SCREEN_SECTION): opened from PERFIL it stacks on PERFIL, and Back comes back there, not to Inicio", () => {
+  assert.deepEqual(S.SCREEN_SECTION, { 'nodes-admin': 'profile' });
+  assert.equal(S.rootSection('nodes-admin'), null);
+  assert.equal(S.sectionOf('nodes-admin'), 'profile');
+  assert.equal(S.sectionOf('toString'), 'play', 'only its own keys, never an inherited one');
+  const st = B.stackAfterOpen({ section: 'profile', stack: ['profile'] }, 'nodes-admin');
+  assert.deepEqual(st, { section: 'profile', stack: ['profile', 'nodes-admin'] }, 'PERFIL stays the section');
+  assert.equal(B.menuBack(menu({ section: st.section, depth: st.stack.length })), 'pop', 'Back pops the panel');
+  assert.deepEqual(st.stack.slice(0, -1), ['profile'], 'to PERFIL');
+  // Its own Back (a node's detail, the wizard) closes the sub-view first.
+  assert.equal(B.menuBack(menu({ section: 'profile', depth: 2, screenBack: true })), 'screen');
+  // From anywhere else (a reload with #ui=, a reset) it lands on PERFIL's root too.
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home'] }, 'nodes-admin', true), { section: 'profile', stack: ['profile', 'nodes-admin'] });
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home', 'play'] }, 'nodes-admin'), { section: 'profile', stack: ['profile', 'nodes-admin'] });
+});
+
 test('sections: LB / RB and Q / E step one, no wrap', () => {
   assert.equal(S.stepSection('play', 1), 'training');
   assert.equal(S.stepSection('training', -1), 'play');

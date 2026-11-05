@@ -94,6 +94,8 @@ export interface InputActions {
   pause: boolean;
   accept: boolean;
   back: boolean;
+  /** The Esc key itself went down (no repeat), whatever the pause binding: with Esc locked in full screen the pause resumes on its release (takeEscRelease). */
+  escape: boolean;
   menuUp: boolean;
   menuDown: boolean;
   menuLeft: boolean;
@@ -135,7 +137,7 @@ export interface InputOptions {
   onChange?: () => void;
   /** Defaults to the global `document` when there is one. */
   document?: DocumentLike | null;
-  /** The clock of the menu auto-repeat (ms; default performance.now), injectable for tests. */
+  /** The clock of the menu auto-repeat and of the Esc hold (ms; default performance.now), injectable for tests. */
   now?: () => number;
 }
 
@@ -330,6 +332,7 @@ function clearActions(a: InputActions): void {
   a.pause = false;
   a.accept = false;
   a.back = false;
+  a.escape = false;
   a.menuUp = false;
   a.menuDown = false;
   a.menuLeft = false;
@@ -356,6 +359,7 @@ function newActions(): InputActions {
     pause: false,
     accept: false,
     back: false,
+    escape: false,
     menuUp: false,
     menuDown: false,
     menuLeft: false,
@@ -511,6 +515,10 @@ export class Input {
 
   private jumpBlocked = false;
   private boostBlocked = false;
+  /** The Esc key held now went down then (the clock's ms; -1: up). */
+  private escDownAt = -1;
+  /** How long (ms) the last Esc was held, let go since takeEscRelease last read it (-1: none). */
+  private escHeldMs = -1;
   private capture: Capture | null = null;
   private disposed = false;
 
@@ -555,6 +563,12 @@ export class Input {
         a.accept = true;
         break;
       case 'Escape':
+        // A new press: a release not read yet was an older one's.
+        a.escape = true;
+        this.escDownAt = this.now();
+        this.escHeldMs = -1;
+        a.back = true;
+        break;
       case 'Backspace':
         a.back = true;
         break;
@@ -583,6 +597,10 @@ export class Input {
     const code = (e as KeyLike).code;
     if (typeof code !== 'string') return;
     this.keys.delete(code);
+    if (code === 'Escape' && this.escDownAt >= 0) {
+      this.escHeldMs = Math.max(0, this.now() - this.escDownAt);
+      this.escDownAt = -1;
+    }
     const cap = this.capture;
     if (cap !== null) cap.ignoreKeys.delete(code);
   };
@@ -1153,6 +1171,17 @@ export class Input {
   }
 
   /**
+   * How long (ms, the clock's) the Esc key was held, when it was let go since the last call; -1
+   * when it was not (still down, never pressed, or a newer press is down). Game reads it once per
+   * frame: with Esc locked in full screen the pause resumes on a short Esc's release (pauseKeys.ts).
+   */
+  takeEscRelease(): number {
+    const ms = this.escHeldMs;
+    this.escHeldMs = -1;
+    return ms;
+  }
+
+  /**
    * Controller vibration if supported and enabled (settings.controls.vibration). Magnitudes
    * 0..1, duration in ms. Safe to call without a pad.
    */
@@ -1344,6 +1373,9 @@ export class Input {
     this.touch?.releaseAll?.();
     this.keys.clear();
     this.tapped.clear();
+    // An Esc down when focus went has no release to read: it resumes nothing.
+    this.escDownAt = -1;
+    this.escHeldMs = -1;
     this.mouseHeld = 0;
     this.mouseTapped = 0;
     this.mouseMask = 0;

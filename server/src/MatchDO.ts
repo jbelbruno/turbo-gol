@@ -6,7 +6,7 @@
  * keeps the object alive for the length of the match.
  *
  * Lifecycle
- *   create      roster + createdAt in storage, wasm instantiated (pre-warmed), 'unused room' alarm (90 s)
+ *   create      roster + createdAt (+ the bots' level) in storage, wasm instantiated (pre-warmed), 'unused room' alarm (90 s)
  *   upgrade     internal header + claim headers, slot check, host ready, single-use jti (storage),
  *               accept, Welcome (a new socket for a slot replaces the old one: close 4000 'replaced')
  *   start       when every human (not left) has sent Ready or 5 s after the first socket ('started' persisted)
@@ -49,8 +49,9 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, error, json, readJson } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, error, isBotLevel, json, readJson } from './env';
 import type { GameModeId } from './env';
+import type { Difficulty } from '../../src/ai/Bot';
 import { INTERNAL_HEADER, checkInternal, internalSecret } from './auth';
 import { RoomHost } from './roomHost';
 import type { RosterEntry } from './roomHost';
@@ -158,6 +159,11 @@ export interface MatchRecord {
   createdAt: number;
   /** Ranked (accounts only): no start without every player, forfeit when a team is gone, the result goes to AccountsDO. */
   ranked?: boolean;
+  /**
+   * The bots' level (the matchmaker's: Casual's KV flag bot_level). Absent: ranked, or a record of
+   * an older build, and RoomHost's default (medium) drives the bots.
+   */
+  botDifficulty?: Difficulty;
 }
 
 /** What POST /internal/leave answers the matchmaker (MatchDO.leave). */
@@ -303,6 +309,7 @@ export class MatchDO extends DurableObject<Env> {
     }
     // A server match runs the standard physics only, whoever asks (experimental rules are P2P only).
     if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules never run on a server match');
+    if (body.botDifficulty !== undefined && !isBotLevel(body.botDifficulty)) return error(400, 'bad_request', "botDifficulty must be 'easy' | 'medium' | 'hard'");
     for (let i = 0; i < body.roster.length; i++) {
       const e = body.roster[i];
       if (!e || e.slot !== i || (e.team !== 0 && e.team !== 1) || (e.kind !== 'player' && e.kind !== 'bot') || typeof e.name !== 'string') {
@@ -323,6 +330,7 @@ export class MatchDO extends DurableObject<Env> {
       matchLengthSeconds: typeof body.matchLengthSeconds === 'number' ? body.matchLengthSeconds : DEFAULT_MATCH_SECONDS,
       createdAt: typeof body.createdAt === 'number' ? body.createdAt : Date.now(),
       ranked: body.ranked === true,
+      ...(body.botDifficulty !== undefined ? { botDifficulty: body.botDifficulty } : {}),
     };
     this.record = rec;
     await this.ctx.storage.put('record', rec);
@@ -425,6 +433,8 @@ export class MatchDO extends DurableObject<Env> {
       matchId: this.record?.matchId ?? null,
       mode: this.record?.mode ?? null,
       roster: this.record?.roster ?? [],
+      // The bots' level the record asks for (null: RoomHost's default, medium).
+      botDifficulty: this.record?.botDifficulty ?? null,
       started: h?.isStarted ?? false,
       tick: h?.currentTick ?? 0,
       phase: h?.phase ?? 'none',
@@ -694,6 +704,8 @@ export class MatchDO extends DurableObject<Env> {
           inputBufferMax: 8,
           matchLengthSeconds: rec.matchLengthSeconds,
           kickoffSeed: KICKOFF_SEED,
+          // Absent (ranked, an older record): RoomHost's default, medium.
+          botDifficulty: rec.botDifficulty,
         });
         // A leave that came while the arena was being built (or before an eviction, from storage).
         for (let s = 0; s < rec.roster.length; s++) if (this.leftSlots[s] === 1) host.convertToBot(s);

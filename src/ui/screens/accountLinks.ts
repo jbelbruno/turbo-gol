@@ -516,6 +516,92 @@ export async function openReauthCodeSheet(menu: Menu, then: () => void): Promise
   });
 }
 
+/**
+ * "Confirma que eres tú" (the sign-in design's R6), shared by PERFIL and CONTROL DE NODOS (and the
+ * community's servers of prompt 2): run `go` once this browser proved a credential at `level` in
+ * the last minutes (AccountClient.fresh): at once when it did (unless `force`: the server just
+ * asked, or the step wants its full 15 minutes), else after the sheet with what reaches that level.
+ * Level 1: a provider already on the account (a round trip that comes back to PERFIL, then the
+ * player taps again; `resume` is kept for it) or the password here. Level 2 (the server's
+ * reauth_required { level: 2 }): the password, or a code to the account's verified address (POST
+ * /api/auth/reauth/code); a press on a provider's page is level 1, Google's too (it cannot be asked
+ * for its password again), and the sheet says so. The project's account gets the password only: the
+ * server refuses it the code (403 password_required). Google is not offered at level 1 inside
+ * another app's browser, which refuses it (the sheet says why). A password of before (me.legacy) is
+ * only re-keyed by itself: no code then. Cancelled, nothing runs (the panel keeps its data and
+ * offers CONFIRMAR CON LA CONTRASEÑA).
+ */
+export function confirmItsYou(menu: Menu, go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void {
+  const acc = menu.host.accounts;
+  if (!force && acc.fresh(level)) {
+    go();
+    return;
+  }
+  const me = acc.me;
+  const configured = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
+  // Level 1 offers the account's providers this browser can sign in with (Google is hidden inside another app's browser, §3.0); level 2 offers none and the note names them all.
+  const own = configured.filter((p) => emailProviders(menu).includes(p));
+  const offered = level === 1 ? own : [];
+  const pass = field(t('profile.yourPassword'), { type: 'password', autocomplete: 'current-password', maxLength: 128 });
+  const withPassword = me?.hasPassword === true;
+  // No code for the project's account: it confirms with its password (the server refuses it the code: 403 password_required).
+  const mailbox = me?.emailVerified === true && typeof me.email === 'string' && me.email.length > 0 && me.legacy !== true && me.maintainer === undefined ? me.email : null;
+  const ownNames = configured.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
+  const notEnough = level === 2 && configured.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
+  let sending = false;
+  const byCode: HTMLButtonElement | null =
+    mailbox !== null
+      ? navButton(
+          'mn-btn',
+          t('auth.reauthCode', { email: mailbox }),
+          () => {
+            if (sending) return;
+            sending = true;
+            byCode?.setAttribute('aria-busy', 'true');
+            void openReauthCodeSheet(menu, go).finally(() => {
+              sending = false;
+              byCode?.removeAttribute('aria-busy');
+            });
+          },
+          { 'data-key': 'profile-reauth-code' },
+        )
+      : null;
+  const inAppNote = level === 1 && configured.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
+  menu.modal({
+    title: t('profile.reauthTitle'),
+    body: [
+      h('p.mn-note', null, t('profile.reauthNote')),
+      notEnough,
+      ...offered.map((p) => navButton('mn-btn', t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })),
+      inAppNote,
+      byCode,
+      withPassword ? pass.el : null,
+    ],
+    actions: [
+      ...(withPassword
+        ? [
+            {
+              label: t('profile.reauthConfirm'),
+              primary: true,
+              onClick: async (): Promise<boolean> => {
+                pass.error(null);
+                try {
+                  await acc.reauth(pass.input.value);
+                  queueMicrotask(go);
+                  return true;
+                } catch (e) {
+                  pass.error(errText(e));
+                  return false;
+                }
+              },
+            },
+          ]
+        : []),
+      { label: t('profile.cancel'), onClick: () => true },
+    ],
+  });
+}
+
 
 // ---- adding and changing the email (sign-in PR 9: the design's §3.6, §3.10) ---------------------------------
 

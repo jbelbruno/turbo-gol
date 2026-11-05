@@ -117,7 +117,7 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `MATCH_LENGTH_SECONDS` | var | regulation length (180) |
 | `REGION_OVERRIDE` | var | force one matchmaking region for everything: the queue hub, every player's home and every lobby's matchmaker (empty = the hub is `SA`, a player's region is the menu's pick, else `request.cf.continent`, `dev` locally) |
 | `TURN_KEY_ID`, `TURN_KEY_TOKEN` | secrets, optional (both or none) | a Cloudflare Realtime TURN key: the room welcome then appends 10-minute TURN credentials minted per request (`POST .../turn/keys/{id}/credentials/generate-ice-servers`, `{ ttl: 600 }`); unset = STUN only (`stun.cloudflare.com:3478`) |
-| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, one of their host region first and then one of SA: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
+| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, one of their host region first and then one of SA: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches"); `bot_level` (`easy`/`medium`/`hard`, anything else or unset = `hard`) is the level of Casual's bots (see "Kill switches") |
 | `NODES`, `NODE_REPLAYS`, `NODE_RELEASES` | Durable Object, R2, R2 | community nodes: the NodeRegistryDO, the replays the nodes upload, the signed releases and `channel.json` (see "Community nodes") |
 | `NODE_CONTROL_PRIVATE_KEY` | secret, optional | the Ed25519 key (PKCS#8, `npm run keys` in `nodes/`) that signs the players' node tickets; without it no match goes to a node |
 | `NODE_CONTROL_PUBLIC_KEY` | var | its public half, handed to every node at registration; a pair that does not match places nothing (ALERT) |
@@ -232,7 +232,8 @@ P2P room lifecycle (RoomDO, Hibernation API: no timers, the object sleeps betwee
 roster + random uint32 `seed` registered by the matchmaker -> each peer opens `/room/<id>` with
 its ticket (single-use `jti`; a second socket for the same slot replaces the first, close 4000) and
 gets `RoomWelcome` (seed, slots with `connected` flags and `peerId`s, `iceServers`, inputDelay 3,
-window 16, hashEvery 30, tickRate 120, `now`); the others get `peerJoined`. `signal` is relayed to
+window 16, hashEvery 30, tickRate 120, `now`, `physics`, and `botDifficulty`: the lobby host's
+bots level, hard by default, which every peer runs; protocol 6); the others get `peerJoined`. `signal` is relayed to
 the target slot (dropped when it has no socket). When every connected peer sent `ready` and at
 least two are connected: `start { startAt: now + 1500, now }` to all, then `drop { slot, atTick: 0 }`
 for every peer slot without a socket (its car is the team AI from tick 0 on every peer).
@@ -371,6 +372,26 @@ without `NODE_TRUSTED_OPERATORS` nobody can create a node token (403 `not_truste
 routes under `wrangler dev`, put a development pair in `.dev.vars` (both halves: a `.dev.vars`
 value overrides the committed var).
 
+A new development pair, never `npm run keys` in `nodes/` (it writes `nodes/.keys/`, where the real
+key may be), written straight into your own `.dev.vars` from `server/`; it prints nothing:
+
+```sh
+node -e "const c=require('crypto'),{publicKey:p,privateKey:k}=c.generateKeyPairSync('ed25519'),s=p.export({format:'der',type:'spki'});require('fs').appendFileSync('.dev.vars','\nNODE_CONTROL_PRIVATE_KEY='+k.export({format:'der',type:'pkcs8'}).toString('base64url')+'\nNODE_CONTROL_PUBLIC_KEY='+s.subarray(s.length-32).toString('base64url')+'\n')"
+```
+
+Then PERFIL's CONTROL DE NODOS (the maintainers' panel) runs against it:
+
+1. In `.dev.vars`: `DEV_AUTH=1`, and `NODES_PUBLIC_BASE=http://127.0.0.1:8787` (your Worker's port):
+   it overrides the committed var, the install lines and tickets name this Worker, and a loopback
+   base lets the object probe and register nodes on this machine (`loopbackOk`).
+2. Start the Worker and Vite, sign in with ENTRAR (DEV) in PERFIL, and read that account's id
+   (`__game.accounts.account.playerId` in the browser's console).
+3. Put it in `.dev.vars` as `NODE_TRUSTED_OPERATORS=<id>`, restart the Worker, and sign in with
+   ENTRAR (DEV) again: CUENTA DEL PROYECTO now shows CONTROL DE NODOS.
+4. A dev sign-in is level 2 without a password, for 15 minutes: after them the panel pauses on
+   `reauth_required`; sign in with ENTRAR (DEV) again (the password sheet is for an account with a
+   password, the project's).
+
 Matches reach the nodes through the matchmaker, behind the KV flag `nodes_on` (absent: off). When
 the nodes are on for every human of a Casual or ranked match, the match is offered first to a node
 of its host region (the control plane picks among that region's nodes only, never another
@@ -463,7 +484,9 @@ the only cron is the health check above.
 
 Each is a KV `FLAGS` key set to `1` (or `true` / `on`) by hand, with no deploy:
 `npx wrangler kv key put <flag> 1 --binding FLAGS --remote`, and `kv key delete` to undo it. A change
-lands within a minute or two.
+lands within a minute or two. `bot_level` is a setting, not an on/off switch: it takes a level
+(`npx wrangler kv key put bot_level medium --binding FLAGS --remote`), and deleting it goes back to
+the code's default, `hard`.
 
 | Flag | What it stops | What goes on |
 |---|---|---|
@@ -471,6 +494,7 @@ lands within a minute or two.
 | `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group asks a node of its host region, then one of SA (node only), and waits busy until a node takes it | node matches; sockets already open |
 | `vm_disabled` | no new match goes to a community node, whatever `nodes_on` says | the control plane and the nodes' sockets; matches already on a node |
 | `replays_off` | the public replays only: `GET /nodes/replays` and `GET /nodes/replays/<id>/view` answer 404, their edge-cached copies too (read once per isolate every 30 s), the object never asked | the nodes, the verifiers' signed replay routes, everything else |
+| `bot_level` | nothing: it sets the level of the bots in every new Casual match, `easy`, `medium` or `hard` (case and spaces ignored; unset, unreadable or anything else = `hard`), read once per formation: the bots in the free seats and the 5:00 solo match, on a MatchDO and on a community node (the hub sends it in the placement; node 0.3.0 reads it, no node release) | matches already formed keep their level; ranked sends no level (the car of a player who leaves stays `medium`, whatever the flag says); a lobby's P2P room plays the level its host picked (default `hard`) |
 | `nodes_off` | every `/nodes/*` route that would reach the NodeRegistryDO: registration, the control socket's upgrade, replay uploads and downloads, tokens, `/nodes/mine`, `/nodes/status`, the replay list and view, the maintainers' routes (503 `nodes_off`, the object never asked), and the cron's health check. Set `vm_disabled` with it: sockets already open stay, and the matchmaker still reaches the object directly | the node releases and the installers (edge-cached), the shop aliases (AccountsDO) |
 
 What no flag stops, and what bounds it instead: guest sessions (Turnstile and the per-network
