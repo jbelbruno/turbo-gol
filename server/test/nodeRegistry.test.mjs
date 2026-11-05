@@ -170,6 +170,9 @@ function sqlOf(db) {
   return { sql, transactionSync };
 }
 
+/** The object's key-value storage (ctx.storage.get / put), one per database: a deploy keeps it with the tables. */
+const kvOf = new WeakMap();
+
 class FakeCtx {
   constructor(db = new DatabaseSync(':memory:'), sockets = []) {
     this.db = db;
@@ -177,9 +180,13 @@ class FakeCtx {
     this.alarm = null;
     this.waits = [];
     const { sql, transactionSync } = sqlOf(db);
+    if (!kvOf.has(db)) kvOf.set(db, new Map());
+    const kv = kvOf.get(db);
     this.storage = {
       sql,
       transactionSync,
+      get: async (k) => structuredClone(kv.get(k)),
+      put: async (k, v) => void kv.set(k, structuredClone(v)),
       getAlarm: async () => this.alarm,
       setAlarm: async (t) => {
         this.alarm = t;
@@ -2390,4 +2397,129 @@ test("a replay listed before the history was kept (its index row, no history row
   assert.deepEqual(rows(h, 'replay_index'), []);
   const again = await call(h, 'POST', '/nodes/admin/delist', { body: { matchId: placement.matchId, reason: 'a player asked' }, headers: ADMIN });
   assert.deepEqual([again.status, again.json.error], [404, 'no_replay'], 'what the lookup shows when it is not listed');
+});
+
+test("the cron's prune while nodes_off is set (POST /internal/prune): what is past HISTORY_DAYS goes from every table, the newer rows stay; no node is probed or told anything, no ALERT, where the health check probes", async () => {
+  // A bucket that deletes: the prune takes the R2 objects too.
+  const replays = bucket();
+  replays.delete = async (keys) => void [].concat(keys).forEach((k) => replays.objects.delete(k));
+  const { h, env, node, ws } = await watched({ NODE_REPLAYS: replays });
+  const start = clock;
+  const withReplay = async () => {
+    const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
+    const x = h.obj.cp.matches.get(placement.matchId);
+    Object.assign(x, { state: 'done', doneAt: clock, replaySha: 'c'.repeat(64), outcome: { kind: 'unrated', matchId: placement.matchId, nodeId: x.nodeId, blue: 1, red: 0, verified: true } });
+    h.obj.store.finished(x, x.outcome);
+    await env.NODE_REPLAYS.put(placement.matchId, new TextEncoder().encode('TGR1 a replay'));
+    return placement.matchId;
+  };
+  const STARRER = 'cccccccccccccccc';
+  // The old rows: the registration's events and ALERT lines, a match with its replay, seats and a star, a purged id.
+  const old = await withReplay();
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'd'.repeat(16) } })).status, 200);
+  clock += 3 * 60 * MIN;
+  assert.equal(h.obj.store.setReplayStar(STARRER, old, true, 10), 1);
+  // Two days later, the newer ones (none of these writes reaches back 30 days).
+  clock += 2 * DAY;
+  await send(h, ws, { t: 'heartbeat', data: beat() });
+  const fresh = await withReplay();
+  h.obj.store.nodeEvent({ nodeId: node.nodeId, at: clock, kind: 'reachable', detail: null, actor: null });
+  h.obj.store.alertLine(clock, 'alert', 'ALERT a newer line');
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'e'.repeat(16) } })).status, 200);
+  clock += 3 * 60 * MIN;
+  assert.equal(h.obj.store.setReplayStar(STARRER, fresh, true, 10), 1);
+  // The old ones turn 31 days old; nothing pruned them yet (no cron, no write since).
+  clock = start + (HISTORY_DAYS + 1) * DAY;
+  const cutoff = clock - HISTORY_DAYS * DAY;
+  const timed = { replay_index: 'match_id', node_match_history: 'match_id', node_events: 'id', node_alerts: 'id', node_forgotten: 'player_id' };
+  const byMatch = (table) => [...new Set(rows(h, table).map((r) => r.match_id))].sort();
+  const kept = {};
+  for (const [t, k] of Object.entries(timed)) {
+    const all = rows(h, t);
+    assert.ok(all.some((r) => r.at < cutoff) && all.some((r) => r.at >= cutoff), `${t}: rows on both sides of the 30 days`);
+    kept[t] = all.filter((r) => r.at >= cutoff).map((r) => String(r[k])).sort();
+  }
+  for (const t of ['replay_players', 'replay_stars', 'node_match_players']) assert.deepEqual(byMatch(t), [old, fresh].sort(), t);
+  const probes = [];
+  const fetchFn = h.obj.fetchFn;
+  h.obj.fetchFn = (url, init) => (new URL(String(url)).pathname === '/healthz' && probes.push(String(url)), fetchFn(url, init));
+  const told = ws.sent.length;
+  lines.length = 0;
+  posts.length = 0;
+  const r = await call(h, 'POST', '/internal/prune');
+  assert.deepEqual([r.status, r.json], [200, { replays: 1, history: 1 }]);
+  for (const [t, k] of Object.entries(timed)) {
+    assert.deepEqual(rows(h, t).map((x) => String(x[k])).sort(), kept[t], `${t}: what is past 30 days gone, the rest kept`);
+  }
+  for (const t of ['replay_players', 'replay_stars', 'node_match_players']) assert.deepEqual(byMatch(t), [fresh], t);
+  assert.deepEqual([replays.objects.has(old), replays.objects.has(fresh)], [false, true], 'the R2 object with its row');
+  await h.ctx.settle();
+  assert.deepEqual([probes, ws.sent.length, alerts(), posts], [[], told, [], []], 'no probe, nothing sent to the node, no ALERT');
+  // The same object's health check would have probed it.
+  assert.deepEqual((await call(h, 'POST', '/internal/health')).json, { probed: 1, problems: 0 });
+  assert.equal(probes.length, 1);
+});
+
+test("the maintainers' lists hide what is past HISTORY_DAYS before any prune: the history (one match's lookup and its raw replay too), the node events and the alert lines", async () => {
+  const { h, node, ws } = await watched();
+  const start = clock;
+  const old = (await settleByHand(h)).assign.matchId;
+  clock += 2 * DAY;
+  await send(h, ws, { t: 'heartbeat', data: beat() });
+  const fresh = (await settleByHand(h)).assign.matchId;
+  h.obj.store.nodeEvent({ nodeId: node.nodeId, at: clock, kind: 'reachable', detail: 'newer', actor: null });
+  h.obj.store.alertLine(clock, 'alert', 'ALERT a newer line');
+  clock = start + (HISTORY_DAYS + 1) * DAY;
+  const cutoff = clock - HISTORY_DAYS * DAY;
+  for (const t of ['node_match_history', 'node_events', 'node_alerts']) assert.ok(rows(h, t).some((r) => r.at < cutoff), `${t}: an old row, not pruned yet`);
+  // The alert lines first: a read's own audit line prunes the ring on its way.
+  const a = (await call(h, 'GET', '/nodes/admin/alerts', { headers: ADMIN })).json.alerts;
+  assert.ok(a.some((x) => x.line === 'ALERT a newer line') && a.every((x) => x.at >= cutoff), JSON.stringify(a));
+  const e = (await call(h, 'GET', '/nodes/admin/events', { headers: ADMIN })).json.events;
+  assert.ok(e.some((x) => x.detail === 'newer') && e.every((x) => x.at >= cutoff), JSON.stringify(e));
+  assert.ok((await call(h, 'GET', '/nodes/admin/events?node=' + node.nodeId, { headers: ADMIN })).json.events.every((x) => x.at >= cutoff));
+  const ids = async (q) => (await call(h, 'GET', '/nodes/admin/history' + q, { headers: ADMIN })).json.matches.map((m) => m.matchId);
+  assert.deepEqual(await ids(''), [fresh]);
+  assert.deepEqual(await ids('?node=' + node.nodeId), [fresh]);
+  assert.deepEqual(await ids('?match=' + old), []);
+  assert.deepEqual(await ids('?match=' + fresh), [fresh]);
+  lines.length = 0;
+  assert.equal((await h.obj.fetch(new Request('https://nodes/nodes/admin/replay?matchId=' + old, { headers: { [INTERNAL_HEADER]: secret, ...ADMIN } }))).status, 404);
+  assert.ok(lines.some((l) => l.endsWith(`the replay of match ${old} was asked for, none served (not in the history)`)), lines.join('\n'));
+  // Hidden, not pruned: the cron's prune takes them.
+  assert.ok(rows(h, 'node_match_history').some((r) => r.match_id === old));
+  assert.ok(rows(h, 'node_events').some((r) => r.at < cutoff));
+});
+
+test("an idle object woken by the cron's prune (nodes_off set) starts again at each run: its start's ALERT reaches the channel and the ring once in 10 minutes, as one object's would; one that cannot start prunes nothing", async () => {
+  // Four of the cron's runs, 5 minutes apart, each on a new instance: nothing keeps the object awake between them.
+  const runs = async (env, db, answer) => {
+    lines.length = 0;
+    posts.length = 0;
+    let h;
+    for (let i = 0; i < 4; i++) {
+      h = await boot(env, new FakeCtx(db));
+      const r = await call(h, 'POST', '/internal/prune');
+      answer(r);
+      await h.ctx.settle();
+      clock += 5 * MIN;
+    }
+    return h;
+  };
+  // A state a newer build wrote: no start of this one reads it.
+  const db = new DatabaseSync(':memory:');
+  const { sql, transactionSync } = sqlOf(db);
+  new NodeStore(sql, transactionSync).migrate();
+  db.prepare("UPDATE meta SET v = '9' WHERE k = 'state_version'").run();
+  await runs(makeEnv({ NODE_ALERT_WEBHOOK: HOOK }), db, (r) => assert.deepEqual([r.status, r.json.error], [503, 'nodes_unavailable'], 'nothing pruned until a start reads it'));
+  assert.equal(alerts().length, 4, 'the logs keep every one');
+  assert.equal(posted().length, 2, 'the first run and 10 minutes later');
+  assert.ok(posted().every((p) => p.includes('node control plane not started, its state is left as it is')), posted().join('\n'));
+  assert.equal(db.prepare("SELECT v FROM meta WHERE k = 'state_version'").get().v, '9');
+  // A control key that is not its pair: the start goes on and the prune runs; the ring keeps the line as the channel gets it.
+  const pair = makeEnv({ NODE_ALERT_WEBHOOK: HOOK, NODE_CONTROL_PUBLIC_KEY: (await generateEd25519()).publicKey });
+  const h = await runs(pair, new DatabaseSync(':memory:'), (r) => assert.deepEqual([r.status, r.json], [200, { replays: 0, history: 0 }]));
+  assert.equal(alerts().length, 4);
+  assert.deepEqual(posted(), Array(2).fill('**ALERT** `NODE_CONTROL_PUBLIC_KEY is not the public half of NODE_CONTROL_PRIVATE_KEY: no placement, registration or rejoin until they match`'));
+  assert.equal(rows(h, 'node_alerts').filter((a) => a.line.includes('not the public half')).length, 2);
 });

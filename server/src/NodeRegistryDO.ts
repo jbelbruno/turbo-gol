@@ -59,6 +59,7 @@
  *                                node online, or in service and seen by the object in the last hour, 5 s each
  *                                (nodeWatch.ts healthzTargets); the public replays past 30 days pruned, with
  *                                their R2 objects, and the maintainers' history past 30 days
+ *   POST /internal/prune         the cron's instead while nodes_off is set: that prune alone, no node probed
  *   POST /internal/operator-deleted { userId }  AccountsDO's purge of an account (sign-in PR 12): every node of
  *                                it banned (told, its socket closed 4403) -> { ok, banned }; an ALERT when there
  *                                were any; its name and id out of every history seat (any purged account, a
@@ -96,11 +97,14 @@
  * ALERT lines, the object's and those of the control plane and the registry it runs, also go to
  * the team's Discord channel when NODE_ALERT_WEBHOOK is set (nodeAlerts.ts: each alert at most once
  * in 10 minutes; an account's action, a maintainer's call or the registry's token and trusted node
- * lines, every time). The alarm also watches the nodes for what nodeWatch.ts lists (a trusted node
- * offline, traffic near its cap, tick lag, a verification or an update waiting too long), and it
- * keeps running while a trusted node in service is offline until its ALERT goes out, so that one
- * is noticed with nothing else going on. Which nodes got theirs is kept in meta: a restart does
- * not raise them again, and the object can sleep while such a node stays away.
+ * lines, every time). The start's own (a control key that is not its pair, a start that failed)
+ * keep those 10 minutes across starts (startAlert): an idle object starts again at each cron run,
+ * the prune while nodes_off is set too. The alarm also watches the nodes for what nodeWatch.ts
+ * lists (a trusted node offline, traffic near its cap, tick lag, a verification or an update
+ * waiting too long), and it keeps running while a trusted node in service is offline until its
+ * ALERT goes out, so that one is noticed with nothing else going on. Which nodes got theirs is
+ * kept in meta: a restart does not raise them again, and the object can sleep while such a node
+ * stays away.
  */
 import { DurableObject } from 'cloudflare:workers';
 import { ControlPlane, MAX_UNAUTHENTICATED, NodeRefused } from '../../nodes/control-plane/controlPlane';
@@ -121,7 +125,7 @@ import type { Env, NodesEnv } from './env';
 import { widePrefix } from './limits';
 import { ALERT_DEDUPE_MS, AlertHook, alertKey } from './nodeAlerts';
 import type { FetchFn } from './nodeAlerts';
-import { CLIENT_BUILD, LEAVE_STATUS, NODE_ROUTES, OPERATOR_DELETED_ROUTE, OPERATORS_ROUTE, READ_AUDIT_ROUTE, REJOIN_STATUS, REPLAY_HIDDEN_MAX } from './nodeApi';
+import { CLIENT_BUILD, LEAVE_STATUS, NODE_ROUTES, OPERATOR_DELETED_ROUTE, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, REJOIN_STATUS, REPLAY_HIDDEN_MAX } from './nodeApi';
 import { adminNodeView, mineView, openMatches, overviewOf } from './nodeOverview';
 import type { LeaveAnswer, LeaveRefusal, PlaceAnswer, RejoinTicket, StatusAnswer } from './nodeApi';
 import { DELIVERY_TIMEOUT_MS, deliverCall } from './nodeOutcome';
@@ -212,6 +216,13 @@ const ALERT_LINE_MAX = 2000;
 const EARLY_ALERTS_MAX = 50;
 /** The alerts whose last time in the ring is remembered (each for ALERT_DEDUPE_MS), as AlertHook keeps its keys. */
 const RING_KEYS_MAX = 500;
+/**
+ * The start's own ALERTs as last posted (startAlert): [alertKey, time] pairs, at most
+ * START_ALERTS_MAX, in the object's key-value storage, apart from the tables a failed start leaves
+ * as they are.
+ */
+const START_ALERTS_KEY = 'start_alerts';
+const START_ALERTS_MAX = 20;
 /** A history page's cursor: a settle time and a match id (as the last row of the page before). */
 const HISTORY_CURSOR = /^(\d{1,15})\.([0-9a-f]{64})$/;
 const NODE_ID_RE = /^[0-9a-f]{16}$/;
@@ -536,6 +547,36 @@ export class NodeRegistryDO extends DurableObject<Env> {
   }
 
   /**
+   * An ALERT of the start (a control key that is not its pair, a start that failed): as log(), but
+   * to the channel and the ring at most once per ALERT_DEDUPE_MS across starts, as one object's hook
+   * would. An object nothing keeps awake is evicted between the cron's runs (the health check, or
+   * the prune while nodes_off is set) and starts again at each, with a new hook: without this the
+   * team's channel would get the same line every 5 minutes. The logs keep every one. A time that
+   * cannot be read lets the line through.
+   */
+  private async startAlert(msg: string): Promise<void> {
+    const key = alertKey(msg);
+    const now = Date.now();
+    let sent: Array<[string, number]> = [];
+    try {
+      const v = await this.ctx.storage.get<unknown>(START_ALERTS_KEY);
+      if (Array.isArray(v)) sent = v.filter((p): p is [string, number] => Array.isArray(p) && typeof p[0] === 'string' && typeof p[1] === 'number' && now - p[1] < ALERT_DEDUPE_MS);
+    } catch {
+      /* not read: the line goes out */
+    }
+    if (sent.some(([k]) => k === key)) {
+      console.log(`[nodes] ${msg}`);
+      return;
+    }
+    try {
+      await this.ctx.storage.put(START_ALERTS_KEY, [...sent, [key, now]].slice(-START_ALERTS_MAX));
+    } catch (e) {
+      console.log(`[nodes] ${START_ALERTS_KEY} not written: ${String(e)}`);
+    }
+    this.log(msg, key);
+  }
+
+  /**
    * A maintainer's read: a log line every time, and an ALERT to the team's channel once per account
    * per READ_AUDIT_WINDOW_MS (naming what it read first in the window): one window for every read,
    * the object's and the two the Worker answers itself (READ_AUDIT_ROUTE). Actions are audited
@@ -580,7 +621,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
     );
     const log = (m: string) => this.log(m);
     this.keyOk = await controlKeysMatch(env.NODE_CONTROL_PRIVATE_KEY, env.NODE_CONTROL_PUBLIC_KEY);
-    if (!this.keyOk) this.log('ALERT NODE_CONTROL_PUBLIC_KEY is not the public half of NODE_CONTROL_PRIVATE_KEY: no placement, registration or rejoin until they match');
+    if (!this.keyOk) await this.startAlert('ALERT NODE_CONTROL_PUBLIC_KEY is not the public half of NODE_CONTROL_PRIVATE_KEY: no placement, registration or rejoin until they match');
     await this.refreshChannel();
     const base = env.NODES_PUBLIC_BASE.replace(/\/+$/, '');
     const baseHost = new URL(base).hostname;
@@ -661,7 +702,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
     } catch (e) {
       this.store = null;
       this.cp = null;
-      this.log(`ALERT node control plane not started, its state is left as it is: ${String(e)}`);
+      await this.startAlert(`ALERT node control plane not started, its state is left as it is: ${String(e)}`);
       for (const ws of this.ctx.getWebSockets()) closeQuietly(ws, 1011, 'unavailable');
       return;
     }
@@ -965,6 +1006,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (method === 'POST' && path === NODE_ROUTES.leave) return await this.leave(request, cp);
       if (method === 'GET' && path === NODE_ROUTES.status) return this.matchStatus(url, cp);
       if (method === 'POST' && path === NODE_ROUTES.health) return await this.health(cp);
+      if (method === 'POST' && path === PRUNE_ROUTE) return await this.prune();
       if (method === 'POST' && path === NODE_ROUTES.replays + '/star') return await this.replayStar(request);
       if (method === 'GET' && (path === NODE_ROUTES.replays || path.startsWith(NODE_ROUTES.replays + '/'))) return await this.replays(url);
     } catch (e) {
@@ -1470,13 +1512,28 @@ export class NodeRegistryDO extends DurableObject<Env> {
     return json({ probed: targets.length, problems });
   }
 
-  /** The maintainers' history past HISTORY_DAYS (node_events, node_match_history, node_alerts), on the cron's schedule too. Never throws. */
-  private pruneHistory(): void {
+  /**
+   * POST /internal/prune (the cron's while nodes_off is set, nodeRoutes.ts nodeHealthCheck): what
+   * health() prunes and nothing else. No node is probed and the prune raises no ALERT: the kill
+   * switch keeps the nodes out, and the 30 days hold all the same. An idle object starts first, as
+   * at any call (its start's ALERTs once in ALERT_DEDUPE_MS: startAlert); one that cannot start
+   * answers 503 and prunes nothing. Each run takes what the prunes cap (REPLAY_PRUNE_MAX); the next
+   * one goes on with the rest.
+   */
+  private async prune(): Promise<Response> {
+    const replays = await this.pruneReplays();
+    return json({ replays, history: this.pruneHistory() });
+  }
+
+  /** The maintainers' history past HISTORY_DAYS (node_events, node_match_history, node_alerts), on the cron's schedule too: the matches pruned. Never throws. */
+  private pruneHistory(): number {
     try {
       const n = this.store?.pruneHistory(Date.now()) ?? 0;
       if (n > 0) this.log(`history: ${n} settled matches past ${HISTORY_DAYS} days pruned`);
+      return n;
     } catch (e) {
-      this.log(`history prune failed (tried again at the next health check): ${String(e)}`);
+      this.log(`history prune failed (tried again at the cron's next run): ${String(e)}`);
+      return 0;
     }
   }
 

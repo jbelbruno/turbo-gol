@@ -64,7 +64,7 @@ The security audit of #60 (pr60-1 to pr60-7, pr60-m1) and the owner's decisions 
   1 h gave anyone polling every 30 s every match's exact end, found in review).
 - **30 days, enforced in code.** Nothing settled more than 30 days ago is listed or viewed, whether
   or not a prune ran (an hour's matches go when its first minute turns 30 days old); the cron
-  (every 5 minutes) deletes those rows and their R2 objects.
+  (every 5 minutes, with `nodes_off` set too) deletes those rows and their R2 objects.
 - **Delist on request.** `POST /nodes/admin/delist { matchId, reason? }`, a maintainer's route with
   the same gate as the others (a `NODE_TRUSTED_OPERATORS` account, not a TV's session, signed in or
   re-authenticated in the last 15 minutes): the row, its seats and its R2 object go, the view's

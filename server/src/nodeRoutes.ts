@@ -99,8 +99,8 @@
  *                                     with the account counts), no-store and no CORS as account-stats; like it,
  *                                     answered with or without the node settings and with nodes_off set
  * The KV flag nodes_off (server/README.md, "Kill switches") stops every route here that would reach
- * the object, and the cron's call: 503 'nodes_off', the object never asked. The releases and the
- * shop aliases go on.
+ * the object: 503 'nodes_off', the object never asked. The cron then asks it only to prune what is
+ * past 30 days (PRUNE_ROUTE), never to probe a node. The releases and the shop aliases go on.
  * Anything else under /nodes/ is a 404: the WebRTC signaling is not open in stage 1, and the
  * reference server's /dev/* routes never exist here. Without the node settings (nodesConfigured: a
  * fork, local dev) every route that needs the object is a 404 too.
@@ -115,7 +115,8 @@
  * (an IPv6 address counted by its /64, env.ts limitKey) or per account.
  *
  * The cron (index.ts scheduled, every 5 minutes) calls nodeHealthCheck: one call to the object,
- * which probes the trusted nodes' /healthz; nothing at all without the node settings.
+ * which probes the trusted nodes' /healthz (with nodes_off set, only prunes); nothing at all without
+ * the node settings.
  */
 import { accountsCall, requireAccount, requireFresh, requirePrimary, shopClaim, shopGet } from './accountRoutes';
 import { STATS_OPERATORS_MAX, STATS_TRUSTED_MAX } from './AccountsDO';
@@ -123,7 +124,7 @@ import type { SessionClaims } from './auth';
 import { INTERNAL_HEADER, internalSecret } from './auth';
 import { JSON_MAX_BYTES, error, flag, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
 import type { Env, NodesEnv } from './env';
-import { NODE_ROUTES, OPERATORS_ROUTE, READ_AUDIT_ROUTE, nodesStub } from './nodeApi';
+import { NODE_ROUTES, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, nodesStub } from './nodeApi';
 import { accountGate, edgeCache, overLimit, sitePrefix, subjectsOf, widePrefix } from './limits';
 import type { LimitName, Limiter } from './limits';
 import { REGISTER_PER_IP_PER_HOUR, REPLAY_MAX_BYTES, TOKENS_PER_ACCOUNT_PER_DAY } from './NodeRegistryDO';
@@ -387,17 +388,20 @@ async function auditRead(c: NodeRouteContext, env: Env, s: SessionClaims, what: 
 
 /**
  * The cron's health check (index.ts scheduled, every 5 minutes): one call to the NodeRegistryDO,
- * which probes the /healthz of the trusted wss nodes and raises the ALERTs (nodeWatch.ts). Without
- * the node settings (a fork, local dev) it does nothing at all. Never throws.
+ * which probes the /healthz of the trusted wss nodes and raises the ALERTs (nodeWatch.ts), then
+ * prunes the public replays and the maintainers' history past 30 days. With nodes_off set it asks
+ * for that prune alone (PRUNE_ROUTE): no node is probed, and the 30 days hold through a stop.
+ * Without the node settings (a fork, local dev) it does nothing at all. Never throws.
  */
 export async function nodeHealthCheck(env: Env): Promise<void> {
-  if (!nodesConfigured(env) || !env.JWT_SECRET || (await flag(env, 'nodes_off'))) return;
+  if (!nodesConfigured(env) || !env.JWT_SECRET) return;
+  const [path, what] = (await flag(env, 'nodes_off')) ? [PRUNE_ROUTE, 'prune'] : [NODE_ROUTES.health, 'health check'];
   try {
-    const res = await nodesStub(env).fetch(new Request('https://nodes' + NODE_ROUTES.health, { method: 'POST', headers: { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET) } }));
+    const res = await nodesStub(env).fetch(new Request('https://nodes' + path, { method: 'POST', headers: { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET) } }));
     const text = await res.text();
-    if (!res.ok) console.error(`nodes health check: ${res.status} ${text.slice(0, 200)}`);
+    if (!res.ok) console.error(`nodes ${what}: ${res.status} ${text.slice(0, 200)}`);
   } catch (e) {
-    console.error('nodes health check failed', e);
+    console.error(`nodes ${what} failed`, e);
   }
 }
 

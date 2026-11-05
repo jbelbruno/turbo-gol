@@ -94,8 +94,9 @@
  * hub's back-off after hosts 0: never a 503 for that player). nodes_on (absent: off; '1':
  * everyone; a list of account ids: a canary) lets matches go to community nodes, vm_disabled turns
  * them off again (env.ts nodesMode; the matchmaker decides per match, MatchmakerDO.ts). nodes_off
- * stops every /nodes/* route that would reach the NodeRegistryDO (503 before the object; the cron's
- * call too): the control plane's kill switch. server/README.md lists which flag stops what.
+ * stops every /nodes/* route that would reach the NodeRegistryDO (503 before the object; the cron
+ * only has it prune what is past 30 days): the control plane's kill switch. server/README.md lists
+ * which flag stops what.
  */
 import type { Env } from './env';
 import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';

@@ -15,6 +15,8 @@
  *                          knows neither the match nor the player in it (the lock is free)
  *   POST /internal/health  the cron's (index.ts scheduled) -> 200 { probed, problems }: the /healthz
  *                          of the trusted wss nodes, each problem an ALERT (nodeWatch.ts)
+ *   POST /internal/prune   the cron's while nodes_off is set -> 200 { replays, history }: only what the
+ *                          health call prunes (the public replays and the history past 30 days), no node asked
  *   GET  /internal/operators  the account counts' (nodeRoutes.ts) -> 200 { operators }: the distinct
  *                          account ids that operate a registered node, for AccountsDO only
  *   POST /internal/operator-deleted  { userId } (AccountsDO's purge, sign-in PR 12) -> 200 { ok, banned }:
@@ -61,6 +63,14 @@ export const NODE_ROUTES = {
 
 /** GET: the node operators' account ids, for the owner's account counts only (nodeRoutes.ts accountStats -> AccountsDO). */
 export const OPERATORS_ROUTE = '/internal/operators';
+
+/**
+ * POST: the cron's call while the kill switch nodes_off is set (nodeRoutes.ts nodeHealthCheck): the
+ * public replays and the maintainers' history past 30 days pruned, as the health call prunes them,
+ * and nothing else (no node probed, no ALERT of its own; an idle object starts first, as at any
+ * call). The switch keeps the nodes out, not the rows in.
+ */
+export const PRUNE_ROUTE = '/internal/prune';
 
 /**
  * POST { userId }: a purged account's nodes are banned, and its name and id leave the maintainers'

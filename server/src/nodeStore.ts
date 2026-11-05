@@ -20,7 +20,7 @@
  *   ledger_notes  the repeat decay's notes of matches that earned nothing by themselves, kept 24 h
  *   replay_index  the public replay list (replayIndex.ts): one row per settled, not voided match
  *                 with a replay, written with the match it settles; kept as long as R2 keeps replays
- *                 (REPLAY_INDEX_DAYS: pruned with their R2 objects by the cron's health call) and
+ *                 (REPLAY_INDEX_DAYS: pruned with their R2 objects by the cron, nodes_off or not) and
  *                 served by whole settle hours (replayServedSpan): the matches of hour H from H + 2 h,
  *                 1 to 2 hours after each settled, until H + 30 days
  *   replay_players each listed match's human seats and their player ids (replayIndex.ts replaySeats),
@@ -31,8 +31,8 @@
  * the leaderboard and the summaries. The points themselves go to the operator's account (AccountsDO
  * host_credits, through the outbox), which keeps them for good.
  *
- * The maintainers' history (GET /nodes/admin/events, /history, /alerts), each kept HISTORY_DAYS and
- * pruned as it is written and by the cron's health call:
+ * The maintainers' history (GET /nodes/admin/events, /history, /alerts), each kept HISTORY_DAYS, never
+ * read past it, and pruned as it is written and by the cron, nodes_off or not (historyOldest):
  *   node_events   what happened to each node (registry.ts NodeEventKind): written through the sink
  *                 the Registry and the ControlPlane are given (NodeRegistryDO nodeEvent), with the
  *                 maintainer who made it happen when one did; at most NODE_EVENTS_MAX rows
@@ -79,6 +79,11 @@ const FORGOTTEN_ASK_MAX = 50;
 const REPLAY_HOUR_SQL = `(at / ${HOUR_MS})`;
 /** Rows one prune deletes at most (the cron's, every 5 minutes): bounded work on the object's thread. */
 const REPLAY_PRUNE_MAX = 2000;
+
+/** The oldest time the maintainers' history keeps at `now` (HISTORY_DAYS): an older row is pruned, and never read before that. */
+function historyOldest(now: number): number {
+  return now - HISTORY_DAYS * DAY_MS;
+}
 
 /** A served row as the object reads it: the stored item and its human seats (null: a row from before replay_players). */
 export interface ReplayRow {
@@ -629,10 +634,14 @@ export class NodeStore implements RegistryStore, MatchStore {
     this.sql.exec('DELETE FROM node_alerts WHERE at < ?', at - HISTORY_DAYS * DAY_MS);
   }
 
-  /** Node events, newest first: of one node or of all, before the event `before` (null: from the newest), at most `limit`. */
+  /**
+   * Node events, newest first: of one node or of all, before the event `before` (null: from the
+   * newest), at most `limit`; none past HISTORY_DAYS, pruned or not yet (`+at`: a filter, the order
+   * stays the id's index).
+   */
   eventList(q: { nodeId: string | null; before: number | null; limit: number }): NodeEventRow[] {
-    const where: string[] = [];
-    const args: Array<string | number> = [];
+    const where: string[] = ['+at >= ?'];
+    const args: Array<string | number> = [historyOldest(this.now())];
     if (q.nodeId !== null) {
       where.push('node_id = ?');
       args.push(q.nodeId);
@@ -643,7 +652,7 @@ export class NodeStore implements RegistryStore, MatchStore {
     }
     return this.sql
       .exec<{ id: number; node_id: string; at: number; kind: string; detail: string | null; actor: string | null }>(
-        `SELECT id, node_id, at, kind, detail, actor FROM node_events ${where.length > 0 ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ?`,
+        `SELECT id, node_id, at, kind, detail, actor FROM node_events WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`,
         ...args,
         q.limit,
       )
@@ -651,23 +660,24 @@ export class NodeStore implements RegistryStore, MatchStore {
       .map((r) => ({ id: Number(r.id), nodeId: r.node_id, at: Number(r.at), kind: r.kind as NodeEventKind, detail: r.detail ?? null, actor: r.actor ?? null }));
   }
 
-  /** The ALERT lines, newest first, before the line `before` (null: from the newest), at most `limit`. */
+  /** The ALERT lines, newest first, before the line `before` (null: from the newest), at most `limit`; none past HISTORY_DAYS, pruned or not yet. */
   alertList(q: { before: number | null; limit: number }): AlertRow[] {
+    const oldest = historyOldest(this.now());
     const rows =
       q.before === null
-        ? this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts ORDER BY id DESC LIMIT ?', q.limit).toArray()
-        : this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts WHERE id < ? ORDER BY id DESC LIMIT ?', q.before, q.limit).toArray();
+        ? this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts WHERE +at >= ? ORDER BY id DESC LIMIT ?', oldest, q.limit).toArray()
+        : this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts WHERE id < ? AND +at >= ? ORDER BY id DESC LIMIT ?', q.before, oldest, q.limit).toArray();
     return rows.map((r) => ({ id: Number(r.id), at: Number(r.at), kind: r.kind === 'audit' ? 'audit' : 'alert', line: r.line }));
   }
 
   /**
    * Settled matches, newest first (settle time, then id): one (`matchId`), or a page of one node's or
    * of all, after `cursor` (null: from the newest), at most `limit`; each with its seats and whether
-   * its replay is listed, and served now.
+   * its replay is listed, and served now. None settled past HISTORY_DAYS, pruned or not yet.
    */
   historyList(q: { nodeId: string | null; matchId: string | null; cursor: HistoryCursor | null; limit: number }): HistoryRow[] {
-    const where: string[] = [];
-    const args: Array<string | number> = [];
+    const where: string[] = ['at >= ?'];
+    const args: Array<string | number> = [historyOldest(this.now())];
     if (q.matchId !== null) {
       where.push('match_id = ?');
       args.push(q.matchId);
@@ -682,7 +692,7 @@ export class NodeStore implements RegistryStore, MatchStore {
     }
     const rows = this.sql
       .exec<{ match_id: string; delisted_at: number | null; data: string }>(
-        `SELECT match_id, delisted_at, data FROM node_match_history ${where.length > 0 ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY at DESC, match_id DESC LIMIT ?`,
+        `SELECT match_id, delisted_at, data FROM node_match_history WHERE ${where.join(' AND ')} ORDER BY at DESC, match_id DESC LIMIT ?`,
         ...args,
         q.limit,
       )
@@ -748,7 +758,7 @@ export class NodeStore implements RegistryStore, MatchStore {
 
   /** The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events, ALERT lines and purged ids past it. Returns the matches pruned. */
   pruneHistory(now: number, max: number = REPLAY_PRUNE_MAX): number {
-    const before = now - HISTORY_DAYS * DAY_MS;
+    const before = historyOldest(now);
     return this.tx(() => {
       this.sql.exec('DELETE FROM node_events WHERE at < ?', before);
       this.sql.exec('DELETE FROM node_alerts WHERE at < ?', before);

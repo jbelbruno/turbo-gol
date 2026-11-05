@@ -1504,6 +1504,91 @@ test('retention: the cron prunes the rows past 30 days and their R2 objects with
   assert.equal((await req(env, 'GET', `/nodes/replays/${fresh}/view`)).status, 200);
 });
 
+test('retention with the kill switch nodes_off: the cron still has the object prune what is past 30 days in every table (replay rows, seats, stars and R2 objects; history matches and seats, node events, alert lines, purged ids), and asks it nothing else; the newer rows stay', async () => {
+  const old = hex64('a');
+  const fresh = hex64('b');
+  // Every outbox call delivered: no ALERT line of the outbox's own comes in between.
+  const ok = { idFromName: (name) => ({ name }), get: () => ({ fetch: async () => new RealResponse('{"ok":true}') }) };
+  const { env, reg } = await replayWorld([{ id: fresh, doneAt: BASE, bytes: tgr(fresh) }], {
+    accounts: ok,
+    over: { MATCHMAKER: ok, FLAGS: { get: async (name) => (name === 'nodes_off' ? '1' : null) } },
+  });
+  const store = reg.obj.store;
+  const NODE = 'feedfacefeedface';
+  // The newer rows first: each write prunes what is past 30 days at its own time.
+  assert.equal(store.setReplayStar(ACCOUNT_A, fresh, true, 10), 1);
+  store.nodeEvent({ nodeId: NODE, at: Date.now(), kind: 'online', detail: 'fresh', actor: null });
+  store.alertLine(Date.now(), 'alert', 'ALERT fresh');
+  store.forgetPlayer('e'.repeat(16));
+  // Then the rows of a match settled 31 days ago, each written then.
+  await env.NODE_REPLAYS.put(old, tgr(old));
+  const realNow = Date.now;
+  const then = realNow() - 31 * DAY;
+  try {
+    Date.now = () => then;
+    store.finished(settled(old, { doneAt: then }), rated(old));
+    store.nodeEvent({ nodeId: NODE, at: then, kind: 'online', detail: 'old', actor: null });
+    store.alertLine(then, 'alert', 'ALERT old');
+    store.forgetPlayer('d'.repeat(16));
+    Date.now = () => then + 3 * HOUR;
+    assert.equal(store.setReplayStar(ACCOUNT_B, old, true, 10), 1, 'starred while it was served');
+  } finally {
+    Date.now = realNow;
+  }
+  const keys = (sql) => store.sql.exec(sql).toArray().map((r) => r.k);
+  const tables = () => ({
+    replay_index: keys('SELECT match_id AS k FROM replay_index ORDER BY k'),
+    replay_players: keys('SELECT DISTINCT match_id AS k FROM replay_players ORDER BY k'),
+    replay_stars: keys('SELECT DISTINCT match_id AS k FROM replay_stars ORDER BY k'),
+    node_match_history: keys('SELECT match_id AS k FROM node_match_history ORDER BY k'),
+    node_match_players: keys('SELECT DISTINCT match_id AS k FROM node_match_players ORDER BY k'),
+    node_events: keys('SELECT detail AS k FROM node_events ORDER BY k'),
+    node_alerts: keys('SELECT line AS k FROM node_alerts ORDER BY k'),
+    node_forgotten: keys('SELECT player_id AS k FROM node_forgotten ORDER BY k'),
+  });
+  const both = [old, fresh];
+  assert.deepEqual(tables(), {
+    replay_index: both,
+    replay_players: both,
+    replay_stars: both,
+    node_match_history: both,
+    node_match_players: both,
+    node_events: ['fresh', 'old'],
+    node_alerts: ['ALERT fresh', 'ALERT old'],
+    node_forgotten: ['d'.repeat(16), 'e'.repeat(16)],
+  }, 'nothing pruned them yet');
+  const asked = [];
+  env.NODES.handler = async (r) => {
+    const res = await reg.obj.fetch(r);
+    asked.push([new URL(r.url).pathname, res.status, await res.clone().json()]);
+    return res;
+  };
+  const errors = [];
+  const realError = console.error;
+  console.error = (...args) => errors.push(args.map(String).join(' '));
+  try {
+    const waits = [];
+    await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => waits.push(p), passThroughOnException() {} });
+    await Promise.all(waits);
+  } finally {
+    console.error = realError;
+  }
+  assert.deepEqual(errors, []);
+  assert.deepEqual(asked, [['/internal/prune', 200, { replays: 1, history: 1 }]], 'the prune alone: no health check');
+  assert.deepEqual(tables(), {
+    replay_index: [fresh],
+    replay_players: [fresh],
+    replay_stars: [fresh],
+    node_match_history: [fresh],
+    node_match_players: [fresh],
+    node_events: ['fresh'],
+    node_alerts: ['ALERT fresh'],
+    node_forgotten: ['e'.repeat(16)],
+  });
+  assert.equal(env.NODE_REPLAYS.objects.has(old), false, 'its R2 object went with its row');
+  assert.equal(env.NODE_REPLAYS.objects.has(fresh), true);
+});
+
 test('without the node settings the replay routes are a 404', async () => {
   const env = makeEnv({ NODES: undefined });
   assert.equal((await req(env, 'GET', '/nodes/replays')).status, 404);
@@ -1511,7 +1596,7 @@ test('without the node settings the replay routes are a 404', async () => {
 });
 
 
-test('the kill switch nodes_off: every route that reaches the object answers 503 nodes_off before it, the cron calls nothing; releases and the shop go on', async () => {
+test('the kill switch nodes_off: every route that reaches the object answers 503 nodes_off before it, the cron asks it only for the prune; releases and the shop go on', async () => {
   const reads = [];
   const env = makeEnv({ FLAGS: { get: async (name) => (reads.push(name), name === 'nodes_off' ? '1' : null) } });
   const op = { Authorization: 'Bearer ' + (await accountToken(PROJECT)) };
@@ -1534,7 +1619,11 @@ test('the kill switch nodes_off: every route that reaches the object answers 503
   const waits = [];
   await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => waits.push(p), passThroughOnException() {} });
   await Promise.all(waits);
-  assert.equal(env.NODES.seen.length, 0, 'nor of the cron');
+  assert.deepEqual(
+    env.NODES.seen.map((s) => [s.path, s.req.method, s.headers[INTERNAL_HEADER]]),
+    [['/internal/prune', 'POST', secret]],
+    'the cron asks only for the prune of what is past 30 days: no health check',
+  );
   assert.equal((await req(env, 'GET', '/nodes/releases/install.sh')).status, 200, 'the installers go on');
   assert.ok(reads.every((n) => n === 'nodes_off'));
 });

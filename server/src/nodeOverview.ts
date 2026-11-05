@@ -136,7 +136,7 @@ const FLAG_ON: Record<Exclude<KvFlag, 'nodes_on'>, string> = {
   matchmaking_off: 'no new match, room or lobby (POST /api/queue and /api/lobbies answer 503)',
   do_disabled: "no new match or socket on the Worker's own servers; with the nodes on, searches wait for a node",
   vm_disabled: 'no new match goes to a community node, whatever nodes_on says',
-  nodes_off: 'every /nodes/* route that reaches the control plane answers 503, the cron calls nothing',
+  nodes_off: 'every /nodes/* route that reaches the control plane answers 503; the cron only wakes it to prune what is past 30 days',
   replays_off: 'the public replay list and viewer answer 404',
   email_off: 'no mail goes out on any lane (sign-up, reset, codes)',
   turn_cf_disabled: 'no TURN credential is minted (STUN only)',
