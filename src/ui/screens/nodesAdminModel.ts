@@ -11,9 +11,9 @@
 import { REGION_IDS, statusTone } from '../../net/nodes';
 import type { AdminNode, HistoryMatch, MatchSeat, NodeEventKind, NodeFailure, NodeStatus, OpenMatch, OpenMatches, Overview, RegionView, Tone, TokenView } from '../../net/nodes';
 
-export type AdminTab = 'summary' | 'nodes' | 'tokens' | 'regions' | 'release' | 'points' | 'stats' | 'matches' | 'history' | 'alerts';
-/** The panel's tabs in their order (Partidas, Historial and Alertas: the history, PR 4). */
-export const ADMIN_TABS: readonly AdminTab[] = ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts'];
+export type AdminTab = 'summary' | 'nodes' | 'operators' | 'tokens' | 'regions' | 'release' | 'points' | 'stats' | 'matches' | 'history' | 'alerts';
+/** The panel's tabs in their order (Partidas, Historial and Alertas: the history, PR 4; Operadores: the community's hosts, Prompt 2 A4). */
+export const ADMIN_TABS: readonly AdminTab[] = ['summary', 'nodes', 'operators', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts'];
 
 /** The overview is asked again this often (ADMIN_REFRESH): under the 30 a minute of the maintainer routes, with room for the actions. */
 export const ADMIN_REFRESH_MS = 15_000;
@@ -50,12 +50,16 @@ export function refreshSent(s: RefreshState): RefreshState {
   return { ...s, inFlight: true };
 }
 
-/** After an answer: `ok`, or how it failed (src/net/nodes.ts nodeFailure), with a 429's retry-after. */
-export function refreshAfter(s: RefreshState, now: number, outcome: 'ok' | NodeFailure, retryAfterMs = 0): RefreshState {
+/**
+ * After an answer: `ok`, or how it failed (src/net/nodes.ts nodeFailure), with a 429's retry-after.
+ * `every`: the next one after an `ok` (the panel's ADMIN_REFRESH_MS; "Mis servidores" asks its
+ * /nodes/mine every 10 s, screens/serversModel.ts MINE_REFRESH_MS).
+ */
+export function refreshAfter(s: RefreshState, now: number, outcome: 'ok' | NodeFailure, retryAfterMs = 0, every = ADMIN_REFRESH_MS): RefreshState {
   const base = { ...s, inFlight: false };
   switch (outcome) {
     case 'ok':
-      return { ...base, dueAt: now + ADMIN_REFRESH_MS, limited: 0, held: null };
+      return { ...base, dueAt: now + every, limited: 0, held: null };
     case 'paused':
       return { ...base, dueAt: now + PAUSED_RETRY_MS, limited: 0 };
     case 'limited': {
@@ -209,18 +213,53 @@ export function nodeActions(n: AdminNode): NodeActions {
   };
 }
 
-export type ConfirmAction = 'status' | 'ban' | 'force' | 'drain' | 'reprobe' | 'retire' | 'revokeToken' | 'update' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'voidMatch' | 'voidStrike' | 'download';
+export type ConfirmAction = 'status' | 'ban' | 'force' | 'drain' | 'reprobe' | 'retire' | 'revokeToken' | 'update' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'voidMatch' | 'voidStrike' | 'download' | 'flag' | 'block' | 'unblock' | 'suspendAll';
 
 /**
  * What a confirmation sheet asks for (prompt 1, B6): a reason for a retirement, a ban, a drain, a
  * delist, a match voided (with or without a strike), an active forced past its verified matches and
  * every points action; the node's name typed for a retirement, a ban and a drain. A raw replay's
- * download asks for nothing: its sheet only says it is posted to the team's channel.
+ * download asks for nothing: its sheet only says it is posted to the team's channel. The opening's
+ * flag, an operator's block and its suspend-all (Prompt 2, A1, A4) ask for a reason (the server
+ * refuses them without one); an unblock's is optional.
  */
 export function confirmNeeds(a: ConfirmAction): { reason: boolean; typeName: boolean } {
   const typeName = a === 'retire' || a === 'ban' || a === 'drain';
-  const reason = typeName || a === 'delist' || a === 'voidMatch' || a === 'voidStrike' || a === 'force' || a === 'grant' || a === 'revoke' || a === 'unfreeze';
+  const reason = typeName || a === 'delist' || a === 'voidMatch' || a === 'voidStrike' || a === 'force' || a === 'grant' || a === 'revoke' || a === 'unfreeze' || a === 'flag' || a === 'block' || a === 'suspendAll';
   return { reason, typeName };
+}
+
+// ---- the opening's flag (RESUMEN, Prompt 2 A1) and OPERADORES (A4) ------------------------------------
+
+/** The opening's three stages as the panel sets them: closed ('0'), a canary list of account ids, every account ('1'). */
+export type FlagChoice = 'closed' | 'canary' | 'all';
+
+/** The most ids a canary may hold (server/src/env.ts HOSTING_CANARY_MAX: the server refuses more). */
+export const CANARY_MAX = 50;
+
+/**
+ * The KV value of a choice (server/src/env.ts hostingFlagValue's rule, checked again there): '0',
+ * '1', or the canary's ids (16 hex each, lower case, deduplicated, comma-separated, CANARY_MAX at
+ * most); null for a canary with no valid id, one that is not 16 hex, or too many.
+ */
+export function flagValueOf(choice: FlagChoice, ids: string): string | null {
+  if (choice === 'closed') return '0';
+  if (choice === 'all') return '1';
+  const list = ids
+    .split(/[\s,;]+/)
+    .map((x) => x.trim().toLowerCase())
+    .filter((x) => x !== '');
+  if (list.length === 0 || list.some((x) => !/^[0-9a-f]{16}$/.test(x))) return null;
+  const unique = [...new Set(list)];
+  return unique.length <= CANARY_MAX ? unique.join(',') : null;
+}
+
+/** The choice a raw flag value stands for (the overview's `hosting.raw`), and its canary's ids. */
+export function flagChoiceOf(raw: string | null): { choice: FlagChoice; ids: string[] } {
+  const v = (raw ?? '').trim();
+  if (v === '1') return { choice: 'all', ids: [] };
+  const ids = v.split(',').map((x) => x.trim().toLowerCase()).filter((x) => /^[0-9a-f]{16}$/.test(x));
+  return ids.length > 0 ? { choice: 'canary', ids } : { choice: 'closed', ids: [] };
 }
 
 /** The name typed matches the node's (trimmed, as written: names are a-z, A-Z, digits, '.', '_' and '-'). */

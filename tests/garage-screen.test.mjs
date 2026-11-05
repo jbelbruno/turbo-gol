@@ -131,7 +131,7 @@ test('every row and detail key exists in English and Spanish', () => {
   assert.equal(es['garage.missing'], 'Tienes {have} pts: te faltan {missing}');
 });
 
-test('how points are earned, as the terms say it (Términos 11.1 and 12.1.2): only by hosting a community server, and today only the project has servers and nobody can register one, so no text invites a player to host one, and none sets a date', () => {
+test('how points are earned, as the terms say it (Términos 11.1 and 12.1.2): only by hosting a community server, and while hosting is closed only the project has servers and nobody can register one, so no closed text invites a player to host one, and none sets a date', () => {
   const copy = {
     'garage.earn': ['ALOJAR UN SERVIDOR DA PUNTOS: AÚN NO ABIERTO', 'HOSTING A SERVER EARNS POINTS: NOT OPEN YET'],
     'garage.earnSub': ['Cómo funciona · ver la guía', 'How it works · see the guide'],
@@ -155,6 +155,53 @@ test('how points are earned, as the terms say it (Términos 11.1 and 12.1.2): on
   // The layout keeps its room: the card's title and the links' words about as long as before.
   assert.ok(es['garage.earn'].length <= 48 && en['garage.earn'].length <= 46);
   assert.ok(es['profile.hostServer'].length <= 20 && en['profile.hostServer'].length <= 16);
+  // "Mis servidores"' own closed view (Prompt 2, B2: open, but not for this account) follows the same
+  // rule: no call to host, no machine, no date. (The open copy below may name the VPS.)
+  for (const k of ['servers.closedTitle', 'servers.closed', 'servers.closedNow', 'servers.what']) {
+    assert.doesNotMatch(es[k], /\b(?:aloja|pon un servidor|gana puntos|vps|tu pc|próximamente|pronto)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:host a|earn points|vps|your pc|coming soon|soon)\b/i, 'en ' + k);
+  }
+});
+
+test('the host copy once hosting is open (Prompt 2, B1 and B2): the same keys stay for the closed state, and the screen picks the open ones only when GET /api/config says hosting is open', async () => {
+  // Terms 11.1 and 12.1.2 of version (b) say both: "hasta la apertura ... nadie puede ganarlos", and
+  // from that day the host who meets section 12 earns them. The open words, as drawn here.
+  const open = {
+    'garage.earnOpen': ['ALOJAR UN SERVIDOR DA PUNTOS', 'HOSTING A SERVER EARNS POINTS'],
+    // Neutral, never "add yours": during a canary /api/config is open for every account, though most
+    // cannot register a server yet (Terms 12.1.2; "Mis servidores" tells them so).
+    'garage.earnSubOpen': ['Cómo funciona · Mis servidores', 'How it works · My servers'],
+    'garage.earnShortOpen': ['Mis servidores', 'My servers'],
+    'garage.pausedOpen': ['Canjes en pausa · revisa Mis servidores', 'Redeeming paused · check My servers'],
+    'points.onlyOpen': ['Solo se ganan alojando un servidor comunitario, nunca jugando.', 'Earned only by hosting a community server, never by playing.'],
+    'profile.hostServerOpen': ['Mis servidores', 'My servers'],
+  };
+  for (const [k, [want, wantEn]] of Object.entries(open)) {
+    assert.equal(es[k], want, 'es ' + k);
+    assert.equal(en[k], wantEn, 'en ' + k);
+    // Still no date, and never "nobody earns them" once it is open.
+    assert.doesNotMatch(es[k], /\b(?:próximamente|pronto|hoy nadie|aún no)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:coming soon|soon|nobody|not open yet)\b/i, 'en ' + k);
+  }
+  assert.ok(es['garage.earnOpen'].length <= 48 && en['garage.earnOpen'].length <= 46);
+  assert.ok(es['profile.hostServerOpen'].length <= 20 && en['profile.hostServerOpen'].length <= 16);
+  // GARAJE and PERFIL choose by the gate alone (screens/serversModel.ts hostEntry(hostingOpen(cfg))).
+  const { readFile } = await import('node:fs/promises');
+  const GARAGE = await readFile(new URL('../src/ui/screens/garage.ts', import.meta.url), 'utf8');
+  const PROFILE = await readFile(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8');
+  assert.match(GARAGE, /const open = \(\): boolean => hostEntry\(hostingOpen\(menu\.cfg\)\) === 'servers';/);
+  assert.match(GARAGE, /set\(earnTitle, t\(o \? 'garage\.earnOpen' : 'garage\.earn'\)\);/);
+  assert.match(GARAGE, /set\(earnSub, t\(o \? 'garage\.earnSubOpen' : 'garage\.earnSub'\)\);/);
+  assert.match(GARAGE, /set\(compactShort, t\(o \? 'garage\.earnShortOpen' : 'garage\.earnShort'\)\);/);
+  assert.match(GARAGE, /t\(opened \? 'points\.onlyOpen' : 'points\.only'\)/);
+  assert.match(GARAGE, /t\(opened \? 'garage\.pausedOpen' : 'garage\.paused'\)/);
+  assert.match(GARAGE, /const earnGo = \(\): void => \(open\(\) \? menu\.open\('servers'\) : openGuide\(\)\);/, 'the compact button and a locked car: the screen when open, the guide when closed');
+  // The earn card itself: the screen when open, its branch first; closed, the guide (a new tab, or its sheet with no pop-up).
+  assert.match(GARAGE, /const earnClick = \(e: MouseEvent\): void => \{\s*if \(open\(\)\) \{\s*e\.preventDefault\(\);\s*menu\.open\('servers'\);\s*return;\s*\}\s*if \(!noPopup\(\)\) return;\s*e\.preventDefault\(\);\s*openGuide\(\);/, 'the card: the screen when open, the guide (new tab or its sheet) when closed');
+  assert.match(GARAGE, /menu\.open\(open\(\) \? 'servers' : 'profile'\);/, "a paused wallet's car: the screen when open, PERFIL when closed");
+  assert.match(PROFILE, /hostEntry\(open\) === 'servers'\s*\? h\('button\.mn-btn\.mn-prof-link'[^\n]*menu\.open\('servers'\)[^\n]*t\('profile\.hostServerOpen'\)\)\)\s*: link\(HOST_GUIDE\(\), 'server', t\('profile\.hostServer'\), 'profile-host'\);/);
+  // And "Muy pronto" is gone for good: no host text promises when.
+  for (const [lang, msgs] of [['es', es], ['en', en]]) for (const [k, v] of Object.entries(msgs)) if (typeof v === 'string') assert.doesNotMatch(v, /muy pronto/i, `${lang} ${k}`);
 });
 
 test('one outline per car, on the 72 x 36 grid, the wheels on the ground', () => {

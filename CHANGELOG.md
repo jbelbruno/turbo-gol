@@ -42,6 +42,21 @@ All notable changes to Turbogol are documented here. The format follows
   reasons, once per match, 20 a day, kept 30 days for the team only and deleted with the
   reporter's account; a report alone never sanctions a host). Before, none of it is stored or
   shown (`server/README.md`).
+- Community nodes: "Mis servidores" in the game, shipped closed: nothing of it shows until
+  `GET /api/config` says hosting is open (before, `/#servers` opens PERFIL, and PERFIL and GARAJE
+  keep the guide). Once it is open, PERFIL's MI SERVIDOR and COMUNIDAD and GARAJE's points card lead
+  to it: what the account still lacks with its fix, then a Linux VPS with a DNS name by region,
+  name and DNS name, a checklist, the rules for hosts and Annex B accepted with the 18-or-older
+  switch right above PEDIR CÓDIGO, "confirm it's you" (the password or a mailed code), the code's
+  install line with COPIAR and its follow-up to active; each server's state, load, egress, version,
+  strikes and refusals with DRENAR, RENOMBRAR and RETIRAR (held to confirm, then how to uninstall),
+  its own codes, today's points against the cap and the balance, and the name in the public list by
+  the host's choice. A TV lists the servers and shows a QR to `/#servers`. PARTIDO ENCONTRADO and
+  the FINAL say "servidor de la comunidad" only for a community server (no longer for every node),
+  whose FINAL offers REPORTAR SERVIDOR once per match; both follow the server's mark, never the
+  opening's flag. Ajustes › JUEGO gets "Solo servidores del proyecto" once hosting is open, sent
+  with every search while it is on (and kept shown while it is, so it can always be turned off);
+  CONTROL DE NODOS gets an Operadores tab and the opening's control in RESUMEN.
 - Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
   P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
   in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and

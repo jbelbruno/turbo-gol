@@ -6,8 +6,16 @@
  * NODE_TRUSTED_OPERATORS account, its password typed in the last 15 minutes).
  *
  *   RESUMEN    the KPIs (nodes online by region, matches now, the verification queue, the outbox,
- *              the trusted slots), the channel, the warnings, the eight KV flags (read only, with
- *              their wrangler commands), AGREGAR SERVIDOR DEL PROYECTO
+ *              the trusted slots), the channel, the warnings, the opening of hosting (Prompt 2, A1:
+ *              the KV flag node_operators, closed / a canary of account ids / every account, behind
+ *              a confirmation with its reason; refused by the server while the terms in force do not
+ *              describe hosting), the eight KV flags (read only, with their wrangler commands),
+ *              AGREGAR SERVIDOR DEL PROYECTO
+ *   OPERADORES the community's hosts (Prompt 2, A4): status, opt-in, servers with their refusals and
+ *              effective capacity, codes, matches against the cap, today's points against the cap,
+ *              concentration and the week's reports (never a sanction alone); BLOQUEAR / DESBLOQUEAR,
+ *              SUSPENDER TODOS behind a confirmation with a reason, BILLETERA (PUNTOS' lookup); asked
+ *              when the tab opens and with ACTUALIZAR (an audited read), never by the refresh
  *   NODOS      one row per node; a press opens its detail (a sub-view Back closes): its machine,
  *              last probe, strikes, pauses, reason, and the actions behind a confirmation sheet
  *              (status with the server's guards, drain, re-probe, retire); a node suspended for a
@@ -64,17 +72,21 @@ import {
   tokenFormIssues,
   verificationMatch,
 } from '../../net/nodes';
-import type { AdminNode, AdminWallet, AlertLine, FrozenList, HistoryMatch, MatchSeat, NamesState, NodeEvent, NodeFailure, NodeStatus, OpenMatch, OpenMatches, Overview, TokenAsk, TokenForm, Tone } from '../../net/nodes';
+import type { AdminNode, AdminWallet, AlertLine, FrozenList, HistoryMatch, HostingView, MatchSeat, NamesState, NodeEvent, NodeFailure, NodeStatus, OpenMatch, OpenMatches, OperatorView, Overview, TokenAsk, TokenForm, Tone } from '../../net/nodes';
+import { REPORT_REASONS } from '../../net/nodes';
 import { sha256Hex } from '../../../nodes/shared/edcrypto';
 import { CATALOG } from '../../../nodes/control-plane/shop';
 import {
   ADMIN_TABS,
   appendPage,
   checklistOf,
+  CANARY_MAX,
   confirmNeeds,
   countRows,
   eventTone,
+  flagChoiceOf,
   flagCommands,
+  flagValueOf,
   followOf,
   kpisOf,
   matchActions,
@@ -95,7 +107,7 @@ import {
   revocable,
   seatName,
 } from './nodesAdminModel';
-import type { AdminTab, ConfirmAction, WizardStep } from './nodesAdminModel';
+import type { AdminTab, ConfirmAction, FlagChoice, WizardStep } from './nodesAdminModel';
 import type { Menu, Screen } from '../Menu';
 import { field, primary, screenHead, secondary, section } from './common';
 import type { Field } from './common';
@@ -111,6 +123,7 @@ import type { Key } from '../../i18n';
 const TAB_KEY: Readonly<Record<AdminTab, Key>> = {
   summary: 'nodesAdmin.tab.summary',
   nodes: 'nodesAdmin.tab.nodes',
+  operators: 'nodesAdmin.tab.operators',
   tokens: 'nodesAdmin.tab.tokens',
   regions: 'nodesAdmin.tab.regions',
   release: 'nodesAdmin.tab.release',
@@ -171,8 +184,12 @@ function errText(e: unknown): string {
 
 const failureOf = (e: unknown): NodeFailure => nodeFailure(e instanceof AccountError ? e : null);
 
-/** The history's tabs: their data are their own reads, not the overview's (PARTIDAS shows its voids of 24 h beside them). */
-const HISTORY_TABS: ReadonlySet<AdminTab> = new Set(['matches', 'history', 'alerts']);
+/** The history's tabs: their data are their own reads, not the overview's (PARTIDAS shows its voids of 24 h beside them); OPERADORES' too (GET /nodes/admin/operators). */
+const HISTORY_TABS: ReadonlySet<AdminTab> = new Set(['matches', 'history', 'alerts', 'operators']);
+
+const STAGE_KEY: Readonly<Record<FlagChoice, Key>> = { closed: 'nodesAdmin.open.stage.closed', canary: 'nodesAdmin.open.stage.canary', all: 'nodesAdmin.open.stage.all' };
+/** The opening's control, as a seg (one word each). */
+const PICK_KEY: Readonly<Record<FlagChoice, Key>> = { closed: 'nodesAdmin.open.pick.closed', canary: 'nodesAdmin.open.pick.canary', all: 'nodesAdmin.open.pick.all' };
 
 /** The wizard as it stands: kept through Back and a password sheet until LISTO or a new account. */
 interface Wizard {
@@ -213,6 +230,10 @@ export function nodesAdminScreen(menu: Menu): Screen {
   let alertLines: { list: AlertLine[]; next: string | null; webhook: boolean; error: string | null; loading: boolean } | null = null;
   /** A match looked up by its id in PARTIDAS: its history row, or null when the history keeps none. */
   let found: { matchId: string; row: HistoryMatch | null; names: NamesState } | null = null;
+  /** OPERADORES (Prompt 2, A4): asked when its tab opens and with ACTUALIZAR (an audited read), never by the refresh. */
+  let operators: { list: OperatorView[]; error: string | null; loading: boolean } | null = null;
+  /** RESUMEN's opening control as picked, before its confirmation (null: the flag's own stage). */
+  let flagPick: { choice: FlagChoice; ids: string } | null = null;
   /** The wizard's countdown and follow-up, repainted by the tick and the refresh without touching its fields. */
   let followEl: HTMLElement | null = null;
   let slotsEl: HTMLElement | null = null;
@@ -233,6 +254,8 @@ export function nodesAdminScreen(menu: Menu): Screen {
     events = null;
     alertLines = null;
     found = null;
+    operators = null;
+    flagPick = null;
     reveal = false;
     view = { kind: 'tabs' };
     tab = 'summary';
@@ -384,8 +407,132 @@ export function nodesAdminScreen(menu: Menu): Screen {
       kpis,
       channel,
       section(t('nodesAdmin.warnTitle'), ...(warnings.length > 0 ? warnings : [h('p.mn-note', null, t('nodesAdmin.noWarnings'))])),
+      ...(o.hosting !== undefined ? [openingView(o.hosting)] : []),
       section(t('nodesAdmin.flagsTitle'), h('p.mn-note', null, t('nodesAdmin.flagsNote')), h('div.mn-cmd', readOnly('na-flag-set'), cmds.set), h('div.mn-cmd', readOnly('na-flag-clear'), cmds.clear), ...flags),
     ];
+  };
+
+  // ---- RESUMEN's opening of hosting (Prompt 2, A1: OPEN_FLAG, node_operators) ----------------------------
+
+  /** Who may ask for a code, in words: closed, the canary's N accounts, everyone. */
+  const stageText = (choice: FlagChoice, count: number): string => t(STAGE_KEY[choice], { count });
+
+  /**
+   * The opening (KV node_operators, the only flag the Worker writes): its stage now, whether the
+   * terms in force describe hosting (below NODE_HOSTING_TERMS the server refuses every value, '0'
+   * too: 409 hosting_terms), closed / canary (account ids) / every account, and CAMBIAR LA APERTURA
+   * behind a confirmation with its reason (an audit row and an ALERT without the ids); its latest
+   * changes. It lands within a minute or two (KV's edge cache).
+   */
+  const openingView = (hv: HostingView): HTMLElement => {
+    const now = flagChoiceOf(hv.raw);
+    const pick = flagPick ?? { choice: now.choice, ids: now.ids.join(', ') };
+    const stage = seg<FlagChoice>(
+      'na-open-stage',
+      t('nodesAdmin.open.title'),
+      (['closed', 'canary', 'all'] as const).map((c) => ({ value: c, label: t(PICK_KEY[c]) })),
+      () => pick.choice,
+      (v) => {
+        flagPick = { choice: v, ids: pick.ids };
+        keepFocus(paintBody);
+      },
+    );
+    const ids = openIds;
+    if (document.activeElement !== ids.input && ids.input.value !== pick.ids) ids.input.value = pick.ids;
+    const set = (): void => {
+      ids.error(null);
+      const choice = flagPick?.choice ?? pick.choice;
+      const value = flagValueOf(choice, flagPick?.ids ?? pick.ids);
+      if (value === null) return ids.error(t('nodesAdmin.open.badIds', { max: CANARY_MAX }));
+      const count = choice === 'canary' ? value.split(',').length : 0;
+      const label = stageText(choice, count);
+      confirmSheet('flag', label, t('nodesAdmin.open.set'), (reason) =>
+        act(
+          () => acc.nodesAction('flags', { name: hv.flag, value, reason }),
+          () => {
+            flagPick = null;
+            menu.toast(t('nodesAdmin.open.done', { stage: label }), 'ok');
+          },
+        ),
+      );
+    };
+    const changes = hv.changes.slice(0, 5).map((c) => h('p', readOnly('na-open-change-' + c.id), h('small', null, when(c.at)), ' ', h('span', null, c.actor), ' · ', h('code.mn-na-raw', null, `${c.old ?? '—'} → ${c.new ?? '—'}`), c.reason !== null ? h('span', null, ` · ${c.reason}`) : null));
+    return section(
+      t('nodesAdmin.open.title'),
+      h('div.mn-na-flag', readOnly('na-open-now'), h('code', null, hv.flag), tag(now.choice === 'closed' ? 'muted' : 'warn', stageText(now.choice, now.ids.length)), h('p.mn-note', null, hv.terms.inForce ? t('nodesAdmin.open.termsOn', { version: hv.terms.version ?? '—' }) : t('nodesAdmin.open.termsOff', { version: hv.terms.version ?? '—', needed: hv.terms.needed ?? '—' }))),
+      hv.communityWebhook ? null : h('div.mn-na-alert', readOnly('na-open-webhook'), icon('warning'), h('p', null, t('nodesAdmin.open.webhookOff'))),
+      h('form.mn-form.mn-na-form', { onsubmit: (e: Event) => e.preventDefault() }, stage.el, pick.choice === 'canary' ? ids.el : null, secondary(t('nodesAdmin.open.set'), set, { 'data-key': 'na-open-set' })),
+      ...(changes.length > 0 ? [h('h3.mn-field-label', null, t('nodesAdmin.open.changes')), ...changes] : []),
+    );
+  };
+
+  // ---- OPERADORES (Prompt 2, A4, A8 bis, A16, A17) -----------------------------------------------------
+
+  const loadOperators = async (): Promise<void> => {
+    if (sample !== null) return;
+    const me = acc.account?.playerId ?? null;
+    operators = { list: operators?.list ?? [], error: null, loading: true };
+    keepFocus(paintBody);
+    try {
+      const r = await acc.nodesOperators();
+      if (me !== (acc.account?.playerId ?? null)) return;
+      operators = { list: r.operators, error: null, loading: false };
+    } catch (e) {
+      if (me !== (acc.account?.playerId ?? null)) return;
+      operators = { list: operators?.list ?? [], error: failureOf(e) === 'reauth' ? null : errText(e), loading: false };
+      if (failureOf(e) === 'reauth') return askPassword(() => void loadOperators());
+    }
+    if (el.isConnected && tab === 'operators') keepFocus(paintBody);
+  };
+
+  /** An operator's card: its account, status and opt-in, its servers with their refusals and effective capacity, codes, matches against its cap, points and concentration, the week's reports (never a sanction alone), and the maintainer's three actions. */
+  const operatorCard = (op: OperatorView): HTMLElement[] => {
+    const pct = (x: number): string => `${Math.round(x * 100)} %`;
+    const who = op.name ?? op.operatorId;
+    const r = op.reports;
+    const reasons = REPORT_REASONS.filter((k) => r.byReason[k] > 0).map((k) => `${t(`final.reason.${k}` as Key)}: ${r.byReason[k]}`).join(' · ');
+    const card = h(
+      'div.mn-prof-node',
+      readOnly('na-op-' + op.operatorId),
+      h('div.mn-prof-node-head', null, icon('profile', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, who), tag(op.status === 'blocked' ? 'bad' : 'ok', t(op.status === 'blocked' ? 'nodesAdmin.op.blocked' : 'nodesAdmin.op.ok')), op.showPublic ? tag('muted', t('nodesAdmin.op.public')) : null),
+      h(
+        'dl.mn-prof-node-facts',
+        null,
+        ...fact(t('nodesAdmin.op.account'), h('code.mn-na-raw', null, op.operatorId)),
+        ...(op.reason !== null ? fact(t('nodesAdmin.detail.reason'), h('span', null, op.reason), op.actor !== null ? h('span', null, ` · ${op.actor}`) : '') : []),
+        ...fact(t('nodesAdmin.op.nodes'), op.nodes.length > 0 ? op.nodes.map((n) => `${n.name} (${regionLabel(n.region)}, ${t(STATE_KEY[n.status], { count: 0, total: 20 })}, ${n.capacityEffective}/${n.capacity}, ${n.refused}/${n.assigned + n.refused})`).join(' · ') : '—'),
+        ...fact(t('nodesAdmin.op.refusals'), pct(op.refusalRate)),
+        ...fact(t('nodesAdmin.op.tokens'), t('nodesAdmin.op.tokensOf', { today: op.tokens.today, unused: op.tokens.unused })),
+        ...fact(t('nodesAdmin.op.running'), `${op.running.matches}/${op.running.max}`),
+        ...fact(t('nodesAdmin.op.pointsToday'), op.points.cap !== null ? `${formatPoints(op.points.today)}/${formatPoints(op.points.cap)}` : formatPoints(op.points.today)),
+        ...fact(t('nodesAdmin.op.points'), t('nodesAdmin.op.pointsOf', { d30: formatPoints(op.points.d30), earned: formatPoints(op.points.earned), matches: op.points.matches30d })),
+        ...fact(t('nodesAdmin.op.concentration'), pct(op.points.concentration)),
+        ...fact(t('nodesAdmin.op.reports', { days: r.days }), t('nodesAdmin.op.reportsOf', { count: r.count, accounts: r.accounts }), reasons !== '' ? h('span', null, ` · ${reasons}`) : ''),
+      ),
+    );
+    const recent = r.recent.slice(0, 5).map((x, i) => h('p', readOnly(`na-op-report-${op.operatorId}-${i}`), h('small', null, when(x.at)), ' ', h('code.mn-na-raw', null, `${x.matchId.slice(0, 8)} · ${x.reporterId}`), ` · ${t(`final.reason.${x.reason}` as Key)}`, x.ping !== null ? ` · ${x.ping} ms` : ''));
+    const blocked = op.status === 'blocked';
+    const actions = h(
+      'div.mn-na-actions',
+      null,
+      blocked
+        ? secondary(t('nodesAdmin.op.unblock'), () => confirmSheet('unblock', who, t('nodesAdmin.op.unblock'), (reason) => act(() => acc.nodesAction('operator', { operatorId: op.operatorId, action: 'unblock', ...(reason ? { reason } : {}) }), () => void loadOperators())), { 'data-key': 'na-op-unblock-' + op.operatorId })
+        : secondary(t('nodesAdmin.op.block'), () => confirmSheet('block', who, t('nodesAdmin.op.block'), (reason) => act(() => acc.nodesAction('operator', { operatorId: op.operatorId, action: 'block', reason }), () => void loadOperators())), { 'data-key': 'na-op-block-' + op.operatorId, class: 'mn-btn-cancel' }),
+      secondary(t('nodesAdmin.op.suspendAll'), () => confirmSheet('suspendAll', who, t('nodesAdmin.op.suspendAll'), (reason) => act(() => acc.nodesAction('operator', { operatorId: op.operatorId, action: 'suspend_all', reason }), () => void loadOperators())), { 'data-key': 'na-op-suspend-' + op.operatorId, class: 'mn-btn-cancel' }),
+      secondary(t('nodesAdmin.op.wallet'), () => ((tab = 'points'), (idField.input.value = op.operatorId), frozen === null ? void loadFrozen() : undefined, void lookUp(op.operatorId)), { 'data-key': 'na-op-wallet-' + op.operatorId }),
+    );
+    return [card, ...recent, actions];
+  };
+
+  const operatorsView = (): HTMLElement[] => {
+    const s = operators;
+    const list = s?.list ?? [];
+    return [
+      h('p.mn-note', null, t('nodesAdmin.op.note')),
+      h('div.mn-na-tools', null, secondary(t('nodesAdmin.refresh'), () => void loadOperators(), { 'data-key': 'na-operators-refresh', 'aria-busy': s?.loading ? 'true' : undefined })),
+      s?.error ? h('p.mn-field-error', null, s.error) : null,
+      ...(list.length > 0 ? list.flatMap(operatorCard) : [h('p.mn-note', readOnly('na-op-none'), t(s === null || s.loading ? 'nodesAdmin.loading' : 'nodesAdmin.op.none'))]),
+    ].filter((x): x is HTMLElement => x !== null);
   };
 
   // ---- NODOS ----------------------------------------------------------------------------------------
@@ -513,7 +660,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     const needs = confirmNeeds(a);
     const reason = field(t('nodesAdmin.confirm.reason'), { maxLength: 200, keypad: 'text', enterkeyhint: needs.typeName ? 'next' : 'done', hint: needs.reason ? undefined : t('nodesAdmin.confirm.optional') });
     const typed: Field | null = needs.typeName ? field(t('nodesAdmin.confirm.typeName', { name }), { maxLength: 40, keypad: 'text', enterkeyhint: 'done' }) : null;
-    const note = a === 'drain' ? 'nodesAdmin.confirm.drainNote' : a === 'retire' ? 'nodesAdmin.confirm.retireNote' : a === 'ban' ? 'nodesAdmin.confirm.banNote' : a === 'force' ? 'nodesAdmin.confirm.forceNote' : a === 'update' ? 'nodesAdmin.confirm.updateNote' : a === 'unfreeze' ? 'nodesAdmin.confirm.unfreezeNote' : a === 'delist' ? 'nodesAdmin.confirm.delistNote' : a === 'voidMatch' ? 'nodesAdmin.confirm.voidNote' : a === 'voidStrike' ? 'nodesAdmin.confirm.voidStrikeNote' : a === 'download' ? 'nodesAdmin.confirm.downloadNote' : 'nodesAdmin.confirm.note';
+    const note = a === 'drain' ? 'nodesAdmin.confirm.drainNote' : a === 'retire' ? 'nodesAdmin.confirm.retireNote' : a === 'ban' ? 'nodesAdmin.confirm.banNote' : a === 'force' ? 'nodesAdmin.confirm.forceNote' : a === 'update' ? 'nodesAdmin.confirm.updateNote' : a === 'unfreeze' ? 'nodesAdmin.confirm.unfreezeNote' : a === 'delist' ? 'nodesAdmin.confirm.delistNote' : a === 'voidMatch' ? 'nodesAdmin.confirm.voidNote' : a === 'voidStrike' ? 'nodesAdmin.confirm.voidStrikeNote' : a === 'download' ? 'nodesAdmin.confirm.downloadNote' : a === 'flag' ? 'nodesAdmin.confirm.flagNote' : a === 'block' ? 'nodesAdmin.confirm.blockNote' : a === 'unblock' ? 'nodesAdmin.confirm.unblockNote' : a === 'suspendAll' ? 'nodesAdmin.confirm.suspendAllNote' : 'nodesAdmin.confirm.note';
     menu.modal({
       title: t('nodesAdmin.confirm.title', { action: label, name }),
       body: [h('p.mn-note', null, t(note as Key)), a === 'update' || a === 'revokeToken' || a === 'download' ? null : reason.el, typed?.el ?? null],
@@ -635,6 +782,10 @@ export function nodesAdminScreen(menu: Menu): Screen {
     }
     if (el.isConnected && tab === 'points') keepFocus(paintBody);
   };
+
+  // The canary's ids (RESUMEN's opening): one field for the screen, so a refresh keeps what is typed and its focus.
+  const openIds = field(t('nodesAdmin.open.ids'), { maxLength: 1200, keypad: 'text', enterkeyhint: 'done' });
+  openIds.input.addEventListener('input', () => (flagPick = { choice: flagPick?.choice ?? 'canary', ids: openIds.input.value }));
 
   const idField = field(t('nodesAdmin.points.lookup'), { maxLength: 16, keypad: 'text', enterkeyhint: 'go', placeholder: '0123456789abcdef' });
   const goLookup = (): void => {
@@ -1159,7 +1310,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
     if (f === null) lines.push(h('p.mn-note', null, t('nodesAdmin.loading')));
     else {
       const step = f.step === 'waiting' && left === 0 ? 'expired' : f.step;
-      lines.push(h('p.mn-na-follow', { 'data-step': step }, icon(step === 'active' || step === 'probation' ? 'check' : step === 'expired' || step === 'revoked' || step === 'stopped' ? 'warning' : 'refresh'), h('span', null, t(`nodesAdmin.follow.${step}` as Key, { name: f.node?.name ?? w.token.ask.name }))));
+      lines.push(h('p.mn-na-follow', { 'data-step': step }, icon(step === 'active' || step === 'probation' ? 'check' : step === 'expired' || step === 'revoked' || step === 'stopped' ? 'warning' : 'refresh'), h('span', null, t(`nodesAdmin.follow.${step}` as Key, { name: f.node?.name ?? w.token.ask.name ?? '' }))));
       if (step === 'waiting') lines.push(h('p.mn-note', null, t('nodesShared.expiresIn', { minutes: left }), ' · ', t('nodesShared.oneUse')));
       if (step === 'expired' || step === 'gone') lines.push(h('p.mn-note', null, t('nodesAdmin.follow.expiredHelp')));
       const probe = f.node?.lastProbe ?? null;
@@ -1228,6 +1379,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
               if (id === 'matches' && matches === null) void loadMatches();
               if (id === 'history' && events === null) void loadEvents();
               if (id === 'alerts' && alertLines === null) void loadAlerts();
+              if (id === 'operators' && operators === null) void loadOperators();
               keepFocus(paintBody);
             },
           },
@@ -1274,7 +1426,9 @@ export function nodesAdminScreen(menu: Menu): Screen {
                   ? pointsView()
                   : tab === 'stats'
                     ? statsView()
-                    : tab === 'matches'
+                    : tab === 'operators'
+                      ? operatorsView()
+                      : tab === 'matches'
                       ? matchesView(o)
                       : tab === 'history'
                         ? eventsView()
@@ -1318,6 +1472,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
         lookup = { account: '0a1b2c3d4e5f6071', wallet: { account: '0a1b2c3d4e5f6071', wallet: { earned: 12500, spent: 3000, balance: 9500, frozen: 'verification_failed:' + 'c'.repeat(64) }, items: ['badge-host', 'pampero'], car: 'pampero' }, error: null };
       }
       if (kind === 'stats') stats = { accounts: { total: 18342, banned: 3, verifiedEmail: 9120, emailHint: 410, active30d: 5230, operators: 12, byWays: { password: 6000, 'password+google': 4100, discord: 2200 }, passwordOnly: { total: 1200, active30d: 90 } }, days: sampleDays(), error: null, loading: false };
+      if (kind === 'operators') operators = { list: sampleOperators(sample), error: null, loading: false };
       if (kind === 'detail') view = { kind: 'node', nodeId: sample.nodes[2].nodeId };
       if (kind === 'review') view = { kind: 'node', nodeId: sample.nodes[3].nodeId };
       if (kind === 'review') frozen = { frozen: [{ account: sample.nodes[3].operator.id, reason: 'verification_failed:' + 'c'.repeat(64), at: Date.now() - 3_600_000 }], more: false };
@@ -1443,6 +1598,14 @@ function sampleOverview(): Overview {
     flags: (['matchmaking_off', 'do_disabled', 'nodes_on', 'vm_disabled', 'nodes_off', 'replays_off', 'email_off', 'turn_cf_disabled'] as const).map((name) => ({ name, raw: name === 'nodes_on' ? '1' : null, set: name === 'nodes_on', meaning: '' })),
     alerts: { webhook: false },
     warnings: [{ kind: 'no_webhook' }, { kind: 'trusted_off_channel', nodeId: nodes[2].nodeId, name: 'frankfurt-1', version: '0.2.9', stable: '0.3.0' }],
+    hosting: {
+      flag: 'node_operators',
+      raw: '0a1b2c3d4e5f6071,1b2c3d4e5f607182',
+      stage: 'canary',
+      terms: { inForce: true, version: '2026-11-13', needed: '2026-11-13' },
+      changes: [{ id: 2, at: now - 3_600_000, actor: 'Turbogol (f0e1d2c3b4a59687)', flag: 'node_operators', old: '0', new: '0a1b2c3d4e5f6071,1b2c3d4e5f607182', reason: 'the canary of the first two hosts' }],
+      communityWebhook: false,
+    },
     voids24h: [
       { nodeId: nodes[0].nodeId, name: 'sao-paulo-1', reason: 'node_offline', count: 2 },
       { nodeId: nodes[3].nodeId, name: 'casa-de-ana-muy-largo', reason: 'verification_failed:report_mismatch', count: 1 },
@@ -1517,6 +1680,40 @@ function sampleHistory(o: Overview): { open: OpenMatches; settled: HistoryMatch[
       { id: 1, at: now - 30_000_000, kind: 'alert', line: 'ALERT trusted node sao-paulo-1 (1111111111111111) offline for 2 min (last heartbeat 03:12:09 UTC): no match goes to it' },
     ],
   };
+}
+
+/** The Operadores tab's samples (window.__nodesAdmin('operators')): a host with a server on probation and reports, a blocked one. */
+function sampleOperators(o: Overview): OperatorView[] {
+  const now = Date.now();
+  const ana = o.nodes[3];
+  const base = (id: string, name: string, x: Partial<OperatorView> = {}): OperatorView => ({
+    operatorId: id,
+    name,
+    status: 'ok',
+    reason: null,
+    actor: null,
+    at: null,
+    showPublic: false,
+    nodes: [],
+    refusalRate: 0,
+    tokens: { today: 0, unused: 0 },
+    running: { matches: 0, max: 32 },
+    points: { today: 0, cap: 300, d30: 0, matches30d: 0, earned: 0, concentration: 0 },
+    reports: { days: 7, count: 0, accounts: 0, byReason: { unresponsive: 0, lag: 0, disconnected: 0, other: 0 }, byNode: [], recent: [] },
+    ...x,
+  });
+  return [
+    base(ana.operator.id, ana.operator.name, {
+      showPublic: true,
+      nodes: [{ nodeId: ana.nodeId, name: ana.name, region: 'SA', status: 'probation', online: true, retired: false, capacity: 12, capacityEffective: 4, assigned: 41, refused: 3, seenContinent: 'SA' }],
+      refusalRate: 0.068,
+      tokens: { today: 1, unused: 1 },
+      running: { matches: 3, max: 32 },
+      points: { today: 212, cap: 300, d30: 3120, matches30d: 64, earned: 4100, concentration: 0.42 },
+      reports: { days: 7, count: 3, accounts: 2, byReason: { unresponsive: 0, lag: 2, disconnected: 1, other: 0 }, byNode: [{ nodeId: ana.nodeId, reports: 3, accounts: 2 }], recent: [{ at: now - 600_000, reporterId: 'b2b2b2b2b2b2b2b2', matchId: 'a'.repeat(64), nodeId: ana.nodeId, reason: 'lag', ping: 182, corrections: 40 }] },
+    }),
+    base('1b2c3d4e5f607182', 'Constantinopla_9', { status: 'blocked', reason: 'a modified node program', actor: 'Turbogol (f0e1d2c3b4a59687)', at: now - 86_400_000 }),
+  ];
 }
 
 /** Thirty sample queue days (window.__nodesAdmin('stats')). */

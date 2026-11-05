@@ -83,9 +83,13 @@ test('CONTROL DE NODOS: inside CUENTA DEL PROYECTO (decision 5), with a data-key
   assert.match(view, /c\.text\)\), confirm, panel\)\)/, 'beside CONFIRMAR CON LA CONTRASEÑA, in the checklist tile');
   // Shown with /api/me's maintainer (the block's own condition), with or without nodes of its own.
   assert.match(view, /project !== undefined && !\(sample === null && acc\.account\?\.tv === true\)/);
-  assert.match(view, /const server = v\.nodes\.length > 0 \? section\(t\('profile\.myServer'\)/, "MI SERVIDOR's condition as it was");
-  assert.match(PROFILE, /if \(el\.isConnected && list\.length > 0\) render\(\);/);
-  assert.match(PROFILE, /void acc\.nodesMine\(\)\.then\(\s*\(\{ nodes: list \}\) => \{/, 'PERFIL reads /nodes/mine through nodesMine (ownCall)');
+  // MI SERVIDOR with its nodes, as before; and (Prompt 2, B1) once hosting is open (GET /api/config)
+  // and /nodes/mine says it is open for this community account, with none too and MIS SERVIDORES.
+  assert.match(view, /const server = v\.nodes\.length > 0 \|\| toServers !== null \? section\(t\('profile\.myServer'\)/, "MI SERVIDOR's condition");
+  assert.match(view, /const toServers = open && v\.hostOpen === true \?/);
+  assert.match(PROFILE, /const hostOpen = hosting\?\.open === true && operator\?\.trusted !== true;/, "never the project's account: it stays as it was");
+  assert.match(PROFILE, /if \(el\.isConnected && \(list\.length > 0 \|\| hostOpen\)\) render\(\);/);
+  assert.match(PROFILE, /void acc\.nodesMine\(\)\.then\(\s*\(\{ nodes: list, hosting, operator \}\) => \{/, 'PERFIL reads /nodes/mine through nodesMine (ownCall)');
   assert.equal(es['nodesAdmin.entry'], 'CONTROL DE NODOS');
   assert.equal(en['nodesAdmin.entry'], 'NODE CONTROL');
 });

@@ -30,11 +30,14 @@
  */
 import { legacyPasswordKey, normalizeEmail, passwordIssue, passwordKey, usernameIssue } from './account';
 import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
-import { alertsPageOf, eventsPageOf, historyPageOf, mineAnswerOf, openMatchesOf, overviewOf as nodeOverviewOf } from './nodes';
-import type { AdminWallet, AlertsPage, EventsPage, FrozenList, HistoryPage, MineAnswer, OpenMatches, Overview, TokenAnswer, TokenAsk } from './nodes';
+import { alertsPageOf, eventsPageOf, historyPageOf, mineAnswerOf, openMatchesOf, operatorsOf, overviewOf as nodeOverviewOf } from './nodes';
+import type { AdminWallet, AlertsPage, EventsPage, FrozenList, HistoryPage, MineAnswer, OpenMatches, OperatorView, Overview, ReportReason, TokenAnswer, TokenAsk } from './nodes';
 
-/** The maintainers' POST /nodes/admin/* actions (server/src/nodeRoutes.ts ADMIN_ROUTES). */
-export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'match/void' | 'match/verify';
+/** The maintainers' POST /nodes/admin/* actions (server/src/nodeRoutes.ts ADMIN_ROUTES): `flags` the opening's flag, `operator` a community operator's block (Prompt 2, A1, A4). */
+export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'match/void' | 'match/verify' | 'flags' | 'operator';
+
+/** An owner's POST /nodes/mine/* action on a server of its own (Prompt 2, A12): never from a TV. */
+export type MineAction = 'drain' | 'rename' | 'retire';
 import { DEAD_LINK_CODES, keepAttempt, keepLastSignIn, keepLink, localResendAt, pageStore, readAttempt, readLastSignIn, readLink } from './emailAuth';
 import type { AccountLink, LastSignIn, LegacyPhase, StoredAttempt } from './emailAuth';
 import type { FetchLike, ResponseLike, StorageLike } from './NetClient';
@@ -70,6 +73,10 @@ export interface AccountErrorDetail {
   email?: string;
   /** deletion_pending (sign-in PR 12): when the account is purged (ms); the sign-in sent again with cancelDeletion calls it off. */
   purgeAt?: number;
+  /** account_too_new (a community node's code, Prompt 2 A2): the whole days the account still lacks. */
+  daysLeft?: number;
+  /** terms_required (the same code): the terms version in force, whose terms or rules for hosts are not accepted. */
+  version?: string;
 }
 
 /** A password sign-in's options (signIn, legacySignIn). */
@@ -79,12 +86,14 @@ export interface SignInOptions {
 }
 
 /** A refusal's detail from its body (each field only when it has its shape). */
-function detailOf(b: { triesLeft?: unknown; suggest?: unknown; email?: unknown; purgeAt?: unknown }): AccountErrorDetail {
+function detailOf(b: { triesLeft?: unknown; suggest?: unknown; email?: unknown; purgeAt?: unknown; daysLeft?: unknown; version?: unknown }): AccountErrorDetail {
   const d: AccountErrorDetail = {};
   if (typeof b.triesLeft === 'number' && Number.isInteger(b.triesLeft) && b.triesLeft >= 0) d.triesLeft = b.triesLeft;
   if (typeof b.suggest === 'string' && usernameIssue(b.suggest) === null) d.suggest = b.suggest;
   if (typeof b.email === 'string' && normalizeEmail(b.email) !== null) d.email = b.email;
   if (typeof b.purgeAt === 'number' && Number.isFinite(b.purgeAt) && b.purgeAt > 0) d.purgeAt = b.purgeAt;
+  if (typeof b.daysLeft === 'number' && Number.isInteger(b.daysLeft) && b.daysLeft >= 0 && b.daysLeft <= 366) d.daysLeft = b.daysLeft;
+  if (typeof b.version === 'string' && TERMS_VERSION_RE.test(b.version)) d.version = b.version;
   return d;
 }
 
@@ -1040,6 +1049,39 @@ export class AccountClient {
       if (e instanceof AccountError && e.status !== 404) throw e;
       return { operator: null, nodes: [], rewards: null }; // 404, or not JSON: the dev server's page
     }
+  }
+
+  /**
+   * An owner's action on a server of its own ("Mis servidores", Prompt 2 A12): POST /nodes/mine/drain
+   * { nodeId }, /rename { nodeId, name }, /retire { nodeId }; never from a TV (the Worker refuses it:
+   * tv_session). The refusals reject with their code (src/net/nodes.ts nodeErrorKey says them).
+   */
+  async nodesMineAction(what: MineAction, body: { nodeId: string; name?: string }): Promise<Record<string, unknown>> {
+    return ((await this.ownCall('/nodes/mine/' + what, body)) ?? {}) as Record<string, unknown>;
+  }
+
+  /** POST /nodes/tokens/revoke { id }: one of the account's own unused codes, by the short id /nodes/mine lists. */
+  async nodesRevokeOwn(id: string): Promise<void> {
+    await this.ownCall('/nodes/tokens/revoke', { id });
+  }
+
+  /** POST /nodes/mine/public { show }: the operator's name in the public list (its consent, A14), or "Anfitrión <n>"; resolves the server's state after it. */
+  async nodesShowPublic(show: boolean): Promise<boolean> {
+    return ((await this.ownCall('/nodes/mine/public', { show })) as { showPublic?: unknown } | null)?.showPublic === true;
+  }
+
+  /**
+   * POST /nodes/report (A16): the community server a match of this account's was played on, reported
+   * for the team to review (never shown to its host, never a sanction alone), once per match. `ping`
+   * and `corrections` are this client's numbers, whole, informative only.
+   */
+  async nodesReport(r: { matchId: string; reason: ReportReason; ping?: number; corrections?: number }): Promise<void> {
+    await this.ownCall('/nodes/report', r);
+  }
+
+  /** GET /nodes/admin/operators: the community operators for the panel's Operadores tab (a maintainer's read, audited). */
+  async nodesOperators(): Promise<{ at: number; operators: OperatorView[] }> {
+    return operatorsOf(await this.ownCall('/nodes/admin/operators'));
   }
 
   async rankedResult(matchId: string): Promise<RankedResultAnswer> {

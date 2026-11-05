@@ -375,7 +375,7 @@ test('CUENTAS Y COLAS: counts as numbers only (ids, lists and booleans left out)
   assert.deepEqual(M.countRows({ total: 3, byWays: { password: 2, 'password+google': 1 }, trusted: [{ found: true }], operators: null, name: 'x' }), [['total', 3], ['byWays.password', 2], ['byWays.password+google', 1]]);
   assert.deepEqual(M.queueDayRow({ date: '2026-11-04', searches: { casual: 3, ranked: 1 }, cancelled: { casual: 1 }, dropped: {}, formed: { casual: { 1: 2, 2: 1 }, ranked: { 2: 1 } }, onNode: 2, onCloud: 2, crossRegion: 1 }), { date: '2026-11-04', searches: 4, cancelled: 1, dropped: 0, formed: 4, onNode: 2, onCloud: 2, crossRegion: 1 });
   assert.equal(M.queueDayRow({ searches: {} }), null);
-  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts']);
+  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'operators', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts']);
 });
 
 // ---- AccountClient's /nodes/* calls ---------------------------------------------------------------
