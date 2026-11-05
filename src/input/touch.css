@@ -416,6 +416,14 @@
   top: calc(var(--safe-top) + clamp(16px, 4vh, 24px) + clamp(48px, 12vh, 60px) + 8px);
 }
 
+/* The speed (F3, Settings > HUD) under them too: the plate it sits on is BOOST here, the stick has the bottom left. */
+.tc-on .hud-speed {
+  top: calc(var(--safe-top) + clamp(16px, 4vh, 24px) + clamp(48px, 12vh, 60px) + 44px);
+  right: calc(var(--safe-right) + 10px);
+  bottom: auto;
+  left: auto;
+}
+
 /* Key hints mean nothing to a finger. */
 .tc-on .trn-keys {
   display: none;

@@ -17,6 +17,10 @@
  * Debug readouts (speed, fps / draw calls / GPU time) are hidden by default; F3 toggles them,
  * and `#stats` or `#debug` in the URL shows them from the start.
  *
+ * What the player chose to see (Settings > HUD, src/render/hudView.ts) comes in through `setView`:
+ * the root's classes (a part hidden, the fps or the speed shown; F3 stays on top of them) and the
+ * feed's chips by kind. Without a call (the replay viewer) everything shows as before.
+ *
  * The pause dock is driven by the Game (`pauseAction`, from Input's menu edges: keyboard and pad
  * alike, onto src/ui/nav.ts FocusNav), since the pause / back keys it shares with the match are
  * Input's. The Hud's own keys are F3 and F4.
@@ -26,8 +30,10 @@
 import { PEER_CAND_LABELS, PEER_STATE_LABELS, type NetStatsView } from '../net/NetStats';
 import { isNodeHost } from '../net/protocol';
 import type { GameMode } from '../sim/constants';
+import type { HudSettings } from '../settings';
 import { t } from '../i18n';
 import { pageFlags } from './hashFlags';
+import { HUD_VIEW_CLASSES, feedShown, hudClasses, type FeedKind } from './hudView';
 import type { CardKey, CardView, ControlsCardContent } from './controlsCard';
 import { pauseResumeKeys } from '../game/pauseKeys';
 import { DEFAULT_MATCH_SECONDS, formatClockSeconds } from '../game/Match';
@@ -225,6 +231,8 @@ export class Hud {
   /** The plates the ball indicator stays out of (measured on a resize and as the controls card comes and goes). */
   private readonly indRects: HudRect[] = [];
   private indRectsKey = '';
+  /** The training and touch layouts (#hud's trn-on / tc-on) indRects was measured under: each hides plates of its own. */
+  private indLayout = 0;
   private readonly indAt = { x: 0, y: 0 };
   private readonly countdown: HTMLElement;
   /** TIEMPO EXTRA over the overtime kickoff's countdown (showOvertime). */
@@ -238,6 +246,8 @@ export class Hud {
   private goalTimer = 0;
   /** The feed (top centre): at most FEED_MAX chips, each FEED_MS. */
   private readonly feedEl: HTMLElement;
+  /** What setView last got that the Hud reads itself: the feed's chips by kind, the scorebug shown. */
+  private readonly view = { players: true, demos: true, scorebug: true };
   private readonly paused: HTMLElement;
   private readonly pausedTitle: HTMLElement;
   private readonly pausedLive: HTMLElement;
@@ -562,6 +572,22 @@ export class Hud {
     return this.debug;
   }
 
+  /**
+   * What the player chose to see (Settings > HUD): the root's classes (hudView.ts hudClasses;
+   * style.css) and the feed's chips by kind. The Game calls it once the Hud is built and on every
+   * settings change, so it applies at once, mid-match too. It never touches F3's readouts.
+   */
+  setView(h: Readonly<HudSettings>): void {
+    const on = hudClasses(h);
+    for (const c of HUD_VIEW_CLASSES) this.root.classList.toggle(c, on.includes(c));
+    const v = this.view;
+    v.players = h.players;
+    v.demos = h.demos;
+    v.scorebug = h.scorebug;
+    // A plate the ball indicator keeps clear of came or went.
+    this.indRectsKey = '';
+  }
+
   // ---- network panel -----------------------------------------------------------------------
 
   /** Manual switch of the network panel (F4 / #net). */
@@ -755,15 +781,25 @@ export class Hud {
     }
   }
 
-  /** The scorebug's, the boost plate's and the controls card's boxes: again after a resize or as the card comes or goes (a few times a match). */
+  /**
+   * The scorebug's, the boost plate's and the controls card's boxes: again after a resize or a
+   * setView, as the card comes or goes and as training or touch mode turns (a few times a match).
+   * None to keep clear of (all hidden) is kept too: no layout read on every frame.
+   */
   private measurePlates(): void {
     const key = this.controls.hidden ? 'off' : this.controlsView;
-    if (key === this.indRectsKey && this.indRects.length > 0) return;
-    this.indRectsKey = key;
+    // Training hides the scorebug, touch mode the boost plate and the card.
+    const box = this.root.parentElement?.classList;
+    const layout = (box?.contains('trn-on') === true ? 1 : 0) | (box?.contains('tc-on') === true ? 2 : 0);
+    if (key === this.indRectsKey && layout === this.indLayout) return;
     const o = this.root.getBoundingClientRect();
+    // A root not laid out yet: measured again next frame.
+    this.indRectsKey = o.width > 0 ? key : '';
+    this.indLayout = layout;
     this.indRects.length = 0;
     for (const e of [this.scoreBox, this.boostBox, this.controls]) {
-      if (e.hidden) continue;
+      // A scorebug the player hid keeps its box (the touch tap target), but nothing shows there.
+      if (e.hidden || (e === this.scoreBox && !this.view.scorebug)) continue;
       const r = e.getBoundingClientRect();
       if (r.width > 0) this.indRects.push({ left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top });
     }
@@ -850,8 +886,9 @@ export class Hud {
     this.goal.hidden = true;
   }
 
-  /** A chip on the feed (top centre) for FEED_MS; the oldest goes when a third comes. `kind` picks its mark. */
-  feed(text: string, kind: 'join' | 'leave' | 'bot' | 'demo' = 'join'): void {
+  /** A chip on the feed (top centre) for FEED_MS; the oldest goes when a third comes. `kind` picks its mark; one the player hid (setView) is dropped. */
+  feed(text: string, kind: FeedKind = 'join'): void {
+    if (!feedShown(this.view, kind)) return;
     const chip = el('div', `hud-feed-chip hud-feed-${kind}`, text);
     this.feedEl.appendChild(chip);
     while (this.feedEl.childElementCount > FEED_MAX) this.feedEl.firstElementChild?.remove();
