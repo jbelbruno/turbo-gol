@@ -6,7 +6,7 @@
   "description": "Community-run match servers for Turbogol: the node program (host + verifier), its launcher, the reference control plane and the rewards ledger. One runtime dependency: werift (WebRTC).",
   "license": "AGPL-3.0-or-later",
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"",

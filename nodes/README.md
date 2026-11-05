@@ -45,7 +45,7 @@ looks the same to the game.
 
 ## Try it
 
-Node.js 24 is required. Run `npm install` in the repository root and in `server/` first (the node
+Node.js 26 is required. Run `npm install` in the repository root and in `server/` first (the node
 uses the game's wasm and code; the typecheck uses the root TypeScript), then, in `nodes/`:
 
 ```bash

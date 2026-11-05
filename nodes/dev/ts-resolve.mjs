@@ -1,4 +1,4 @@
-// Resolve hook for running the TypeScript sources directly with Node >= 24 (native type stripping).
+// Resolve hook for running the TypeScript sources directly with Node >= 26 (native type stripping).
 // The repo's modules use extensionless relative imports (bundler style: "../sim/types"), which Node
 // does not complete on its own, so "./x" falls back to "./x.ts" (and "./x.js" to "./x.ts").
 // Same hook the repo's own tests register. Load it first:

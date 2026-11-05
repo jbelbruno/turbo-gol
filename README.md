@@ -43,7 +43,7 @@ font (Barlow Condensed, SIL Open Font License) for the titles.
 
 ## Quick start
 
-Requirements: Node.js 24+ and a browser with WebGPU (Chrome / Edge 113+, Firefox 141+, Safari 26+)
+Requirements: Node.js 26+ and a browser with WebGPU (Chrome / Edge 113+, Firefox 141+, Safari 26+)
 or at least WebGL2.
 
 ```sh

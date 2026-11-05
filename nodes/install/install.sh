@@ -25,13 +25,13 @@
 #                    to --restore.
 #   --matches <n>:   how many matches at a time, instead of the CPU benchmark's estimate; auto
 #                    goes back to the benchmark.
-#   --node-version <version>: the Node.js the node runs (/usr/bin/node), a major (24), a major
-#                    and minor (24.14) or an exact version (24.14.0), from NodeSource. Installed when
+#   --node-version <version>: the Node.js the node runs (/usr/bin/node), a major (26), a major
+#                    and minor (26.13) or an exact version (26.13.0), from NodeSource. Installed when
 #                    the one there does not match, a downgrade or one held with apt-mark hold
 #                    included; on a re-run the node then restarts on it once its running matches
 #                    end. A major and minor or an exact version is then held (apt-mark hold
 #                    nodejs), so that an apt upgrade does not move it to the newest of its major; a
-#                    major alone is not. Left out: Node.js 24 when there is none or it is older.
+#                    major alone is not. Left out: Node.js 26 when there is none or it is older.
 #
 # Caddy is the node's own: the installer replaces /etc/caddy/Caddyfile on every run, and stops
 # before the token is spent when that file is one it did not write (other than the Caddy
@@ -49,7 +49,7 @@
 #                    address: anywhere else, register again.
 #
 # What it does (and nothing else):
-#   1. Node.js 24 (or the --node-version one, NodeSource, held for a major and minor or an exact
+#   1. Node.js 26 (or the --node-version one, NodeSource, held for a major and minor or an exact
 #      version) and Caddy (official repo) if missing
 #   2. user 'turbogol', /opt/turbogol-node (launcher), /var/lib/turbogol-node (keys, releases, state)
 #   3. downloads the launcher and checks its Ed25519 signature against the release key below
@@ -86,6 +86,9 @@ UNIT=/etc/systemd/system/turbogol-node.service
 # distribution's both install it here. Its version is the one checked, not that of the first node
 # on root's PATH.
 NODE_BIN=/usr/bin/node
+# The oldest Node.js major a node runs on (the release manifest's nodeMajor, scripts/build-node.mjs),
+# and the one installed when there is none or it is older.
+NODE_MIN=26
 # The operator guide a run ends with: the page the game's "host a server" links open
 # (src/ui/screens/garage.ts, guideUrl).
 GUIDE=https://github.com/DonJaimeHash/turbo-gol/blob/main/nodes/README.md
@@ -380,7 +383,7 @@ fi
 [ -z "$MATCHES" ] || [ "$MATCHES" = auto ] || { [[ "$MATCHES" =~ ^[0-9]{1,3}$ ]] && [ "$MATCHES" -ge 1 ] && [ "$MATCHES" -le 200 ]; } || die "--matches: a whole number from 1 to 200, or auto (the CPU benchmark's estimate)"
 [ -z "$UPLINK" ] || [[ "$UPLINK" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--uplink-mbps: a number"
 [ -z "$EGRESS" ] || [[ "$EGRESS" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--egress-cap-gb: a number"
-[ -z "$NODE_VERSION" ] || { [[ "$NODE_VERSION" =~ ^([1-9][0-9])(\.(0|[1-9][0-9]{0,3})){0,2}$ ]] && [ "${BASH_REMATCH[1]}" -ge 24 ]; } || die "--node-version: Node.js 24 or newer, as a major (24), a major and minor (24.14) or an exact version (24.14.0)"
+[ -z "$NODE_VERSION" ] || { [[ "$NODE_VERSION" =~ ^([1-9][0-9])(\.(0|[1-9][0-9]{0,3})){0,2}$ ]] && [ "${BASH_REMATCH[1]}" -ge "$NODE_MIN" ]; } || die "--node-version: Node.js $NODE_MIN or newer, as a major ($NODE_MIN), a major and minor (26.13) or an exact version (26.13.0)"
 PUBLIC_HOST=${PUBLIC_HOST#\[}; PUBLIC_HOST=${PUBLIC_HOST%\]}
 # --allow-ip only matters to a new registration: a re-run or a restore keeps the identity's address.
 HOST_FORM="a DNS name or an IP address"
@@ -435,15 +438,15 @@ if [ -n "$NODE_VERSION" ]; then
     apt_get install -y -qq --allow-downgrades --allow-change-held-packages "nodejs=$NODE_PKG" >/dev/null
     NODE_CHANGED=1
   fi
-elif [ "${NODE_MAJOR:-0}" -lt 24 ]; then
-  say "Node.js 24 (NodeSource)"
-  nodesource_setup 24
+elif [ "${NODE_MAJOR:-0}" -lt "$NODE_MIN" ]; then
+  say "Node.js $NODE_MIN (NodeSource)"
+  nodesource_setup "$NODE_MIN"
   apt_get install -y -qq nodejs >/dev/null
   NODE_CHANGED=1
 fi
 if [ "$NODE_CHANGED" = 1 ]; then
   NODE_HAVE=$("$NODE_BIN" -p process.versions.node 2>/dev/null || true)
-  node_is "$NODE_HAVE" "${NODE_VERSION:-24}" || die "NodeSource's nodejs${NODE_PKG:+ $NODE_PKG} is installed, but $NODE_BIN, the Node.js the service runs, is ${NODE_HAVE:+Node.js }${NODE_HAVE:-missing}: something other than that package provides it (dpkg -S $NODE_BIN)"
+  node_is "$NODE_HAVE" "${NODE_VERSION:-$NODE_MIN}" || die "NodeSource's nodejs${NODE_PKG:+ $NODE_PKG} is installed, but $NODE_BIN, the Node.js the service runs, is ${NODE_HAVE:+Node.js }${NODE_HAVE:-missing}: something other than that package provides it (dpkg -S $NODE_BIN)"
 fi
 if [ -n "$NODE_VERSION" ]; then
   # A major and minor or an exact version stays the one asked for: NodeSource's repository offers

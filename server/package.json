@@ -6,7 +6,7 @@
   "description": "Turbogol online backend on Cloudflare Workers + Durable Objects: guest and account sessions, matchmaking, P2P signaling rooms, authoritative server matches, ranked ratings and custom lobbies.",
   "license": "AGPL-3.0-or-later",
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "predev": "node -e \"require('node:fs').mkdirSync('../dist', { recursive: true })\"",

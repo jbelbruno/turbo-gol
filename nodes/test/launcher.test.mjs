@@ -21,7 +21,7 @@ const enc = new TextEncoder();
 async function makeRelease(version, key, files, extra = {}) {
   const list = [];
   for (const [path, bytes] of Object.entries(files)) list.push({ path, sha256: await sha256Hex(bytes), size: bytes.length });
-  const manifest = { name: 'turbogol-node', version, protocol: 1, wasmSha256: list[1]?.sha256 ?? 'x', nodeMajor: 24, entry: 'node.mjs', createdAt: '2026-10-15T00:00:00Z', files: list, ...extra };
+  const manifest = { name: 'turbogol-node', version, protocol: 1, wasmSha256: list[1]?.sha256 ?? 'x', nodeMajor: 26, entry: 'node.mjs', createdAt: '2026-10-15T00:00:00Z', files: list, ...extra };
   const mb = enc.encode(JSON.stringify(manifest));
   return { manifest, mb, sig: await sign(key, mb), files };
 }

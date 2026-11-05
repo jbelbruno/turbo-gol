@@ -574,6 +574,12 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- Node.js 26 (the LTS since 2026-10-28) is the minimum for development, CI and community nodes. The
+  next node release (0.3.1) needs it (`nodeMajor: 26`): a node on an older Node.js keeps running
+  the release it has until its operator upgrades. The installers set up 26 where Node.js is missing
+  or older (`install.sh`: NodeSource 26; Windows: the winget LTS, now 26), and `--node-version`
+  takes 26 or newer. The project's six servers already run 26.13.0: the same replays verify on 24
+  and 26 with the same hashes, and a 3v3 with bots costs about 11 % less CPU per second.
 - A softer picture on High and Ultra, to fix the hard, cut look of far edges: a fine film grain
   (hides the banding of the gradients and the stair steps of far edges), a light sharpening of the
   scene colour so it stays crisp, wider and softer car shadows (PCF radius 7 on High, 14 on Ultra),

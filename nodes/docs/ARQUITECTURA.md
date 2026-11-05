@@ -75,7 +75,7 @@ aceptar máquinas de cualquiera sin confiar en nadie.
 2. Elige dónde corre:
    - **Mi PC**, en Windows, macOS o Linux: una línea en PowerShell o en la terminal, sin
      permisos de administrador. En Windows instala Node con winget si falta; en macOS y Linux
-     tiene que estar Node 24 y, si no está, el instalador explica cómo ponerlo. Verifica la firma,
+     tiene que estar Node 26 y, si no está, el instalador explica cómo ponerlo. Verifica la firma,
      registra y deja el nodo arrancando solo al iniciar sesión.
    - **VPS alquilado**: pega el cloud-init al crearlo.
    - **Servidor Linux propio**: una línea como root.

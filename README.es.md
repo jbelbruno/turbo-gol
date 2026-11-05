@@ -41,7 +41,7 @@ licencia SIL Open Font License) para los títulos.
 
 ## Probarlo
 
-Necesitas Node.js 24+ y un navegador con WebGPU (o al menos WebGL2).
+Necesitas Node.js 26+ y un navegador con WebGPU (o al menos WebGL2).
 
 ```sh
 git clone --recurse-submodules https://github.com/DonJaimeHash/turbo-gol.git
