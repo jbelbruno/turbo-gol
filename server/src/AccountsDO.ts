@@ -118,6 +118,9 @@
  *   POST /host-grant      { userId, item } (a maintainer, through the NodeRegistryDO) -> { granted, items } | 404
  *   POST /host-revoke     { userId, item }                           -> { revoked, refunded, items }
  *   POST /host-unfreeze   { userId }                                 -> { unfrozen }
+ *   GET  /host-frozen     (a maintainer, through the NodeRegistryDO)  -> { frozen: [{ account, reason, at }], more }:
+ *                                                                     the wallets frozen now, newest first, at most
+ *                                                                     FROZEN_LIST_MAX (read only)
  *   The email accounts (sign-in PR 7; emailPost): each answer's `mail` is what the Worker sends after
  *   it answers (R7), never shown to a client; the caps and lanes are mail_rate's and mail_day's.
  *   POST /signup-start    { email, attempt, lang?, ip }              -> { resendAt, codeLength, mail } | 400 bad_email | 429
@@ -297,6 +300,8 @@ const HOST_CREDIT_MAX = 100_000;
 export const STATS_OPERATORS_MAX = 500;
 /** The most NODE_TRUSTED_OPERATORS ids /account-stats reports on. */
 export const STATS_TRUSTED_MAX = 32;
+/** The most frozen wallets GET /host-frozen lists (newest first; `more` says there are others). */
+export const FROZEN_LIST_MAX = 200;
 
 function isIdList(v: unknown, max: number): v is string[] {
   return Array.isArray(v) && v.length <= max && v.every((id) => isHex(id, 16));
@@ -883,6 +888,8 @@ export class AccountsDO extends DurableObject<Env> {
         const r = this.store.shop(p.get('userId') ?? '');
         return r === 'no_user' ? error(404, 'no_user') : json(r);
       }
+      case '/host-frozen':
+        return json(this.store.frozenWallets(FROZEN_LIST_MAX));
       case '/replay-name': {
         const r = this.store.replayName(p.get('userId') ?? '');
         return r === 'no_user' ? error(404, 'no_user') : json(r);

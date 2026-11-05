@@ -22,6 +22,14 @@ All notable changes to Turbogol are documented here. The format follows
   pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
   version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
   the maintainer can delete one on request with a certificate (docs/legal/README.md).
+- PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS, the maintainers' panel of the community nodes
+  (never on a TV): a summary (nodes online by region, matches, the verification queue, the outbox,
+  the trusted slots, the channel, the warnings and the KV switches, read only), every node with its
+  detail and actions behind a confirmation (status, drain, probe again, retire), the tokens, the
+  regions, the releases, the server points (a wallet by account id, the frozen ones, grant, take back,
+  unfreeze) and the account and queue counts. It refreshes every 15 s and asks for the password once
+  when the server wants it again. ADD A PROJECT SERVER asks the machine's data, a checklist and the
+  password, then shows the install line the server composed (COPY) and follows the node to active.
 - Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
   without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
   link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
@@ -646,6 +654,11 @@ All notable changes to Turbogol are documented here. The format follows
   solid tiles over it; every other menu keeps the solid page.
 - Language moved to PROFILE (until Settings has it), and says before you pick that the game
   reloads for a few seconds.
+- Regional placement: a Casual or Competitive match asks first for a community node of its host
+  region (its players' majority), never one of another region, and goes to a server near that
+  region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
+  of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
+  A node match's release goes to the one queue, and a ranked result always names the host region.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,
