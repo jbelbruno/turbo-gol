@@ -10,6 +10,14 @@
  * Clock: every welcome carries the control plane's time. The node keeps the offset and signs
  * replay requests (and times its matches) with serverNow(), so a PC with a wrong clock still works.
  *
+ * Refusals (refusalOf): a link the control plane closes with 4403 (a banned or retired node) or
+ * 1008 'address not allowed' (a hello on an address its token does not allow) is refused for good:
+ * the agent stops and never logs in again, whatever the launcher does next. 1008 'too many hellos'
+ * or 'too many address changes' is a rate limit: the next login waits at least RATE_LIMIT_WAIT_MS
+ * (the welcome that comes before the refused hello resets the backoff to 1 s, so without it the node
+ * would log in about every second, each login waking the control plane). Any other close
+ * reconnects with the usual backoff (1 s doubling to 30 s).
+ *
  * Uses Node's built-in WebSocket client and fetch; no dependencies.
  */
 import {
@@ -47,6 +55,33 @@ export interface AgentIdentity {
   httpBase: string;
 }
 
+/** The shortest wait before logging in again after a rate-limit refusal (1008 'too many hellos' / 'too many address changes'). */
+export const RATE_LIMIT_WAIT_MS = 60 * 60_000;
+
+/**
+ * How the agent takes a close of its control link: 'final' (refused for good: 4403, 1008 'address
+ * not allowed'), 'wait' (rate-limited: 1008 'too many hellos' / 'too many address changes'), or
+ * null (anything else: reconnect with the usual backoff). The close code and its reason are all it
+ * needs: the control plane's reasons are fixed strings (server/src/NodeRegistryDO.ts helloRefused,
+ * nodes/control-plane/controlPlane.ts auth).
+ */
+export function refusalOf(code: number, reason: string): 'final' | 'wait' | null {
+  if (code === 4403) return 'final';
+  if (code !== 1008) return null;
+  if (reason === 'address not allowed') return 'final';
+  if (reason === 'too many hellos' || reason === 'too many address changes') return 'wait';
+  return null;
+}
+
+/** A logged-in link that closed, or a refusal at any point (AgentHandlers.closed). */
+export interface LinkClosed {
+  code: number;
+  reason: string;
+  refusal: 'final' | 'wait' | null;
+  /** ms until the next login; null after a 'final' refusal (the agent stopped). */
+  retryInMs: number | null;
+}
+
 /** A request the node refuses (sent back as { ok: false, code }). */
 export class AgentError extends Error {
   readonly code: string;
@@ -68,6 +103,11 @@ export interface AgentHandlers {
   update(version: string): void;
   welcome(w: { status: NodeStatus; region: string; channel: ReleaseChannel; serverTime: number; iceServers: IceServer[] }): void;
   status(status: NodeStatus, reason?: string): void;
+  /**
+   * The link closed after a login, or the control plane refused it (also before a login). After a
+   * 'final' refusal the agent is stopped: nothing more arrives, and nothing queued is delivered.
+   */
+  closed(c: LinkClosed): void;
 }
 
 export interface AgentOptions {
@@ -92,6 +132,8 @@ export interface AgentOptions {
   staleRetries?: number;
   /** How long a 'stale' retry waits for that welcome before re-syncing from the answer's Date header. */
   staleWaitMs?: number;
+  /** The shortest wait before the next login after a rate-limit refusal (default RATE_LIMIT_WAIT_MS). */
+  rateLimitWaitMs?: number;
 }
 
 interface PendingReport {
@@ -111,6 +153,7 @@ export class Agent {
   private readonly resendAfterMs: number;
   private readonly staleRetries: number;
   private readonly staleWaitMs: number;
+  private readonly rateLimitWaitMs: number;
   private readonly sleepHook: ((ms: number) => Promise<void>) | undefined;
   private key: Promise<CryptoKey>;
   private ws: WebSocket | null = null;
@@ -144,6 +187,7 @@ export class Agent {
     this.resendAfterMs = opts.resendAfterMs ?? 15_000;
     this.staleRetries = opts.staleRetries ?? 2;
     this.staleWaitMs = opts.staleWaitMs ?? 30_000;
+    this.rateLimitWaitMs = opts.rateLimitWaitMs ?? RATE_LIMIT_WAIT_MS;
     this.sleepHook = opts.sleep;
     this.key = importPrivateKey(id.privateKey);
   }
@@ -405,22 +449,34 @@ export class Agent {
       const was = this.authed;
       this.authed = false;
       this.clearSessionTimers();
-      if (was) this.log(`control connection closed (${ev.code} ${ev.reason})`);
-      this.scheduleReconnect();
+      const refusal = refusalOf(ev.code, ev.reason);
+      if (was || refusal) this.log(`control connection closed (${ev.code} ${ev.reason})`);
+      if (refusal === 'final') {
+        this.log('refused by the control plane for good: not logging in again');
+        void this.stop();
+        this.h.closed({ code: ev.code, reason: ev.reason, refusal, retryInMs: null });
+        return;
+      }
+      const wait = this.scheduleReconnect(refusal === 'wait' ? this.rateLimitWaitMs : 0);
+      if (refusal === 'wait' && wait !== null) this.log(`rate-limited by the control plane: next login in ${duration(wait)}`);
+      if (was || refusal) this.h.closed({ code: ev.code, reason: ev.reason, refusal, retryInMs: wait });
     };
     ws.onerror = () => {
       /* onclose follows */
     };
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) return;
-    const wait = this.backoffMs * (0.75 + Math.random() * 0.5);
+  /** Arm the next login (backoff with jitter, never sooner than minMs); returns its wait, null when none was armed. */
+  private scheduleReconnect(minMs = 0): number | null {
+    if (this.stopped || this.reconnectTimer) return null;
+    // A rate limit is shared by every node the control plane refused at once (a restart): spread them.
+    const wait = minMs > 0 ? minMs * (1 + Math.random() * 0.1) : this.backoffMs * (0.75 + Math.random() * 0.5);
     this.backoffMs = Math.min(this.backoffMs * 2, 30_000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
     }, wait);
+    return wait;
   }
 
   /** Timers that only run while logged in: heartbeats and report re-sends. */
@@ -510,6 +566,11 @@ export class Agent {
       this.answering--;
     }
   }
+}
+
+/** A wait for the log: '42 s', '60 min'. */
+function duration(ms: number): string {
+  return ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`;
 }
 
 /** The control plane's error code ({ error }) of a refused request, null otherwise; consumes the body. */

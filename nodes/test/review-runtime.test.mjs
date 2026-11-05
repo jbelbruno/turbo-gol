@@ -1,12 +1,18 @@
 // The node runtime and its control-plane agent against a scripted fake control plane (WebSocket +
 // replay HTTP on one loopback port): drain vs in-flight uploads, stop vs update, the control plane
-// clock, report re-sends, the WebRTC self-test schedule, bootId, and verification jobs.
+// clock, report re-sends, the WebRTC self-test schedule, bootId, verification jobs, the refusals
+// (4403, the 1008 reasons) and <data>/status.json with the `status` command that prints it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FAKE_BUILD_VERSION, P, playRecordedMatch, roster1v1, testBuild } from './helpers.mjs';
 
-const { NodeRuntime } = await import('../node/runtime.ts');
-const { Agent } = await import('../node/agent.ts');
+const { NodeRuntime, STATUS_FILE } = await import('../node/runtime.ts');
+const { Agent, RATE_LIMIT_WAIT_MS, refusalOf } = await import('../node/agent.ts');
 const { startHttp, readBody, header, json, errorJson } = await import('../node/http.ts');
 const { acceptUpgrade } = await import('../node/wsServer.ts');
 const { generateEd25519, verifyWith, sha256Hex, randomB64, importPrivateKey, importPublicKey } = await import('../shared/edcrypto.ts');
@@ -44,7 +50,9 @@ function deferred() {
  * header on that clock. st.dropAcks: the next N reports get no ack (a report it failed to process).
  * st.putUnavailable: while it returns true, replay uploads get a 503 (the Worker being deployed).
  * st.iceServers: the welcome's list, or a function minting one per welcome. opts.welcome: patched
- * into every welcome.
+ * into every welcome. st.refuse = { at: 'auth' | 'welcome' | 'hello', code, reason, times? }: close
+ * the link with that code instead of the welcome, right after it, or at the hello (the real one's
+ * login check and helloRefused), `times` times (default: always).
  */
 async function fakeControl(opts = {}) {
   const nodeKeys = await generateEd25519();
@@ -55,8 +63,10 @@ async function fakeControl(opts = {}) {
     putDelayMs: 0,
     putUnavailable: null,
     iceServers: [{ urls: 'stun:stun.test:3478' }, { urls: 'turn:turn.test:3478', username: 'u', credential: 'c' }],
-    /** Logins (auth accepted). */
+    /** Logins (auth accepted), and control sockets opened. */
     logins: 0,
+    connects: 0,
+    refuse: null,
     replays: new Map(),
     /** Every message the node sent. */
     msgs: [],
@@ -115,14 +125,26 @@ async function fakeControl(opts = {}) {
       const conn = acceptUpgrade(req, socket, head);
       if (!conn) return;
       st.conn = conn;
+      st.connects++;
       const nonce = randomB64(16);
+      const refuse = (at) => {
+        const r = st.refuse;
+        if (!r || r.at !== at) return false;
+        if (r.times !== undefined && --r.times <= 0) st.refuse = null;
+        conn.close(r.code, r.reason);
+        return true;
+      };
       conn.onmessage = async (data) => {
         const msg = JSON.parse(new TextDecoder().decode(data));
         st.msgs.push({ ...msg, at: performance.now() });
         if (msg.t === 'auth') {
           if (msg.nodeId !== NODE_ID || !(await verifyWith(nodeKeys.publicKey, authMessage(NODE_ID, nonce), msg.sig))) return conn.close(4001, 'bad_auth');
+          if (refuse('auth')) return;
           st.logins++;
           welcome();
+          refuse('welcome');
+        } else if (msg.t === 'hello') {
+          refuse('hello');
         } else if (msg.t === 'report') {
           if (st.dropAcks > 0) st.dropAcks--;
           else send({ t: 'ack', id: msg.id });
@@ -202,6 +224,7 @@ const stubHandlers = {
   update() {},
   welcome() {},
   status() {},
+  closed() {},
 };
 const RESULT = { winner: -1, blue: 0, red: 0, endTick: 600, endReason: 'left' };
 const STATS = { ticks: 600, durationMs: 5_000, slots: [], tickLagP99Ms: 0, egressBytes: 0 };
@@ -650,5 +673,378 @@ test('verification: leaves reach the verifier, the job shape is checked, and the
   } finally {
     await rt.stop();
     await cp.close();
+  }
+});
+
+// ---- refusals: 4403 and the 1008 reasons of the control plane --------------------------------
+
+/** A bare agent whose closed() calls are kept, with the time each came. */
+function closingAgent(cp, opts = {}) {
+  const closes = [];
+  const agent = new Agent(cp.agentIdentity, { ...stubHandlers, closed: (c) => closes.push({ ...c, at: performance.now() }) }, { log: () => undefined, ...opts });
+  return { agent, closes };
+}
+
+test('refusalOf: 4403 and a refused address are final, the two rate limits wait, any other close reconnects', () => {
+  for (const reason of ['banned', 'retired', '']) assert.equal(refusalOf(4403, reason), 'final', reason);
+  assert.equal(refusalOf(1008, 'address not allowed'), 'final');
+  assert.equal(refusalOf(1008, 'too many hellos'), 'wait');
+  assert.equal(refusalOf(1008, 'too many address changes'), 'wait');
+  for (const [code, reason] of [[1008, 'too many messages'], [1008, 'bad hello'], [1008, ''], [4401, 'bad auth'], [4000, 'replaced'], [1006, ''], [1000, 'stop'], [1012, 'restart']]) {
+    assert.equal(refusalOf(code, reason), null, `${code} ${reason}`);
+  }
+  assert.equal(RATE_LIMIT_WAIT_MS, 60 * MIN);
+});
+
+test('refused for good (4403 at the login or after it, 1008 address not allowed at the hello): the agent never logs in again', async () => {
+  const cases = [
+    { at: 'auth', code: 4403, reason: 'banned' },
+    { at: 'welcome', code: 4403, reason: 'retired' },
+    { at: 'hello', code: 1008, reason: 'address not allowed' },
+  ];
+  await Promise.all(
+    cases.map(async (c) => {
+      const cp = await fakeControl();
+      cp.st.refuse = c;
+      const { agent, closes } = closingAgent(cp);
+      try {
+        agent.start();
+        await waitFor(() => closes.length > 0);
+        assert.deepEqual({ ...closes[0], at: undefined }, { code: c.code, reason: c.reason, refusal: 'final', retryInMs: null, at: undefined }, c.reason);
+        // The old agent was back in 0.75-1.25 s (the welcome had reset its backoff to 1 s).
+        await sleep(1_600);
+        assert.equal(cp.st.connects, 1, `${c.reason}: no second login`);
+        assert.equal(agent['reconnectTimer'], null);
+        assert.equal(agent['stopped'], true);
+        assert.equal(closes.length, 1);
+      } finally {
+        await agent.stop();
+        await cp.close();
+      }
+    }),
+  );
+});
+
+test('a rate limit (1008 too many hellos / too many address changes) waits before the next login; any other close reconnects at once', async () => {
+  await Promise.all([
+    (async () => {
+      // A short wait: the next login comes after it, not at the 1 s the welcome reset the backoff to.
+      const cp = await fakeControl();
+      cp.st.refuse = { at: 'hello', code: 1008, reason: 'too many hellos', times: 1 };
+      const { agent, closes } = closingAgent(cp, { rateLimitWaitMs: 1_800 });
+      try {
+        agent.start();
+        await waitFor(() => closes.length > 0);
+        assert.equal(closes[0].refusal, 'wait');
+        assert.ok(closes[0].retryInMs >= 1_800 && closes[0].retryInMs <= 1_980, `retry in ${closes[0].retryInMs}`);
+        await sleep(1_300);
+        assert.equal(cp.st.connects, 1, 'not back at the usual backoff');
+        await waitFor(() => cp.st.logins === 2, 3_000);
+        assert.ok(cp.st.welcomesAt[1] - closes[0].at >= 1_750, `logged in again ${cp.st.welcomesAt[1] - closes[0].at} ms later`);
+        await sleep(100);
+        assert.equal(closes.length, 1, 'the second login was accepted');
+      } finally {
+        await agent.stop();
+        await cp.close();
+      }
+    })(),
+    (async () => {
+      // The default: at least an hour.
+      const cp = await fakeControl();
+      cp.st.refuse = { at: 'hello', code: 1008, reason: 'too many address changes' };
+      const { agent, closes } = closingAgent(cp);
+      try {
+        agent.start();
+        await waitFor(() => closes.length > 0);
+        assert.equal(closes[0].refusal, 'wait');
+        assert.ok(closes[0].retryInMs >= 60 * MIN && closes[0].retryInMs <= 66 * MIN, `retry in ${closes[0].retryInMs}`);
+        assert.notEqual(agent['reconnectTimer'], null, 'armed, not stopped');
+        assert.equal(agent['stopped'], false);
+      } finally {
+        await agent.stop();
+        await cp.close();
+      }
+    })(),
+    (async () => {
+      // Anything else (a restart, 1012): the usual backoff, from 1 s after a welcome.
+      const cp = await fakeControl();
+      const { agent, closes } = closingAgent(cp);
+      try {
+        agent.start();
+        await agent.whenConnected();
+        cp.st.conn.close(1012, 'restart');
+        await waitFor(() => closes.length > 0);
+        assert.equal(closes[0].refusal, null);
+        assert.ok(closes[0].retryInMs <= 1_250, `retry in ${closes[0].retryInMs}`);
+        await waitFor(() => cp.st.logins === 2, 2_000);
+      } finally {
+        await agent.stop();
+        await cp.close();
+      }
+    })(),
+  ]);
+});
+
+test('a node refused for good drains and exits 0 once its matches are over (an update pending, a report unacknowledged), and says what to do', async () => {
+  const cp = await fakeControl();
+  const { rt, logs, exits } = runtime(cp);
+  const fakeRoom = { status: () => ({ matchId: 'fakefake', tick: 0, phase: 'kickoff', sockets: 0 }), dispose() {} };
+  try {
+    await rt.start();
+    await rt.agent.whenConnected();
+    rt.rooms.set('fakefake', fakeRoom); // a match still running holds the exit
+    cp.send({ t: 'update', version: '9.9.9' });
+    await waitFor(() => rt.updateTo === '9.9.9');
+    cp.st.dropAcks = 1;
+    rt.agent.submit({ kind: 'lost', matchId: 'match0001', reason: 'tick_error' });
+    await waitFor(() => cp.msgsOf('report').length === 1);
+    cp.st.conn.close(4403, 'banned');
+    await waitFor(() => rt.refused);
+    assert.equal(rt.draining, true);
+    // Nothing restarts a node that exits 0: once let back in, the operator starts it again.
+    assert.ok(logs.some((m) => m.includes('refused this node (4403 banned)') && m.includes(`${cp.identity().httpBase}/#servers`) && m.includes('start the node again')), logs.join('\n'));
+    await sleep(50);
+    assert.deepEqual(exits, [], 'no exit while a match runs');
+    rt.rooms.delete('fakefake');
+    rt['maybeExit'](); // what the room's onClosed does
+    await waitFor(() => exits.length > 0);
+    assert.deepEqual(exits, [0], 'a stop for the launcher, not the update (75)');
+    assert.equal(rt.agent.backlog, 1, 'a report that can never be delivered does not hold the exit');
+    await sleep(1_300);
+    assert.equal(cp.st.connects, 1, 'never logged in again');
+  } finally {
+    await rt.stop();
+    await cp.close();
+  }
+  // Refused at the login with nothing running: it exits at once; a refused address says how to fix it.
+  const cp2 = await fakeControl();
+  cp2.st.refuse = { at: 'hello', code: 1008, reason: 'address not allowed' };
+  const r2 = runtime(cp2);
+  try {
+    await r2.rt.start();
+    await waitFor(() => r2.exits.length > 0);
+    assert.deepEqual(r2.exits, [0]);
+    const fix = r2.logs.find((m) => m.includes("does not accept this node's public address"));
+    assert.ok(fix && fix.includes('new token') && fix.includes('then start the node again (installed with install.sh: sudo systemctl start turbogol-node)'), r2.logs.join('\n'));
+  } finally {
+    await r2.rt.stop();
+    await cp2.close();
+  }
+});
+
+const readStatus = async (dir) => JSON.parse(await readFile(join(dir, STATUS_FILE), 'utf8'));
+/** The status file once `pred` holds for it. */
+const statusWhen = (dir, pred) =>
+  waitFor(async () => {
+    const s = await readStatus(dir).catch(() => null);
+    return s && pred(s) ? s : null;
+  });
+
+/** `turbogol-node status --data <dir>` (node/main.ts run from source): its JSON on stdout. */
+async function statusCommand(dir) {
+  const main = fileURLToPath(new URL('../node/main.ts', import.meta.url));
+  const hook = new URL('../dev/ts-resolve.mjs', import.meta.url).href;
+  const p = spawn(process.execPath, ['--import', hook, main, 'status', '--data', dir], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  let err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  const code = await new Promise((resolve) => p.on('close', resolve));
+  assert.equal(code, 0, err);
+  return JSON.parse(out);
+}
+
+test('status.json: the state the control plane gave this node over its own link, mode 0600, rewritten at each change; `status` prints it', async () => {
+  const cp = await fakeControl();
+  const dir = await mkdtemp(join(tmpdir(), 'tgn-status-'));
+  await writeFile(join(dir, 'node.json'), JSON.stringify(cp.identity()));
+  const { rt } = runtime(cp, { opts: { dataDir: dir, agent: { rateLimitWaitMs: 10 * MIN } } });
+  try {
+    await rt.start();
+    await rt.agent.whenConnected();
+    let s = await statusWhen(dir, (x) => x.connected);
+    assert.equal(s.nodeId, NODE_ID);
+    assert.equal(s.name, 'review-node');
+    assert.equal(s.region, 'SA');
+    assert.equal(s.version, FAKE_BUILD_VERSION);
+    assert.equal(s.pid, process.pid);
+    assert.equal(s.running, true);
+    assert.equal(s.status, 'active');
+    assert.equal(s.closed, undefined);
+    if (process.platform !== 'win32') assert.equal((await stat(join(dir, STATUS_FILE))).mode & 0o777, 0o600);
+
+    // A status change, a node the public list would not show: the file has it, with its reason.
+    cp.send({ t: 'status', status: 'suspended', reason: 'strikes' });
+    s = await statusWhen(dir, (x) => x.status === 'suspended');
+    assert.equal(s.reason, 'strikes');
+
+    // Rate-limited: not connected, and when it logs in again.
+    cp.st.conn.close(1008, 'too many hellos');
+    s = await statusWhen(dir, (x) => x.connected === false);
+    assert.equal(s.closed.refusal, 'wait');
+    assert.equal(s.closed.code, 1008);
+    const retryIn = Date.parse(s.closed.retryAt) - Date.parse(s.closed.at);
+    assert.ok(retryIn >= 10 * MIN && retryIn <= 11 * MIN, `retry in ${retryIn} ms`);
+    const printed = await statusCommand(dir);
+    assert.equal(printed.running, true, 'this process is alive');
+    assert.equal(printed.status, 'suspended');
+    assert.match(printed.note, /^running, not connected to the control plane \(next login /);
+
+    await rt.stop();
+    s = await readStatus(dir);
+    assert.equal(s.running, false);
+    const after = await statusCommand(dir);
+    assert.equal(after.running, false);
+    assert.equal(after.note, 'not running');
+  } finally {
+    await rt.stop();
+    await cp.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('status.json held open by a reader (on Windows the rename over it fails meanwhile): the rewrite waits for it, it is not lost', async () => {
+  const cp = await fakeControl();
+  const dir = await mkdtemp(join(tmpdir(), 'tgn-status-'));
+  const { rt, logs } = runtime(cp, { opts: { dataDir: dir } });
+  try {
+    await rt.start();
+    await rt.agent.whenConnected();
+    await statusWhen(dir, (x) => x.connected);
+    const held = await open(join(dir, STATUS_FILE), 'r'); // `turbogol-node status`, an antivirus scan
+    try {
+      cp.send({ t: 'status', status: 'suspended', reason: 'strikes' });
+      await waitFor(() => logs.includes('status suspended (strikes)'));
+      await sleep(300);
+    } finally {
+      await held.close();
+    }
+    const s = await statusWhen(dir, (x) => x.status === 'suspended');
+    assert.equal(s.reason, 'strikes');
+    assert.ok(!logs.some((m) => m.startsWith(`cannot write ${STATUS_FILE}`)), logs.join('\n'));
+  } finally {
+    await rt.stop();
+    await cp.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('`status` without the network: a pending node is pending (not unknown), a refused one says so, a dead process is not running', async () => {
+  const cp = await fakeControl();
+  await cp.close(); // nothing listens: the command must not need the control plane
+  const dir = await mkdtemp(join(tmpdir(), 'tgn-status-'));
+  const id = cp.identity();
+  await writeFile(join(dir, 'node.json'), JSON.stringify(id));
+  const file = (patch) => writeFile(join(dir, STATUS_FILE), JSON.stringify({ nodeId: id.nodeId, name: id.name, region: 'SA', version: '0.3.1', pid: process.pid, running: true, connected: true, draining: false, status: 'pending', statusAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...patch }));
+  // A pid that no longer runs.
+  const gone = spawn(process.execPath, ['-e', '']);
+  await new Promise((resolve) => gone.on('close', resolve));
+  try {
+    const none = await statusCommand(dir);
+    assert.deepEqual(none, { nodeId: id.nodeId, name: id.name, running: false, status: null, note: `not run since it was registered (no ${STATUS_FILE} yet)` });
+
+    await file({});
+    const pending = await statusCommand(dir);
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.running, true);
+    assert.equal(pending.note, undefined);
+
+    const closed = { code: 4403, reason: 'banned', refusal: 'final', at: new Date().toISOString(), retryAt: null };
+    await file({ connected: false, draining: true, status: 'active', closed });
+    assert.equal((await statusCommand(dir)).note, 'running until its matches are over: the control plane refused this node for good (4403 banned)');
+    await file({ connected: false, running: false, status: 'active', closed });
+    assert.equal((await statusCommand(dir)).note, 'not running: the control plane refused this node for good (4403 banned)');
+
+    // A login closed and its retry time went by: the retries that fail before a login are not
+    // written, so no "next login" in the past.
+    const ago = (ms) => new Date(Date.now() - ms).toISOString();
+    await file({ connected: false, closed: { code: 1012, reason: 'restart', refusal: null, at: ago(MIN), retryAt: ago(MIN - 1_000) } });
+    assert.equal((await statusCommand(dir)).note, 'running, not connected to the control plane');
+
+    await file({ pid: gone.pid });
+    const dead = await statusCommand(dir);
+    assert.equal(dead.running, false);
+    assert.equal(dead.note, 'not running (it ended without a clean stop)');
+
+    await file({ nodeId: 'x'.repeat(16) });
+    assert.equal((await statusCommand(dir)).note, `not run since it was registered (${STATUS_FILE} is another node's)`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('status.json across a restart: a new run keeps the status and a refusal for good an earlier run was told, marked, until it hears from the control plane', async () => {
+  const cp = await fakeControl();
+  const dir = await mkdtemp(join(tmpdir(), 'tgn-status-'));
+  await writeFile(join(dir, 'node.json'), JSON.stringify(cp.identity()));
+  const runs = [];
+  const run = async (c) => {
+    const r = runtime(c, { opts: { dataDir: dir } });
+    runs.push(r);
+    await r.rt.start();
+    await r.rt['statusWrites'];
+    return r;
+  };
+  let cp2 = null;
+  try {
+    // Run 1: suspended, then banned after its login: it stops.
+    const r1 = await run(cp);
+    await r1.rt.agent.whenConnected();
+    cp.send({ t: 'status', status: 'suspended', reason: 'strikes' });
+    await statusWhen(dir, (x) => x.status === 'suspended');
+    cp.st.conn.close(4403, 'banned');
+    await waitFor(() => r1.exits.length > 0);
+    await r1.rt.stop();
+    const told = await readStatus(dir);
+    assert.equal(told.closed.refusal, 'final');
+
+    // Run 2, after a reboot with the control plane out of reach: it never logs in, and still says
+    // what the last run was told. That refusal does not stop it: it tries to log in again.
+    await cp.close();
+    const r2 = await run(cp);
+    let s = await readStatus(dir);
+    assert.equal(s.running, true);
+    assert.equal(s.connected, false);
+    assert.equal(s.status, 'suspended');
+    assert.equal(s.reason, 'strikes');
+    assert.equal(s.statusAt, told.statusAt);
+    assert.equal(s.statusFromEarlierRun, true);
+    assert.deepEqual(s.closed, { ...told.closed, fromEarlierRun: true });
+    assert.equal(r2.rt.refused, false);
+    assert.deepEqual(r2.exits, []);
+    assert.equal((await statusCommand(dir)).note, 'running, not connected to the control plane yet: the control plane refused this node for good (4403 banned, in an earlier run)');
+    await r2.rt.stop();
+    assert.equal((await statusCommand(dir)).note, 'not running: the control plane refused this node for good (4403 banned, in an earlier run)');
+
+    // Only a refusal for good is kept (a wait belonged to that run's link), only a known status,
+    // only this node's.
+    const ago = new Date(Date.now() - MIN).toISOString();
+    for (const [patch, status, closed] of [
+      [{ closed: { code: 1008, reason: 'too many hellos', refusal: 'wait', at: ago, retryAt: ago } }, 'suspended', undefined],
+      [{ status: 'unknown' }, null, 'final'],
+      [{ nodeId: 'x'.repeat(16) }, null, undefined],
+    ]) {
+      await writeFile(join(dir, STATUS_FILE), JSON.stringify({ ...told, ...patch }));
+      const r = await run(cp);
+      s = await readStatus(dir);
+      assert.equal(s.status, status, JSON.stringify(patch));
+      assert.equal(s.closed?.refusal, closed, JSON.stringify(patch));
+      await r.rt.stop();
+    }
+
+    // Run 3, let back in: its welcome replaces both.
+    await writeFile(join(dir, STATUS_FILE), JSON.stringify(told));
+    cp2 = await fakeControl();
+    const r3 = await run(cp2);
+    await r3.rt.agent.whenConnected();
+    s = await statusWhen(dir, (x) => x.connected);
+    assert.equal(s.status, 'active');
+    assert.equal(s.statusFromEarlierRun, undefined);
+    assert.equal(s.closed, undefined);
+  } finally {
+    for (const r of runs) await r.rt.stop();
+    await cp.close();
+    await cp2?.close();
+    await rm(dir, { recursive: true, force: true });
   }
 });

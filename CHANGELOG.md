@@ -394,6 +394,17 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- Community nodes (from node release 0.3.1): a node the control plane refuses for good (banned,
+  retired, or on an address its token does not allow) no longer keeps logging in (about every 30
+  seconds after a ban or retirement, every second on a refused address): it finishes its matches,
+  says in its log what to do next, and stops, and the launcher does not restart it. A node the
+  control plane is limiting (too many hellos or address changes) waits an hour before its next
+  login. A player whose connection goes silent (no input or ping for 10 seconds) is disconnected,
+  as if the socket had closed, so their car no longer repeats their last input to the end,
+  recorded in the replay as theirs. `turbogol-node status` shows what the control plane last told
+  this node, also when it is pending, suspended or banned (it said "unknown") and after a restart
+  while the control plane cannot be reached, from `<data>/status.json`, and says when the node is
+  not running.
 - Replays: "My replays" also finds the matches listed before the seats were kept (the first days: they have no seat, so they are found by the account's username).
 - You can choose the stadium again. In MODES › VS AI, Stadium opened an empty GARAGE; now it opens
   the list of stadiums (Night harbour, Red canyon, Alpine valley) with yours marked. Pick one with
