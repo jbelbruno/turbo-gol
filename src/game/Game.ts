@@ -1610,6 +1610,12 @@ export class Game implements P2PGameHooks {
           net.queuePrefer = mode;
         }
       },
+      setQueueBots: (level) => {
+        // As the format: a Casual search only, updated in place in the hub (its solo match's bots).
+        if (game.searchReq?.kind !== 'casual') return;
+        game.searchReq.bots = level;
+        if (net !== null) net.queueBots = level;
+      },
       playLobbyMatch: (r) => game.playLobbyMatch(r),
       rejoinable: () => (game.online !== null ? game.online.rejoinable : null),
       rejoinMatch: () => game.rejoinMatch(),
@@ -1654,6 +1660,8 @@ export class Game implements P2PGameHooks {
     client.region = req.region;
     const mode = req.modes[0];
     client.queuePrefer = req.kind === 'casual' ? mode : null;
+    // Casual's solo bots level (the player's pick); ranked never sends one.
+    client.queueBots = req.kind === 'casual' ? (req.bots ?? null) : null;
     client.queueLocal = queueLocal(this.wait);
     this.searchReq = { ...req, modes: req.modes.slice() };
     this.searchSince = performance.now();

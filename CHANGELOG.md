@@ -511,6 +511,12 @@ All notable changes to Turbogol are documented here. The format follows
   for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
   default) and every player's game runs it; the lobby's line shows it, the public list does not. The
   P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
+- Casual: you pick the difficulty of the bots in your 5:00 match against bots (MODOS › CASUAL,
+  DIFFICULTY IF YOU PLAY BOTS: Easy, Normal or Hard; a running search takes the change at once, and
+  the 5:00 box names it). Until you pick one it shows the server's level (Hard, or what the owner
+  set with `bot_level`) and your search sends none, so `bot_level` still sets that match. A match
+  with other people plays the server's level. The search carries the pick, which the privacy policy
+  (and Terms 7.1 and 7.4) say from version 2026-11-05.
 - The terms of use and the privacy policy are at version 2026-11-05, in force on its deploy day: the
   project's servers in Brazil, Germany and Malaysia (Hostinger) and, for now, South Africa,
   Australia and the United States (Google Cloud), each taking its region's Casual and Competitive

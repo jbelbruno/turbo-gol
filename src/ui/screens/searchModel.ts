@@ -26,6 +26,7 @@ import type { QueueWait } from '../../net/queueWait';
 import { isRegion } from '../../net/account';
 import type { RegionId } from '../../net/account';
 import { SOLO_AFTER_MS, botsCountdown } from './modesModel';
+import type { Difficulty } from '../../ai/Bot';
 
 /** "While you search" opens this long after the search's first POST left, answered or not (the hub may long-poll a reloaded page's first). */
 export const WAIT_SHEET_AFTER_MS = 1_000;
@@ -69,6 +70,8 @@ export function waitSheetStep(s: { queueing: boolean; onModes: boolean; answers:
 export interface QueueTimes {
   soloAfterMs: number;
   widenMs: { casual: number; ranked: number };
+  /** The bots' level of Casual's 5:00 solo match while its player picked none (the KV flag bot_level; absent from an older Worker): MODOS shows it picked. */
+  botLevel?: Difficulty;
 }
 
 export const DEFAULT_QUEUE_TIMES: Readonly<QueueTimes> = { soloAfterMs: SOLO_AFTER_MS, widenMs: { casual: 60_000, ranked: 120_000 } };

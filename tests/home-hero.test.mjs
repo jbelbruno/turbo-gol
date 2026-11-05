@@ -87,11 +87,68 @@ test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked; a
   for (const c of ['bots', 'training', 'menu']) assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: c })).waitChoice, c);
   assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: 'x' })).waitChoice, 'bots');
   const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
-  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
+  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', casualBots: null, rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
   assert.equal(P.PREFS_KEY, 'turbogol.menu.v1', 'the same key: no migration');
   // Each parse is a fresh object: a change to one never reaches the defaults.
   P.parsePrefs(null).rankedModes.push('3v3');
   assert.deepEqual(P.parsePrefs(null).rankedModes, ['2v2']);
+});
+
+test("parsePrefs: Casual's solo bots level is unset (null) until the player picks one; one of the three levels kept, anything else unset", () => {
+  // Review: a default of 'hard' went out with every search, so the KV flag bot_level never reached a solo match.
+  assert.equal(P.DEFAULT_PREFS.casualBots, null);
+  assert.equal(P.parsePrefs(null).casualBots, null, 'a first visit');
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: level })).casualBots, level);
+  for (const junk of ['Hard', 'expert', 2, null, {}]) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: junk })).casualBots, null, JSON.stringify(junk));
+});
+
+test("a never-picked Casual search sends no `bots` (the KV flag bot_level plays its solo match); MODOS shows the server's level picked until the player picks; ranked never sends one", async () => {
+  const MM = await import('../src/ui/screens/modesModel.ts');
+  assert.equal(MM.searchBots('casual', null), null, 'never picked: no field');
+  assert.equal(MM.searchBots('casual', P.parsePrefs(null).casualBots), null, 'a first visit sends none');
+  for (const level of ['easy', 'medium', 'hard']) {
+    assert.equal(MM.searchBots('casual', level), level, 'a pick goes out');
+    assert.equal(MM.searchBots('ranked', level), null, 'Competitive never');
+  }
+  // The seg's value and the 5:00 box: the pick, else the config's queue.botLevel, else hard (the Worker's default).
+  assert.equal(MM.SERVER_BOTS_DEFAULT, 'hard');
+  assert.equal(MM.shownBots(null, 'easy'), 'easy', "the server's level (bot_level=easy)");
+  assert.equal(MM.shownBots(null, undefined), 'hard', 'no config yet, or an older Worker');
+  assert.equal(MM.shownBots('medium', 'easy'), 'medium', "the player's pick over the server's");
+  // The wiring: Menu.startSearch through searchBots (MODOS, Inicio's hero, PLAY AGAIN, the requeue), MODOS through shownBots.
+  const menu = await readFile(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /const \{ bots: _old, \.\.\.base \} = req;\s*const bots = searchBots\(req\.kind, this\.prefs\.casualBots\);\s*this\.host\.search\(bots !== null \? \{ \.\.\.base, bots \} : base\);/);
+  assert.doesNotMatch(menu, /bots: this\.prefs\.casualBots/, 'never the raw pref');
+  const modes = await readFile(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /const botsLevel = \(\): Difficulty => shownBots\(menu\.prefs\.casualBots, menu\.cfg\?\.queue\?\.botLevel\);/);
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\), DIFFICULTIES\.map\(\(d\) => \(\{ value: d, label: difficultyName\(d\) \}\)\), \(\) => botsLevel\(\), \(v\) => pickBots\(v\)\);/);
+  assert.match(modes, /t\('search\.botsLevel', \{ level: difficultyName\(botsLevel\(\)\) \}\)/);
+  // A pick of the level shown (the server's) is a pick: stored, and the search carries it from then on.
+  assert.match(modes, /if \(menu\.prefs\.casualBots !== level\) \{\s*menu\.prefs\.casualBots = level;\s*menu\.savePrefs\(\);/);
+  // GET /api/config's queue.botLevel, read only as one of the three levels.
+  const { parseServerConfig } = await import('../src/net/NetClient.ts');
+  const q = (botLevel) => parseServerConfig({ queue: { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, botLevel } }).queue;
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(q(level).botLevel, level);
+  for (const junk of ['Hard', 'expert', 2, null, undefined]) assert.equal('botLevel' in q(junk), false, JSON.stringify(junk));
+});
+
+test("MODOS › CASUAL: DIFFICULTY IF YOU PLAY BOTS under the format grid (es / en), a pick changes a running Casual search in place; every Casual search carries the pick once made, ranked none", async () => {
+  const en = (await import('../src/locales/en.ts')).default;
+  const es = (await import('../src/locales/es.ts')).default;
+  assert.deepEqual([en['modes.botsPrefer'], es['modes.botsPrefer']], ['DIFFICULTY IF YOU PLAY BOTS', 'DIFICULTAD SI JUEGAS CON BOTS']);
+  for (const msgs of [en, es]) {
+    assert.match(msgs['search.botsLevel'], /\{level\}/, "the 5:00 box names the level");
+    assert.equal('search.bots' in msgs, false, 'the box without the level is gone');
+  }
+  assert.match(es['modes.formatPreferNote'], /la dificultad la elige el servidor/);
+  const { readFileSync } = await import('node:fs');
+  const modes = readFileSync(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\)/);
+  assert.match(modes, /host\.setQueueBots\(level\)/);
+  const menu = readFileSync(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /this\.host\.search\(bots !== null \? \{ \.\.\.base, bots \} : base\)/);
+  const game = readFileSync(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
+  assert.match(game, /client\.queueBots = req\.kind === 'casual' \? \(req\.bots \?\? null\) : null;/);
 });
 
 test('Inicio by role and device: a guest VS AI and LOBBIES first, a TV guest the phone sign-in and no Competitive, an account as before', () => {

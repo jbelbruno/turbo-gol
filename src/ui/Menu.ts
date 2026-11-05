@@ -125,6 +125,7 @@ import type { Outcome } from '../net/outcome';
 import type { RejoinRecord } from '../game/rejoinStore';
 import type { QueueWait } from '../net/queueWait';
 import { waitSheetStep } from './screens/searchModel';
+import { searchBots } from './screens/modesModel';
 import type { QueueTimes } from './screens/searchModel';
 import { openWaitSheet } from './screens/waitSheet';
 import { openTvSignIn } from './screens/tvSignIn';
@@ -140,6 +141,8 @@ export interface SearchRequest {
   modes: GameMode[];
   /** null = automatic (the continent of the connection). */
   region: RegionId | null;
+  /** Casual: the bots' level of its 5:00 solo match (MenuPrefs.casualBots, filled by Menu.startSearch); absent: the server's. */
+  bots?: Difficulty;
 }
 
 export interface SearchView {
@@ -266,6 +269,8 @@ export interface MenuHost {
   waitPlay(kind: 'bots' | 'training'): void;
   /** Casual's preferred format changed: a running Casual search carries it at once (NetClient.queuePrefer), no restart. */
   setQueuePrefer(mode: GameMode): void;
+  /** The bots' level of Casual's solo match changed: a running Casual search carries it at once (NetClient.queueBots), no restart. */
+  setQueueBots(level: Difficulty): void;
   /** A custom lobby started: join this member's match. */
   playLobbyMatch(result: QueueResult | QueueResultP2p): void;
   /** The server match this tab may join again (rejoinStore.ts: a reload, a lost connection), or null. */
@@ -681,7 +686,11 @@ export class Menu {
     this.prefs.lastQueue = req.kind;
     this.savePrefs();
     this.waitSheetDue = opts.sheet === true;
-    this.host.search(req);
+    // Every Casual search (MODOS, Inicio's hero, PLAY AGAIN) carries the player's solo bots level
+    // once they picked one; until then none, so the KV flag bot_level (the server's level) plays it.
+    const { bots: _old, ...base } = req;
+    const bots = searchBots(req.kind, this.prefs.casualBots);
+    this.host.search(bots !== null ? { ...base, bots } : base);
     this.renderSearch(performance.now());
   }
 

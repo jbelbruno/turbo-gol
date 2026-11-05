@@ -447,8 +447,10 @@ export function isBotLevel(v: unknown): v is Difficulty {
 
 /**
  * The KV flag bot_level: 'easy' | 'medium' | 'hard' (case and spaces ignored); unset, unreadable
- * or anything else is CASUAL_BOT_LEVEL, never an error. Read once per Casual formation; edge-cached
- * 60 s like every flag, so a change lands within a minute or two. Set by hand, as every switch:
+ * or anything else is CASUAL_BOT_LEVEL, never an error. Read once per Casual formation, and by GET
+ * /api/config (queue.botLevel: MODOS shows it picked while the player picked none, and a solo match
+ * whose player picked none plays it); edge-cached 60 s like every flag, so a change lands within a
+ * minute or two. Set by hand, as every switch:
  * `npx wrangler kv key put bot_level medium --binding FLAGS --remote` (server/README.md).
  */
 export async function casualBotLevel(env: Pick<Env, 'FLAGS'>): Promise<Difficulty> {

@@ -451,6 +451,18 @@ test('the KV flag bot_level sets the level a node match is placed with (pooled a
   assert.equal(ranked.flags.reads.includes('bot_level'), false, 'not even read');
 });
 
+test("a solo match on a node plays the level its player chose (the queue's `bots`), not the flag's; a pooled one the flag's", async () => {
+  const h = await makeMm({ flags: { nodes_on: '1', bot_level: 'medium' } });
+  await h.join(C, 'server', '1v1', { bots: 'easy' });
+  h.setTime(h.time() + Q.SOLO_AFTER_MS);
+  assert.equal((await h.join(C, 'server', '1v1', { bots: 'easy' })).json.status, 'matched');
+  assert.equal(h.nodes.of('/internal/place')[0].body.botDifficulty, 'easy');
+  const pooled = await makeMm({ flags: { nodes_on: '1', bot_level: 'medium' } });
+  await pooled.join(A, 'server', '1v1', { bots: 'easy' });
+  await pooled.join(B, 'server', '1v1', { bots: 'easy' });
+  assert.equal(pooled.nodes.of('/internal/place')[0].body.botDifficulty, 'medium');
+});
+
 test('two Casual humans (an older page\'s p2p kind too) go to a node, never to a P2P room; a lobby start never asks for a placement (D10)', async () => {
   const h = await makeMm();
   assert.equal((await h.join(A, 'p2p')).json.status, 'waiting');
@@ -888,6 +900,28 @@ test("the bots' level goes with every regional placement: an EU node (pooled and
   assert.equal((await rankedMd.join(A, 'ranked', '1v1', EU)).json.status, 'waiting');
   assert.deepEqual([(await rankedMd.join(B, 'ranked', '1v1', EU)).json.host], ['EU']);
   assert.deepEqual([created(rankedMd)[0].body.host, created(rankedMd)[0].body.ranked, 'botDifficulty' in created(rankedMd)[0].body], ['EU', true, false]);
+});
+
+test("a solo match's chosen level reaches a regional placement too: the EU node, the MatchDO near EU when EU has none, SA's node under do_disabled (both asks); the flag is not read for it", async () => {
+  const soloOf = async (flags, regions, extra = {}) => {
+    const h = await makeMm({ flags: { nodes_on: '1', bot_level: 'medium', ...flags } });
+    nodesIn(h, ...regions);
+    const join = { ...EU, bots: 'easy', ...extra };
+    assert.equal((await h.join(C, 'server', '1v1', join)).json.status, 'waiting');
+    h.setTime(h.time() + Q.SOLO_AFTER_MS);
+    const r = await h.join(C, 'server', '1v1', join);
+    assert.deepEqual([r.json.status, r.json.humans], ['matched', 1]);
+    return { h, r, asked: h.nodes.of('/internal/place').map((c) => [c.body.region, c.body.botDifficulty]) };
+  };
+  const eu = await soloOf({}, ['EU']);
+  assert.deepEqual([eu.r.json.node, eu.r.json.host, eu.asked], [true, 'EU', [['EU', 'easy']]]);
+  assert.equal(eu.h.flags.reads.includes('bot_level'), false, "the player's own level: the flag is not read");
+  const md = await soloOf({}, ['SA']);
+  assert.deepEqual([md.r.json.node, md.r.json.host, md.asked], [undefined, 'EU', [['EU', 'easy']]]);
+  assert.deepEqual([created(md.h)[0].opts.locationHint, created(md.h)[0].body.host, created(md.h)[0].body.botDifficulty], ['weur', 'EU', 'easy']);
+  const sa = await soloOf({ do_disabled: '1' }, ['SA'], { doDisabled: true });
+  assert.deepEqual([sa.r.json.node, sa.r.json.host, sa.asked], [true, 'SA', [['EU', 'easy'], ['SA', 'easy']]]);
+  assert.equal(created(sa.h).length, 0, 'never a MatchDO under do_disabled');
 });
 
 test('do_disabled, and the owner turns the nodes off while groups wait for one: still no MatchDO (Casual and ranked); they wait busy until the Worker\'s own 503 ends each search', async () => {

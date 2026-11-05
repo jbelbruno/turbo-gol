@@ -185,9 +185,11 @@ html[data-input='pad'] .mn-keys-pad {
   margin-top: 1.375rem;
 }
 
+/* Its floor holds two rows of tiles with their text (about 4.2rem each and the gap): at 150 % on a
+   computer (data-ui-big) the stage scrolls instead of the names running out of the tiles. */
 .mn-formats {
   flex: 0 1 20.375rem;
-  min-height: 9rem;
+  min-height: 9.5rem;
   max-width: 34.8125rem;
   margin-top: 0.625rem;
   display: grid;
@@ -311,6 +313,17 @@ html[data-input='pad'] .mn-keys-pad {
   flex: none;
   width: 1.125rem;
   height: 1.125rem;
+}
+
+/* Casual's DIFFICULTY IF YOU PLAY BOTS: a mn-seg under the note (the rail hides its label as the
+   format's; a TV hides it too, or the format tiles shrink under their text) */
+.mn-modes-bots-label {
+  margin-top: 1.125rem;
+}
+
+.mn-modes-bots {
+  flex: none;
+  margin-top: 0.625rem;
 }
 
 .mn-modes-rows {
@@ -695,7 +708,8 @@ html[data-shell='tv'] .mn-act-always,
 html[data-shell='tv'] .mn-act-bar,
 html[data-shell='tv'] .mn-act-line,
 html[data-shell='tv'] .mn-act-where,
-html[data-shell='tv'] .mn-modes-note {
+html[data-shell='tv'] .mn-modes-note,
+html[data-shell='tv'] .mn-modes-bots-label {
   display: none;
 }
 

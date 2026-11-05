@@ -52,7 +52,9 @@
  *   GET  /room/:roomId  same gate with a role 'peer' ticket whose mid is the room id -> RoomDO (phase 2 signaling)
  *   GET  /api/config  -> { turnstileSiteKey: TURNSTILE_SITEKEY | null, protocol, version, region: cf.colo | 'local',
  *                        autoRegion, regions, oauth, accounts, botFillMs: null (pages from before the modes redesign hide
- *                        their server countdown), queue: { soloAfterMs, widenMs: { casual, ranked }, accountRequired },
+ *                        their server countdown), queue: { soloAfterMs, widenMs: { casual, ranked }, accountRequired,
+ *                        botLevel: the KV flag bot_level's level (env.ts casualBotLevel), the one a 5:00 solo match
+ *                        plays while its player picked none: MODOS shows it picked },
  *                        auth: { devSignIn: the dev-only sign-in is open (mail.ts isDevAuth), email: the
  *                        flows that send mail may show (mail.ts emailAvailable), legacy: { phase, until }:
  *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) },
@@ -99,7 +101,7 @@
  * which flag stops what.
  */
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
@@ -442,13 +444,16 @@ interface QueueBody {
   /** true on the FIRST POST of a client's search loop (a new search, or the one a reloaded page starts again); a boolean, anything else is ignored. */
   first?: unknown;
   physics?: unknown;
+  /** Casual: the bots' level of the player's solo match (easy | medium | hard); anything else, or ranked, is not passed on. */
+  bots?: unknown;
 }
 
 /**
  * POST /api/queue (the build spec's §2.1): session (401), its limit, then the account gate (403
  * for a guest, any kind, any page version: decision 2), the client version (426 for an account's
  * page from before the deploy), the KV flags, the body, the ranked check, and the hub's /join with
- * the player's `home`, `prefer`, `local` and `visible`. A join that made or restored a search
+ * the player's `home`, `prefer`, `local`, `visible` and Casual's `bots` (its solo match's bots level,
+ * only one of the three levels). A join that made or restored a search
  * (`fresh`), or one whose body says `first: true` (a boolean; anything else is ignored), is
  * answered at once; any other waiting join long-polls as before.
  */
@@ -511,6 +516,8 @@ async function queue(request: Request, env: Env): Promise<Response> {
       prefer: preferOf(body.prefer, modes),
       local: body.local === 'bots' || body.local === 'training' ? body.local : undefined,
       visible: body.visible !== false,
+      // Casual's solo bots level, the player's pick (privacy policy, the search's row).
+      bots: kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined,
       ...seatFields(session, now),
     }),
   });
@@ -904,8 +911,11 @@ export default {
       const cfg: Record<string, unknown> = serverConfig(request, env);
       // auth.legacy (sign-in PR 9, §3.10): the username sign-in's phase and cutoff, 'none' while LEGACY_PASSWORD_UNTIL is unset.
       const auth = { ...(cfg.auth as Record<string, unknown> | undefined), email: await emailAvailable(request, env), legacy: await legacyConfig(env) };
+      // queue.botLevel: the KV flag bot_level's level (edge-cached 60 s), what a 5:00 solo match plays while
+      // its player picked none (the queue's `bots`); MODOS › CASUAL shows it picked until they pick.
+      const queue = { ...(cfg.queue as Record<string, unknown>), botLevel: await casualBotLevel(env) };
       // legal (env.ts legalConfig): the terms version in force (null until the owner publishes) and DELETION_OPEN.
-      return withCors(json({ ...cfg, auth, legal: legalConfig(env) }, 200, { 'cache-control': 'no-store' }), cors);
+      return withCors(json({ ...cfg, queue, auth, legal: legalConfig(env) }, 200, { 'cache-control': 'no-store' }), cors);
     }
     // ---- /api/where (edge colo / country / masked ip; no secret needed) ----
     if (path === '/api/where') return withCors(where(request), cors);
