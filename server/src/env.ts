@@ -150,6 +150,12 @@ export interface Env {
    */
   NODE_TRUSTED_OPERATORS?: string;
   /**
+   * Var, optional: how many nodes each NODE_TRUSTED_OPERATORS account may have (each one fully
+   * trusted), bounded in code to 2..8 (registry.ts trustedNodeCap); unset or unreadable: 2. Not a
+   * secret, so it stays in wrangler.jsonc, under review; it lands with the next deploy.
+   */
+  NODE_TRUSTED_MAX_NODES?: string | number;
+  /**
    * Secret, optional: a staff-only Discord channel's webhook URL the control plane posts its ALERT
    * lines to (nodeAlerts.ts), and the Worker every sign-in of a NODE_TRUSTED_OPERATORS account
    * (accountRoutes.ts maintainerAlert).
@@ -398,8 +404,18 @@ export function isModeList(v: unknown): v is GameModeId[] {
 
 // ---- KV flags ----------------------------------------------------------------------------------
 
-/** A KV flag's raw value: null when it is not set, or KV cannot be read (every flag then reads as off). */
-async function flagValue(env: Pick<Env, 'FLAGS'>, name: string): Promise<string | null> {
+/**
+ * Every KV flag the code reads (server/README.md, "Kill switches" and FLAGS), in the maintainers'
+ * panel's order. Nothing writes them: they are set by hand with wrangler.
+ */
+export const KV_FLAGS = ['matchmaking_off', 'do_disabled', 'nodes_on', 'vm_disabled', 'nodes_off', 'replays_off', 'email_off', 'turn_cf_disabled'] as const;
+export type KvFlag = (typeof KV_FLAGS)[number];
+
+/**
+ * A KV flag's raw value: null when it is not set, or KV cannot be read (every flag then reads as
+ * off). Exported for the maintainers' overview, which shows the values as they are.
+ */
+export async function flagValue(env: Pick<Env, 'FLAGS'>, name: string): Promise<string | null> {
   try {
     return await env.FLAGS.get(name, { cacheTtl: 60 });
   } catch {

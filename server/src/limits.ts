@@ -428,6 +428,12 @@ export function isolateLimited(key: string, max: number, now: number = Date.now(
   return hit(routeWindows, key, max, now, windowMs);
 }
 
+/** isolateLimited's check without its count: true when `key` was hit `max` times already in its current window (the next hit would be over). */
+export function isolateSpent(key: string, max: number, now: number = Date.now()): boolean {
+  const e = routeWindows.m.get(key);
+  return e !== undefined && e.resetAt > now && e.n >= max;
+}
+
 /** True when the request is over the rule's limit for `subject`; a null subject is never limited. */
 export type Limiter = (name: LimitName, subject: string | null) => Promise<boolean>;
 

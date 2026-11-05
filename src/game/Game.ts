@@ -130,9 +130,18 @@
  * `touch.setLive`). BOOST shows the amount (`touch.setBoost`), a tap on the scorebug opens the full
  * scoreboard (`touch.scoreboardOpen`, as the held binding), and an offline first touch match waits
  * for the three first-match cards (`touch.cardsUp`).
- * On Android a finger tap outside the controls goes fullscreen in landscape (autoFullscreen) and
- * leaving fullscreen mid-match pauses it; an iPhone (no element fullscreen) gets a one-time
- * add-to-home-screen toast in the menus. Without a touch screen none of it exists.
+ * On Android a finger tap outside the controls goes fullscreen in landscape (autoFullscreen); an
+ * iPhone (no element fullscreen) gets a one-time add-to-home-screen toast in the menus. Without a
+ * touch screen none of it exists.
+ *
+ * Full screen on the pitch (`fullscreen`, src/ui/fullscreen.ts; the decisions in
+ * src/ui/fullscreenModel.ts): on a computer the page goes full screen as a match, training or
+ * session takes the screen (hideMenus: 'local' for the player's own PLAY or training, 'session'
+ * for a found match, a lobby start, a rejoin); without the press's user activation the first key,
+ * click or tap in the match does it. It stays full screen in the menus and on the FINAL (showMenu
+ * only drops a request still armed). Leaving it mid-match pauses the game, on every device
+ * (onFullscreenExit); a player who leaves on purpose is not taken back by a session's entry.
+ * Settings > Game's "Full screen when playing" turns it, and Android's tap, off (applySettings).
  *
  * Audio unlocks on the first gesture with a user activation (onGesture); the listeners go once the
  * context runs and come back when the system takes it away (iOS after a call or an app switch).
@@ -188,6 +197,8 @@ import { BotTeam } from '../ai/Team';
 import { Audio, type AudioState } from '../audio/Audio';
 import { Input } from '../input/Input';
 import { TouchControls, autoFullscreen, hasTouchScreen, installHintDue, noteInstallHintShown } from '../input/TouchControls';
+import { PageFullscreen, escLocked } from '../ui/fullscreen';
+import type { PitchEntry } from '../ui/fullscreenModel';
 import { t } from '../i18n';
 import type { Outcome } from '../net/outcome';
 import { sessionValid } from '../net/NetClient';
@@ -306,7 +317,7 @@ import { GAME_NAME, STORAGE_PREFIX } from '../brand';
 import { BackGuard } from '../ui/backGuard';
 import { systemBack } from '../ui/backModel';
 import { applyUiSettings, installDevice, motionReduced, type DeviceTracker } from '../ui/device';
-import { pauseKeyAction, pauseResumeKeys } from './pauseKeys';
+import { escArmStep, pauseKeyAction, pauseResumeKeys } from './pauseKeys';
 import { CARD_FIRST_MATCHES, ControlsCardPlan, controlsCardRows, localCardSeen, type ControlsCardContent } from '../render/controlsCard';
 import type { Device } from '../input/bindings';
 import { kbmCustomised, usesMouseButton } from '../input/bindings';
@@ -561,6 +572,11 @@ const PAD_SOUND_DIST = 320;
  * never dropped.
  */
 const UNLOCK_PAUSE_WINDOW = 0.12;
+/**
+ * Full screen left this soon (s) after the pointer lock's release paused the game counts as left
+ * mid-match (onFullscreenExit): the same Esc can release the lock first (Firefox, Safari).
+ */
+const FULLSCREEN_EXIT_WINDOW = 0.5;
 /** The in-match hint while mouse look is available but the pointer is not captured (built once: shown per frame). */
 const POINTER_LOCK_HINT = t('game.pointerLockHint');
 /**
@@ -871,6 +887,8 @@ export class Game implements P2PGameHooks {
   private sbClockOvertime = false;
   /** Loop time at which losing the pointer lock paused the game (see UNLOCK_PAUSE_WINDOW). */
   private unlockPausedAt = -1e9;
+  /** An Esc press from the pause, with Esc locked in full screen, waits for its release to resume (processActions, pauseKeys.ts escArmStep). */
+  private escResumeArmed = false;
 
   private raf = 0;
   private running = false;
@@ -957,6 +975,8 @@ export class Game implements P2PGameHooks {
   private readonly portraitQuery: MediaQueryList | null;
   /** The iPhone's add-to-home-screen toast is still due (touch screens only, see updateInstallHint). */
   private installHint: boolean;
+  /** Full screen on the pitch (src/ui/fullscreen.ts); null outside a browser. */
+  private readonly fullscreen: PageFullscreen | null;
   /** Frames left that render the normally hidden meshes so their pipelines compile (see warmUp). */
   private warmFrames = 0;
   /**
@@ -1081,13 +1101,23 @@ export class Game implements P2PGameHooks {
   };
 
   /**
-   * Fullscreen left (Android's back gesture) while a match is played in touch mode: pause, like a
-   * hidden tab (the viewport changes under the thumbs). The RESUME tap goes fullscreen again.
+   * Full screen left (PageFullscreen's `left` hook; `byGame`: the setting turned it off) while a
+   * match is played, on any device and with any input: pause, like a hidden tab (the view changes
+   * under the player: Esc held, F11, Android's back gesture). The same Esc may have released the
+   * pointer lock and paused a moment before (FULLSCREEN_EXIT_WINDOW): still mid-match. Setting
+   * unlockPausedAt drops that Esc's keydown if the browser delivers it too. On Android the RESUME
+   * tap goes full screen again (autoFullscreen); on a computer without the keyboard lock the first
+   * input after the resume does (fullscreenModel.ts exitStep).
    */
-  private readonly onFullscreenChange = (): void => {
-    if (document.fullscreenElement != null || this.touch === null || !this.touch.touchMode) return;
-    if (this.playing) this.setPaused(true);
-  };
+  private onFullscreenExit(byGame: boolean): void {
+    const fs = this.fullscreen;
+    if (fs === null) return;
+    const playing = this.playing || this.time - this.unlockPausedAt <= FULLSCREEN_EXIT_WINDOW;
+    if (fs.exited(byGame, playing) && this.playing) {
+      this.setPaused(true);
+      this.unlockPausedAt = this.time;
+    }
+  }
 
   constructor(opts: GameOptions) {
     this.sim = opts.sim;
@@ -1133,6 +1163,9 @@ export class Game implements P2PGameHooks {
 
     const settings = opts.settings ?? loadSettings();
     this.settings = settings;
+    // Full screen on the pitch: the player's switch, read live (and Android's tap through setEnabled).
+    this.fullscreen = typeof document !== 'undefined' ? new PageFullscreen(() => this.settings.ui.fullscreen) : null;
+    this.fullscreen?.setEnabled(settings.ui.fullscreen);
     this.canvas = opts.canvas !== undefined ? opts.canvas : (document.getElementById('game-canvas') as HTMLCanvasElement | null);
     this.canPointerLock = this.canvas !== null && typeof this.canvas.requestPointerLock === 'function' && hasFinePointer();
 
@@ -1459,7 +1492,14 @@ export class Game implements P2PGameHooks {
     return this.menu.visible ? this.menuCover : 'none';
   }
 
-  private hideMenus(): void {
+  /**
+   * The pitch takes the screen: a match, training or an online session. `entry`: 'local' for the
+   * player's own start (PLAY, training: a click or Enter usually), 'session' for one the network
+   * brought (a found match, a lobby start, a rejoin). Full screen first, while the press that got
+   * here still carries its user activation (PageFullscreen.enter: else it waits for the first input).
+   */
+  private hideMenus(entry: PitchEntry): void {
+    this.fullscreen?.enter(entry);
     this.menu.hide();
     // A match, training or online session takes the screen: a showroom behind the menus (the
     // garage) gives the camera back and stops holding the sim.
@@ -2622,7 +2662,7 @@ export class Game implements P2PGameHooks {
   /** A session's match is on screen: hide the menu, clear banners, block the stale edges, offline match off. */
   private sessionMatchOnScreen(): void {
     if (this.settingsCapturing) this.input.cancelRebind();
-    this.hideMenus();
+    this.hideMenus('session');
     this.hud.hideBanner();
     this.hud.showCountdown(null);
     this.input.blockJumpUntilRelease();
@@ -2818,7 +2858,7 @@ export class Game implements P2PGameHooks {
     const session = this.session;
     if (session !== null && session.state !== 'idle' && opts.keepSession !== true) session.leave();
     if (this.settingsCapturing) this.input.cancelRebind();
-    this.hideMenus();
+    this.hideMenus('local');
     this.hud.hideBanner();
     this.hud.showCountdown(null);
     // The press that started training (menu Enter / A / a click) must not release the first shot.
@@ -3564,8 +3604,9 @@ export class Game implements P2PGameHooks {
       // uses the activation first. autoFullscreen applies the gate.
       window.addEventListener('pointerup', autoFullscreen, { capture: true, passive: true });
       window.addEventListener('click', autoFullscreen, { passive: true });
-      document.addEventListener('fullscreenchange', this.onFullscreenChange);
     }
+    // Full screen on the pitch: an armed request's first input, and a match paused when it goes.
+    this.fullscreen?.install({ playing: () => this.playing, left: (byGame) => this.onFullscreenExit(byGame) });
     this.addGestureListeners();
     if (this.backGuard !== null) this.backGuard.start();
     this.hud.setCameraMode(this.chase.ballCam);
@@ -3594,8 +3635,8 @@ export class Game implements P2PGameHooks {
       this.touch.root.removeEventListener('pointerdown', this.onTouchLayerPointerDown);
       window.removeEventListener('pointerup', autoFullscreen, { capture: true });
       window.removeEventListener('click', autoFullscreen);
-      document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     }
+    this.fullscreen?.dispose();
     this.removeGestureListeners();
     if (this.backGuard !== null) this.backGuard.dispose();
     if (this.leaveGuarded) {
@@ -3857,6 +3898,8 @@ export class Game implements P2PGameHooks {
     this.audio.setVolume(s.audio.volume / 100);
     this.audio.setMusicVolume(s.audio.music / 100);
     this.touch?.applySettings();
+    // "Full screen when playing" off: the game's own full screen goes now, Android's tap stops.
+    this.fullscreen?.setEnabled(s.ui.fullscreen);
     if (this.device !== null) applyUiSettings(s.ui);
   }
 
@@ -3900,7 +3943,7 @@ export class Game implements P2PGameHooks {
   private beginLocalMatch(): void {
     if (this.training !== null) this.endTraining(); // back to the offline roster of the mode first
     if (this.settingsCapturing) this.input.cancelRebind();
-    this.hideMenus();
+    this.hideMenus('local');
     this.hud.hideBanner();
     this.input.blockJumpUntilRelease();
     // The menu closed synchronously inside a key / button handler: that press is still down (or
@@ -4284,6 +4327,11 @@ export class Game implements P2PGameHooks {
     const a = input.actions;
     const pa = input.padActions;
     const hud = this.hud;
+    // The Esc let go this frame (ms held; -1 none) and the resume an earlier Esc armed: read every
+    // frame, so an arm never outlives the pause branch below (Ajustes, the menus).
+    const escUp = input.takeEscRelease();
+    const escArmed = this.escResumeArmed;
+    this.escResumeArmed = false;
 
     if (this.settingsCapturing) {
       // A rebind capture owns every device: the press that ends it must not act on anything else.
@@ -4332,9 +4380,13 @@ export class Game implements P2PGameHooks {
       // (src/game/pauseKeys.ts; only QUIT leaves). A keyboard pause edge right after the
       // pointer-lock release already paused us is that same Escape (dropped); a pad Start
       // (pa.pause) never is. The pause menu's own edges: arrows / WASD / D-pad / stick move the
-      // focus, Enter / A activate, pad X opens the settings.
+      // focus, Enter / A activate, pad X opens the settings. In the game's own full screen with Esc
+      // locked, a held Esc is the browser's way out: from the pause, the Esc press only arms the
+      // resume, which its release makes if it was short (a pad's Start or B in the same frame acts
+      // at once). Mid-match Esc pauses on the press.
       const dropPause = !pa.pause && this.time - this.unlockPausedAt <= UNLOCK_PAUSE_WINDOW;
-      const pk = pauseKeyAction(a.pause, a.back, this.paused, dropPause);
+      const escOnRelease = a.escape && !pa.pause && !pa.back && escLocked();
+      const pk = pauseKeyAction(a.pause, a.back, this.paused, dropPause, escOnRelease);
       if (pk === 'toggle') this.setPaused(!this.paused);
       else if (pk === 'resume') {
         // Pad B is boost too: held on past the resume it would boost at once.
@@ -4343,6 +4395,12 @@ export class Game implements P2PGameHooks {
           this.resumeFromMenu();
         }
       } else if (pk === 'menu') this.pauseMenuActions();
+      if (pk === 'arm' || escArmed) {
+        // A tap's press and release can come in one frame: armed and let go at once.
+        const step = escArmStep(escUp, escLocked(), this.paused);
+        if (step === 'wait') this.escResumeArmed = true;
+        else if (step === 'resume') this.resumeFromMenu();
+      }
       if (a.toggleBallCam) {
         this.chase.toggle();
         hud.setCameraMode(this.chase.ballCam);
@@ -4819,6 +4877,8 @@ export class Game implements P2PGameHooks {
 
   /** The menus back. `keepSearch`: a session still queueing stays (search practice quit: stopTraining). */
   private showMenu(keepSearch = false): void {
+    // Full screen stays with the menus (and the FINAL): only a request still waiting for an input goes.
+    this.fullscreen?.leftPitch();
     // An online match (or one being set up) ends here: sockets closed, offline roster back.
     const session = this.session;
     if (session !== null && session.state !== 'idle' && !(keepSearch && session.busy)) session.leave();

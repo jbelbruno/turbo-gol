@@ -245,6 +245,33 @@ test('AccountStore freeze: a failed verification pauses claims until a maintaine
   assert.equal(store.frozen(b), null);
 });
 
+test('the frozen wallets (the maintainers\' panel: AccountStore.frozenWallets, AccountsDO GET /host-frozen): only those frozen now, newest first, with reason and time, capped with `more`; read only', async () => {
+  const { env, store, db } = makeEnv();
+  const a = makeAccount(store, 'Ana', { now: NOW, refresh: H('1') }).userId;
+  const b = makeAccount(store, 'Beto', { now: NOW, refresh: H('2') }).userId;
+  const c = makeAccount(store, 'Caro', { now: NOW, refresh: H('3') }).userId;
+  assert.deepEqual(store.frozenWallets(10), { frozen: [], more: false });
+  store.hostFreeze(a, 'verification_failed:' + H('a'), NOW + 10);
+  store.hostFreeze(b, 'verification_failed:' + H('b'), NOW + 20);
+  store.hostFreeze(c, 'verification_failed:' + H('c'), NOW + 30);
+  store.unfreeze(c, NOW + 40);
+  assert.deepEqual(store.frozenWallets(10), {
+    frozen: [
+      { account: b, reason: 'verification_failed:' + H('b'), at: NOW + 20 },
+      { account: a, reason: 'verification_failed:' + H('a'), at: NOW + 10 },
+    ],
+    more: false,
+  });
+  assert.deepEqual(store.frozenWallets(1), { frozen: [{ account: b, reason: 'verification_failed:' + H('b'), at: NOW + 20 }], more: true });
+  const before = db.prepare('SELECT * FROM host_freeze ORDER BY user_id').all();
+  const res = await env.ACCOUNTS.get().fetch('https://accounts/host-frozen', { headers: { [INTERNAL_HEADER]: await internalSecret(SECRET) } });
+  assert.equal(res.status, 200);
+  const got = await res.json();
+  assert.deepEqual([got.frozen.map((f) => f.account), got.more], [[b, a], false]);
+  assert.deepEqual(db.prepare('SELECT * FROM host_freeze ORDER BY user_id').all(), before, 'read only');
+  assert.equal((await env.ACCOUNTS.get().fetch('https://accounts/host-frozen')).status, 403, 'internal only');
+});
+
 test('AccountStore shop: the catalog as the account sees it (claimable first), owned items flagged, the default car never listed', async () => {
   const { store } = makeStore();
   const a = makeAccount(store, 'Ana', { now: NOW, refresh: H('1') }).userId;

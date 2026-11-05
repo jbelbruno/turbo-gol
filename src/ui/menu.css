@@ -506,21 +506,6 @@ html:not(.tg-reduce-motion) .mn .mn-bounce-right {
   background: #5865f2;
   color: #fff;
 }
-.mn-codes {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  margin: 12px 0;
-}
-.mn-codes code {
-  font-size: 18px;
-  letter-spacing: 0.14em;
-  padding: 8px;
-  text-align: center;
-  border-radius: var(--r-key);
-  background: var(--surface-0);
-  user-select: all;
-}
 
 /* ---- the ranked result (leaderboard.ts, a sheet's body) ------------------------------------- */
 .mn-result {

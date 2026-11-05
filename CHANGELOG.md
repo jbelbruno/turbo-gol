@@ -7,12 +7,29 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Full screen on the pitch: on a computer the game fills the screen when a match or a training
+  starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
+  tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
+  Esc is still the pause (from the pause it resumes when you let it go) and holding Esc leaves full
+  screen without resuming the match or going back a screen in the menus; a player who leaves is not
+  taken back until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
+  screen when playing" (on by default), turns it off, and Android's tap to full screen with it; the
+  row is not listed on an iPhone, an iPad or a TV. The replay viewer has a Full screen button and
+  the F key.
 - The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
   /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
   notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
   pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
   version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
   the maintainer can delete one on request with a certificate (docs/legal/README.md).
+- PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS, the maintainers' panel of the community nodes
+  (never on a TV): a summary (nodes online by region, matches, the verification queue, the outbox,
+  the trusted slots, the channel, the warnings and the KV switches, read only), every node with its
+  detail and actions behind a confirmation (status, drain, probe again, retire), the tokens, the
+  regions, the releases, the server points (a wallet by account id, the frozen ones, grant, take back,
+  unfreeze) and the account and queue counts. It refreshes every 15 s and asks for the password once
+  when the server wants it again. ADD A PROJECT SERVER asks the machine's data, a checklist and the
+  password, then shows the install line the server composed (COPY) and follows the node to active.
 - Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
   without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
   link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
@@ -498,8 +515,17 @@ All notable changes to Turbogol are documented here. The format follows
   DIFFICULTY IF YOU PLAY BOTS: Easy, Normal or Hard; a running search takes the change at once, and
   the 5:00 box names it). Until you pick one it shows the server's level (Hard, or what the owner
   set with `bot_level`) and your search sends none, so `bot_level` still sets that match. A match
-  with other people plays the server's level. The search carries the pick, so the privacy policy
-  (and Terms 7.1 and 7.4) say so in their next version.
+  with other people plays the server's level. The search carries the pick, which the privacy policy
+  (and Terms 7.1 and 7.4) say from version 2026-11-05.
+- The terms of use and the privacy policy are at version 2026-11-05, in force on its deploy day: the
+  project's servers in Brazil, Germany and Malaysia (Hostinger) and, for now, South Africa,
+  Australia and the United States (Google Cloud), each taking its region's Casual and Competitive
+  matches; a Competitive match verified on a project server that may be in another country; the
+  public server list of the servers in service, with a community host as "Anfitrión" and a number;
+  the maintainers' 30-day history of the servers; the bots' level a player picks; and the notice of
+  an important change cut from 30 to 7 days, posted in Spanish in the repository and in English on
+  Discord (`docs/legal/avisos/2026-11-05.md`). The notice above the accepting buttons names the new
+  countries, and every account and guest accepts again before playing online.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%
@@ -654,6 +680,12 @@ All notable changes to Turbogol are documented here. The format follows
   region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
   of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
   A node match's release goes to the one queue, and a ranked result always names the host region.
+- The community servers' public list (`/nodes/status`) shows only the servers in service (on
+  probation or active), never one pending, suspended, banned or retired, and names who runs each one
+  only for the project's servers: any other host is "Anfitrión" and a number, in the list and in the
+  points ranking, never its username or the start of its account id. A server registered without a
+  name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
+  the legal texts that describe it.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,

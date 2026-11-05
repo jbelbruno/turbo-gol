@@ -15,6 +15,8 @@
  *                          knows neither the match nor the player in it (the lock is free)
  *   POST /internal/health  the cron's (index.ts scheduled) -> 200 { probed, problems }: the /healthz
  *                          of the trusted wss nodes, each problem an ALERT (nodeWatch.ts)
+ *   POST /internal/prune   the cron's while nodes_off is set -> 200 { replays, history }: only what the
+ *                          health call prunes (the public replays and the history past 30 days), no node asked
  *   GET  /internal/operators  the account counts' (nodeRoutes.ts) -> 200 { operators }: the distinct
  *                          account ids that operate a registered node, for AccountsDO only
  *   POST /internal/operator-deleted  { userId } (AccountsDO's purge, sign-in PR 12) -> 200 { ok, banned }:
@@ -62,8 +64,33 @@ export const NODE_ROUTES = {
 /** GET: the node operators' account ids, for the owner's account counts only (nodeRoutes.ts accountStats -> AccountsDO). */
 export const OPERATORS_ROUTE = '/internal/operators';
 
-/** POST { userId }: a purged account's nodes are banned (AccountsDO's alarm, best effort, tried again until answered). */
+/**
+ * POST: the cron's call while the kill switch nodes_off is set (nodeRoutes.ts nodeHealthCheck): the
+ * public replays and the maintainers' history past 30 days pruned, as the health call prunes them,
+ * and nothing else (no node probed, no ALERT of its own; an idle object starts first, as at any
+ * call). The switch keeps the nodes out, not the rows in.
+ */
+export const PRUNE_ROUTE = '/internal/prune';
+
+/**
+ * POST { userId }: a purged account's nodes are banned, and its name and id leave the maintainers'
+ * history (AccountsDO's alarm, best effort, tried again until answered; every purged account, a
+ * player's too).
+ */
 export const OPERATOR_DELETED_ROUTE = '/internal/operator-deleted';
+
+/**
+ * AccountsDO's POST /replay-hidden takes this many ids and as many names at most (a page of the
+ * public replays: 31 rows of 8 seats); the NodeRegistryDO asks in batches of it.
+ */
+export const REPLAY_HIDDEN_MAX = 256;
+
+/**
+ * POST { what } with x-operator-id / x-operator-name: a maintainer's read that the Worker answered
+ * itself (account-stats, queue-stats), audited in the object's one window for every read
+ * (NodeRegistryDO readAudit, READ_AUDIT_WINDOW_MS). Sent after the answer.
+ */
+export const READ_AUDIT_ROUTE = '/internal/read-audit';
 
 /** POST /internal/place: a match the matchmaker formed (its humans, fixed teams, length). */
 export type PlaceBody = PlaceRequest;

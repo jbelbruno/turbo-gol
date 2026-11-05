@@ -133,9 +133,10 @@ test('a community node hosts casual and ranked matches; results are verified bef
     assert.equal(mine.rewards.matches30d, 2);
     assert.ok(mine.rewards.points30d > 0);
     assert.equal(mine.wallet.balance, mine.rewards.earned, 'nothing spent yet');
+    // The public list names a community operator by a number, never by its name or its id.
     const pub = await (await fetch(`${cp.url}/nodes/status`)).json();
-    assert.equal(pub.nodes[0].name, 'cordoba-1');
-    assert.equal(pub.hosts[0].name, 'Juan');
+    assert.deepEqual([pub.nodes[0].name, pub.nodes[0].operator], ['cordoba-1', 'Anfitrión 1']);
+    assert.deepEqual(pub.hosts, [{ name: 'Anfitrión 1', points: mine.rewards.points30d }]);
   } finally {
     if (rt) await rt.stop();
     await cp.close();

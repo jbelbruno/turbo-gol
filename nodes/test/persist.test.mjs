@@ -22,10 +22,10 @@ const quiet = () => undefined;
 const hello = (patch = {}) => ({ bootId: 'boot-1', build: BUILD, roles: ['host'], transports: ['wss'], publicUrl: 'wss://203.0.113.7', rtcReady: false, specs: SPECS, capacity: CAP, draining: false, egressCapGB: null, ...patch });
 const beat = (patch = {}) => ({ active: 1, capacity: 4, draining: false, egressGB: 0.5, egressCapGB: null, tickLagP99Ms: 2, cpuLoad: 0.3, rssMB: 80, matches: [], ...patch });
 
-/** A registry writing through `store`, as the DO builds it at every start. */
-function boot(store, opts = {}) {
+/** A registry writing through `store`, as the DO builds it at every start (`now`: the start's clock, Date.now by default). */
+function boot(store, opts = {}, now = undefined) {
   const reg = new Registry({ allowInsecure: true, store, log: quiet, ...opts });
-  reg.restore(store.rows());
+  reg.restore(store.rows(), now);
   return reg;
 }
 
@@ -149,12 +149,73 @@ test('a node row keeps every durable field and drops the heartbeat ones', async 
   assert.equal(nodeFromRow(row, new Set([OP.id])).trusted, true, 'trust comes from the operators of this load, not from the row');
 
   // Rows without the fields added later load with the registry's own defaults.
-  const { capacityMax, pauseTimes, ...older } = JSON.parse(row.data);
+  const { capacityMax, pauseTimes, publicHost, retiredAt, retiredReason, trustRemovedAt, seenAt, ...older } = JSON.parse(row.data);
+  assert.deepEqual([publicHost, retiredAt, retiredReason, trustRemovedAt, seenAt], [null, null, null, null, 2_000], 'a new row writes them (seenAt: its hello, the online transition)');
   delete older.counters.probationVerified;
   const old = nodeFromRow({ ...row, data: JSON.stringify(older) }, new Set());
   assert.equal(old.capacityMax, CAP.matches);
   assert.deepEqual(old.pauseTimes, []);
   assert.equal(old.counters.probationVerified, 0);
+  // A row of before the panel (no publicHost, no retirement, no lost trust, no seenAt): the same node, none of them.
+  assert.deepEqual([old.publicHost, old.retiredAt, old.retiredReason, old.trustRemovedAt, old.seenAt], [null, null, null, null, null]);
+  assert.deepEqual({ ...old, capacityMax: back.capacityMax, pauseTimes: back.pauseTimes, counters: back.counters, seenAt: back.seenAt }, back);
+});
+
+test('an old row in a registry: it loads, counts toward its cap and registers nothing new by itself; a retired one survives a restart retired', async () => {
+  const store = new MemoryStore();
+  let reg = boot(store);
+  const n = await regNode(reg, OP, 0);
+  const keep = await regNode(reg, OP, 0);
+  const { publicHost, retiredAt, retiredReason, trustRemovedAt, ...older } = JSON.parse(store.nodeRows.get(n.nodeId).data);
+  store.nodeRows.set(n.nodeId, { ...store.nodeRows.get(n.nodeId), data: JSON.stringify(older) });
+  reg = boot(store);
+  assert.equal(reg.node(n.nodeId).retiredAt, null);
+  assert.deepEqual(reg.slots(OP.id).used, 2);
+  reg.retire(n.nodeId, 'moved', 10);
+  reg = boot(store);
+  assert.deepEqual([reg.node(n.nodeId).retiredAt, reg.node(n.nodeId).retiredReason, reg.slots(OP.id).used], [10, 'moved', 1]);
+  assert.equal(reg.node(keep.nodeId).retiredAt, null);
+});
+
+test('trust lost at a restart: a node written as trusted whose operator left the list goes back to probation, 0 of 20, with one ALERT, written at once; never left active', async () => {
+  const store = new MemoryStore();
+  let reg = boot(store, { trustedOperators: [PROJECT.id] });
+  const active = await regNode(reg, PROJECT, 0, { roles: ['host', 'verify'], publicUrl: 'wss://sp1.example.org' });
+  reg.markReachable(active.nodeId, 0);
+  for (let i = 0; i < 25; i++) reg.onVerified(active.nodeId, true, true);
+  const pending = await regNode(reg, PROJECT, 0, { roles: ['host'], publicUrl: 'wss://sp2.example.org' });
+  const community = await regNode(reg, OP, 0);
+  reg.markReachable(community.nodeId, 0);
+  assert.deepEqual([active.status, active.counters.probationVerified, pending.status, community.status], ['active', 25, 'pending', 'probation']);
+  const lines = [];
+  reg = boot(store, { trustedOperators: [], log: (m) => lines.push(m) }, 1_234);
+  const a = reg.node(active.nodeId);
+  assert.deepEqual([a.trusted, a.status, a.statusReason, a.counters.probationVerified, a.trustRemovedAt], [false, 'probation', 'trust_removed', 0, 1_234]);
+  const p = reg.node(pending.nodeId);
+  assert.deepEqual([p.status, p.trustRemovedAt], ['pending', 1_234], 'pending stays pending: probation once reachable, never active');
+  assert.equal(reg.markReachable(pending.nodeId, 2_000), 'probation');
+  assert.deepEqual([reg.node(community.nodeId).status, reg.node(community.nodeId).trustRemovedAt], ['probation', null], 'a community node never had the trust');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], new RegExp(`^ALERT node \\S+ \\(${active.nodeId}\\) of Proyecto \\(proj\\) lost its trust \\(the operator is no longer in NODE_TRUSTED_OPERATORS\\): active -> probation, 0 of 20 verified matches$`));
+  assert.match(lines[1], new RegExp(`\\(${pending.nodeId}\\) .*: pending -> pending, 0 of 20 verified matches$`));
+  const row = JSON.parse(store.nodeRows.get(active.nodeId).data);
+  assert.deepEqual([row.trusted, row.status, row.statusReason, row.trustRemovedAt], [false, 'probation', 'trust_removed', 1_234], 'written at once');
+  // The next start finds an untrusted row: nothing again.
+  lines.length = 0;
+  reg = boot(store, { trustedOperators: [], log: (m) => lines.push(m) });
+  assert.deepEqual(lines, []);
+  assert.equal(reg.node(active.nodeId).status, 'probation');
+  // Its 20 verified matches promote it as any community node's do.
+  for (let i = 0; i < 19; i++) assert.equal(reg.onVerified(active.nodeId, false, true), null);
+  assert.equal(reg.onVerified(active.nodeId, false, true), 'active');
+  // Trusted again: the mark goes, and the row says so at once; the status stays what it earned.
+  reg = boot(store, { trustedOperators: [PROJECT.id], log: (m) => lines.push(m) });
+  assert.deepEqual([reg.node(pending.nodeId).trusted, reg.node(pending.nodeId).status, reg.node(pending.nodeId).trustRemovedAt], [true, 'probation', null]);
+  assert.equal(JSON.parse(store.nodeRows.get(pending.nodeId).data).trusted, true);
+  assert.deepEqual(lines, []);
+  const r2 = boot(store, { trustedOperators: [], log: (m) => lines.push(m) }, 5_000);
+  assert.deepEqual([r2.node(active.nodeId).trustRemovedAt, r2.node(active.nodeId).status], [5_000, 'probation'], 'losing it a second time: back to probation again');
+  assert.equal(lines.length, 2);
 });
 
 test('a token row round-trips', () => {
@@ -242,18 +303,29 @@ test('the MemoryStore keeps, replaces and drops rows', async () => {
 
 // ---- Registry write-through and restore ---------------------------------------------------------
 
-test('heartbeats and disconnects never write; a hello writes once', async () => {
-  const { store, calls } = counted();
+test('heartbeats never write, an online or offline transition writes once (when the node was last seen), a hello writes once', async () => {
+  const { mem, store, calls } = counted();
   const reg = boot(store);
   const n = await regNode(reg, OP, 0);
   assert.deepEqual(calls, { node: 0, register: 1, tokens: 1, dropTokens: 0 });
   reg.connected(n.nodeId, hello(), 10);
-  assert.equal(calls.node, 1, 'one write per hello');
+  assert.equal(calls.node, 1, 'one write per hello, its online transition included');
+  assert.equal(reg.node(n.nodeId).seenAt, 10);
   const before = calls.node;
   for (let i = 1; i <= 200; i++) reg.heartbeat(n.nodeId, beat({ active: i % 4, egressGB: i / 100 }), 10 + i * 5_000);
+  assert.equal(calls.node, before, '200 heartbeats: 0 writes');
+  reg.disconnected(n.nodeId);
   reg.disconnected(n.nodeId);
   reg.sweep(10 + 201 * 5_000 + 60_000);
-  assert.equal(calls.node, before, '200 heartbeats, a disconnect and an offline sweep: 0 writes');
+  assert.equal(calls.node, before + 1, 'a disconnect: one write; again, or an offline sweep after it: none');
+  assert.equal(nodeFromRow(mem.nodeRows.get(n.nodeId), new Set()).seenAt, 10 + 200 * 5_000, 'its last heartbeat, kept through a restart');
+  // A link that goes quiet: the sweep takes the node out (one write), its heartbeat brings it back (one write).
+  reg.connected(n.nodeId, hello(), 2_000_000);
+  const quiet = calls.node;
+  reg.sweep(2_000_000 + 60_000);
+  reg.heartbeat(n.nodeId, beat(), 2_000_000 + 61_000);
+  reg.heartbeat(n.nodeId, beat(), 2_000_000 + 66_000);
+  assert.equal(calls.node, quiet + 2);
   // An rtc host that proves itself in its hello: still one write.
   const home = await regNode(reg, OP, 0, { publicUrl: null });
   const w = calls.node;

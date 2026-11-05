@@ -27,6 +27,10 @@
  *                 LINK_TIMEOUT_MS and a match is void once it sat through NODE_OFFLINE_MS of its
  *                 node's silence (a restarted node's at its hello): no penalties for players, one
  *                 strike per outage; strike suspensions lift after their cooldown
+ *   history       what happens to a node (probes, link cuts, drains, updates, failed verifications)
+ *                 goes to `events` (registry.ts NodeEventSink) as it happens, and a settled match
+ *                 carries the node's fault it was void for (MatchEntry.strike) and a maintainer's
+ *                 reason (voidByAdmin) for the maintainers' history
  *   persistence   every durable change of a match is written through `store` (persist.ts) before
  *                 the message that depends on it goes out: a Durable Object holds its outgoing
  *                 messages only for the writes issued before the send. `restore` loads the rows back
@@ -76,8 +80,8 @@ import { regionFactor } from './ledger';
 import type { Ledger, LedgerEntry, LedgerPlayer } from './ledger';
 import { matchFromRow } from './persist';
 import type { MatchRow, MatchStore } from './persist';
-import { MAX_CAPACITY, usableTransports } from './registry';
-import type { Registry, NodeRecord } from './registry';
+import { MAX_CAPACITY, isRetired, usableTransports } from './registry';
+import type { NodeEventSink, Registry, NodeRecord } from './registry';
 import { ineligibility, pickNode, pickVerifier, transportFor } from './scheduler';
 import type { Shop } from './shop';
 import { parseFromNode, parseHeartbeat, parseHello, parseReport, reportMatchId } from './validate';
@@ -117,6 +121,9 @@ const DONE_RETENTION_MS = 10 * 60_000;
 export const CASUAL_VERIFY_RATE = 0.2;
 /** Matches the matchmaker could not place on a node count as demand for this long. */
 const UNPLACED_WINDOW_MS = 15 * 60_000;
+/** A node's control link cuts are counted over this long (the maintainers' panel), at most LINK_CUTS_MAX of them. */
+export const LINK_CUTS_WINDOW_MS = 24 * 60 * 60_000;
+const LINK_CUTS_MAX = 500;
 /**
  * Strikes closer together than this count once: one outage (a stop, a crash, a restart) is one
  * strike, however many matches it took. A silence counts from its start (strike's `since`).
@@ -254,6 +261,33 @@ export interface LeaveResult {
 /** A refused replay upload: the HTTP status and error code the Worker answers. */
 export type ReplayRefusal = { ok: false; status: number; code: string };
 
+/** The last reachability probe of a wss host (memory only): when it ended, and what it found. */
+export interface ProbeResult {
+  at: number;
+  ok: boolean;
+  /** What went wrong (probeFailure's words), or null when it passed. */
+  error: string | null;
+}
+
+/** One region as the maintainers' panel sees it (ControlPlane.regionView). */
+export interface RegionView {
+  region: string;
+  /** Hosts that may take a match now (hostsOnline). */
+  hostsOnline: number;
+  /** The match slots those hosts offer. */
+  slots: number;
+  /** Matches running on them (the control plane's count, never below their heartbeats'). */
+  active: number;
+  /** Matches placed in the region and not reported yet. */
+  matches: number;
+  /** Matches no node could take in the last 15 minutes (the demand the nodes did not meet). */
+  unplaced: number;
+  /** The region factor a match placed now would get (community points only). */
+  regionFactor: number;
+  /** A ranked match could go there now: an active host on a build some trusted verifier online re-simulates. */
+  rankedReady: boolean;
+}
+
 export interface MatchEntry {
   assign: MatchAssignment;
   nodeId: string;
@@ -295,6 +329,13 @@ export interface MatchEntry {
    * Absent in rows written before it, and on every other match.
    */
   freeze?: { operatorId: string; reason: string };
+  /**
+   * The node's fault the match was settled for (a strike's reason: one outage strikes once, so
+   * not every such match added a strike), for the maintainers' history. Absent otherwise.
+   */
+  strike?: string | null;
+  /** A maintainer's reason when one voided the match (voidByAdmin), for the history. Absent otherwise. */
+  adminReason?: string | null;
   /** When the control plane gives up waiting for a report. */
   deadline: number;
   /** Verification queue: when the job was queued, the last dispatch attempt, a dispatch in flight. */
@@ -342,6 +383,8 @@ export interface ControlPlaneOptions {
   restartGraceMs?: number;
   now?: () => number;
   log?: (msg: string) => void;
+  /** A node's events, for the maintainers' history (registry.ts NodeEventSink; none: not kept). */
+  events?: NodeEventSink;
 }
 
 interface Pending {
@@ -487,12 +530,18 @@ export class ControlPlane {
   private readonly pub: Promise<CryptoKey>;
   private readonly now: () => number;
   private readonly log: (msg: string) => void;
+  private readonly event: NodeEventSink;
   private readonly requireRelay: boolean;
   private readonly casualVerifyRate: number;
   private readonly probing = new Set<string>();
+  /** When each host's last probe started (the sweep paces the next one by it). */
   private readonly lastProbe = new Map<string, number>();
+  /** What each host's last probe found (probeOf; memory only, like the rest of the probes' state). */
+  private readonly probeResults = new Map<string, ProbeResult>();
   /** Failed re-probes in a row of proven hosts, and the hosts they took out (for the recovery line). */
   private readonly probeFailures = new Map<string, number>();
+  /** When each node's logged-in control link ended, the last LINK_CUTS_WINDOW_MS (linkCutsOf). */
+  private readonly linkCuts = new Map<string, number[]>();
   private readonly unreachable = new Set<string>();
   private readonly deferredUpdates = new Set<string>();
   private readonly lastStrike = new Map<string, number>();
@@ -522,6 +571,7 @@ export class ControlPlane {
     this.pub = importPublicKey(o.controlPublicKey);
     this.now = o.now ?? Date.now;
     this.log = o.log ?? ((m) => console.log(`[control] ${m}`));
+    this.event = o.events ?? (() => undefined);
     this.requireRelay = o.requireRelay !== false;
     const rate = o.casualVerifyRate ?? CASUAL_VERIFY_RATE;
     this.casualVerifyRate = Number.isFinite(rate) ? Math.min(1, Math.max(0, rate)) : CASUAL_VERIFY_RATE;
@@ -623,12 +673,13 @@ export class ControlPlane {
    */
   adopt(link: NodeLink, nodeId: string, quiet = false): Session | null {
     const n = this.registry.node(nodeId);
-    if (!n || n.status === 'banned') {
+    if (!n || n.status === 'banned' || isRetired(n)) {
       link.close(4401, 'unknown node');
       return null;
     }
     if (quiet) {
       this.log(`node ${n.name}: silent when the control plane restarted, closing its control link (4408)`);
+      this.event(nodeId, 'link_4408', 'silent when the control plane restarted');
       link.close(4408, 'heartbeat timeout');
       return null;
     }
@@ -658,7 +709,23 @@ export class ControlPlane {
     if (s.nodeId && this.sessions.get(s.nodeId) === s) {
       this.sessions.delete(s.nodeId);
       this.registry.disconnected(s.nodeId);
+      this.linkCut(s.nodeId);
     }
+  }
+
+  /** A node's logged-in link ended (any cause: its close, a 4408, a replacement, a ban): counted for the panel. */
+  private linkCut(nodeId: string): void {
+    const now = this.now();
+    const cuts = (this.linkCuts.get(nodeId) ?? []).filter((t) => now - t < LINK_CUTS_WINDOW_MS);
+    cuts.push(now);
+    this.linkCuts.set(nodeId, cuts.slice(-LINK_CUTS_MAX));
+  }
+
+  /** A node's control link cuts in the last 24 h and when the last one was (memory only: a restart forgets them). */
+  linkCutsOf(nodeId: string): { count24h: number; lastAt: number | null } {
+    const now = this.now();
+    const cuts = (this.linkCuts.get(nodeId) ?? []).filter((t) => now - t < LINK_CUTS_WINDOW_MS);
+    return { count24h: cuts.length, lastAt: cuts.length > 0 ? cuts[cuts.length - 1] : null };
   }
 
   /** One text frame from a node. Never throws for anything the node sends; a storage failure while handling a report rejects (no ack: the node sends it again). */
@@ -704,6 +771,7 @@ export class ControlPlane {
           s.quiet = false;
           s.link.quiet?.(false);
           this.log(`node ${n.name}: heartbeat again after ${seconds(this.now() - n.lastSeen)} s`);
+          this.event(nodeId, 'link_back', `heartbeat again after ${seconds(this.now() - n.lastSeen)} s`);
         }
         this.heard(s);
         this.registry.heartbeat(nodeId, hb, this.now());
@@ -780,6 +848,11 @@ export class ControlPlane {
     if (n.status === 'banned') {
       s.link.send({ t: 'error', code: 'banned' });
       return s.link.close(4403, 'banned');
+    }
+    // Retired by a maintainer: refused as a banned node is, whatever its status says.
+    if (isRetired(n)) {
+      s.link.send({ t: 'error', code: 'retired' });
+      return s.link.close(4403, 'retired');
     }
     if (s.closed) return;
     if (s.authTimer) clearTimeout(s.authTimer);
@@ -862,13 +935,16 @@ export class ControlPlane {
     const error = await this.healthz(n, n.publicUrl);
     if (error !== null) {
       this.log(`probe ${n.name} failed: ${error}`);
+      this.event(nodeId, 'probe_failed', error);
       return false;
     }
     const changed = this.registry.markReachable(nodeId, this.now());
     if (changed) this.notifyStatus(nodeId, changed);
     this.probeFailures.delete(nodeId);
-    if (this.unreachable.delete(nodeId)) this.log(`node ${n.name} reachable again at ${n.publicUrl}`);
+    const again = this.unreachable.delete(nodeId);
+    if (again) this.log(`node ${n.name} reachable again at ${n.publicUrl}`);
     else this.log(`probe ${n.name}: reachable at ${n.publicUrl}`);
+    this.event(nodeId, 'reachable', again ? 'again, after its re-probes failed' : null);
     return true;
   }
 
@@ -892,6 +968,7 @@ export class ControlPlane {
     if (n.reachableAt === null || n.publicUrl !== url) return n.reachableAt !== null;
     const failures = (this.probeFailures.get(nodeId) ?? 0) + 1;
     this.log(`probe ${n.name} failed (${failures} of ${REPROBE_FAILURES}): ${error}`);
+    this.event(nodeId, 'probe_failed', `${failures} of ${REPROBE_FAILURES}: ${error}`);
     if (failures < REPROBE_FAILURES) {
       this.probeFailures.set(nodeId, failures);
       return true;
@@ -900,6 +977,7 @@ export class ControlPlane {
     this.registry.markUnreachable(nodeId);
     this.unreachable.add(nodeId);
     this.log(`ALERT node ${n.name} unreachable at ${url}: ${error}`);
+    this.event(nodeId, 'unreachable', error);
     return false;
   }
 
@@ -907,17 +985,29 @@ export class ControlPlane {
   private async healthz(n: NodeRecord, url: string): Promise<string | null> {
     this.probing.add(n.nodeId);
     this.lastProbe.set(n.nodeId, this.now());
+    let error: string | null = null;
     try {
       const nonce = randomB64(18);
       const get = this.o.fetchJson ?? (async (u: string) => (await fetch(u, { signal: AbortSignal.timeout(5_000) })).json());
       const body = (await get(`${httpOf(url)}/healthz?nonce=${nonce}`)) as { nodeId?: unknown; sig?: unknown };
-      if (body?.nodeId !== n.nodeId || typeof body.sig !== 'string' || !(await verifyWith(n.publicKey, reachMessage(n.nodeId, nonce), body.sig))) return 'bad answer';
-      return null;
+      if (body?.nodeId !== n.nodeId || typeof body.sig !== 'string' || !(await verifyWith(n.publicKey, reachMessage(n.nodeId, nonce), body.sig))) error = 'bad answer';
     } catch (e) {
-      return probeFailure(e);
+      error = probeFailure(e);
     } finally {
       this.probing.delete(n.nodeId);
     }
+    this.probeResults.set(n.nodeId, { at: this.now(), ok: error === null, error });
+    return error;
+  }
+
+  /** The last probe of a wss host (what the panel shows of a node stuck in pending), or null before its first. */
+  probeOf(nodeId: string): ProbeResult | null {
+    return this.probeResults.get(nodeId) ?? null;
+  }
+
+  /** Failed re-probes in a row of a proven host (REPROBE_FAILURES of them take its wss out). */
+  probeStreak(nodeId: string): number {
+    return this.probeFailures.get(nodeId) ?? 0;
   }
 
   /**
@@ -939,6 +1029,7 @@ export class ControlPlane {
     }
     this.deferredUpdates.delete(nodeId);
     this.notify(nodeId, { t: 'update', version: ch.stable });
+    if (this.sessions.has(nodeId)) this.event(nodeId, 'update_sent', `${n.build.version} -> ${ch.stable} (minimum ${ch.minimum})`);
   }
 
   /**
@@ -998,6 +1089,7 @@ export class ControlPlane {
 
   drain(nodeId: string, reason: string): void {
     this.notify(nodeId, { t: 'drain', reason });
+    if (this.sessions.has(nodeId)) this.event(nodeId, 'drain', reason);
   }
 
   // ---- placement ----------------------------------------------------------------------------
@@ -1033,7 +1125,36 @@ export class ControlPlane {
    * took out (and that has no other way in) offers nothing until a probe passes again.
    */
   private mayHost(n: NodeRecord): boolean {
-    return this.isOnline(n.nodeId) && n.roles.includes('host') && (n.status === 'probation' || n.status === 'active') && usableTransports(n).length > 0;
+    return this.isOnline(n.nodeId) && !isRetired(n) && n.roles.includes('host') && (n.status === 'probation' || n.status === 'active') && usableTransports(n).length > 0;
+  }
+
+  /**
+   * One region for the maintainers' panel: its hosts and slots, the matches on them, the demand
+   * they did not meet, its factor and whether a ranked match could go there now (an active host
+   * whose build a trusted verifier online re-simulates: what place() asks of a ranked candidate).
+   */
+  regionView(region: string): RegionView {
+    const now = this.now();
+    let hostsOnline = 0;
+    let slots = 0;
+    let active = 0;
+    let rankedReady = false;
+    for (const n of this.registry.list()) {
+      if (n.region !== region || !this.mayHost(n)) continue;
+      hostsOnline++;
+      slots += n.capacity.matches;
+      active += Math.max(n.active, this.runningOn(n.nodeId));
+      if (!rankedReady && n.status === 'active' && this.verifiable(n.build)) rankedReady = true;
+    }
+    let matches = 0;
+    for (const m of this.matches.values()) if (m.assign.region === region && (m.state === 'assigned' || m.state === 'reporting')) matches++;
+    const unplaced = this.unplaced.filter((u) => u.region === region && now - u.at < UNPLACED_WINDOW_MS).length;
+    return { region, hostsOnline, slots, active, matches, unplaced, regionFactor: this.regionFactorAt(region), rankedReady };
+  }
+
+  /** The verifications a verifier node is running now. */
+  verifyingOn(nodeId: string): number {
+    return this.sessions.get(nodeId)?.verifying ?? 0;
   }
 
   /**
@@ -1320,7 +1441,9 @@ export class ControlPlane {
     return this.o.replays.get(matchId);
   }
 
-  private voidMatch(m: MatchEntry, reason: string, noShows: string[] = []): void {
+  /** `strike`: the node's fault it is void for, a strike's reason (MatchEntry.strike, for the history), or null. */
+  private voidMatch(m: MatchEntry, reason: string, noShows: string[] = [], strike: string | null = null): void {
+    if (strike !== null && m.state !== 'done') m.strike = strike;
     this.finish(m, { kind: 'void', matchId: m.assign.matchId, nodeId: m.nodeId, ranked: m.assign.ranked, reason, players: this.playerIds(m), noShows });
   }
 
@@ -1343,7 +1466,7 @@ export class ControlPlane {
   /** Void every match of `nodeId` that `which` selects, with ONE strike for the whole outage (strike's `since`). */
   private voidMatchesOf(nodeId: string, reason: string, which: (m: MatchEntry) => boolean, since?: number): number {
     const hit = [...this.matches.values()].filter((m) => m.nodeId === nodeId && which(m));
-    for (const m of hit) this.voidMatch(m, reason);
+    for (const m of hit) this.voidMatch(m, reason, [], reason);
     if (hit.length > 0) this.strike(nodeId, reason, since);
     return hit.length;
   }
@@ -1354,7 +1477,7 @@ export class ControlPlane {
     if (!m || m.nodeId !== nodeId || m.state !== 'assigned' || m.report) return;
     this.log(`bad report from ${nodeId} for ${matchId.slice(0, 8)}`);
     this.strike(nodeId, 'bad_report');
-    this.voidMatch(m, 'lost:bad_report');
+    this.voidMatch(m, 'lost:bad_report', [], 'bad_report');
   }
 
   /**
@@ -1406,7 +1529,7 @@ export class ControlPlane {
       const since = m.reportedAt - m.assign.createdAt;
       const lost = (why: string): boolean => {
         this.strike(nodeId, why);
-        this.voidMatch(m, 'lost:' + why);
+        this.voidMatch(m, 'lost:' + why, [], why);
         return true;
       };
       // A cancel a deploy held up (the node sends it again at its welcome, in the grace) is late
@@ -1433,7 +1556,7 @@ export class ControlPlane {
     }
     if (r.kind === 'lost') {
       this.strike(nodeId, r.reason);
-      this.voidMatch(m, 'lost:' + r.reason);
+      this.voidMatch(m, 'lost:' + r.reason, [], r.reason);
       return true;
     }
     // 'ended'. A casual match that is not sampled settles now, on the node's word: it has no
@@ -1442,7 +1565,7 @@ export class ControlPlane {
     // reporting 'ended' without one would beat honestly reporting 'lost' (always a strike).
     if (m.replaySha === null || m.replaySha !== r.replaySha256) {
       this.strike(nodeId, 'no_replay');
-      this.voidMatch(m, 'no_replay');
+      this.voidMatch(m, 'no_replay', [], 'no_replay');
       return true;
     }
     m.verifyRate = this.verifyRateOf(m, n);
@@ -1459,7 +1582,7 @@ export class ControlPlane {
     if (m.state !== 'reporting' || m.report !== r) return true; // settled meanwhile (sweep)
     if (sha === null || sha !== r.replaySha256) {
       this.strike(nodeId, 'no_replay');
-      this.voidMatch(m, 'no_replay');
+      this.voidMatch(m, 'no_replay', [], 'no_replay');
       return true;
     }
     m.state = 'verifying';
@@ -1487,6 +1610,47 @@ export class ControlPlane {
       }
       void this.tryVerify(m);
     }
+  }
+
+  /**
+   * A maintainer voids a match the control plane holds and has not settled (POST
+   * /nodes/admin/match/void): void as 'admin_void', settled as any void is (its outbox rows in the
+   * settling transaction: a ranked one's /ranked-cancel, every one's /release), `reason` kept for
+   * the history (adminReason). No strike unless `strike` (one, as the node's fault). The node is not
+   * told (no message ends a match): its players play on, and its report is acked and forgotten.
+   * 'none' when no such match is held, 'settled' when it is settled already. Throws when the store
+   * does (the match stays as it was).
+   */
+  voidByAdmin(matchId: string, reason: string, strike: boolean): 'voided' | 'none' | 'settled' {
+    const m = this.matches.get(matchId);
+    if (!m) return 'none';
+    if (m.state === 'done') return 'settled';
+    const was = { adminReason: m.adminReason };
+    m.adminReason = reason;
+    try {
+      this.voidMatch(m, 'admin_void', [], strike ? 'admin_void' : null);
+    } catch (e) {
+      m.adminReason = was.adminReason;
+      throw e;
+    }
+    if (strike) this.strike(m.nodeId, 'admin_void');
+    return 'voided';
+  }
+
+  /**
+   * A maintainer asks for a queued verification now (POST /nodes/admin/match/verify): its retry
+   * wait is skipped and the queue pumped (its deadline, VERIFY_MAX_WAIT_MS from when it was
+   * queued, stays). 'none' when no such match is held, 'not_verifying' when it is not in the queue
+   * (still played, being reported, or settled), 'in_flight' when a verifier has it now.
+   */
+  verifyNow(matchId: string): 'queued' | 'none' | 'not_verifying' | 'in_flight' {
+    const m = this.matches.get(matchId);
+    if (!m) return 'none';
+    if (m.state !== 'verifying') return 'not_verifying';
+    if (m.inFlight) return 'in_flight';
+    m.lastTry = 0;
+    this.pump();
+    return 'queued';
   }
 
   private async tryVerify(m: MatchEntry): Promise<void> {
@@ -1617,6 +1781,7 @@ export class ControlPlane {
     if (changed) this.notifyStatus(m.nodeId, changed);
     if (!ok) {
       this.log(`ALERT match ${matchId} on ${host.name}: verification ${why} ${verdict.message ?? ''}`);
+      this.event(m.nodeId, 'verify_failed', `match ${matchId}: ${why}`);
       if (!host.trusted) {
         m.freeze = { operatorId: host.operatorId, reason: `verification_failed:${matchId}` };
         this.shop?.freeze(m.freeze.operatorId, m.freeze.reason);
@@ -1682,11 +1847,15 @@ export class ControlPlane {
     if (m.assign.ranked) {
       // Every player vanished at once: the node's network, most likely (a strike). Players closing
       // their tabs one after another is not the node's fault.
+      let fault: string | null = null;
       if (reason === 'empty') {
         const gone = (verdict.goneTicks ?? []).filter((t, slot) => m.assign.roster[slot]?.kind === 'player' && t >= 0);
-        if (gone.length > 0 && Math.max(...gone) - Math.min(...gone) <= EMPTY_TOGETHER_TICKS) this.strike(m.nodeId, 'empty');
+        if (gone.length > 0 && Math.max(...gone) - Math.min(...gone) <= EMPTY_TOGETHER_TICKS) {
+          this.strike(m.nodeId, 'empty');
+          fault = 'empty';
+        }
       }
-      return this.voidMatch(m, reason);
+      return this.voidMatch(m, reason, [], fault);
     }
     return this.finish(m, { kind: 'unrated', matchId, nodeId: m.nodeId, blue: verdict.score.blue, red: verdict.score.red, verified: true });
   }
@@ -1744,16 +1913,20 @@ export class ControlPlane {
       s.quiet = true;
       s.link.quiet?.(true);
       this.log(`node ${n.name}: no heartbeat for ${seconds(now - n.lastSeen)} s, no new matches until the next one`);
+      this.event(n.nodeId, 'link_quiet', `no heartbeat for ${seconds(now - n.lastSeen)} s`);
     }
     for (const s of [...this.sessions.values()]) {
       const silent = now - s.heardAt;
       if (silent <= LINK_TIMEOUT_MS) continue;
       this.log(`node ${this.nameOf(s)}: silent ${seconds(silent)} s, closing its control link (4408)`);
+      if (s.nodeId !== null) this.event(s.nodeId, 'link_4408', `silent ${seconds(silent)} s`);
       s.link.close(4408, 'heartbeat timeout');
       this.onClose(s);
     }
     for (const s of this.lateLinks) {
-      this.log(`node ${this.nameOf(s)}: ${s.late} message${s.late === 1 ? '' : 's'} so far after its link was closed, up to ${seconds(s.lateMs)} s late`);
+      const line = `${s.late} message${s.late === 1 ? '' : 's'} so far after its link was closed, up to ${seconds(s.lateMs)} s late`;
+      this.log(`node ${this.nameOf(s)}: ${line}`);
+      if (s.nodeId !== null) this.event(s.nodeId, 'late_messages', line);
       s.lateLogged = s.late;
     }
     this.lateLinks.clear();

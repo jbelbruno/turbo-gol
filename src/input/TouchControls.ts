@@ -55,7 +55,8 @@
  *
  * Phone platform helpers (their decisions are in ./touchMode.ts), used by the Game on touch
  * screens only:
- *   - `autoFullscreen`: on Android a finger tap outside the controls goes fullscreen in landscape;
+ *   - `autoFullscreen`: on Android a finger tap outside the controls goes fullscreen in landscape
+ *     (src/ui/fullscreen.ts requestPageFullscreen; Settings > Game's switch turns it off);
  *   - `installHintDue` / `noteInstallHintShown`: the iPhone's one-time add-to-home-screen hint;
  *   - iOS Safari's pinch zoom (gesturestart) is cancelled but in the menus (`.mn-open`: the
  *     front-end menus and the settings over them), never on the controls or the game's canvas:
@@ -72,6 +73,7 @@ import { TOUCH_SIZE_SCALE, type TouchSettings } from '../settings';
 import { TB, TOUCH_BUTTON_COUNT, TouchState, type TouchButton } from './touchState';
 import { TouchRouter, emptyLayout, type TouchLayout } from './touchRouter';
 import { keyLeavesTouchMode, pointerTouchMode, shouldAutoFullscreen, shouldShowInstallHint, type PlatformEnv } from './touchMode';
+import { fullscreenAllowed, fullscreenEnv, requestPageFullscreen } from '../ui/fullscreen';
 
 /** The device has a touch screen (phone, tablet, touch laptop): the Game then creates the controls. */
 export function hasTouchScreen(): boolean {
@@ -169,18 +171,9 @@ function coarsePointer(): boolean {
   return mediaMatches('(pointer: coarse)');
 }
 
-/** The browser's side of the phone platform decisions (touchMode.ts). */
+/** The browser's side of the phone platform decisions (touchMode.ts): read with the full screen's (src/ui/fullscreen.ts). */
 export function platformEnv(): PlatformEnv {
-  // Typed as always there; Safari before 16.4 lacks it.
-  const orientation: ScreenOrientation | undefined = screen.orientation;
-  const root = document.documentElement;
-  return {
-    coarse: coarsePointer(),
-    orientationLock: orientation !== undefined && typeof orientation.lock === 'function',
-    elementFullscreen: document.fullscreenEnabled === true && typeof root.requestFullscreen === 'function',
-    fullscreen: document.fullscreenElement != null,
-    standalone: mediaMatches('(display-mode: standalone)') || (navigator as Navigator & { standalone?: boolean }).standalone === true,
-  };
+  return fullscreenEnv();
 }
 
 /**
@@ -194,8 +187,9 @@ const FULLSCREEN_CLICK_MS = 1000;
 let fullscreenClickFrom = -Infinity;
 
 /**
- * Android phones (shouldAutoFullscreen): a finger lifted anywhere but on the controls, a link or a
- * text field (or its label) goes fullscreen without the navigation bar and locks landscape. The
+ * Android phones (shouldAutoFullscreen), while Settings > Game's "Full screen when playing" is on
+ * (fullscreenAllowed): a finger lifted anywhere but on the controls, a link or a text field (or
+ * its label) goes fullscreen without the navigation bar and locks landscape. The
  * Game listens with it on window while it runs: pointerup (capture phase, passive) and click
  * (bubble phase, passive). requestFullscreen needs the user activation of that very event, so it
  * is called right here, never from a later callback; only the orientation lock waits for the
@@ -212,10 +206,11 @@ export function autoFullscreen(e: MouseEvent): void {
   if (e.type === 'click') {
     const due = e.isTrusted && e.timeStamp - fullscreenClickFrom <= FULLSCREEN_CLICK_MS;
     fullscreenClickFrom = -Infinity;
-    if (due && document.fullscreenElement == null) requestLandscapeFullscreen();
+    if (due && document.fullscreenElement == null && fullscreenAllowed()) requestLandscapeFullscreen();
     return;
   }
   fullscreenClickFrom = -Infinity;
+  if (!fullscreenAllowed()) return;
   const pointerType = (e as PointerEvent).pointerType;
   if (pointerType !== 'touch' && pointerType !== 'pen') return;
   if (document.fullscreenElement != null) return;
@@ -231,10 +226,7 @@ export function autoFullscreen(e: MouseEvent): void {
 
 /** Called only inside an input event's own listener (autoFullscreen): it needs its user activation. */
 function requestLandscapeFullscreen(): void {
-  document.documentElement
-    .requestFullscreen({ navigationUI: 'hide' })
-    .then(() => screen.orientation.lock('landscape'))
-    .catch(() => undefined);
+  void requestPageFullscreen({ landscape: true });
 }
 
 const INSTALL_HINT_KEY = STORAGE_PREFIX + 'installHint';
