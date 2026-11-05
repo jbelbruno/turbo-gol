@@ -282,7 +282,9 @@ export function createAtmosphere(): Atmosphere {
       const dens = smoothstep(c0, c0.add(0.13), n).toVar();
       const glowW = azWeight(dir).mul(exp(max(e, 0.0).div(0.2).negate()));
       const top = mix(c.shadow, c.lit, lit01);
-      const below = c.under.mul(glowW).mul(mix(float(1.0), float(0.5), lit01));
+      // 1 - lit01 / 2 (mix(1, 0.5, lit01)): lit01 is a plain constant on the cheap clouds, and a mix whose arguments are all
+      // literals reaches the shader as an abstract-typed expression that Firefox's WebGPU validator (Naga) refuses.
+      const below = c.under.mul(glowW).mul(oneMinus(lit01.mul(0.5)));
       const cosK = max(dot(dir, U.keyDir), 0.0);
       const silver = U.keyColor.mul(pow(cosK, 10.0).mul(U.keyHalo2).mul(1.6).add(pow(cosK, 3.0).mul(U.keyHalo).mul(1.5))).mul(oneMinus(dens).mul(0.7).add(0.3));
       const thick = mix(float(1.0), float(0.62), dens.mul(dens));

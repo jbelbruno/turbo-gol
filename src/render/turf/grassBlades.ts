@@ -159,7 +159,7 @@ export class GrassBlades {
     //    stripes, the team tint, the damp darkening and the paint
     const camDir = toCam.xz.div(max(length(toCam), float(1)));
     const shade = t.mul(0.6).add(0.4);
-    let col: Vec3Node = grassAlbedo(shade, mix(h3, tB.a, 0.5), clumpS.mul(0.6).add(tB.a.mul(0.4)), f.a, trample, bare, clumpS, float(0.6), U);
+    let col: Vec3Node = grassAlbedo(shade, mix(h3, tB.a, 0.5), clumpS.mul(0.6).add(tB.a.mul(0.4)), f.a, trample, bare, clumpS, 0.6, U);
     col = col.mul(mowingStripes(bend, camDir, trample, U)).mul(teamTint(root, U));
     const dampLocal = U.wetness.mul(f.g.mul(1.1).add(0.25)).min(1);
     col = col.mul(mix(float(1), float(0.75), dampLocal));
