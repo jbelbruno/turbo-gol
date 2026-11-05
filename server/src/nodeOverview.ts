@@ -3,18 +3,23 @@
  * 15 s, GET /nodes/admin/nodes and GET /nodes/admin/operators): built from the NodeRegistryDO's
  * ControlPlane through its public getters only, plus the few things the object itself holds (the
  * channel, the outbox, the KV flags, the opening's flag and its changes, the operators' rows,
- * whether the ALERT webhooks are set). Maintainers only: it carries the nodes' addresses, the
- * operators' account ids and the tokens' short ids (never a token), none of which goes into /nodes/status.
+ * whether the ALERT webhooks are set, the players' reports). Maintainers only: it carries the nodes'
+ * addresses, the operators' account ids and the tokens' short ids (never a token), none of which goes
+ * into /nodes/status. GET /nodes/mine's views (mineView, mineNodeView, mineTokenViews) are an
+ * operator's own: its own nodes and codes only, never another's, and never a report.
  */
 import { OPERATOR_MATCHES_MAX } from '../../nodes/control-plane/controlPlane';
 import type { ControlPlane, ProbeResult, RegionView } from '../../nodes/control-plane/controlPlane';
-import { isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
+import { MAX_STRIKES, PROBATION_MATCHES, STRIKE_WINDOW_MS, isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
 import type { NodeRecord, TokenState } from '../../nodes/control-plane/registry';
 import type { BuildId, NodeRole } from '../../nodes/shared/controlProtocol';
 import { REGIONS } from '../../src/net/account';
 import { KV_FLAGS } from './env';
 import type { KvFlag } from './env';
-import type { AdminAuditRow, OperatorRow } from './nodeStore';
+import { REPORT_REASONS } from './nodeStore';
+import type { AdminAuditRow, OperatorRow, ReportReason, ReportRow } from './nodeStore';
+
+const DAY_MS = 24 * 60 * 60_000;
 
 /** GET /nodes/mine: one of the operator's own nodes, its address and counters included. */
 export function mineView(cp: ControlPlane, n: NodeRecord) {
@@ -38,6 +43,32 @@ export function mineView(cp: ControlPlane, n: NodeRecord) {
     counters: n.counters,
     version: n.build.version,
     compatible: cp.sameBuildAs(n.build),
+  };
+}
+
+/**
+ * GET /nodes/mine's node in full (Prompt 2, A11), for its own operator: mineView, plus its dates and
+ * service state, the last probe of its address, its progress to active (`needed`), its strikes in
+ * their window, its refusals (all time and their rate, and the last window's: A8 bis) and the
+ * matches placement lets it run (capacityEffective). Never the players' reports: those are the
+ * team's (the privacy policy: "lo ve el equipo, no el anfitrión").
+ */
+export function mineNodeView(cp: ControlPlane, n: NodeRecord) {
+  const probe: ProbeResult | null = cp.probeOf(n.nodeId);
+  const refused = n.counters.refused ?? 0;
+  const tries = n.counters.assigned + refused;
+  return {
+    ...mineView(cp, n),
+    createdAt: n.createdAt,
+    lastSeen: n.lastSeen > 0 ? n.lastSeen : (n.seenAt ?? null),
+    draining: n.draining,
+    egressCapGB: n.egressCapGB,
+    reachableAt: n.reachableAt,
+    lastProbe: probe ? { at: probe.at, ok: probe.ok, error: probe.error } : null,
+    needed: PROBATION_MATCHES,
+    strikes: { count: n.counters.strikes, max: MAX_STRIKES, windowDays: STRIKE_WINDOW_MS / DAY_MS },
+    refused: { count: refused, rate: tries > 0 ? Math.round((refused / tries) * 1000) / 1000 : 0, ...cp.refusalsOf(n.nodeId) },
+    capacityEffective: cp.effectiveCapacity(n),
   };
 }
 
@@ -109,6 +140,13 @@ export interface TokenView {
   usedBy: string | null;
   revokedAt: number | null;
   state: TokenState;
+}
+
+/** GET /nodes/mine's tokens: the operator's own, by their short id, and the node each one registered (A11). */
+export function mineTokenViews(cp: ControlPlane, operatorId: string, now: number) {
+  return tokenViews(cp, now)
+    .filter((t) => t.operatorId === operatorId)
+    .map((t) => ({ id: t.id, region: t.region, name: t.name, publicHost: t.publicHost, createdAt: t.createdAt, expiresAt: t.expiresAt, state: t.state, nodeId: t.usedBy }));
 }
 
 export function tokenViews(cp: ControlPlane, now: number): TokenView[] {
@@ -289,14 +327,43 @@ export interface OperatorInput {
   row: OperatorRow | null;
   /** Its community node tokens minted in the last 24 hours (NodeStore.tokensToday). */
   tokensToday: number;
+  /** The players' reports about its servers of the last REPORTS_SHOWN_DAYS, newest first (NodeStore.reportsAbout); none: an object of before them. */
+  reports?: ReportRow[];
+}
+
+/** The days of reports the Operadores tab shows (A16: a week), and how many of them at most. */
+export const REPORTS_SHOWN_DAYS = 7;
+export const REPORTS_SHOWN_MAX = 100;
+
+/**
+ * An operator's reports as the maintainers read them (A16): how many, from how many accounts (the
+ * signal: several accounts about one server, never one report alone), by reason and by node, and
+ * the reports themselves (the match opens its replay or its history row; the reporter's account id
+ * is for the team only).
+ */
+export function reportsView(rows: readonly ReportRow[]) {
+  const byReason = Object.fromEntries(REPORT_REASONS.map((r) => [r, 0])) as Record<ReportReason, number>;
+  const byNode = new Map<string, Set<string>>();
+  for (const r of rows) {
+    byReason[r.reason]++;
+    byNode.set(r.nodeId, (byNode.get(r.nodeId) ?? new Set()).add(r.reporterId));
+  }
+  return {
+    days: REPORTS_SHOWN_DAYS,
+    count: rows.length,
+    accounts: new Set(rows.map((r) => r.reporterId)).size,
+    byReason,
+    byNode: [...byNode].map(([nodeId, who]) => ({ nodeId, reports: rows.filter((r) => r.nodeId === nodeId).length, accounts: who.size })),
+    recent: rows.slice(0, REPORTS_SHOWN_MAX),
+  };
 }
 
 /**
- * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A17): its
- * status and opt-in, its nodes with their refusals and effective capacity, its tokens, the matches
- * it runs against OPERATOR_MATCHES_MAX, and its points (today against the daily cap, 30 days, all
- * time, and how much of them the 3 accounts that played most on its nodes brought). Its wallet is
- * GET /nodes/admin/wallet's.
+ * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A16, A17):
+ * its status and opt-in, its nodes with their refusals and effective capacity, its tokens, the
+ * matches it runs against OPERATOR_MATCHES_MAX, its points (today against the daily cap, 30 days,
+ * all time, and how much of them the 3 accounts that played most on its nodes brought) and the
+ * players' reports of the last week (reportsView). Its wallet is GET /nodes/admin/wallet's.
  */
 export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorInput) {
   const nodes = cp.registry.byOperator(operatorId);
@@ -344,5 +411,6 @@ export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorIn
       earned: summary.earned,
       concentration: cp.ledger.concentration(operatorId, i.now),
     },
+    reports: reportsView(i.reports ?? []),
   };
 }

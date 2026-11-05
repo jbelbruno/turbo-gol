@@ -6,7 +6,7 @@
  * regions' instances keep the custom lobbies' P2P rooms (/custom) and the locks of matches formed
  * there before the deploy.
  *
- *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, bots?, car?, account?, accountAgeDays? }
+ *   POST /join    { playerId, name, mode | modes, kind?, home, prefer?, local?, visible?, bots?, projectOnly?, car?, account?, accountAgeDays? }
  *                                            -> QueueResult (matched right away; with the hub's extras mode, host,
  *                                               humans: src/net/queueWait.ts QueueMatchedExtra) or 'waiting' with
  *                                               { waiting, region: home, wait: QueueWait } and fresh: true when this
@@ -19,8 +19,12 @@
  *                                               plays locally meanwhile (the daily counters only). visible: false while
  *                                               its tab is in the background (no solo match then). bots: Casual, the
  *                                               level of its solo match's bots (easy | medium | hard; anything else is
- *                                               no choice). A change of prefer, modes, local, visible or bots updates
- *                                               the waiter in place (its clock goes on); only a change of kind replaces it.
+ *                                               no choice). projectOnly: true, "Solo servidores del proyecto" (the Worker
+ *                                               sends it once the terms in force describe hosting, never by the KV
+ *                                               flag; ignored here too before them): its group's match never goes to a community node
+ *                                               (Community nodes below). A change of prefer, modes, local, visible, bots
+ *                                               or projectOnly updates the waiter in place (its clock goes on); only a
+ *                                               change of kind replaces it. Never kept in a dropped search (`recent`).
  *                                               car / account / accountAgeDays: the session's (index.ts seatFields),
  *                                               kept with the seat (HumanEntry) and copied into every roster;
  *                                               409 { error: 'active_match', matchId, kind } while a match / room of the
@@ -178,6 +182,14 @@
  * its own region, then one of SA (at once while its region backs off), never a MatchDO; the
  * result's `host` is where it was placed. Custom lobbies never go to a node. With the nodes off
  * for a player (or not configured: a fork, the tests) everything is as without them.
+ * "Solo servidores del proyecto" (Prompt 2, A15): when one human of a group asked for it
+ * (Waiter.projectOnly), the whole group's placement asks for the project's nodes alone
+ * (PlaceBody.projectOnly); none free, a MatchDO as without nodes, and with do_disabled the group
+ * waits for a project node (its region's, then SA's), never a community one. Its back-off after
+ * hosts 0 is its own (backoffKey: the region may still have community hosts for everyone else).
+ * The answer of a node match carries the server's mark the NodeRegistryDO gives (`server`, its
+ * word, never the node's Welcome: a community server's always, a project server's once the terms
+ * in force describe hosting), and nothing else of the node.
  *
  * Experimental rules (the owner's rule: every ranked or counted match, P2P included, runs the
  * standard physics; the experimental counts for nothing): only a custom lobby's /custom may carry
@@ -191,17 +203,17 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, casualBotLevel, error, flag, isBotLevel, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, NEED_PLAYERS_TEXT, QUEUE_HUB, TURN_PER_PLAYER_PER_DAY, carriesPhysics, casualBotLevel, error, flag, hostingTermsInForce, isBotLevel, isMode, isModeList, isQueueKind, json, limitKey, matchLengthSeconds, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, readJson } from './env';
 import type { GameModeId, LockKind, NodesMode, PublicQueueKind, QueueKind, RoomKind } from './env';
 import { ARRIVALS_MAX, ARRIVALS_WINDOW_MS, CASUAL_WIDEN_MS, RANKED_WIDEN_MS, RECENT_MS, SOLO_ROOMS_MAX, SOLO_UNPLAYED_MS, arrivalOf, countArrivals, decodeArrivals, encodeArrivals, estimateWait, hostRegion, locationHintOf, normalizeHome, planCasual } from './queuePlan';
 import type { Arrival, PlanGroup } from './queuePlan';
 import { STATS_FLUSH_MS, STATS_PREFIX, addFormed, dayOf, daysBefore, emptyDay, emptyRow, expiredDay, mergeDays, parseDay, statsDays } from './queueStats';
 import type { LocalPlay, QueueDay, StatsKind } from './queueStats';
-import type { QueueMatchedExtra, QueueWait } from '../../src/net/queueWait';
+import type { QueueMatchedExtra, QueueWait, ServerMark } from '../../src/net/queueWait';
 import type { RegionId } from '../../src/net/account';
 import { INTERNAL_HEADER, checkInternal, createTicket, internalSecret } from './auth';
 import type { TicketRole } from './auth';
-import { NODE_CALL_TIMEOUT_MS, NODE_ROUTES, askNodes, nodeLockHeld, placementFor } from './nodeApi';
+import { NODE_CALL_TIMEOUT_MS, NODE_ROUTES, askNodes, nodeLockHeld, placementFor, serverMarkOf } from './nodeApi';
 import type { PlaceBody } from './nodeApi';
 import type { Placement } from '../../nodes/control-plane/controlPlane';
 import type { RosterEntry } from './roomHost';
@@ -358,6 +370,13 @@ interface Waiter extends HumanEntry {
    * chosen (an older page), the flag's level.
    */
   bots?: Difficulty;
+  /**
+   * "Solo servidores del proyecto" (A15): its group's match goes to a project node or a MatchDO,
+   * never a community node. Memory only, while it searches (never in `recent`), and only once the
+   * terms in force describe hosting (the Worker's guard and join's are the same: no KV flag, so it
+   * holds while community servers host, whatever the flag says or a failed read of it).
+   */
+  projectOnly?: true;
   /** Its match could form but every server is full (wait.busy). */
   busy: boolean;
   /** Its last formation found no node and no MatchDO, or failed: not tried again before this. */
@@ -524,6 +543,8 @@ interface JoinBody {
   visible?: unknown;
   /** Casual: the bots' level the player chose for its solo match (easy | medium | hard; anything else is ignored: the server's level). */
   bots?: unknown;
+  /** The Worker's, once the terms in force describe hosting: true, the player's matches never go to a community node (A15); anything else is no choice. */
+  projectOnly?: unknown;
 }
 
 /** The solo match's format: `prefer` when it is a playlist, else 2v2 when searched, else the first one searched. Pure. */
@@ -535,6 +556,16 @@ export function preferOf(prefer: unknown, modes: readonly GameModeId[]): GameMod
 /** The local play a join reports ('bots' | 'training'), else none. Pure. */
 export function localOf(v: unknown): LocalPlay | undefined {
   return v === 'bots' || v === 'training' ? v : undefined;
+}
+
+/** A group goes to the project's servers only when one of its humans asked for it (A15: the privacy policy's "vale para toda la partida"). Pure. */
+export function projectOnlyOf(humans: ReadonlyArray<{ projectOnly?: true }>): boolean {
+  return humans.some((h) => h.projectOnly === true);
+}
+
+/** The placement back-off's key: a host region's, or (projectOnly) its project nodes', apart from everyone's. Pure. */
+export function backoffKey(host: string, projectOnly: boolean): string {
+  return projectOnly ? host + ':project' : host;
 }
 
 /** The counters' name of a queue kind. */
@@ -759,6 +790,8 @@ interface FormOptions {
    * formMatch reads the KV flag bot_level.
    */
   bots?: Difficulty;
+  /** formMatch: one of the humans asked for the project's servers only (Waiter.projectOnly): no community node takes it (A15). */
+  projectOnly?: boolean;
 }
 
 /**
@@ -988,7 +1021,7 @@ export class MatchmakerDO extends DurableObject<Env> {
   private nodesReadAt = -Infinity;
   private nodesRead: Promise<void> | null = null;
   private nodesKnown = false;
-  /** No placement is asked before this, per host region (NO_HOSTS_BACKOFF_MS). */
+  /** No placement is asked before this, per host region (NO_HOSTS_BACKOFF_MS), and per region's project nodes (backoffKey). */
   private readonly noHostsUntil = new Map<string, number>();
   /** The clock of the request handlers (Date.now; tests inject their own). */
   now: () => number = () => Date.now();
@@ -1190,6 +1223,9 @@ export class MatchmakerDO extends DurableObject<Env> {
     const visible = body.visible !== false;
     // Casual's solo bots level, the player's (ranked has none; junk is no choice: the flag's level).
     const bots = kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined;
+    // "Solo servidores del proyecto" (A15): the Worker's guard, again here: while the terms do not
+    // describe hosting it is dropped (dark: kept nowhere); from then on it is always taken.
+    const projectOnly = body.projectOnly === true && hostingTermsInForce(this.env);
     let ratings: Waiter['ratings'];
     if (kind === 'ranked') {
       const r = parseRatings(body.ratings, modes);
@@ -1273,6 +1309,8 @@ export class MatchmakerDO extends DurableObject<Env> {
       waiter.visible = visible;
       if (bots === undefined) delete waiter.bots;
       else waiter.bots = bots;
+      if (projectOnly) waiter.projectOnly = true;
+      else delete waiter.projectOnly;
       this.setLocal(waiter, local, now);
       if (waiter.modes.length !== modes.length || waiter.modes.some((m) => !modes.includes(m))) {
         // A ranked waiter moves to its new playlists' queues, keeping its place by its join time.
@@ -1288,7 +1326,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       const restored = back !== undefined && back.kind === kind && back.until > now;
       if (back !== undefined && restored) this.forgetRecent(playerId);
       const joinedAt = restored ? back.joinedAt : now;
-      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(bots !== undefined ? { bots } : {}), ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}), ...(restored && back.soloRetried ? { soloRetried: true as const } : {}) };
+      waiter = { playerId, name: body.name, car, account, accountAgeDays, modes, kind, joinedAt, lastSeen: now, resolvers: [], ratings, home, prefer, visible, busy: false, ...(bots !== undefined ? { bots } : {}), ...(projectOnly ? { projectOnly: true as const } : {}), ...(guest ? { guest: true } : {}), ...(net !== null ? { net } : {}), ...(restored && back.soloRetried ? { soloRetried: true as const } : {}) };
       if (!restored) {
         this.stat(now).searches[statsKindOf(kind)]++;
         this.arrive({ at: now, kind: statsKindOf(kind), home });
@@ -2350,7 +2388,7 @@ export class MatchmakerDO extends DurableObject<Env> {
       for (const h of g.humans) planned.add(h);
       const ids = g.humans.map((h) => h.playerId);
       const host = hostRegion(g.humans);
-      const nodeFirst = this.nodesHere(ids, now, host);
+      const nodeFirst = this.nodesHere(ids, now, host, projectOnlyOf(g.humans));
       if (!nodeFirst && this.serverFull(now, 'server', false, g.humans.every((h) => h.guest === true), g.solo)) {
         for (const h of g.humans) h.busy = true;
         continue;
@@ -2379,7 +2417,12 @@ export class MatchmakerDO extends DurableObject<Env> {
     try {
       const first = humans[0];
       // A solo match plays the bots' level its player chose (Waiter.bots); a pooled one the flag's.
-      formed = await this.formMatch(g.mode, humans, now, { host, ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home, ...(first.soloRetried ? { retried: true as const } : {}) }, ...(first.bots !== undefined ? { bots: first.bots } : {}) } : {}) });
+      // One human asking for the project's servers only takes the whole group there (A15).
+      formed = await this.formMatch(g.mode, humans, now, {
+        host,
+        ...(projectOnlyOf(humans) ? { projectOnly: true } : {}),
+        ...(g.solo ? { solo: { playerId: first.playerId, joinedAt: first.joinedAt, home: first.home, ...(first.soloRetried ? { retried: true as const } : {}) }, ...(first.bots !== undefined ? { bots: first.bots } : {}) } : {}),
+      });
       this.countFormed('casual', humans, formed, now);
     } catch (e) {
       this.formFailed(e, humans, now);
@@ -2425,7 +2468,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     const humans = group.map((g) => g.w);
     const ids = humans.map((h) => h.playerId);
     const host = hostRegion(humans);
-    if (!this.nodesHere(ids, now, host) && this.serverFull(now, 'server', true, false)) {
+    if (!this.nodesHere(ids, now, host, projectOnlyOf(humans)) && this.serverFull(now, 'server', true, false)) {
       for (const h of humans) h.busy = true;
       return null;
     }
@@ -2443,7 +2486,7 @@ export class MatchmakerDO extends DurableObject<Env> {
     const ids = humans.map((h) => h.playerId);
     let formed: FormedMatch | null = null;
     try {
-      formed = await this.formMatch(mode, humans, now, { teams, ranked: true, host });
+      formed = await this.formMatch(mode, humans, now, { teams, ranked: true, host, ...(projectOnlyOf(humans) ? { projectOnly: true } : {}) });
       this.countFormed('ranked', humans, formed, now);
     } catch (e) {
       this.formFailed(e, humans, now);
@@ -2509,9 +2552,11 @@ export class MatchmakerDO extends DurableObject<Env> {
       // One of them left while the first ask was out: no second placement with it.
       if (toSa && humans.some((h) => this.cancels.has(h.playerId))) throw new NoRoom('left');
       const at: RegionId = toSa ? QUEUE_HUB : host;
-      const placed = toSa ? await this.placeOnNode(mode, humans, now, length, opts, at, await bots()) : own;
+      const got = toSa ? await this.placeOnNode(mode, humans, now, length, opts, at, await bots()) : own;
+      const placed = got?.placement ?? null;
       if (placed) {
-        const hosted: QueueMatchedExtra = { ...extra, host: at };
+        // The server's mark (A15) when the NodeRegistryDO gave one: never the node's own words.
+        const hosted: QueueMatchedExtra = { ...extra, host: at, ...(got?.server ? { server: got.server } : {}) };
         if (opts.ranked) await this.rankedLock(placed.matchId, humans, until);
         const tickets = new Map(placed.tickets.map((t) => [t.playerId, t.ticket]));
         const names = new Map(humans.map((h) => [h.playerId, h.name]));
@@ -2645,13 +2690,20 @@ export class MatchmakerDO extends DurableObject<Env> {
 
   /**
    * ... and a node of `host`, their match's host region, may take it now: outside that region's
-   * back-off after hosts 0 or a failed call (NO_HOSTS_BACKOFF_MS). Otherwise no node is asked
-   * before the cap: it applies as without the nodes, and with do_disabled their groups wait, busy
-   * (formMatch creates no MatchDO for them: NoRoom do_disabled), until a node can take them. No
+   * back-off after hosts 0 or a failed call (NO_HOSTS_BACKOFF_MS), and for a project-only group
+   * (A15) outside the back-off of the region's project nodes too (backoffKey). Otherwise no node is
+   * asked before the cap: it applies as without the nodes, and with do_disabled their groups wait,
+   * busy (formMatch creates no MatchDO for them: NoRoom do_disabled), until a node can take them. No
    * default for `host`: every caller names the region it asks for.
    */
-  private nodesHere(playerIds: readonly string[], now: number, host: string): boolean {
-    return this.nodesFor(playerIds) && now >= (this.noHostsUntil.get(host) ?? 0);
+  private nodesHere(playerIds: readonly string[], now: number, host: string, projectOnly = false): boolean {
+    return this.nodesFor(playerIds) && !this.backingOff(host, projectOnly, now);
+  }
+
+  /** `host` is in its back-off after hosts 0 or a failed call: for every group, or (projectOnly) for its project nodes. */
+  private backingOff(host: string, projectOnly: boolean, now: number): boolean {
+    if (now < (this.noHostsUntil.get(backoffKey(host, false)) ?? 0)) return true;
+    return projectOnly && now < (this.noHostsUntil.get(backoffKey(host, true)) ?? 0);
   }
 
   /**
@@ -2667,10 +2719,14 @@ export class MatchmakerDO extends DurableObject<Env> {
    * `cars`: the assignment's roster is built field by field, so a node's is the same as without).
    * `bots`: the match's bots level (botLevelOf; none for ranked: the control plane's default,
    * medium), which the assignment carries to the node (node 0.3.0 reads it: no node release).
+   * opts.projectOnly (A15): the project's nodes only, with a back-off of their own after their
+   * hosts 0 (backoffKey; a failed call is everyone's). With the placement, the server's mark the
+   * object gave (PlaceAnswer.server), or null.
    */
-  private async placeOnNode(mode: GameModeId, humans: readonly HumanEntry[], now: number, length: number, opts: FormOptions, host: string, bots: Difficulty | undefined): Promise<Placement | null> {
+  private async placeOnNode(mode: GameModeId, humans: readonly HumanEntry[], now: number, length: number, opts: FormOptions, host: string, bots: Difficulty | undefined): Promise<{ placement: Placement; server: ServerMark | null } | null> {
     const env = this.env;
-    if (!nodesConfigured(env) || now < (this.noHostsUntil.get(host) ?? 0)) return null;
+    const projectOnly = opts.projectOnly === true;
+    if (!nodesConfigured(env) || this.backingOff(host, projectOnly, now)) return null;
     const body: PlaceBody = {
       mode,
       region: host,
@@ -2685,18 +2741,20 @@ export class MatchmakerDO extends DurableObject<Env> {
       })),
       ...(opts.teams ? { teams: { blue: opts.teams[0].map((h) => h.playerId), red: opts.teams[1].map((h) => h.playerId) } } : {}),
       ...(bots !== undefined ? { botDifficulty: bots } : {}),
+      ...(projectOnly ? { projectOnly: true } : {}),
     };
     try {
       const r = await askNodes(env, NODE_ROUTES.place, body, this.nodeTimeoutMs);
       if (r.status !== 200) throw new Error(`place -> ${r.status} ${JSON.stringify(r.body)}`);
-      const answer = (r.body ?? {}) as { placement?: unknown; hosts?: unknown };
-      if (answer.hosts === 0) this.noHostsUntil.set(host, now + NO_HOSTS_BACKOFF_MS);
+      const answer = (r.body ?? {}) as { placement?: unknown; hosts?: unknown; server?: unknown };
+      // A project-only ask's hosts are the project's: 0 backs off its own key, never everyone's.
+      if (answer.hosts === 0) this.noHostsUntil.set(backoffKey(host, projectOnly), now + NO_HOSTS_BACKOFF_MS);
       if (answer.placement === null || answer.placement === undefined) return null; // no node took it
       const placed = placementFor(answer, humans.map((h) => h.playerId));
       if (placed === null) throw new Error('place: not a placement for these players');
-      return placed;
+      return { placement: placed, server: serverMarkOf(answer.server) };
     } catch (e) {
-      this.noHostsUntil.set(host, now + NO_HOSTS_BACKOFF_MS);
+      this.noHostsUntil.set(backoffKey(host, false), now + NO_HOSTS_BACKOFF_MS);
       console.error('matchmaker: node placement failed, a MatchDO instead', e);
       return null;
     }

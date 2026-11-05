@@ -27,11 +27,34 @@
  *                                (hostGate): not blocked, the requirements of hostPolicy.ts, the rules for hosts of
  *                                the terms in force (its 'host' consents row, written here when it sends acceptHost
  *                                and adult), a public host of its own, COMMUNITY_TOKENS_PER_DAY and COMMUNITY_OUTSTANDING
- *   GET  /nodes/mine             x-operator-id -> that operator's nodes (never a retired one) and its rewards
- *                                (Ledger.summary)
+ *   GET  /nodes/mine             x-operator-id (and x-operator-since) -> that operator's nodes in full (never a retired
+ *                                one: nodeOverview.ts mineNodeView), its rewards (Ledger.summary, today's points
+ *                                against the daily cap), its own tokens, its slots and code limits, whether hosting is
+ *                                open for it, and, only while it is (A11): what it still lacks (hostPolicy.ts, from
+ *                                AccountsDO's GET /me) and whether it accepted the rules for hosts in force; its
+ *                                opt-in and the release channel. Never the players' reports: those are the team's
  *   POST /nodes/mine/public      { show } with x-operator-id: an operator outside the project shows its name in the
  *                                public list, or stops (the opt-in, operators.show_public); turning it on only while
  *                                hosting is open for it (403 hosting_closed), off always; a project account 409 trusted
+ *   POST /nodes/mine/drain       { nodeId } with x-operator-id: an operator's own actions on its own servers (A12),
+ *   POST /nodes/mine/rename      { nodeId, name }  outside the project only (409 trusted: the project's are the panel's,
+ *   POST /nodes/mine/retire      { nodeId }        behind the maintainer gate), a log line each and never an ALERT;
+ *   POST /nodes/tokens/revoke    { id }            404 no_node / no_token for another's, 409 banned for a server
+ *                                the team banned (its slot stays taken). Drain and revoke always (they stop
+ *                                something), retire too but for a suspended server (409 suspended: it waits for its
+ *                                review or its pause); a rename (a name it chooses) only while hosting is open for
+ *                                it and it is not blocked (403 operator_blocked), under A13's names (409
+ *                                name_taken). Retire as a maintainer's: offline, or drained with no open match (409
+ *                                not_retirable)
+ *   POST /nodes/report           { matchId, reason, ping?, corrections? } with x-operator-id (the reporting account,
+ *                                A16): a community server reported by a player of that match (the control plane's
+ *                                roster, or a seat of the history or of the public replays), once per match and
+ *                                account (409 already_reported), REPORTS_PER_DAY a day (429 too_many_reports); a
+ *                                project server is never reported (409 project_server), nor one whose host's account
+ *                                is purged (409 host_deleted). Only once the terms in force describe hosting (403
+ *                                hosting_closed: nothing stored; no community server exists before the opening).
+ *                                For the maintainers (the Operadores tab), never its host's; a report alone
+ *                                sanctions nothing
  *   The maintainers' routes, x-operator-id / x-operator-name as for tokens (checked again here). Every action
  *   is an ALERT line naming who made it, every time; every read (the GETs) a log line, and an ALERT once per
  *   account per READ_AUDIT_WINDOW_MS (readAudit):
@@ -59,7 +82,8 @@
  *                                project blocked (no token, registration or login of its nodes, its sockets closed
  *                                4403, its wallet frozen), unblocked (its wallet stays frozen: /unfreeze), or every
  *                                node of it in service suspended
- *   GET  /nodes/admin/operators  the community operators for the Operadores tab (nodeOverview.ts operatorView)
+ *   GET  /nodes/admin/operators  the community operators for the Operadores tab (nodeOverview.ts operatorView), the
+ *                                players' reports of their servers of the last week included
  *   The maintainers' history (nodeStore.ts: node_events, node_match_history, node_alerts, 30 days):
  *   GET  /nodes/admin/events     ?node=&before=: what happened to the nodes, newest first, a page at a time
  *   GET  /nodes/admin/history    ?node=&match=&before=: the settled matches (void ones too), their verdicts, verifiers,
@@ -72,7 +96,10 @@
  *   POST /nodes/admin/match/verify { matchId }: its queued verification tried now
  *   POST /internal/read-audit    { what } with the operator headers: a read the Worker answered itself
  *                                (account-stats, queue-stats), in the same window
- *   POST /internal/place | /internal/rejoin | /internal/leave, GET /internal/status: the matchmaker's (nodeApi.ts)
+ *   POST /internal/place | /internal/rejoin | /internal/leave, GET /internal/status: the matchmaker's (nodeApi.ts);
+ *                                a placement and a rejoin carry the players' mark of the server (A15, markOf): a
+ *                                community node's always, a project node's once the terms in force describe hosting;
+ *                                projectOnly places on the project's nodes alone
  *   POST /internal/health        the cron's (index.ts scheduled, every 5 minutes): /healthz of every trusted wss
  *                                node online, or in service and seen by the object in the last hour, 5 s each
  *                                (nodeWatch.ts healthzTargets); the public replays past 30 days pruned, with
@@ -81,7 +108,8 @@
  *   POST /internal/operator-deleted { userId }  AccountsDO's purge of an account (sign-in PR 12): every node of
  *                                it banned (told, its socket closed 4403) -> { ok, banned }; an ALERT when there
  *                                were any; its name and id out of every history seat (any purged account, a
- *                                player's too), now and when a match it is still in settles; 409 trusted for a NODE_TRUSTED_OPERATORS id (never deleted)
+ *                                player's too), now and when a match it is still in settles, and the reports it made
+ *                                gone (A16); 409 trusted for a NODE_TRUSTED_OPERATORS id (never deleted)
  *   GET  /internal/replays       the public replay list and one entry of it, as the public sees them (replays():
  *                                an hour after the settle, rounded to the hour, hidden names as 'Jugador N', asked
  *                                of AccountsDO /replay-hidden and kept a minute)
@@ -178,12 +206,13 @@ import { widePrefix } from './limits';
 import { ALERT_DEDUPE_MS, AlertHook, alertKey } from './nodeAlerts';
 import type { FetchFn } from './nodeAlerts';
 import { CLIENT_BUILD, LEAVE_STATUS, NODE_ROUTES, OPERATOR_DELETED_ROUTE, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, REJOIN_STATUS, REPLAY_HIDDEN_MAX } from './nodeApi';
-import { adminNodeView, mineView, openMatches, operatorView, overviewOf } from './nodeOverview';
+import { REPORTS_SHOWN_DAYS, adminNodeView, mineNodeView, mineTokenViews, openMatches, operatorView, overviewOf } from './nodeOverview';
 import type { HostingView } from './nodeOverview';
 import type { LeaveAnswer, LeaveRefusal, PlaceAnswer, RejoinTicket, StatusAnswer } from './nodeApi';
 import { DELIVERY_TIMEOUT_MS, deliverCall } from './nodeOutcome';
-import { HISTORY_DAYS, NodeStore } from './nodeStore';
-import type { AlertRow, HistoryCursor, HistoryRow, OperatorRow, ReplayCursor, ReplayRow } from './nodeStore';
+import { HISTORY_DAYS, NodeStore, REPORT_REASONS } from './nodeStore';
+import type { AlertRow, HistoryCursor, HistoryRow, OperatorRow, ReplayCursor, ReplayRow, ReportReason } from './nodeStore';
+import type { ServerMark } from '../../src/net/queueWait';
 import { publicItem } from './replayIndex';
 import type { ReplaySeat } from './replayIndex';
 import { GUEST_NAME_RE } from '../../src/net/guestName';
@@ -260,6 +289,15 @@ const HOSTING_CLOSED = 'hosting a server is not open to this account';
 const HOSTING_CHANGES_SHOWN = 10;
 /** Accounts whose GET /me answer the token's checks keep (HOST_ACCOUNT_TTL_MS each), at most. */
 const HOST_ACCOUNTS_MAX = 1000;
+/** The ban reason of a node whose operator's account was purged (operatorDeleted): a report of it is refused. */
+const PURGED_BAN = 'operator account deleted';
+/** A player's reports of community servers in any 24 hours, at most (counted in SQLite: A16's daily limit). */
+export const REPORTS_PER_DAY = 20;
+/** The reports of one operator the Operadores tab counts at most (the list shows the newest REPORTS_SHOWN_MAX). */
+const REPORTS_COUNTED_MAX = 1000;
+/** The client's numbers a report carries, at most: its ping (ms) and its position corrections. */
+const REPORT_PING_MAX = 60_000;
+const REPORT_CORRECTIONS_MAX = 1_000_000;
 /**
  * A page of the maintainers' history: node events, settled matches, ALERT lines; and the open
  * matches listed at most (their 6 seats each are asked of AccountsDO in batches of 256: 5 calls).
@@ -411,6 +449,9 @@ export function parsePlace(v: unknown): PlaceRequest | null {
     if (!isNum(n)) return null;
     out[k] = n;
   }
+  // "Solo servidores del proyecto" (A15): the matchmaker sends it only once the terms in force describe hosting.
+  if (b.projectOnly !== undefined && typeof b.projectOnly !== 'boolean') return null;
+  if (b.projectOnly === true) out.projectOnly = true;
   return out;
 }
 
@@ -1096,8 +1137,11 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (replay && method === 'GET') return await this.getReplay(request, cp, replay[1]);
       if (method === 'GET' && path === '/nodes/status') return this.status(cp);
       if (method === 'POST' && path === '/nodes/tokens') return await this.token(request, cp, env);
-      if (method === 'GET' && path === '/nodes/mine') return this.mine(request, cp);
+      if (method === 'GET' && path === '/nodes/mine') return await this.mine(request, cp);
       if (method === 'POST' && path === '/nodes/mine/public') return await this.minePublic(request, cp);
+      if (method === 'POST' && (path === '/nodes/mine/drain' || path === '/nodes/mine/rename' || path === '/nodes/mine/retire')) return await this.mineAction(request, cp, path.slice('/nodes/mine/'.length) as 'drain' | 'rename' | 'retire');
+      if (method === 'POST' && path === '/nodes/tokens/revoke') return await this.mineRevokeToken(request, cp);
+      if (method === 'POST' && path === '/nodes/report') return await this.report(request, cp);
       // The account counts (nodeRoutes.ts): who operates a node, never an address; the ids go on to AccountsDO only.
       // A retired node operates nothing: an account whose nodes are all retired is no operator.
       if (method === 'GET' && path === OPERATORS_ROUTE) return json({ operators: [...new Set(cp.registry.list().filter((n) => !isRetired(n)).map((n) => n.operatorId))] }, 200, { 'cache-control': 'no-store' });
@@ -1625,18 +1669,60 @@ export class NodeRegistryDO extends DurableObject<Env> {
     return { name, publicHost, roles, matches, egressCapGB };
   }
 
-  private mine(request: Request, cp: ControlPlane): Response {
+  /**
+   * GET /nodes/mine (A11): everything "Mis servidores" shows of the caller's own hosting, none of it
+   * audited (it is the operator's own). Its nodes in full (mineNodeView), its rewards with today's
+   * points against the daily cap (the project's earn nothing, and have no cap), its own tokens, its
+   * slots and code limits, whether hosting is open for it, its opt-in and the release channel (an
+   * "update pending" is a node below its minimum). What it still lacks (`requirements`: hostPolicy.ts
+   * and a block, in the token's order) and whether it accepted the rules for hosts in force (`terms`)
+   * come from AccountsDO's GET /me (hostAccount: kept a minute), read only while hosting is open for
+   * it: before, AccountsDO is never asked and both are null. A project account lacks nothing.
+   */
+  private async mine(request: Request, cp: ControlPlane): Promise<Response> {
     const id = request.headers.get('x-operator-id') ?? '';
+    const now = Date.now();
+    const trusted = cp.registry.isTrusted(id);
+    const version = termsVersion(this.env);
+    const open = trusted || hostingOpenFor(await hostingMode(this.env), id);
+    let requirements: { missing: string[]; daysLeft: number } | null = trusted ? { missing: [], daysLeft: 0 } : null;
+    let terms: { version: string | null; accepted: boolean } | null = trusted ? { version, accepted: true } : null;
+    if (!trusted && open && version !== null) {
+      const account = await this.hostAccount(id, now);
+      if (!(account instanceof Response)) {
+        const since = Number(request.headers.get('x-operator-since'));
+        const r = hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version });
+        requirements = { missing: [...(this.blocked(id) ? ['operator_blocked'] : []), ...r.missing], daysLeft: r.daysLeft };
+        terms = { version, accepted: account.hostTerms === version };
+      }
+    }
+    const slots = cp.registry.slots(id);
+    const unused = cp.registry.tokenList().filter((t) => t.operatorId === id && tokenState(t, now) === 'unused').length;
+    const today = trusted ? null : (this.store?.tokensToday(id, now) ?? 0);
     return json(
       {
-        operator: { id, trusted: cp.registry.isTrusted(id) },
+        operator: { id, trusted },
         // A retired node is off the operator's books: PERFIL's MI SERVIDOR lists what comes here, banned ones included.
         nodes: cp.registry
           .byOperator(id)
           .filter((n) => !isRetired(n))
-          .map((n) => mineView(cp, n)),
+          .map((n) => mineNodeView(cp, n)),
         // The ledger's view (30 days, all time): the wallet to spend it is the account's (GET /api/me/shop).
-        rewards: cp.ledger.summary(id, Date.now()),
+        rewards: { ...cp.ledger.summary(id, now), pointsToday: trusted ? 0 : cp.ledger.pointsToday(id, now), capToday: trusted ? null : cp.ledger.capPerDay() },
+        hosting: open ? { open: true } : { open: false, reason: 'hosting_closed' },
+        requirements,
+        terms,
+        limits: {
+          nodes: slots.used,
+          maxNodes: slots.max,
+          tokensToday: today,
+          tokensLeftToday: today === null ? null : Math.max(0, COMMUNITY_TOKENS_PER_DAY - today),
+          outstanding: unused,
+          maxOutstanding: trusted ? null : COMMUNITY_OUTSTANDING,
+        },
+        tokens: mineTokenViews(cp, id, now),
+        showPublic: trusted || this.operators.get(id)?.showPublic === true,
+        channel: this.goodChannel,
       },
       200,
       { 'cache-control': 'no-store' },
@@ -1668,6 +1754,160 @@ export class NodeRegistryDO extends DurableObject<Env> {
     return json({ showPublic: b.show }, 200, { 'cache-control': 'no-store' });
   }
 
+  /**
+   * POST /nodes/mine/drain { nodeId }, /rename { nodeId, name }, /retire { nodeId } (A12): an
+   * operator outside the project on a server of its own (404 no_node for anyone else's, 409 retired
+   * once it is, 409 banned for one the team banned: its slot stays taken). A project account maintains its servers in the panel, behind the maintainer gate
+   * (409 trusted): this route would skip that gate's freshness and its ALERTs. Each is a log line,
+   * never an ALERT (the operator's own business). Drain always, retire but for a suspended server:
+   * they stop something.
+   *   drain   as a maintainer's (adminDrain): one-way, the node comes back with a restart on its
+   *           machine; 409 offline when it is not connected (nothing sent)
+   *   rename  a name it chooses, so only while hosting is open for it (403 hosting_closed: nothing
+   *           stored before the opening) and it is not blocked (403 operator_blocked, A4): a --name's
+   *           characters (400 bad_name), free in its region and never a project server's (409
+   *           name_taken, A13). The node's own process keeps the name it runs with: the players'
+   *           mark is the Worker's (markOf)
+   *   retire  a maintainer's rule (adminRetire): offline, or drained with no open match (409
+   *           not_retirable): its socket closes 4403, every login is refused, its slot is free and
+   *           it leaves /nodes/mine; its record stays. Never a suspended server (409 suspended: a
+   *           failed verification waits for a person, a strike pause for its end): a retire would
+   *           free its slot for a fresh node with no strikes and no refusals, past the review
+   */
+  private async mineAction(request: Request, cp: ControlPlane, what: 'drain' | 'rename' | 'retire'): Promise<Response> {
+    const id = request.headers.get('x-operator-id') ?? '';
+    if (!ACCOUNT_ID_RE.test(id)) return error(400, 'bad_request');
+    if (cp.registry.isTrusted(id)) return error(409, 'trusted', "the project's servers are maintained in the panel (CONTROL DE NODOS)");
+    const b = await readJson<{ nodeId?: unknown; name?: unknown }>(request);
+    if (!b || !isHex(b.nodeId, 16)) return error(400, 'bad_node_id', 'nodeId: the 16 hex characters of a server of yours');
+    const n = cp.registry.node(b.nodeId);
+    if (!n || n.operatorId !== id) return error(404, 'no_node', 'no server of yours has that id');
+    if (isRetired(n)) return error(409, 'retired', 'the server is retired');
+    // A ban is the team's: its server keeps its operator's slot (Registry takesSlot), so retiring it here would free one.
+    if (n.status === 'banned') return error(409, 'banned', 'a banned server stays as the team left it');
+    const who = `community operator ${id}`;
+    if (what === 'drain') {
+      if (!cp.isOnline(n.nodeId)) return error(409, 'offline', 'the server is not connected: nothing was sent');
+      cp.drain(n.nodeId, 'asked by its operator');
+      this.log(`${who}: node ${label(n)} told to drain`);
+      return json({ nodeId: n.nodeId, name: n.name, draining: true, back: 'sudo systemctl restart turbogol-node on its machine' }, 200, { 'cache-control': 'no-store' });
+    }
+    if (what === 'rename') {
+      if (typeof b.name !== 'string' || !SHELL_NAME.test(b.name)) return error(400, 'bad_name', "name: 2 to 32 of a-z, A-Z, 0-9, '.', '_' and '-', starting with a letter or a digit");
+      if (!hostingOpenFor(await hostingMode(this.env), id)) return error(403, 'hosting_closed', HOSTING_CLOSED);
+      // A blocked operator's servers are out of the network (A4): no new name for the public list.
+      if (this.blocked(id)) return error(403, 'operator_blocked', 'this account may not host servers');
+      const r = cp.registry.rename(n.nodeId, b.name);
+      if (r === null) return error(409, 'retired', 'the server is retired');
+      if (!r.ok) return r.code === 'name_taken' ? error(409, 'name_taken', `a server of the region is already called ${b.name}`) : error(400, 'bad_name');
+      this.log(`${who}: node ${n.nodeId} renamed ${clip(r.was)} -> ${clip(r.node.name)}`);
+      return json({ nodeId: n.nodeId, name: r.node.name, was: r.was }, 200, { 'cache-control': 'no-store' });
+    }
+    // A suspension is the network's (a failed verification until a person reviews it, a strike pause
+    // until it ends): retiring it would free its slot for a fresh node, past the review.
+    if (n.status === 'suspended') return error(409, 'suspended', 'a suspended server is retired once its review or its pause is over');
+    const open = openMatches(cp).open.get(n.nodeId) ?? 0;
+    if (cp.isOnline(n.nodeId) && !(n.draining && open === 0)) {
+      return error(409, 'not_retirable', `only a server that is offline, or drained with no open match, is retired (${open} open): drain it first`);
+    }
+    const at = Date.now();
+    cp.registry.retire(n.nodeId, 'retired by its operator', at);
+    this.closeNode(n.nodeId, 4403, 'retired');
+    this.watch.statusSet(n);
+    this.keepOffline();
+    this.log(`${who}: node ${label(n)} retired`);
+    if (this.busy()) await this.ensureAlarm();
+    return json({ nodeId: n.nodeId, name: n.name, retiredAt: at, slots: cp.registry.slots(id) }, 200, { 'cache-control': 'no-store' });
+  }
+
+  /**
+   * POST /nodes/tokens/revoke { id } (A12): an operator outside the project revokes one of its own
+   * unused codes, by the short id /nodes/mine lists (Registry.revokeToken, as a maintainer's: it
+   * registers nothing from then on). Always taken; another's code, or none, 404 no_token; 409
+   * token_used once its node registered (retire the node instead); a project account 409 trusted
+   * (the panel's /nodes/admin/tokens/revoke). A log line, never an ALERT.
+   */
+  private async mineRevokeToken(request: Request, cp: ControlPlane): Promise<Response> {
+    const id = request.headers.get('x-operator-id') ?? '';
+    if (!ACCOUNT_ID_RE.test(id)) return error(400, 'bad_request');
+    if (cp.registry.isTrusted(id)) return error(409, 'trusted', "the project's codes are revoked in the panel (CONTROL DE NODOS)");
+    const b = await readJson<{ id?: unknown }>(request);
+    if (!b || typeof b.id !== 'string' || !/^[0-9a-f]{8,64}$/.test(b.id)) return error(400, 'bad_token_id', "id: the code's id as Mis servidores lists it");
+    const short = b.id;
+    const own = cp.registry.tokenList().filter((t) => t.operatorId === id && t.hash.startsWith(short));
+    if (own.length !== 1) return error(404, 'no_token', 'no code of yours has that id');
+    const r = cp.registry.revokeToken(own[0].hash, Date.now());
+    if (r.result === 'used') return error(409, 'token_used', 'its server registered already: retire the server instead');
+    if (r.result === 'none') return error(404, 'no_token', 'no code of yours has that id');
+    if (r.result === 'revoked') this.log(`community operator ${id}: token ${short.slice(0, 12)} revoked`);
+    return json({ id: short.slice(0, 12), revoked: true, already: r.result === 'already' }, 200, { 'cache-control': 'no-store' });
+  }
+
+  /**
+   * POST /nodes/report { matchId, reason, ping?, corrections? } (A16): a player's report of the
+   * community server a match of theirs was played on, for the team to review (the Operadores tab:
+   * reportsView), never shown to its host and never a sanction by itself: a modified client can
+   * lie, so only several accounts about one server are a signal, for a person. Refused while the
+   * terms in force do not describe hosting (403 hosting_closed, before anything is read or stored:
+   * decisions.md's "no reports"); from then on never by the KV flag, so a close after the opening, or
+   * a failed read, never stops the reports of community servers still hosting (Terms 12.6.2). Before
+   * the opening no community server exists, so nothing can be reported. The player must have had a
+   * seat in it: the control plane's roster while it holds the match, then the history's seats (void
+   * matches too) or the public replays' (404 no_match otherwise, whether the match exists or not).
+   * A project server is never reported (409 project_server), nor one whose host's account is purged
+   * (409 host_deleted: its servers are banned, and its account id must not come back into
+   * node_reports, which forgetOperator re-keyed). Once per match and account (409
+   * already_reported), REPORTS_PER_DAY in any 24 hours (429 too_many_reports). `reason`: one of
+   * REPORT_REASONS (400 bad_reason); `ping` (ms) and `corrections` (the client's position
+   * corrections), whole numbers, informative only. Kept 30 days (NodeStore REPORT_DAYS); the
+   * reporter's purge deletes its reports (operatorDeleted). A log line without the account.
+   */
+  private async report(request: Request, cp: ControlPlane): Promise<Response> {
+    const id = request.headers.get('x-operator-id') ?? '';
+    if (!ACCOUNT_ID_RE.test(id)) return error(400, 'bad_request');
+    if (!hostingTermsInForce(this.env)) {
+      await request.body?.cancel().catch(() => undefined);
+      return error(403, 'hosting_closed', 'reports of community servers are not open yet');
+    }
+    const store = this.store;
+    if (!store) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    const b = await readJson<{ matchId?: unknown; reason?: unknown; ping?: unknown; corrections?: unknown }>(request);
+    if (!b || !isHex(b.matchId, 64)) return error(400, 'bad_match_id', 'matchId: the 64 hex characters of a match');
+    if (!(REPORT_REASONS as readonly unknown[]).includes(b.reason)) return error(400, 'bad_reason', `reason: ${REPORT_REASONS.join(', ')}`);
+    const whole = (v: unknown, max: number): number | null | undefined => (v === undefined || v === null ? null : Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : undefined);
+    const ping = whole(b.ping, REPORT_PING_MAX);
+    const corrections = whole(b.corrections, REPORT_CORRECTIONS_MAX);
+    if (ping === undefined || corrections === undefined) return error(400, 'bad_numbers', `ping: whole ms up to ${REPORT_PING_MAX}; corrections: a whole number up to ${REPORT_CORRECTIONS_MAX}`);
+    const matchId = b.matchId;
+    const m = cp.matches.get(matchId);
+    const nodeId = m ? (m.assign.roster.some((e) => e.kind === 'player' && e.playerId === id) ? m.nodeId : null) : store.seatNodeOf(matchId, id);
+    const n = nodeId === null ? undefined : cp.registry.node(nodeId);
+    if (!n) return error(404, 'no_match', 'no match of yours has that id');
+    if (n.trusted) return error(409, 'project_server', 'a project server is not reported: only a community server is');
+    // Its host's account is purged: node_forgotten keeps the id HISTORY_DAYS from the purge, and the
+    // purge's ban reason stays on a server that could still settle a match after it (one held then).
+    if (n.statusReason === PURGED_BAN || store.forgotten([n.operatorId]).has(n.operatorId)) return error(409, 'host_deleted', 'the host of that server deleted its account: its servers are out of the network');
+    const now = Date.now();
+    if (store.reportsBy(id, now) >= REPORTS_PER_DAY) return error(429, 'too_many_reports', `at most ${REPORTS_PER_DAY} reports a day`);
+    const written = store.report({ at: now, reporterId: id, matchId, nodeId: n.nodeId, operatorId: n.operatorId, reason: b.reason as ReportReason, ping, corrections });
+    if (!written) return error(409, 'already_reported', 'you reported this match already');
+    this.log(`report on community node ${n.nodeId} (${b.reason as string})`);
+    return json({ reported: true }, 200, { 'cache-control': 'no-store' });
+  }
+
+  /**
+   * The players' mark of the server a node match is played on (A15: PARTIDO ENCONTRADO and the
+   * FINAL), the object's word and never the node's: a community server always (honest whatever
+   * the opening's stage), a project server once the terms in force describe hosting (null before:
+   * a player's answer is what it was while it is dark). Never by the KV flag: a failed read, or a
+   * close after the opening, must not take a project server's mark away while community servers
+   * keep theirs. Its name as the registry holds it (a rename shows at once).
+   */
+  private markOf(n: { name: string; trusted: boolean }): ServerMark | null {
+    if (!n.trusted) return { name: n.name, community: true };
+    return hostingTermsInForce(this.env) ? { name: n.name, community: false } : null;
+  }
+
   private async place(request: Request, cp: ControlPlane): Promise<Response> {
     const body = parsePlace(await readJson<unknown>(request));
     if (!body) return error(400, 'bad_request');
@@ -1681,7 +1921,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
       throw e;
     }
     if (placement) await this.ensureAlarm();
-    return json({ placement, hosts: cp.hostsOnline(body.region) } satisfies PlaceAnswer);
+    // The players' mark (A15), and a project-only placement's hosts: the project's alone (the matchmaker's back-off for those).
+    const mark = placement ? this.markOf({ name: placement.nodeName, trusted: placement.trusted }) : null;
+    return json({ placement, hosts: cp.hostsOnline(body.region, body.projectOnly === true), ...(mark ? { server: mark } : {}) } satisfies PlaceAnswer);
   }
 
   private async rejoin(request: Request, cp: ControlPlane): Promise<Response> {
@@ -1689,7 +1931,12 @@ export class NodeRegistryDO extends DurableObject<Env> {
     if (!b || !isHex(b.matchId, 64) || !isStr(b.playerId, 64)) return error(400, 'bad_request');
     if (!this.keyOk) return error(REJOIN_STATUS.offline, 'offline');
     const r = await cp.rejoin(b.matchId, b.playerId);
-    return r.ok ? json({ ticket: r.ticket, wsUrl: r.wsUrl, ...(r.cars ? { cars: r.cars } : {}) } satisfies RejoinTicket) : error(REJOIN_STATUS[r.code], r.code);
+    if (!r.ok) return error(REJOIN_STATUS[r.code], r.code);
+    // The same mark as the placement's (A15): a rejoin's PARTIDO ENCONTRADO and FINAL say it too.
+    const m = cp.matches.get(b.matchId);
+    const n = m ? cp.registry.node(m.nodeId) : undefined;
+    const mark = n ? this.markOf(n) : null;
+    return json({ ticket: r.ticket, wsUrl: r.wsUrl, ...(r.cars ? { cars: r.cars } : {}), ...(mark ? { server: mark } : {}) } satisfies RejoinTicket);
   }
 
   private async leave(request: Request, cp: ControlPlane): Promise<Response> {
@@ -2028,15 +2275,19 @@ export class NodeRegistryDO extends DurableObject<Env> {
   }
 
   /**
-   * GET /nodes/admin/operators: every operator outside the project that has a node or a row, for
-   * the Operadores tab (nodeOverview.ts operatorView). A read: in the read window.
+   * GET /nodes/admin/operators: every operator outside the project that has a node, a row or a
+   * report of the last week, for the Operadores tab (nodeOverview.ts operatorView, its reports
+   * reportsView). A read: in the read window.
    */
   private adminOperators(cp: ControlPlane, id: string, actor: string): Response {
     const now = Date.now();
     const ids = new Set<string>();
     for (const n of cp.registry.list()) if (!cp.registry.isTrusted(n.operatorId)) ids.add(n.operatorId);
     for (const k of this.operators.keys()) if (!cp.registry.isTrusted(k)) ids.add(k);
-    const operators = [...ids].map((op) => operatorView(cp, op, { now, row: this.operators.get(op) ?? null, tokensToday: this.store?.tokensToday(op, now) ?? 0 }));
+    // The players' reports of the last week (A16), an operator they name included.
+    const since = now - REPORTS_SHOWN_DAYS * DAY_MS;
+    for (const k of this.store?.reportedOperators(since) ?? []) if (!cp.registry.isTrusted(k)) ids.add(k);
+    const operators = [...ids].map((op) => operatorView(cp, op, { now, row: this.operators.get(op) ?? null, tokensToday: this.store?.tokensToday(op, now) ?? 0, reports: this.store?.reportsAbout(op, since, REPORTS_COUNTED_MAX) ?? [] }));
     this.readAudit(id, actor, `the community operators (${operators.length})`);
     return json({ at: now, operators }, 200, { 'cache-control': 'no-store' });
   }
@@ -2393,8 +2644,10 @@ export class NodeRegistryDO extends DurableObject<Env> {
       this.audit(`ALERT operator ${id} reported deleted, but it is a trusted operator: nothing banned`);
       return error(409, 'trusted', 'a trusted operator is never deleted');
     }
-    // Every purged account comes here, a player's too: its name and id leave the maintainers' history.
+    // Every purged account comes here, a player's too: its name and id leave the maintainers' history,
+    // and the reports it made of community servers go (A16: 30 days, or until the account goes).
     this.store?.forgetPlayer(id);
+    this.store?.forgetReporter(id);
     const row = this.operators.get(id);
     const alias = `deleted:${randomHex(6)}`;
     this.store?.forgetOperator(id, alias);
@@ -2407,7 +2660,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
     let banned = 0;
     for (const n of cp.registry.byOperator(id)) {
       if (n.status === 'banned' || isRetired(n)) continue;
-      cp.setStatus(n.nodeId, 'banned', 'operator account deleted');
+      cp.setStatus(n.nodeId, 'banned', PURGED_BAN);
       this.closeNode(n.nodeId, 4403, 'banned');
       this.watch.statusSet(n);
       banned++;

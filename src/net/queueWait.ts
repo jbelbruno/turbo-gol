@@ -27,8 +27,22 @@ export interface QueueWait {
   busy: boolean;
 }
 
-/** Extra fields of a matched queue answer (the hub's; QueueResult itself is frozen). */
-export interface QueueMatchedExtra { mode?: GameMode; host?: string; humans?: number }
+/**
+ * The server a node match is played on, as the Worker knows it (never the node's own Welcome, whose
+ * words are the node's): its name, and whether it is a community server, one whose host is not the
+ * project (Prompt 2, A15: PARTIDO ENCONTRADO and the FINAL say so). A project server is never one.
+ */
+export interface ServerMark {
+  name: string;
+  community: boolean;
+}
+
+/**
+ * Extra fields of a matched queue answer (the hub's; QueueResult itself is frozen). `server`: on a
+ * node match, a community server's always, a project server's once the terms in force describe
+ * hosting (the Worker's env.ts hostingTermsInForce); absent before, and on a MatchDO match.
+ */
+export interface QueueMatchedExtra { mode?: GameMode; host?: string; humans?: number; server?: ServerMark }
 
 /** The client-version marker sent on /api/queue, POST /api/lobbies and POST /api/lobbies/join. */
 export const QUEUE_API = 2;

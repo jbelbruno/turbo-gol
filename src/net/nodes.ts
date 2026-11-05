@@ -41,6 +41,34 @@ export interface MineNode extends MyNode {
   tickLagP99Ms: number;
   egressGB: number;
   counters: NodeCounters;
+  /**
+   * The rest of GET /nodes/mine's node (Prompt 2, A11: nodeOverview.ts mineNodeView), from the
+   * server of that change on: its dates and service state, its last probe, its progress to active,
+   * its strikes in their window, its refusals and the matches placement lets it run.
+   */
+  createdAt?: number;
+  lastSeen?: number | null;
+  draining?: boolean;
+  egressCapGB?: number | null;
+  reachableAt?: number | null;
+  lastProbe?: { at: number; ok: boolean; error: string | null } | null;
+  needed?: number;
+  strikes?: { count: number; max: number; windowDays: number };
+  refused?: { count: number; rate: number; recent: number; of: number; outUntil: number | null };
+  capacityEffective?: number;
+}
+
+/** A token of GET /nodes/mine: one of the caller's own, by its short id (nodeOverview.ts mineTokenViews). */
+export interface MineToken {
+  id: string;
+  region: string;
+  name: string | null;
+  publicHost: string | null;
+  createdAt: number;
+  expiresAt: number;
+  state: 'unused' | 'used' | 'expired' | 'revoked';
+  /** The node it registered, once it did. */
+  nodeId: string | null;
 }
 
 /** The ledger's view of an operator (nodes/control-plane/ledger.ts OperatorSummary). */
@@ -51,6 +79,9 @@ export interface Rewards {
   matches30d: number;
   playerMinutes30d: number;
   byNode: Record<string, { points: number; matches: number }>;
+  /** Today's points (UTC) against the daily cap per host (A17a); the project's earn nothing and have no cap (null). From the A11 server on. */
+  pointsToday?: number;
+  capToday?: number | null;
 }
 
 /** GET /nodes/mine as AccountClient.nodesMine reads it: empty where the Worker has no nodes (a fork, local dev: 404). */
@@ -59,6 +90,20 @@ export interface MineAnswer {
   operator: { id: string; trusted: boolean } | null;
   nodes: MineNode[];
   rewards: Rewards | null;
+  /**
+   * The rest of "Mis servidores" (A11), from the server of that change on, each only when it came:
+   * whether hosting is open for the caller (`reason` why not), what it still lacks (the token's
+   * refusal codes, null while hosting is closed or the account cannot be read), the rules for hosts
+   * of the terms in force (null likewise), its slots and code limits (null: no community cap, a
+   * project account), its own codes, its name in the public list, and the release channel.
+   */
+  hosting?: { open: boolean; reason?: string };
+  requirements?: { missing: string[]; daysLeft: number } | null;
+  terms?: { version: string | null; accepted: boolean } | null;
+  limits?: { nodes: number; maxNodes: number; tokensToday: number | null; tokensLeftToday: number | null; outstanding: number; maxOutstanding: number | null };
+  tokens?: MineToken[];
+  showPublic?: boolean;
+  channel?: { stable: string; minimum: string } | null;
 }
 
 /** A node in the overview (nodeOverview.ts overviewNode). */
@@ -358,12 +403,21 @@ const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
 /** GET /nodes/mine's body, whatever a server of before sent (no operator, no rewards). */
 export function mineAnswerOf(b: unknown): MineAnswer {
-  const o = (b ?? {}) as { operator?: unknown; nodes?: unknown; rewards?: unknown };
+  const o = (b ?? {}) as Partial<Record<keyof MineAnswer, unknown>>;
   const op = o.operator as { id?: unknown; trusted?: unknown } | undefined;
+  const obj = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v);
   return {
     operator: op && typeof op.id === 'string' ? { id: op.id, trusted: op.trusted === true } : null,
     nodes: arr<MineNode>(o.nodes),
     rewards: o.rewards && typeof o.rewards === 'object' ? (o.rewards as Rewards) : null,
+    // A11's fields, each only when it came (an older server, a fork: the answer as before).
+    ...(obj(o.hosting) ? { hosting: o.hosting as MineAnswer['hosting'] } : {}),
+    ...(o.requirements === null || obj(o.requirements) ? { requirements: o.requirements as MineAnswer['requirements'] } : {}),
+    ...(o.terms === null || obj(o.terms) ? { terms: o.terms as MineAnswer['terms'] } : {}),
+    ...(obj(o.limits) ? { limits: o.limits as MineAnswer['limits'] } : {}),
+    ...(Array.isArray(o.tokens) ? { tokens: arr<MineToken>(o.tokens) } : {}),
+    ...(typeof o.showPublic === 'boolean' ? { showPublic: o.showPublic } : {}),
+    ...(o.channel === null || obj(o.channel) ? { channel: o.channel as MineAnswer['channel'] } : {}),
   };
 }
 

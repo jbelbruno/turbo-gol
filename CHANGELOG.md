@@ -26,6 +26,22 @@ All notable changes to Turbogol are documented here. The format follows
   can choose to show its name in the public list. Community alerts go to a second staff-only
   channel (`NODE_COMMUNITY_WEBHOOK`, never one the community reads), not the team's
   (`server/src/hostPolicy.ts`, `server/README.md`).
+- Community nodes: "Mis servidores" on the server, shipped closed with the rest of hosting.
+  `GET /nodes/mine` now gives an operator its whole hosting: each server's service state, last
+  probe, progress to active, strikes, refusals and the matches it may run, its own codes and limits,
+  today's points against the daily cap and, once hosting is open for it, what it still lacks and
+  whether it accepted the rules for hosts. A host can drain, rename (once hosting is open; never
+  while blocked) and retire (never while suspended) its own servers and revoke its own unused
+  codes; the project's servers stay the panel's. The queue's and the rejoin's answers now carry
+  the server's mark (the Worker's word, never the server's own: a community server's always; a
+  project server's, never marked as a community one, once the terms that describe hosting are in
+  force), which the game shows in a later change. Once those terms are in force, the queue takes
+  "Solo servidores del proyecto" (one player asking for it takes the whole match to a project
+  server or a Cloudflare one, never a community server, whatever the opening's flag says later)
+  and a player can report a community server a match of theirs was played on (a closed list of
+  reasons, once per match, 20 a day, kept 30 days for the team only and deleted with the
+  reporter's account; a report alone never sanctions a host). Before, none of it is stored or
+  shown (`server/README.md`).
 - Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
   P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
   in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and
