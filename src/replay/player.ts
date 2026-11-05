@@ -47,6 +47,8 @@ import {
 import wasmUrl from '../sim/wasm/rocketsim.wasm?url';
 import { drawsFrame } from '../render/quality';
 import { goalScorer } from '../ui/screens/match/finalModel';
+import { escLocked, fullscreenEnv, togglePageFullscreen } from '../ui/fullscreen';
+import { escArmStep, escMenuAction } from '../game/pauseKeys';
 import { replayName } from './names';
 import { clockText, el } from './list';
 
@@ -319,9 +321,13 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   const distSlider = el('input', { type: 'range', min: String(CHASE_MIN), max: String(CHASE_MAX), step: '10', 'aria-label': t('replay.distance') }) as HTMLInputElement;
   const chaseCtl = el('span.rp-ctl.rp-hidden', null, ballCamBtn, el('span.rp-ctl-label', null, t('replay.distance')), distSlider);
   const hint = el('span.rp-keys.rp-grow', null, '');
+  // Full screen by hand (its button, the F key), never by itself: the page loads with no press.
+  // Not where the page cannot go full screen (an iPhone).
+  const fullscreenBtn = el('button.rp-btn', { type: 'button', 'aria-pressed': 'false' }, t('replay.fullscreen')) as HTMLButtonElement;
+  document.addEventListener('fullscreenchange', () => fullscreenBtn.setAttribute('aria-pressed', String(document.fullscreenElement != null)));
   o.bar.replaceChildren(
     el('div.rp-line', null, playBtn, el('div.rp-track', null, marks, seek), time),
-    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, list),
+    el('div.rp-line', null, speedSel, camSel, chaseCtl, goals.length > 0 ? prevGoalBtn : null, goals.length > 0 ? nextGoalBtn : null, hint, fullscreenEnv().elementFullscreen ? fullscreenBtn : null, list),
   );
   o.bar.classList.remove('rp-hidden');
 
@@ -430,6 +436,7 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
   camSel.addEventListener('change', () => setCam(Number(camSel.value) || 0));
   prevGoalBtn.addEventListener('click', () => goalJump(-1));
   nextGoalBtn.addEventListener('click', () => goalJump(1));
+  fullscreenBtn.addEventListener('click', () => togglePageFullscreen());
   ballCamBtn.addEventListener('click', () => {
     chase.toggle();
     prefs.ballCam = chase.ballCam;
@@ -520,13 +527,20 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
     dragging = false;
     seekTo(Number(seek.value));
   });
+  /** The Esc press that will close the menu on its release (performance.now; -1 none): full screen with Esc locked. */
+  let escArmedAt = -1;
   window.addEventListener('keydown', (e) => {
     // Alt + ← is the browser's Back, Ctrl / Cmd + a digit its tabs.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     // Esc pauses and opens the menu (and closes it again); with the menu open nothing else answers.
+    // A held key's repeats do nothing; in the game's full screen with Esc locked the close waits
+    // for the release, as a held Esc is the browser's way out (src/game/pauseKeys.ts).
     if (e.code === 'Escape') {
       e.preventDefault();
-      setMenu(!menuOpen);
+      const act = escMenuAction(menuOpen, e.repeat, escLocked());
+      if (act === 'open') setMenu(true);
+      else if (act === 'close') setMenu(false);
+      else if (act === 'arm') escArmedAt = performance.now();
       return;
     }
     if (menuOpen) return;
@@ -541,9 +555,21 @@ export async function startPlayer(o: PlayerOptions): Promise<() => void> {
       goalJump(e.code === 'BracketLeft' ? -1 : 1);
     } else if (e.code === 'KeyB' && camIndex >= CAM_CAR0) {
       ballCamBtn.click();
+    } else if (e.code === 'KeyF') {
+      // In the keydown itself (its user activation). With the keyboard lock a short Esc still opens the menu.
+      togglePageFullscreen();
     } else if (/^Digit[0-9]$/.test(e.code)) {
       setCam(Number(e.code.slice(5)));
     }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code !== 'Escape' || escArmedAt < 0) return;
+    const held = performance.now() - escArmedAt;
+    escArmedAt = -1;
+    if (escArmStep(held, escLocked(), menuOpen) === 'resume') setMenu(false);
+  });
+  window.addEventListener('blur', () => {
+    escArmedAt = -1;
   });
 
   /** The final whistle's banner (kept until a seek). */

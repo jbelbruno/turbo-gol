@@ -70,7 +70,7 @@ test('registration tokens: single use, expiry, URL rules, transports', async () 
   assert.equal(v.status, 'active');
 });
 
-test('a trusted operator registers at most two nodes, tokens minted before included, and the refusal raises an ALERT', async () => {
+test('a trusted operator registers at most two nodes by default, tokens minted before included, and the refusal raises an ALERT', async () => {
   const lines = [];
   const reg = new Registry({ trustedOperators: ['project'], log: (m) => lines.push(m) });
   const project = { id: 'project', name: 'Proyecto' };
@@ -81,6 +81,7 @@ test('a trusted operator registers at most two nodes, tokens minted before inclu
   assert.ok((await reg.register(await req(tokens[1]), 0)).ok, 'the VPS and its replacement');
   lines.length = 0;
   assert.equal(R.MAX_TRUSTED_NODES_PER_OPERATOR, 2);
+  assert.deepEqual(reg.slots('project'), { used: 2, max: 2 });
   assert.equal((await reg.register(await req(tokens[2]), 0)).code, 'too_many_nodes');
   assert.deepEqual(lines, ['ALERT registration refused: trusted operator Proyecto (project) already has its 2 nodes']);
   assert.equal(reg.byOperator('project').length, 2);
@@ -92,6 +93,131 @@ test('a trusted operator registers at most two nodes, tokens minted before inclu
   const { token } = await reg.createToken(op, 'SA', 0);
   assert.equal((await reg.register(await req(token), 0)).code, 'too_many_nodes');
   assert.deepEqual(lines, []);
+});
+
+test('the trusted cap: maxTrustedNodes, bounded to 2..8; a retired node takes no slot, a banned one none of a trusted operator but still one of a community operator', async () => {
+  assert.deepEqual([R.TRUSTED_NODES_MIN, R.TRUSTED_NODES_MAX], [2, 8]);
+  for (const [v, cap] of [[undefined, 2], [null, 2], ['', 2], ['abc', 2], ['4', 4], [' 4 ', 4], [4, 4], ['1', 2], [0, 2], ['20', 8], [9, 8], ['4.5', 2], [4.5, 2], ['-3', 2]]) assert.equal(R.trustedNodeCap(v), cap, String(v));
+  const lines = [];
+  const reg = new Registry({ trustedOperators: ['project'], maxTrustedNodes: 4, log: (m) => lines.push(m) });
+  const project = { id: 'project', name: 'Proyecto' };
+  const nodes = [];
+  for (let i = 0; i < 4; i++) nodes.push(await regNode(reg, project, 0, { roles: ['host', 'verify'], publicUrl: `wss://n${i}.example.org` }));
+  assert.deepEqual(reg.slots('project'), { used: 4, max: 4 });
+  const { token } = await reg.createToken(project, 'SA', 0);
+  const req = async () => ({ token, publicKey: (await generateEd25519()).publicKey, roles: ['host'], publicUrl: 'wss://n9.example.org', build: BUILD, specs: SPECS, capacity: CAP });
+  assert.equal((await reg.register(await req(), 0)).code, 'too_many_nodes');
+  assert.ok(lines.includes('ALERT registration refused: trusted operator Proyecto (project) already has its 4 nodes'));
+  // The old "Ubuntu" registration: banned, it takes no slot of the project's.
+  reg.setStatus(nodes[0].nodeId, 'banned', 'a bad first install');
+  assert.deepEqual(reg.slots('project'), { used: 3, max: 4 });
+  assert.equal(reg.retire(nodes[1].nodeId, 'replaced', 5)?.retiredReason, 'replaced');
+  assert.equal(reg.retire(nodes[1].nodeId, 'again', 6), null, 'once');
+  assert.ok(R.isRetired(reg.node(nodes[1].nodeId)));
+  assert.deepEqual(reg.slots('project'), { used: 2, max: 4 });
+  assert.ok((await reg.register(await req(), 0)).ok, 'the token minted at the cap registers once a slot is free');
+  // A community operator: a banned node still counts (else its owner registers again), a retired one does not.
+  const reg2 = new Registry(quiet);
+  const op = { id: 'op1', name: 'Juan' };
+  const own = [];
+  for (let i = 0; i < R.MAX_NODES_PER_OPERATOR; i++) own.push(await regNode(reg2, op, 0));
+  reg2.setStatus(own[0].nodeId, 'banned', 'cheating');
+  assert.deepEqual(reg2.slots('op1'), { used: R.MAX_NODES_PER_OPERATOR, max: R.MAX_NODES_PER_OPERATOR });
+  reg2.retire(own[1].nodeId, 'gone', 1);
+  assert.deepEqual(reg2.slots('op1'), { used: R.MAX_NODES_PER_OPERATOR - 1, max: R.MAX_NODES_PER_OPERATOR });
+});
+
+test('a retired node takes no match and verifies none', async () => {
+  const reg = new Registry({ trustedOperators: ['project'], log: () => undefined });
+  const host = online(await regNode(reg, { id: 'op1', name: 'Juan' }, 0), 0);
+  const v1 = online(await regNode(reg, { id: 'project', name: 'Proyecto' }, 0, { roles: ['verify'], publicUrl: null }), 0);
+  const req = { region: 'SA', mode: '1v1', ranked: false, playerIds: ['x'], build: BUILD, transports: ['wss'], now: 0 };
+  assert.equal(ineligibility(host, req), null);
+  assert.equal(pickVerifier(reg.list(), host, BUILD, 0, () => 0)?.nodeId, v1.nodeId);
+  reg.retire(host.nodeId, 'gone', 1);
+  reg.retire(v1.nodeId, 'gone', 1);
+  assert.equal(ineligibility(host, req), 'retired');
+  assert.equal(pickVerifier(reg.list(), reg.node(host.nodeId), BUILD, 0, () => 0), null);
+});
+
+test('a trusted host is verified by another free verifier of the same simulation when there is one, by itself only when there is not', async () => {
+  const reg = new Registry({ trustedOperators: ['project'], log: () => undefined });
+  const project = { id: 'project', name: 'Proyecto' };
+  const sp = online(await regNode(reg, project, 0, { roles: ['host', 'verify'], publicUrl: 'wss://sp.example.org' }), 0);
+  const de = online(await regNode(reg, project, 0, { roles: ['host', 'verify'], publicUrl: 'wss://de.example.org' }), 0);
+  const busy = new Map();
+  // The host is first in the list: a random pick among the least busy would land on it with a draw of 0.
+  const pick = (r = 0) => pickVerifier(reg.list(), sp, BUILD, 0, (id) => busy.get(id) ?? 0, { rand: () => r })?.nodeId;
+  for (const r of [0, 0.5, 0.99]) assert.equal(pick(r), de.nodeId, `the other machine, whatever the draw (${r})`);
+  busy.set(de.nodeId, 1);
+  assert.equal(pick(), sp.nodeId, 'the other one is busy: itself');
+  busy.set(sp.nodeId, 2);
+  assert.equal(pick(), de.nodeId, 'both busy: the least busy');
+  de.build = { ...BUILD, version: '0.2.0' };
+  busy.clear();
+  assert.equal(pick(), sp.nodeId, 'another simulation never verifies it');
+});
+
+test('validPublicHost: a DNS name as install.sh is_dns_name reads one, lower-cased; no scheme, port, path or IP address', () => {
+  for (const ok of ['sp1.turbo-gol.com', 'A1.Example.ORG', 'xn--80ak6aa92e.com', 'a.b.c.d.e', 'n-1.de']) assert.equal(R.validPublicHost(ok), ok.toLowerCase(), ok);
+  for (const bad of ['', 'localhost', 'turbo-gol', '203.0.113.7', '1.2.3', '::1', '[2001:db8::1]', '2001:db8::1', 'wss://sp1.example.org', 'sp1.example.org:443', 'sp1.example.org/', 'sp1.example.org.', '-a.example.org', 'a-.example.org', 'a..example.org', 'a.example.1x', 'a b.example.org', 'sp1.example.org\n', 'a.' + 'b'.repeat(64) + '.org', `${'a'.repeat(63)}.`.repeat(4) + 'org', 7, null]) {
+    assert.equal(R.validPublicHost(bad), null, String(bad));
+  }
+  assert.ok(R.isIpHost(new URL('wss://203.0.113.7').hostname));
+  assert.ok(R.isIpHost(new URL('wss://0xcb.0.113.7').hostname), 'every IPv4 form reads as the dotted one');
+  assert.ok(R.isIpHost(new URL('wss://[2001:db8::7]:8443').hostname));
+  assert.ok(!R.isIpHost(new URL('wss://sp1.example.org').hostname));
+});
+
+test('a token pins its host and roles: another host, an IP address (refuseIpUrls) or another role is refused before the token is spent; a hello stays on the pinned host; a revoked token registers nothing', async () => {
+  const lines = [];
+  const reg = new Registry({ trustedOperators: ['project'], refuseIpUrls: true, maxTrustedNodes: 4, log: (m) => lines.push(m) });
+  const project = { id: 'project', name: 'Proyecto' };
+  const { token } = await reg.createToken(project, 'EU', 0, 'frankfurt-1', { publicHost: 'de1.example.org', roles: ['host', 'verify'] });
+  const t = reg.tokenList()[0];
+  assert.deepEqual([t.publicHost, t.roles, R.tokenState(t, 0), R.tokenIdOf(t)], ['de1.example.org', ['host', 'verify'], 'unused', t.hash.slice(0, 12)]);
+  assert.ok(lines.at(-1).endsWith('region EU for de1.example.org'), lines.at(-1));
+  const keys = await generateEd25519();
+  const req = (over) => ({ token, publicKey: keys.publicKey, roles: ['host', 'verify'], publicUrl: 'wss://de1.example.org', build: BUILD, specs: SPECS, capacity: CAP, ...over });
+  assert.equal((await reg.register(req({ publicUrl: 'wss://de2.example.org' }), 1)).code, 'public_host_mismatch');
+  assert.equal((await reg.register(req({ publicUrl: 'wss://203.0.113.7' }), 1)).code, 'public_host_mismatch');
+  assert.equal((await reg.register(req({ roles: ['verify'], publicUrl: undefined }), 1)).code, 'public_host_mismatch', 'a pinned token is for a wss host');
+  assert.equal(R.tokenState(reg.tokenList()[0], 1), 'unused', 'none of them spent it');
+  const n = await reg.register(req(), 1);
+  assert.ok(n.ok, JSON.stringify(n));
+  assert.deepEqual([n.node.publicHost, n.node.publicUrl, n.node.retiredAt, n.node.trustRemovedAt], ['de1.example.org', 'wss://de1.example.org', null, null]);
+  assert.equal(reg.addressAllowed(n.node, 'wss://DE1.example.org:443'), true, 'the host as the URL parser reads it: lower case');
+  // A hello on another host keeps the pinned address.
+  reg.connected(n.node.nodeId, { ...hello({ roles: ['host', 'verify'], transports: ['wss'] }), publicUrl: 'wss://evil.example.org' }, 2);
+  assert.equal(reg.node(n.node.nodeId).publicUrl, 'wss://de1.example.org');
+  assert.ok(lines.some((l) => l.includes('a hello on another address (wss://evil.example.org) kept wss://de1.example.org')));
+  reg.connected(n.node.nodeId, { ...hello({ roles: ['host', 'verify'], transports: ['wss'] }), publicUrl: 'wss://de1.example.org:8443' }, 3);
+  assert.equal(reg.node(n.node.nodeId).publicUrl, 'wss://de1.example.org:8443', 'another port on the pinned host is its own business');
+  // Without a pin, an IP address is refused for every registration and every hello (refuseIpUrls).
+  const free = (await reg.createToken(project, 'SA', 0)).token;
+  const k2 = await generateEd25519();
+  assert.equal((await reg.register({ ...req({ publicUrl: 'wss://203.0.113.7' }), token: free, publicKey: k2.publicKey }, 1)).code, 'ip_not_supported');
+  assert.equal((await reg.register({ ...req({ publicUrl: 'wss://[2001:db8::7]' }), token: free, publicKey: k2.publicKey }, 1)).code, 'ip_not_supported');
+  const sp = await reg.register({ ...req({ publicUrl: 'wss://sp1.example.org' }), token: free, publicKey: k2.publicKey }, 1);
+  assert.ok(sp.ok);
+  reg.connected(sp.node.nodeId, { ...hello({ roles: ['host', 'verify'], transports: ['wss'] }), publicUrl: 'wss://203.0.113.9' }, 2);
+  assert.equal(reg.node(sp.node.nodeId).publicUrl, 'wss://sp1.example.org');
+  assert.equal(reg.addressAllowed(reg.node(sp.node.nodeId), 'wss://sp2.example.org'), true, 'an unpinned node may move to another name');
+  // Roles: a host-only token registers no verifier.
+  const hostOnly = (await reg.createToken(project, 'SA', 0, undefined, { roles: ['host'] })).token;
+  const k3 = await generateEd25519();
+  assert.equal((await reg.register({ ...req({ publicUrl: 'wss://sp3.example.org' }), token: hostOnly, publicKey: k3.publicKey }, 1)).code, 'bad_roles');
+  // A revoked token: refused, never spent; a used one cannot be revoked; ids are never guessed.
+  const id = R.tokenIdOf(reg.tokenList().find((x) => x.roles?.length === 1));
+  assert.deepEqual(reg.revokeToken(id, 5).result, 'revoked');
+  assert.deepEqual(reg.revokeToken(id, 6).result, 'already');
+  assert.equal((await reg.register({ ...req({ publicUrl: 'wss://sp3.example.org', roles: ['host'] }), token: hostOnly, publicKey: k3.publicKey }, 7)).code, 'token_revoked');
+  assert.equal(R.tokenState(reg.tokenList().find((x) => R.tokenIdOf(x) === id), 7), 'revoked');
+  assert.equal(reg.revokeToken(R.tokenIdOf(t), 8).result, 'used');
+  assert.equal(reg.revokeToken('ffffffffffff', 8).result, 'none');
+  assert.equal(reg.revokeToken('', 8).result, 'none', 'a prefix that matches every token');
+  // The reference server and the tests (no refuseIpUrls) still register on addresses.
+  assert.ok((await regNode(new Registry(quiet), { id: 'op1', name: 'Juan' }, 0)).publicUrl.includes('203.0.113.7'));
 });
 
 test('reachability: wss by probe, rtc by its self-test; trusted nodes skip probation', async () => {

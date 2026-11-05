@@ -119,7 +119,8 @@ test('the sign-in buttons and the link buttons: Google is configured but hidden 
 });
 
 test('PERFIL: VINCULAR and "confirm it\'s you" use the providers this browser can sign in with; the level-2 sheet offers none (Google neither) and its note names them all; the in-app note says why Google is missing', () => {
-  const profile = readFileSync(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8');
+  // "Confirm it's you" itself is accountLinks.ts confirmItsYou (shared with CONTROL DE NODOS): both sources.
+  const profile = readFileSync(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8') + readFileSync(new URL('../src/ui/screens/accountLinks.ts', import.meta.url), 'utf8');
   const has = (code, why) => assert.ok(profile.includes(code), why + ': ' + code);
   has('const linkable = emailProviders(menu).filter((p) => me && !me.providers.includes(p));', 'VINCULAR never offers Google inside another app');
   has('const own = configured.filter((p) => emailProviders(menu).includes(p));', 'neither does "confirm it is you"');

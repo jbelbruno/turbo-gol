@@ -19,7 +19,7 @@
  */
 import { HEARTBEAT_TIMEOUT_MS, sameBuild, sameSimulation } from '../shared/controlProtocol';
 import type { BuildId, GameMode, NodeTransport } from '../shared/controlProtocol';
-import { usableTransports } from './registry';
+import { isRetired, usableTransports } from './registry';
 import type { NodeRecord } from './registry';
 
 export interface PlacementRequest {
@@ -44,6 +44,7 @@ export function transportFor(n: NodeRecord, clientTransports: readonly NodeTrans
 
 /** Why `n` cannot take the match, or null when it can. */
 export function ineligibility(n: NodeRecord, req: PlacementRequest): string | null {
+  if (isRetired(n)) return 'retired';
   if (!n.online || req.now - n.lastSeen > HEARTBEAT_TIMEOUT_MS) return 'offline';
   if (!n.roles.includes('host')) return 'not_a_host';
   if (usableTransports(n).length === 0) return 'unreachable';
@@ -73,9 +74,10 @@ export function pickNode(nodes: readonly NodeRecord[], req: PlacementRequest, ra
  * Who verifies a hosted match: a trusted (project-run) verifier node on the SAME SIMULATION as the
  * match (wasm, protocol and node release), preferably one whose operator did not play in it. A
  * community host is never verified by itself nor by another node of its operator; a trusted host
- * may verify its own matches (still a full re-simulation: it catches determinism bugs). Among the
- * least busy, the pick is random, so nobody can predict which verifier a match gets. null =
- * nobody can right now (the job waits in the queue).
+ * may verify its own matches (still a full re-simulation: it catches determinism bugs), but a free
+ * verifier on another machine of the same simulation goes first: a second machine catches what one
+ * machine's own bug would hide. Among the least busy, the pick is random, so nobody can predict
+ * which verifier a match gets. null = nobody can right now (the job waits in the queue).
  */
 export function pickVerifier(
   nodes: readonly NodeRecord[],
@@ -89,6 +91,7 @@ export function pickVerifier(
   const ok = nodes.filter(
     (n) =>
       n.trusted &&
+      !isRetired(n) &&
       n.roles.includes('verify') &&
       n.online &&
       !n.draining &&
@@ -101,7 +104,9 @@ export function pickVerifier(
   // Prefer a verifier whose operator did not play; they are all the project's, so fall back to the
   // rest rather than leave the match unverified.
   const clean = ok.filter((n) => !played.has(n.operatorId));
-  const from = clean.length > 0 ? clean : ok;
+  let from = clean.length > 0 ? clean : ok;
+  const others = from.filter((n) => n.nodeId !== host.nodeId && busy(n.nodeId) === 0);
+  if (host.trusted && others.length > 0) from = others;
   let least = Infinity;
   for (const n of from) least = Math.min(least, busy(n.nodeId));
   const pool = from.filter((n) => busy(n.nodeId) === least);

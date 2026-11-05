@@ -308,7 +308,8 @@ test('the node operators: asked of the object at /internal/operators, passed to 
   const stats = async (e, project = f.project) => (await req(e, 'GET', '/nodes/admin/account-stats', { bearer: await accountToken(project) })).json();
   env.nodesHandler = () => new Response(JSON.stringify({ operators: [f.operator] }), { headers: { 'content-type': 'application/json' } });
   assert.equal((await stats(env)).passwordOnly.nodes, 1);
-  assert.deepEqual(seen, ['/internal/operators']);
+  // Then, after the answer, the read goes into the object's one window of maintainer reads.
+  assert.deepEqual(seen, ['/internal/operators', '/internal/read-audit']);
   env.nodesHandler = () => new Response('{"error":"nodes_unavailable"}', { status: 503 });
   assert.deepEqual([(await stats(env)).operators, (await stats(env)).passwordOnly.nodes], [null, null]);
   env.nodesHandler = () => {
