@@ -453,6 +453,12 @@ export interface ServerConfig {
   queue?: { soloAfterMs: number; widenMs: { casual: number; ranked: number }; botLevel?: Difficulty };
   /** legal.terms: the terms version in force (src/net/terms.ts), absent until the owner publishes them (Inicio's links then: the legal draft's P12). */
   terms?: string;
+  /**
+   * Whether accounts outside the project may host a server: closed until the terms in force describe
+   * it and the opening's flag opens it (a canary first). The hosting screens, the community server's
+   * mark and its report stay hidden while it is closed. Absent from an older Worker: closed.
+   */
+  hosting?: { open: boolean; stage: 'closed' | 'canary' | 'all' };
 }
 
 /** POST /api/guest body: no name, the server names every guest (a name sent anyway is ignored). */

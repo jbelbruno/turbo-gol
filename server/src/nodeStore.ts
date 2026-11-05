@@ -9,7 +9,8 @@
  * Tables
  *   meta          k -> v; 'state_version': the persist.ts STATE_VERSION the rows were written in;
  *                 'drains_asked': the node processes the object told to drain (NodeRegistryDO)
- *   node_tokens   registration tokens (only their hash), pruned an hour after they expire
+ *   node_tokens   registration tokens (only their hash), pruned an hour after they expire (at each
+ *                 new token and on the cron: Registry.pruneTokens)
  *   nodes         every registered node
  *   node_matches  the matches the control plane keeps (settled ones until its retention ends)
  *   outbox        the calls of each settled match (nodeOutcome.ts), until each is delivered
@@ -47,7 +48,19 @@
  *                 (AccountsDO tells the purge once). The open matches leave them out too (forgotten)
  *   node_alerts   the ALERT lines the object posts to the team's channel (log and audit), whether or
  *                 not a webhook is set, as the channel gets them (the same alert once in 10 minutes,
- *                 every audit line): a ring of ALERT_RING_MAX lines
+ *                 every audit line): a ring of ALERT_RING_MAX lines; the community nodes' too
+ *
+ * Hosting by the community (Prompt 2: A1, A2, A4, A14):
+ *   operators     one row per operator outside the project a maintainer acted on or that chose to
+ *                 show its name: its status (ok, blocked) with the reason, who set it and when, and
+ *                 show_public (the opt-in: its name in the public list). No deadline, like the
+ *                 nodes' records; when the account is purged a maintainer's row stays under an
+ *                 opaque key (deleted:<hex>), with show_public 0, and an opt-in's goes (forgetOperator)
+ *   admin_audit   every change of the KV flag node_operators (the opening): who, when, the value
+ *                 before and after (the canary's account ids; a purged account's becomes 'deleted'),
+ *                 the reason. ADMIN_AUDIT_DAYS
+ *   operator_tokens one row per community node token minted (the operator, when): the day's cap
+ *                 counts them across deploys. A day, then pruned; a purged account's go at once
  */
 import { STATE_VERSION, matchToRow, nodeToRow, tokenToRow } from '../../nodes/control-plane/persist';
 import type { MatchRow, MatchStore, NodeRow, RegistryStore, TokenRow } from '../../nodes/control-plane/persist';
@@ -79,6 +92,34 @@ const FORGOTTEN_ASK_MAX = 50;
 const REPLAY_HOUR_SQL = `(at / ${HOUR_MS})`;
 /** Rows one prune deletes at most (the cron's, every 5 minutes): bounded work on the object's thread. */
 const REPLAY_PRUNE_MAX = 2000;
+/** How long admin_audit keeps a change of the opening's flag (the owner's: a year, like the Discord channel's lines). */
+export const ADMIN_AUDIT_DAYS = 365;
+/** How long operator_tokens keeps a minted token's row: the day the cap counts. */
+const OPERATOR_TOKENS_MS = DAY_MS;
+
+/** An operator outside the project as the object keeps it (operators). */
+export interface OperatorRow {
+  operatorId: string;
+  status: 'ok' | 'blocked';
+  reason: string | null;
+  /** The maintainer who set the status ('name (account id)'), null for a row only the opt-in wrote. */
+  actor: string | null;
+  /** When the status was set (or the row first written). */
+  at: number;
+  /** The operator chose to show its name in the public list. */
+  showPublic: boolean;
+}
+
+/** One change of the opening's flag (admin_audit). */
+export interface AdminAuditRow {
+  id: number;
+  at: number;
+  actor: string;
+  flag: string;
+  old: string | null;
+  new: string | null;
+  reason: string | null;
+}
 
 /** The oldest time the maintainers' history keeps at `now` (HISTORY_DAYS): an older row is pruned, and never read before that. */
 function historyOldest(now: number): number {
@@ -285,6 +326,12 @@ export class NodeStore implements RegistryStore, MatchStore {
     s.exec('CREATE INDEX IF NOT EXISTS node_forgotten_at ON node_forgotten (at)');
     s.exec('CREATE TABLE IF NOT EXISTS node_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, line TEXT NOT NULL)');
     s.exec('CREATE INDEX IF NOT EXISTS node_alerts_at ON node_alerts (at)');
+    // Hosting by the community: new tables again, the state version unchanged.
+    s.exec("CREATE TABLE IF NOT EXISTS operators (operator_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'ok', reason TEXT, actor TEXT, at INTEGER NOT NULL, show_public INTEGER NOT NULL DEFAULT 0)");
+    s.exec('CREATE TABLE IF NOT EXISTS admin_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor TEXT NOT NULL, flag TEXT NOT NULL, old TEXT, new TEXT, reason TEXT)');
+    s.exec('CREATE INDEX IF NOT EXISTS admin_audit_at ON admin_audit (at)');
+    s.exec('CREATE TABLE IF NOT EXISTS operator_tokens (operator_id TEXT NOT NULL, at INTEGER NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS operator_tokens_op ON operator_tokens (operator_id, at)');
     const v = s.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'state_version'").toArray()[0]?.v;
     if (v === undefined) {
       s.exec("INSERT INTO meta (k, v) VALUES ('state_version', ?)", String(STATE_VERSION));
@@ -756,15 +803,91 @@ export class NodeStore implements RegistryStore, MatchStore {
     return out;
   }
 
-  /** The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events, ALERT lines and purged ids past it. Returns the matches pruned. */
+  /**
+   * The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events,
+   * ALERT lines and purged ids past it; and the opening's rows past theirs (admin_audit,
+   * operator_tokens). Returns the matches pruned.
+   */
   pruneHistory(now: number, max: number = REPLAY_PRUNE_MAX): number {
     const before = historyOldest(now);
     return this.tx(() => {
       this.sql.exec('DELETE FROM node_events WHERE at < ?', before);
       this.sql.exec('DELETE FROM node_alerts WHERE at < ?', before);
       this.sql.exec('DELETE FROM node_forgotten WHERE at < ?', before);
+      this.sql.exec('DELETE FROM admin_audit WHERE at < ?', now - ADMIN_AUDIT_DAYS * DAY_MS);
+      this.sql.exec('DELETE FROM operator_tokens WHERE at <= ?', now - OPERATOR_TOKENS_MS);
       return this.pruneMatchHistory(before, max);
     });
+  }
+
+  // ---- hosting by the community --------------------------------------------------------------
+
+  /** Every operators row (the object keeps them in memory: a hello reads the block). */
+  operatorRows(): OperatorRow[] {
+    return this.sql
+      .exec<{ operator_id: string; status: string; reason: string | null; actor: string | null; at: number; show_public: number }>('SELECT operator_id, status, reason, actor, at, show_public FROM operators')
+      .toArray()
+      .map((r) => ({ operatorId: r.operator_id, status: r.status === 'blocked' ? 'blocked' : 'ok', reason: r.reason ?? null, actor: r.actor ?? null, at: Number(r.at), showPublic: Number(r.show_public) === 1 }));
+  }
+
+  /** A maintainer set an operator's status (POST /nodes/admin/operator): its row, its opt-in kept as it was. */
+  setOperatorStatus(o: Pick<OperatorRow, 'operatorId' | 'status' | 'reason' | 'actor' | 'at'>): void {
+    this.sql.exec(
+      'INSERT INTO operators (operator_id, status, reason, actor, at, show_public) VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(operator_id) DO UPDATE SET status = excluded.status, reason = excluded.reason, actor = excluded.actor, at = excluded.at',
+      o.operatorId,
+      o.status,
+      o.reason,
+      o.actor,
+      o.at,
+    );
+  }
+
+  /** The operator's opt-in (POST /nodes/mine/public): its row, its status kept as it was. */
+  setShowPublic(operatorId: string, show: boolean, at: number): void {
+    this.sql.exec('INSERT INTO operators (operator_id, status, at, show_public) VALUES (?, ?, ?, ?) ON CONFLICT(operator_id) DO UPDATE SET show_public = excluded.show_public', operatorId, 'ok', at, show ? 1 : 0);
+  }
+
+  /**
+   * A purged account (/internal/operator-deleted): the account id leaves this object's hosting rows
+   * (decisions.md: the chosen name and the account id go with the account). Its name choice goes
+   * for good, its token counts with it. A status a maintainer set stays, as its nodes' records do,
+   * but under `alias` (an opaque key), with its status, reason, actor and date; a row only the
+   * opt-in wrote goes. In admin_audit's values (a canary's ids) the id becomes 'deleted'.
+   */
+  forgetOperator(operatorId: string, alias: string): void {
+    this.tx(() => {
+      this.sql.exec('DELETE FROM operators WHERE operator_id = ? AND actor IS NULL', operatorId);
+      this.sql.exec('UPDATE operators SET operator_id = ?, show_public = 0 WHERE operator_id = ?', alias, operatorId);
+      this.sql.exec('DELETE FROM operator_tokens WHERE operator_id = ?', operatorId);
+      const strip = (v: string | null) => (v === null ? null : v.split(',').map((x) => (x.trim() === operatorId ? 'deleted' : x)).join(','));
+      const audits = this.sql.exec<{ id: number; old: string | null; new: string | null }>('SELECT id, old, new FROM admin_audit WHERE instr(old, ?) > 0 OR instr(new, ?) > 0', operatorId, operatorId).toArray();
+      for (const r of audits) this.sql.exec('UPDATE admin_audit SET old = ?, new = ? WHERE id = ?', strip(r.old), strip(r.new), r.id);
+    });
+  }
+
+  /** One change of the opening's flag; the ones past ADMIN_AUDIT_DAYS go. */
+  adminAudit(r: Omit<AdminAuditRow, 'id'>): void {
+    this.sql.exec('INSERT INTO admin_audit (at, actor, flag, old, new, reason) VALUES (?, ?, ?, ?, ?, ?)', r.at, r.actor, r.flag, r.old, r.new, r.reason);
+    this.sql.exec('DELETE FROM admin_audit WHERE at < ?', r.at - ADMIN_AUDIT_DAYS * DAY_MS);
+  }
+
+  /** The newest changes of the opening's flag, at most `limit`, none past ADMIN_AUDIT_DAYS. */
+  adminAuditList(limit: number): AdminAuditRow[] {
+    return this.sql
+      .exec<{ id: number; at: number; actor: string; flag: string; old: string | null; new: string | null; reason: string | null }>('SELECT id, at, actor, flag, old, new, reason FROM admin_audit WHERE at >= ? ORDER BY id DESC LIMIT ?', this.now() - ADMIN_AUDIT_DAYS * DAY_MS, limit)
+      .toArray()
+      .map((r) => ({ id: Number(r.id), at: Number(r.at), actor: r.actor, flag: r.flag, old: r.old ?? null, new: r.new ?? null, reason: r.reason ?? null }));
+  }
+
+  /** A community node token minted for `operatorId`; the rows past the day go. */
+  tokenMinted(operatorId: string, at: number): void {
+    this.sql.exec('INSERT INTO operator_tokens (operator_id, at) VALUES (?, ?)', operatorId, at);
+    this.sql.exec('DELETE FROM operator_tokens WHERE at <= ?', at - OPERATOR_TOKENS_MS);
+  }
+
+  /** The community node tokens `operatorId` minted in the 24 hours before `now`. */
+  tokensToday(operatorId: string, now: number): number {
+    return Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM operator_tokens WHERE operator_id = ? AND at > ?', operatorId, now - OPERATOR_TOKENS_MS).toArray()[0]?.n ?? 0);
   }
 
   drop(matchId: string): void {

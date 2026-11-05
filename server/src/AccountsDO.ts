@@ -115,6 +115,15 @@
  *   POST /shop/claim      { userId, item }                           -> ClaimAnswer | 404 unknown_item | 409 <ClaimRefusal> | 404
  *   POST /host-credit     HostCredit (the NodeRegistryDO's outbox)    -> { ok, applied } (once per matchId)
  *   POST /host-freeze     { userId, reason, at } (the outbox)        -> { ok, applied }
+ *   POST /host-consent    { userId, version, adult } (the NodeRegistryDO's community token, Prompt 2 A3) -> { hostTerms }:
+ *                                                                     a 'host' consents row (source 'node_token': the rules
+ *                                                                     for hosts of the version in force accepted and 18 or
+ *                                                                     older declared), one per version at most | 400
+ *                                                                     bad_consent (no terms, or none that describe hosting:
+ *                                                                     env.ts hostingTermsInForce) | 403 adult_required (no
+ *                                                                     adult: true) | 409 terms_changed { version } (not the
+ *                                                                     version in force) | 403 terms_required { version } (that
+ *                                                                     version's terms not accepted) | 403 deletion_pending | 404
  *   POST /host-grant      { userId, item } (a maintainer, through the NodeRegistryDO) -> { granted, items } | 404
  *   POST /host-revoke     { userId, item }                           -> { revoked, refunded, items }
  *   POST /host-unfreeze   { userId }                                 -> { unfrozen }
@@ -212,7 +221,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, hostingTermsInForce, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
 import { base64urlEncode, checkInternal } from './auth';
 import { AccountStore, DEV_NAME_PROBLEM } from './accountStore';
 import { CODE_TRIES, LEGACY_CLOSED, LEGACY_REMIND_MS, legacyDateOf, markSlot, providerMark } from './accountStore';
@@ -2336,6 +2345,20 @@ export class AccountsDO extends DurableObject<Env> {
       case '/host-freeze': {
         if (!isHex(b.userId, 16) || typeof b.reason !== 'string' || typeof b.at !== 'number' || !(b.at > 0)) return error(400, 'bad_request');
         return json({ ok: true, applied: s.hostFreeze(b.userId, b.reason.slice(0, 120), b.at) });
+      }
+      case '/host-consent': {
+        if (!isHex(b.userId, 16) || typeof b.version !== 'string' || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+        const current = termsVersion(this.env);
+        // No terms published, or none that describe hosting yet (NODE_HOSTING_TERMS): no 'host' row, ever.
+        if (current === null || !hostingTermsInForce(this.env)) return error(400, 'bad_consent', 'Consentimiento inválido');
+        // The account's own refusals are 403, as the token's (PR 2A's contract); a version that is not in force, 409.
+        if (b.adult !== true) return error(403, 'adult_required', 'Declara que tienes 18 años o más');
+        if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
+        const r = s.acceptHost(b.userId, current, now);
+        if (r === 'no_user') return error(404, 'no_user');
+        if (r === 'deletion_pending') return json({ error: 'deletion_pending', message: 'Esta cuenta tiene un borrado pendiente', purgeAt: s.deletionAt(b.userId) }, 403);
+        if (r === 'terms_required') return json({ error: 'terms_required', message: 'Primero acepta los términos vigentes', version: current }, 403);
+        return json(r);
       }
       case '/host-grant': {
         if (typeof b.userId !== 'string' || typeof b.item !== 'string') return error(400, 'bad_request');

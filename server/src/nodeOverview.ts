@@ -1,10 +1,12 @@
 /**
  * What the maintainers' panel reads of the control plane (GET /nodes/admin/overview, refreshed every
- * 15 s, and GET /nodes/admin/nodes): built from the NodeRegistryDO's ControlPlane through its public
- * getters only, plus the few things the object itself holds (the channel, the outbox, the KV flags,
- * whether the ALERT webhook is set). Maintainers only: it carries the nodes' addresses, the operators'
- * account ids and the tokens' short ids (never a token), none of which goes into /nodes/status.
+ * 15 s, GET /nodes/admin/nodes and GET /nodes/admin/operators): built from the NodeRegistryDO's
+ * ControlPlane through its public getters only, plus the few things the object itself holds (the
+ * channel, the outbox, the KV flags, the opening's flag and its changes, the operators' rows,
+ * whether the ALERT webhooks are set). Maintainers only: it carries the nodes' addresses, the
+ * operators' account ids and the tokens' short ids (never a token), none of which goes into /nodes/status.
  */
+import { OPERATOR_MATCHES_MAX } from '../../nodes/control-plane/controlPlane';
 import type { ControlPlane, ProbeResult, RegionView } from '../../nodes/control-plane/controlPlane';
 import { isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
 import type { NodeRecord, TokenState } from '../../nodes/control-plane/registry';
@@ -12,6 +14,7 @@ import type { BuildId, NodeRole } from '../../nodes/shared/controlProtocol';
 import { REGIONS } from '../../src/net/account';
 import { KV_FLAGS } from './env';
 import type { KvFlag } from './env';
+import type { AdminAuditRow, OperatorRow } from './nodeStore';
 
 /** GET /nodes/mine: one of the operator's own nodes, its address and counters included. */
 export function mineView(cp: ControlPlane, n: NodeRecord) {
@@ -75,6 +78,10 @@ export function overviewNode(cp: ControlPlane, n: NodeRecord, open: ReadonlyMap<
     build: n.build,
     specs: n.specs,
     capacityMax: n.capacityMax,
+    // What placement counts (a community node's capped: ControlPlane.effectiveCapacity), its refusals, and where Cloudflare saw it register from.
+    capacityEffective: cp.effectiveCapacity(n),
+    refusals: cp.refusalsOf(n.nodeId),
+    seenContinent: n.seenContinent ?? null,
     reachableAt: n.reachableAt,
     lastProbe: probe ? { at: probe.at, ok: probe.ok, error: probe.error } : null,
     probeFailures: cp.probeStreak(n.nodeId),
@@ -189,6 +196,22 @@ export function warningsOf(nodes: readonly NodeRecord[], channel: { stable: stri
   return out;
 }
 
+/**
+ * The opening of hosting as the panel shows it (Prompt 2, A1): the KV flag node_operators as it is
+ * (a canary's account ids included: maintainers only), its stage, whether the terms in force allow
+ * it (NODE_HOSTING_TERMS: closed below it whatever the flag says), and its latest changes.
+ */
+export interface HostingView {
+  flag: string;
+  raw: string | null;
+  stage: 'closed' | 'canary' | 'all';
+  /** The terms in force describe hosting (env.ts hostingTermsInForce): `version` in force, `needed` the first that does (null: unset). */
+  terms: { inForce: boolean; version: string | null; needed: string | null };
+  changes: AdminAuditRow[];
+  /** The community nodes' staff-only channel's webhook is set (NODE_COMMUNITY_WEBHOOK): else their ALERTs reach only the panel. */
+  communityWebhook: boolean;
+}
+
 /** What the object hands in beside its control plane. */
 export interface OverviewInput {
   now: number;
@@ -201,6 +224,19 @@ export interface OverviewInput {
   webhook: boolean;
   /** The voids of the last 24 h by node and reason (the history, NodeStore.voidsSince); none before it existed. */
   voids?: Array<{ nodeId: string; reason: string; count: number }>;
+  /** The opening of hosting; absent (an object of before it): not in the answer. */
+  hosting?: HostingView;
+}
+
+/**
+ * The project's nodes registered from another continent than their region (A6: a community node
+ * never registers so, REGION_CHECK; a project node only shows here). Apart from `warnings`, whose
+ * kinds the panel words one by one.
+ */
+export function regionMismatches(nodes: readonly NodeRecord[]): Array<{ nodeId: string; name: string; region: string; seen: string }> {
+  return nodes
+    .filter((n) => n.trusted && !isRetired(n) && n.seenContinent !== undefined && n.seenContinent !== null && n.seenContinent !== n.region)
+    .map((n) => ({ nodeId: n.nodeId, name: n.name, region: n.region, seen: n.seenContinent as string }));
 }
 
 /** GET /nodes/admin/overview. */
@@ -232,7 +268,8 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     verifiers: nodes
       .filter((n) => n.trusted && n.roles.includes('verify') && !isRetired(n))
       .map((n) => ({ nodeId: n.nodeId, name: n.name, region: n.region, version: n.build.version, node: String(n.specs?.node ?? ''), status: n.status, online: cp.isOnline(n.nodeId), verifying: cp.verifyingOn(n.nodeId) })),
-    verifyQueue: [...queue.values()].map((q) => ({ version: q.build.version, protocol: q.build.protocol, wasmSha256: q.build.wasmSha256, depth: q.depth, oldestAt: q.oldestAt })),
+    // `braked`: no new match on a community node on probation of that build until it drains (ControlPlane.verifyBraked).
+    verifyQueue: [...queue.values()].map((q) => ({ version: q.build.version, protocol: q.build.protocol, wasmSha256: q.build.wasmSha256, depth: q.depth, oldestAt: q.oldestAt, braked: cp.verifyBraked(q.build, i.now) })),
     outbox: { rows: i.outbox.reduce((s, r) => s + r.rows, 0), byPath: i.outbox },
     // The ledger's view of each operator that earned in the window (30 days; all time as `earned`).
     points: cp.ledger.leaderboard(i.now).map((e) => ({ ...cp.ledger.summary(e.operatorId, i.now), name: names.get(e.operatorId) ?? null })),
@@ -241,5 +278,71 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     warnings: warningsOf(nodes, i.channel, i.webhook),
     // node_offline, empty, unverified, a strike's lost:*...: which node's matches went void, and why.
     voids24h: (i.voids ?? []).map((v) => ({ ...v, name: nodes.find((n) => n.nodeId === v.nodeId)?.name ?? null })),
+    regionMismatches: regionMismatches(nodes),
+    ...(i.hosting ? { hosting: i.hosting } : {}),
+  };
+}
+
+/** What the Operadores tab reads of one operator outside the project, beside what the object keeps of it. */
+export interface OperatorInput {
+  now: number;
+  row: OperatorRow | null;
+  /** Its community node tokens minted in the last 24 hours (NodeStore.tokensToday). */
+  tokensToday: number;
+}
+
+/**
+ * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A17): its
+ * status and opt-in, its nodes with their refusals and effective capacity, its tokens, the matches
+ * it runs against OPERATOR_MATCHES_MAX, and its points (today against the daily cap, 30 days, all
+ * time, and how much of them the 3 accounts that played most on its nodes brought). Its wallet is
+ * GET /nodes/admin/wallet's.
+ */
+export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorInput) {
+  const nodes = cp.registry.byOperator(operatorId);
+  const newest = nodes.reduce<NodeRecord | null>((a, n) => (a === null || n.createdAt >= a.createdAt ? n : a), null);
+  const summary = cp.ledger.summary(operatorId, i.now);
+  let assigned = 0;
+  let refused = 0;
+  for (const n of nodes) {
+    assigned += n.counters.assigned;
+    refused += n.counters.refused ?? 0;
+  }
+  return {
+    operatorId,
+    name: newest?.operatorName ?? null,
+    status: i.row?.status ?? 'ok',
+    reason: i.row?.reason ?? null,
+    actor: i.row?.actor ?? null,
+    at: i.row?.at ?? null,
+    showPublic: i.row?.showPublic === true,
+    nodes: nodes.map((n) => ({
+      nodeId: n.nodeId,
+      name: n.name,
+      region: n.region,
+      status: n.status,
+      online: n.online,
+      retired: isRetired(n),
+      capacity: n.capacity.matches,
+      capacityEffective: cp.effectiveCapacity(n),
+      assigned: n.counters.assigned,
+      refused: n.counters.refused ?? 0,
+      refusals: cp.refusalsOf(n.nodeId),
+      seenContinent: n.seenContinent ?? null,
+    })),
+    refusalRate: assigned + refused > 0 ? Math.round((refused / (assigned + refused)) * 1000) / 1000 : 0,
+    tokens: {
+      today: i.tokensToday,
+      unused: cp.registry.tokenList().filter((t) => t.operatorId === operatorId && tokenState(t, i.now) === 'unused').length,
+    },
+    running: { matches: cp.operatorRunning(operatorId), max: OPERATOR_MATCHES_MAX },
+    points: {
+      today: cp.ledger.pointsToday(operatorId, i.now),
+      cap: cp.ledger.capPerDay(),
+      d30: summary.points30d,
+      matches30d: summary.matches30d,
+      earned: summary.earned,
+      concentration: cp.ledger.concentration(operatorId, i.now),
+    },
   };
 }

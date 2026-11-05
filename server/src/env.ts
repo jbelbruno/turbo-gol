@@ -80,6 +80,15 @@ export interface Env {
    * and '-', at most 32 (e.g. "2026-12-01"); anything else counts as unset.
    */
   TERMS_VERSION?: string;
+  /**
+   * Var: the first TERMS_VERSION whose texts let anyone outside the project host a server (the
+   * rules for hosts, the 18-or-older declaration, Annex B: legal version (b)). Set only by the
+   * change that puts those texts in force. While it is unset, malformed, or TERMS_VERSION is older
+   * (hostingTermsInForce), hosting is closed whatever the KV flag node_operators says: no community
+   * node token, no 'host' consents row, no operator's name choice stored. The project's accounts
+   * (NODE_TRUSTED_OPERATORS) are never asked.
+   */
+  NODE_HOSTING_TERMS?: string;
   /** `.dev.vars` only: '1' opens the dev-only routes (the dev sign-in, the stub's outbox) on a loopback host, never elsewhere. */
   DEV_AUTH?: string;
   FLAGS: KVNamespace;
@@ -161,6 +170,25 @@ export interface Env {
    * (accountRoutes.ts maintainerAlert).
    */
   NODE_ALERT_WEBHOOK?: string;
+  /**
+   * Secret, optional: a second staff-only Discord channel's webhook URL, for the ALERT lines about
+   * community nodes (their verifications, refusals, lag, traffic, probes, addresses, and an
+   * operator's code asked for at its node cap), never a channel the community reads: the lines carry
+   * node ids, addresses and account ids. They go there with a limit of their own, never to
+   * NODE_ALERT_WEBHOOK; without it they reach only the maintainers' panel (node_alerts).
+   */
+  NODE_COMMUNITY_WEBHOOK?: string;
+  /**
+   * Var, optional: '1' lets ranked matches go to community nodes (communityRanked). Unset or
+   * anything else: ranked only on the project's nodes, "for now not" in the terms.
+   */
+  NODE_COMMUNITY_RANKED?: string;
+  /**
+   * Var, optional: the most points one community host earns in a UTC day, over all its nodes
+   * (communityPointsPerDay): a whole number from 1 to 100,000; COMMUNITY_POINTS_PER_DAY_DEFAULT
+   * (300, the owner's) when unset or anything else.
+   */
+  NODE_COMMUNITY_POINTS_PER_DAY?: string | number;
   /** Var: the public origin the nodes and the installers reach the control plane at (https://turbo-gol.com). */
   NODES_PUBLIC_BASE?: string;
   /**
@@ -405,8 +433,9 @@ export function isModeList(v: unknown): v is GameModeId[] {
 // ---- KV flags ----------------------------------------------------------------------------------
 
 /**
- * Every KV flag the code reads (server/README.md, "Kill switches" and FLAGS), in the maintainers'
- * panel's order. Nothing writes them: they are set by hand with wrangler.
+ * Every KV switch the code reads (server/README.md, "Kill switches" and FLAGS), in the maintainers'
+ * panel's order. Nothing writes them: they are set by hand with wrangler. Two more keys are read
+ * apart: bot_level (a setting) and HOSTING_FLAG (the one the panel writes).
  */
 export const KV_FLAGS = ['matchmaking_off', 'do_disabled', 'nodes_on', 'vm_disabled', 'nodes_off', 'replays_off', 'email_off', 'turn_cf_disabled'] as const;
 export type KvFlag = (typeof KV_FLAGS)[number];
@@ -501,6 +530,111 @@ export function nodesAllowed(mode: NodesMode, playerIds: readonly string[]): boo
 /** NODE_TRUSTED_OPERATORS as account ids (an entry that is not one is dropped, so it trusts nobody). */
 export function trustedOperatorIds(env: Pick<Env, 'NODE_TRUSTED_OPERATORS'>): Set<string> {
   return accountIds(env.NODE_TRUSTED_OPERATORS);
+}
+
+// ---- Hosting by the community (who may ask for a node token) -------------------------------------
+
+/**
+ * The KV flag that opens hosting to accounts outside the project (the owner's OPEN_FLAG): absent or
+ * '0' closed, '1' every account, a comma-separated list of account ids a canary. It decides who may
+ * ask for a node token, nothing else: whose matches a node gets is nodes_on's (nodesMode), and
+ * vm_disabled has no say here. The only flag the Worker writes (POST /nodes/admin/flags, the
+ * NodeRegistryDO); it is not among KV_FLAGS, the panel's eight switches.
+ */
+export const HOSTING_FLAG = 'node_operators';
+/** The account ids a canary of HOSTING_FLAG names at most (a longer list is refused when written). */
+export const HOSTING_CANARY_MAX = 50;
+
+/** Who may ask for a community node token: nobody, everybody, or a canary of account ids. */
+export type HostingMode = 'closed' | 'all' | ReadonlySet<string>;
+
+/**
+ * Two terms versions in order (TERMS_VERSION_RE: digits, letters, '.', '_', '-'): their runs of
+ * digits as numbers, the rest as text, so 2026-11-04-2 < 2026-11-05 < 2026-11-05-2 < 2026-11-16.
+ */
+export function compareTermsVersions(a: string, b: string): number {
+  const x = a.match(/\d+|\D+/g) ?? [];
+  const y = b.match(/\d+|\D+/g) ?? [];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if (i >= x.length) return -1;
+    if (i >= y.length) return 1;
+    const [p, q] = [x[i], y[i]];
+    if (/^\d/.test(p) && /^\d/.test(q)) {
+      if (Number(p) !== Number(q)) return Number(p) < Number(q) ? -1 : 1;
+    } else if (p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * The terms in force describe hosting by anyone: TERMS_VERSION and NODE_HOSTING_TERMS are both set
+ * and well formed, and the first is not older than the second. Fails closed: until the change that
+ * sets NODE_HOSTING_TERMS is deployed, no flag value opens hosting.
+ */
+export function hostingTermsInForce(env: Pick<Env, 'TERMS_VERSION' | 'NODE_HOSTING_TERMS'>): boolean {
+  const v = termsVersion(env);
+  const need = termsVersion({ TERMS_VERSION: env.NODE_HOSTING_TERMS });
+  return v !== null && need !== null && compareTermsVersions(v, need) >= 0;
+}
+
+/** HOSTING_FLAG's raw value as nodes_on's is read: '1' all, a list of valid ids a canary, anything else (absent, '0', junk) closed. */
+export function hostingModeOf(raw: string | null): HostingMode {
+  if (raw === null) return 'closed';
+  const v = raw.trim();
+  if (v === '1') return 'all';
+  const ids = accountIds(v);
+  return ids.size > 0 ? ids : 'closed';
+}
+
+/**
+ * A value the panel may write to HOSTING_FLAG, as it is stored ('0', '1', or the account ids
+ * deduplicated in their order, comma-separated), or null. Stricter than hostingModeOf: one entry
+ * that is not an account id, or more than HOSTING_CANARY_MAX ids, refuses the whole value.
+ */
+export function hostingFlagValue(v: unknown): string | null {
+  if (typeof v !== 'string' || v.length > 2000) return null;
+  const s = v.trim();
+  if (s === '0' || s === '1') return s;
+  const ids = s.split(',').map((x) => x.trim());
+  if (ids.length === 0 || !ids.every((id) => ACCOUNT_ID.test(id))) return null;
+  const out = [...new Set(ids)];
+  return out.length <= HOSTING_CANARY_MAX ? out.join(',') : null;
+}
+
+/**
+ * Who may ask for a node token now: closed while the terms in force do not describe hosting
+ * (hostingTermsInForce), whatever the flag says; else HOSTING_FLAG's (edge-cached 60 s, like every
+ * flag: a change lands within a minute or two). The project's accounts are never asked.
+ */
+export async function hostingMode(env: Pick<Env, 'FLAGS' | 'TERMS_VERSION' | 'NODE_HOSTING_TERMS'>): Promise<HostingMode> {
+  if (!hostingTermsInForce(env)) return 'closed';
+  return hostingModeOf(await flagValue(env, HOSTING_FLAG));
+}
+
+/** `accountId` may ask for a community node token under `mode`. */
+export function hostingOpenFor(mode: HostingMode, accountId: string): boolean {
+  if (mode === 'closed') return false;
+  return mode === 'all' || mode.has(accountId);
+}
+
+/** The stage a mode is: GET /api/config's hosting (the game shows its hosting screens from 'canary' on), the panel's. */
+export function hostingStage(mode: HostingMode): 'closed' | 'canary' | 'all' {
+  return mode === 'closed' ? 'closed' : mode === 'all' ? 'all' : 'canary';
+}
+
+/** NODE_COMMUNITY_RANKED is '1': ranked matches may go to community nodes (the owner's COMMUNITY_RANKED; off). */
+export function communityRanked(env: Pick<Env, 'NODE_COMMUNITY_RANKED'>): boolean {
+  return String(env.NODE_COMMUNITY_RANKED ?? '').trim() === '1';
+}
+
+/** NODE_COMMUNITY_POINTS_PER_DAY's default: the owner's daily cap per community host (2026-11-05). */
+export const COMMUNITY_POINTS_PER_DAY_DEFAULT = 300;
+
+/** NODE_COMMUNITY_POINTS_PER_DAY: a whole number from 1 to 100,000, else COMMUNITY_POINTS_PER_DAY_DEFAULT. */
+export function communityPointsPerDay(env: Pick<Env, 'NODE_COMMUNITY_POINTS_PER_DAY'>): number {
+  const raw = env.NODE_COMMUNITY_POINTS_PER_DAY;
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\s*\d{1,6}\s*$/.test(raw) ? Number(raw) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 100_000 ? n : COMMUNITY_POINTS_PER_DAY_DEFAULT;
 }
 
 /** An Env with everything the node control plane needs (nodesConfigured). */

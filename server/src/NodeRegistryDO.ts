@@ -4,8 +4,10 @@
  * only through the Worker (internal header): the /nodes/* routes of nodeRoutes.ts and the
  * matchmaker's internal routes.
  *
- *   POST /nodes/register         RegisterRequest (at most 4 KB read), x-client-ip -> RegisterAnswer (403 <code> when
- *                                refused); 5 per address per hour, an IPv6 address counted by its /64
+ *   POST /nodes/register         RegisterRequest (at most 4 KB read), x-client-ip, x-client-continent -> RegisterAnswer
+ *                                (403 <code> when refused); 5 per address per hour, an IPv6 address counted by its /64.
+ *                                A community operator's node under the registry's CommunityRules (wss on 443 behind a
+ *                                DNS name, in its token's continent, a name of its own), never a blocked operator's
  *   GET  /nodes/connect          WebSocket upgrade: a node's control link (Hibernation API), x-client-ip; the
  *                                sockets still to log in are capped per address, prefix and pool (PENDING_*)
  *   PUT  /nodes/replays/<id>     the hosting node's replay upload, signed (x-node-id / -ts / -sig, x-replay-sha256): the
@@ -15,14 +17,21 @@
  *   GET  /nodes/replays/<id>     the replay, for the verifier node its job went to (signed the same way)
  *   GET  /nodes/status           the public list (publicList.ts): only the nodes in service (probation or active,
  *                                never retired), the project by its name and any other operator as "Anfitrión <n>"
- *   POST /nodes/tokens           { region, name?, publicHost?, roles?, matches?, egressCapGB? } with x-operator-id /
- *                                x-operator-name (an account the Worker found in NODE_TRUSTED_OPERATORS; checked again
- *                                here) -> a one-time token and its install line, built here with every value checked
- *                                (installLine); publicHost pins the node to that DNS name. 409 too_many_nodes, before
- *                                any token, when the operator has every node it may have (NODE_TRUSTED_MAX_NODES);
- *                                10 per account per day
+ *   POST /nodes/tokens           { region, name?, publicHost?, roles?, matches?, egressCapGB?, acceptHost?, adult? } with
+ *                                x-operator-id / x-operator-name (and x-operator-since, the session's): the policy the
+ *                                Worker applied, checked again here (a project account always; any other only while
+ *                                hosting is open for it: env.ts hostingMode, else 403 hosting_closed) -> a one-time
+ *                                token and its install line, built here with every value checked (installLine);
+ *                                publicHost pins the node to that DNS name. 409 too_many_nodes, before any token, when
+ *                                the operator has every node it may have. A project account: 10 per day. Any other
+ *                                (hostGate): not blocked, the requirements of hostPolicy.ts, the rules for hosts of
+ *                                the terms in force (its 'host' consents row, written here when it sends acceptHost
+ *                                and adult), a public host of its own, COMMUNITY_TOKENS_PER_DAY and COMMUNITY_OUTSTANDING
  *   GET  /nodes/mine             x-operator-id -> that operator's nodes (never a retired one) and its rewards
  *                                (Ledger.summary)
+ *   POST /nodes/mine/public      { show } with x-operator-id: an operator outside the project shows its name in the
+ *                                public list, or stops (the opt-in, operators.show_public); turning it on only while
+ *                                hosting is open for it (403 hosting_closed), off always; a project account 409 trusted
  *   The maintainers' routes, x-operator-id / x-operator-name as for tokens (checked again here). Every action
  *   is an ALERT line naming who made it, every time; every read (the GETs) a log line, and an ALERT once per
  *   account per READ_AUDIT_WINDOW_MS (readAudit):
@@ -43,6 +52,14 @@
  *                                -revoke, -unfreeze)
  *   POST /nodes/admin/delist     { matchId, reason? }: one match out of the public replays, its row and its R2
  *                                object; the Worker purges the view's edge copies
+ *   POST /nodes/admin/flags      { name: 'node_operators', value, reason }: the opening of hosting, the only KV write
+ *                                (env.ts HOSTING_FLAG: '0', '1' or account ids), an admin_audit row; every value is
+ *                                refused (409 hosting_terms) while the terms in force do not describe hosting
+ *   POST /nodes/admin/operator   { operatorId, action: block | unblock | suspend_all, reason }: an operator outside the
+ *                                project blocked (no token, registration or login of its nodes, its sockets closed
+ *                                4403, its wallet frozen), unblocked (its wallet stays frozen: /unfreeze), or every
+ *                                node of it in service suspended
+ *   GET  /nodes/admin/operators  the community operators for the Operadores tab (nodeOverview.ts operatorView)
  *   The maintainers' history (nodeStore.ts: node_events, node_match_history, node_alerts, 30 days):
  *   GET  /nodes/admin/events     ?node=&before=: what happened to the nodes, newest first, a page at a time
  *   GET  /nodes/admin/history    ?node=&match=&before=: the settled matches (void ones too), their verdicts, verifiers,
@@ -105,14 +122,19 @@
  * waiting too long), and it keeps running while a trusted node in service is offline until its
  * ALERT goes out, so that one is noticed with nothing else going on. Which nodes got theirs is
  * kept in meta: a restart does not raise them again, and the object can sleep while such a node
- * stays away.
+ * stays away. A community node's ALERT lines (its verifications, refusals, probes, lag, traffic,
+ * update, its pinned host, its operator's code asked for at its node cap) go instead to a second
+ * staff-only channel, NODE_COMMUNITY_WEBHOOK, never one the community reads (they carry node ids,
+ * addresses and account ids), with a hook and a limit of their own (communityAlert), and to the
+ * panel's ring; never to the team's, which a flood of them could otherwise silence. Only the line
+ * of each community registration goes to the team's.
  */
 import { DurableObject } from 'cloudflare:workers';
-import { ControlPlane, MAX_UNAUTHENTICATED, NodeRefused } from '../../nodes/control-plane/controlPlane';
+import { COMMUNITY_POLICY, ControlPlane, MAX_UNAUTHENTICATED, NodeRefused } from '../../nodes/control-plane/controlPlane';
 import type { NodeLink, PlaceRequest, Session } from '../../nodes/control-plane/controlPlane';
 import { Ledger } from '../../nodes/control-plane/ledger';
-import { publicStatus } from '../../nodes/control-plane/publicList';
-import { MAX_CAPACITY, Registry, TOKEN_TTL_MS, isRetired, trustedNodeCap, validPublicHost } from '../../nodes/control-plane/registry';
+import { PUBLIC_HOST_LABEL, publicStatus } from '../../nodes/control-plane/publicList';
+import { MAX_CAPACITY, Registry, TOKEN_TTL_MS, hostOf, isRetired, tokenState, trustedNodeCap, validPublicHost } from '../../nodes/control-plane/registry';
 import type { NodeEventKind, NodeRecord, RegistryOptions } from '../../nodes/control-plane/registry';
 import { compareVersions } from '../../nodes/shared/controlProtocol';
 import type { HeartbeatData, NodeRole, NodeStatus, RegisterAnswer, RegisterRequest, ReleaseChannel } from '../../nodes/shared/controlProtocol';
@@ -121,18 +143,47 @@ import { REGIONS, isRegion } from '../../src/net/account';
 import { seatCar } from '../../src/net/cosmetics';
 import { CATALOG, catalogItem } from '../../nodes/control-plane/shop';
 import { accountsCall } from './accountRoutes';
-import { checkInternal } from './auth';
-import { KV_FLAGS, carriesPhysics, error, flagValue, isHex, isMode, json, limitKey, nodesConfigured, readCapped, readJson, sanitizeName, trustedOperatorIds, withTimeout } from './env';
+import { checkInternal, randomHex } from './auth';
+import {
+  HOSTING_CANARY_MAX,
+  HOSTING_FLAG,
+  KV_FLAGS,
+  carriesPhysics,
+  communityPointsPerDay,
+  communityRanked,
+  error,
+  flagValue,
+  hostingFlagValue,
+  hostingMode,
+  hostingModeOf,
+  hostingOpenFor,
+  hostingStage,
+  hostingTermsInForce,
+  isHex,
+  isMode,
+  json,
+  limitKey,
+  nodesConfigured,
+  readCapped,
+  readJson,
+  sanitizeName,
+  termsVersion,
+  trustedOperatorIds,
+  withTimeout,
+} from './env';
 import type { Env, NodesEnv } from './env';
+import { COMMUNITY_OUTSTANDING, COMMUNITY_TOKENS_PER_DAY, HOST_ACCOUNT_TTL_MS, RESERVED_HOST_DOMAIN, hostAccountOf, hostRequirements, hostingWords, underReservedDomain } from './hostPolicy';
+import type { HostAccount } from './hostPolicy';
 import { widePrefix } from './limits';
 import { ALERT_DEDUPE_MS, AlertHook, alertKey } from './nodeAlerts';
 import type { FetchFn } from './nodeAlerts';
 import { CLIENT_BUILD, LEAVE_STATUS, NODE_ROUTES, OPERATOR_DELETED_ROUTE, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, REJOIN_STATUS, REPLAY_HIDDEN_MAX } from './nodeApi';
-import { adminNodeView, mineView, openMatches, overviewOf } from './nodeOverview';
+import { adminNodeView, mineView, openMatches, operatorView, overviewOf } from './nodeOverview';
+import type { HostingView } from './nodeOverview';
 import type { LeaveAnswer, LeaveRefusal, PlaceAnswer, RejoinTicket, StatusAnswer } from './nodeApi';
 import { DELIVERY_TIMEOUT_MS, deliverCall } from './nodeOutcome';
 import { HISTORY_DAYS, NodeStore } from './nodeStore';
-import type { AlertRow, HistoryCursor, HistoryRow, ReplayCursor, ReplayRow } from './nodeStore';
+import type { AlertRow, HistoryCursor, HistoryRow, OperatorRow, ReplayCursor, ReplayRow } from './nodeStore';
 import { publicItem } from './replayIndex';
 import type { ReplaySeat } from './replayIndex';
 import { GUEST_NAME_RE } from '../../src/net/guestName';
@@ -203,6 +254,12 @@ const READ_AUDITS_KEY = 'read_audits';
 const FLAGS_TTL_MS = 60_000;
 /** The longest egress cap a token's install line takes, in GB a month. */
 const EGRESS_CAP_MAX_GB = 1_000_000;
+/** What an account outside the project hears while hosting is not open to it. */
+const HOSTING_CLOSED = 'hosting a server is not open to this account';
+/** The changes of the opening's flag the overview lists. */
+const HOSTING_CHANGES_SHOWN = 10;
+/** Accounts whose GET /me answer the token's checks keep (HOST_ACCOUNT_TTL_MS each), at most. */
+const HOST_ACCOUNTS_MAX = 1000;
 /**
  * A page of the maintainers' history: node events, settled matches, ALERT lines; and the open
  * matches listed at most (their 6 seats each are asked of AccountsDO in batches of 256: 5 calls).
@@ -458,17 +515,28 @@ export class NodeRegistryDO extends DurableObject<Env> {
   private earlyAlerts: Array<{ at: number; kind: AlertRow['kind']; line: string }> = [];
   /** When each alert (its key) last went into the ring, oldest first (RING_KEYS_MAX). */
   private readonly ringKeys = new Map<string, number>();
+  /** The community nodes' staff-only channel (NODE_COMMUNITY_WEBHOOK): its own hook, so its limit never holds back the team's. */
+  private readonly communityHook: AlertHook;
+  /** The operators outside the project the object keeps a row of (operators: a block, the opt-in), read at the start. */
+  private operators = new Map<string, OperatorRow>();
+  /** GET /me answers for the token's checks (hostGate), HOST_ACCOUNT_TTL_MS each, oldest first. */
+  private readonly hostAccounts = new Map<string, { at: number; account: HostAccount }>();
+  /** The community accounts whose token request is under way (token): one at a time each, so two never pass the caps together. */
+  private readonly tokenAsks = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.cfg = nodesConfigured(env) ? env : null;
-    this.alerts = new AlertHook({
-      url: env.NODE_ALERT_WEBHOOK,
-      waitUntil: (p) => ctx.waitUntil(p),
-      fetch: (url, init) => this.fetchFn(url, init),
-      sleep: (ms) => this.alertSleep(ms),
-      log: (m) => console.log(`[nodes] ${m}`),
-    });
+    const hook = (url: string | undefined) =>
+      new AlertHook({
+        url,
+        waitUntil: (p) => ctx.waitUntil(p),
+        fetch: (u, init) => this.fetchFn(u, init),
+        sleep: (ms) => this.alertSleep(ms),
+        log: (m) => console.log(`[nodes] ${m}`),
+      });
+    this.alerts = hook(env.NODE_ALERT_WEBHOOK);
+    this.communityHook = hook(env.NODE_COMMUNITY_WEBHOOK);
     this.ready = ctx.blockConcurrencyWhile(() => this.start());
   }
 
@@ -545,7 +613,29 @@ export class NodeRegistryDO extends DurableObject<Env> {
   }
 
   private note(notes: Iterable<WatchNote>): void {
-    for (const n of notes) this.log(n.line, n.key);
+    for (const n of notes) {
+      if (n.community) this.communityAlert(n.line, n.key);
+      else this.log(n.line, n.key);
+    }
+  }
+
+  /**
+   * A line about a community node (a node of an operator outside the project). One that starts with
+   * ALERT goes to the community nodes' staff-only channel (NODE_COMMUNITY_WEBHOOK, its own hook:
+   * once per alert in ALERT_DEDUPE_MS, its own ALERT_BURST a minute) and to the panel's ring, never
+   * to the team's channel: the project's alerts never wait behind the community's. Without that
+   * webhook, the ring only.
+   */
+  private communityAlert(msg: string, key?: string): void {
+    console.log(`[nodes] ${msg}`);
+    if (!msg.startsWith('ALERT')) return;
+    this.communityHook.post(msg, key);
+    this.ring('alert', msg, key ?? alertKey(msg));
+  }
+
+  /** A maintainer blocked this operator (operators: status 'blocked'). */
+  private blocked(operatorId: string): boolean {
+    return this.operators.get(operatorId)?.status === 'blocked';
   }
 
   /**
@@ -602,11 +692,14 @@ export class NodeRegistryDO extends DurableObject<Env> {
     }
   }
 
-  /** The eight KV flags' raw values (env.ts KV_FLAGS), read again at most every FLAGS_TTL_MS; one that cannot be read is null. */
+  /**
+   * The eight KV flags' raw values (env.ts KV_FLAGS) and the opening's (HOSTING_FLAG), read again at
+   * most every FLAGS_TTL_MS; one that cannot be read is null.
+   */
   private async flagValues(): Promise<Map<string, string | null>> {
     const now = Date.now();
     if (this.flagsMemo && now - this.flagsMemo.at < FLAGS_TTL_MS) return this.flagsMemo.values;
-    const values = new Map(await Promise.all(KV_FLAGS.map(async (f) => [f, await flagValue(this.env, f)] as const)));
+    const values = new Map(await Promise.all([...KV_FLAGS, HOSTING_FLAG].map(async (f) => [f, await flagValue(this.env, f)] as const)));
     this.flagsMemo = { at: now, values };
     return values;
   }
@@ -635,6 +728,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       this.offlineRow = store.meta(OFFLINE_KEY) ?? '[]';
       this.loginAddrs = loginAddrsOf(store.meta(LOGIN_ADDRS_KEY), Date.now());
       this.readAudits = readAuditsOf(store.meta(READ_AUDITS_KEY), Date.now());
+      this.operators = new Map(store.operatorRows().map((r) => [r.operatorId, r]));
       this.watch = new NodeWatch(idsOf(this.offlineRow));
       // Each of the registry's ALERTs is an account's action: a token or a node of a trusted operator,
       // or the trust an operator lost (NODE_TRUSTED_OPERATORS changed).
@@ -652,6 +746,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
           maxTrustedNodes: trustedNodeCap(env.NODE_TRUSTED_MAX_NODES),
           // A Worker's fetch cannot probe an IP address; a node on this machine under wrangler dev may use one.
           refuseIpUrls: !this.loopbackOk,
+          // A community node (Prompt 2, A5, A6, A13): a VPS by wss on 443, never under the project's domain, in its token's continent.
+          community: { reservedDomains: [RESERVED_HOST_DOMAIN], regionCheck: true },
+          operatorBlocked: (id) => this.blocked(id),
         },
         (n) => {
           const note = this.watch.beat(n);
@@ -660,7 +757,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
       );
       registry.restore(rows, Date.now());
       // The rewards ledger as the store kept it: the repeat decay, the leaderboard and the summaries go on after a deploy.
-      const ledger = new Ledger({ onNote: (n) => store.ledgerNote(n) });
+      // The opening's anti-farming (A17): each player's own decay, and the daily cap per host (its default 300).
+      const ledger = new Ledger({ onNote: (n) => store.ledgerNote(n), playerRepeat: true, dailyCap: communityPointsPerDay(env) });
       ledger.restore(store.ledgerSnapshot(Date.now()), Date.now());
       const cp = new ControlPlane({
         controlPrivateKey: env.NODE_CONTROL_PRIVATE_KEY,
@@ -687,6 +785,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
         now: () => Date.now(),
         log,
         events,
+        // The community nodes' rules (A7, A8, A8 bis, A9, A17e); none of them touches a project node.
+        community: { ...COMMUNITY_POLICY, ranked: communityRanked(env), blocked: (id) => this.blocked(id), log: (m) => this.communityAlert(m) },
       });
       // A deploy drops every socket; a hibernation keeps them (they are adopted below).
       const sockets = this.ctx.getWebSockets();
@@ -997,6 +1097,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (method === 'GET' && path === '/nodes/status') return this.status(cp);
       if (method === 'POST' && path === '/nodes/tokens') return await this.token(request, cp, env);
       if (method === 'GET' && path === '/nodes/mine') return this.mine(request, cp);
+      if (method === 'POST' && path === '/nodes/mine/public') return await this.minePublic(request, cp);
       // The account counts (nodeRoutes.ts): who operates a node, never an address; the ids go on to AccountsDO only.
       // A retired node operates nothing: an account whose nodes are all retired is no operator.
       if (method === 'GET' && path === OPERATORS_ROUTE) return json({ operators: [...new Set(cp.registry.list().filter((n) => !isRetired(n)).map((n) => n.operatorId))] }, 200, { 'cache-control': 'no-store' });
@@ -1057,15 +1158,20 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const n = cp.registry.node(nodeId);
     if (n?.status === 'banned') return { code: 4403, reason: 'banned' };
     if (n && isRetired(n)) return { code: 4403, reason: 'retired' };
+    if (n && !n.trusted && this.blocked(n.operatorId)) return { code: 4403, reason: 'operator blocked' };
     const hello = helloIn(message);
     if (!hello) return null;
     if (this.lastHello.get(ws) === message) return 'drop';
     if (this.limited('hello:' + nodeId, HELLOS_PER_WINDOW, HELLO_WINDOW_MS)) return { code: 1008, reason: 'too many hellos' };
     const url = typeof hello.publicUrl === 'string' ? hello.publicUrl.replace(/\/$/, '') : null;
     if (n && n.transports.includes('wss') && url !== null && url !== n.publicUrl) {
-      // Off the host its token pinned (or onto an IP address): the node keeps that host or nothing.
-      if (!cp.registry.addressAllowed(n, url)) {
-        this.log(`ALERT node ${label(n)} said hello on ${clip(url, 120)}, an address it may not move to (${n.publicHost ? `its token pinned ${n.publicHost}` : 'an IP address'}): its link is closed`, `pinned:${n.nodeId}`);
+      // Off the host its token pinned, onto an IP address, or a community node off port 443: the
+      // node keeps its address or nothing.
+      const why = cp.registry.addressRefusal(n, url);
+      if (why !== null) {
+        const line = `ALERT node ${label(n)} said hello on ${clip(url, 120)}, an address it may not move to (${why}): its link is closed`;
+        if (n.trusted) this.log(line, `pinned:${n.nodeId}`);
+        else this.communityAlert(line, `pinned:${n.nodeId}`);
         return { code: 1008, reason: 'address not allowed' };
       }
       if (this.limited('url:' + nodeId, PUBLIC_URL_CHANGES_PER_HOUR, HOUR_MS)) return { code: 1008, reason: 'too many address changes' };
@@ -1152,10 +1258,16 @@ export class NodeRegistryDO extends DurableObject<Env> {
     if (!this.keyOk) return error(503, 'nodes_unavailable', UNAVAILABLE);
     const body = await readJson<RegisterRequest>(request);
     if (!body) return error(400, 'bad_request');
-    const r = await cp.registry.register(body, Date.now());
+    // The continent Cloudflare saw the installer from (the Worker always sets it, '' for none): a
+    // community node's must be its token's region (A6), a project node's is kept for the panel.
+    const continent = request.headers.get('x-client-continent');
+    const r = await cp.registry.register(body, Date.now(), continent !== null ? { continent: continent.slice(0, 8) } : {});
     if (!r.ok) return error(403, r.code, r.message);
     const n = r.node;
-    this.log(`registered node ${n.name} (${n.nodeId}) for ${n.operatorName}, roles ${n.roles.join('+')}, transports ${n.transports.join('+') || '-'}${n.trusted ? ', trusted' : ''}`);
+    const line = `registered node ${n.name} (${n.nodeId}) for ${n.operatorName}, roles ${n.roles.join('+')}, transports ${n.transports.join('+') || '-'}${n.trusted ? ', trusted' : ''}`;
+    // Each community registration is the one community line the team's channel gets (A10): who, where, which host.
+    if (n.trusted) this.log(line);
+    else this.audit(`ALERT community node ${clip(n.name)} (${n.nodeId}) registered for ${clip(n.operatorName)} (${n.operatorId}), region ${n.region}, host ${n.publicHost ?? (n.publicUrl !== null ? hostOf(n.publicUrl) : null) ?? '-'}`);
     const answer: RegisterAnswer = {
       nodeId: n.nodeId,
       operatorId: n.operatorId,
@@ -1333,54 +1445,149 @@ export class NodeRegistryDO extends DurableObject<Env> {
 
   /**
    * The public list (publicList.ts, as the reference server builds it): the nodes in service only,
-   * and no address, node id or operator id. Always a 200 with { build, nodes, hosts } while the
+   * and no address, node id or operator id; an operator outside the project by its name only when
+   * it chose to (operators.show_public, A14). Always a 200 with { build, nodes, hosts } while the
    * object is up, an empty list too: the deploy's check asks for it (scripts/deploy-check.mjs).
    */
   private status(cp: ControlPlane): Response {
-    return json(publicStatus(cp, Date.now()));
+    return json(publicStatus(cp, Date.now(), (id) => this.operators.get(id)?.showPublic === true));
   }
 
   /**
-   * POST /nodes/tokens { region, name?, publicHost?, roles?, matches?, egressCapGB? }: a one-time
-   * token and the install line built from it (installLine: every value checked first). `publicHost`
-   * pins the node to that DNS name (the registration and every hello stay on it), `roles` to those
-   * roles. 409 too_many_nodes before any token exists when the operator has every node it may have.
+   * POST /nodes/tokens { region, name?, publicHost?, roles?, matches?, egressCapGB?, acceptHost?,
+   * adult? }: a one-time token and the install line built from it (installLine: every value checked
+   * first). `publicHost` pins the node to that DNS name (the registration and every hello stay on
+   * it), `roles` to those roles. The policy first (A1, the Worker's again: the object decides): a
+   * project account always, any other only while hosting is open for it (env.ts hostingMode: the
+   * terms in force describe it, and the KV flag node_operators names it), else 403 hosting_closed;
+   * then such an account's gate (hostGate), one request of the account at a time (429 rate_limited
+   * while another is under way: tokenAsks). 409 too_many_nodes before any token exists when the
+   * operator has every node it may have.
    */
   private async token(request: Request, cp: ControlPlane, env: NodesEnv): Promise<Response> {
     const id = request.headers.get('x-operator-id') ?? '';
-    // The Worker let only a trusted account through; the object holds the same list, and only it decides.
-    if (!cp.registry.isTrusted(id)) return error(403, 'not_trusted', 'only the project creates node tokens for now');
+    const trusted = cp.registry.isTrusted(id);
+    if (!trusted && !hostingOpenFor(await hostingMode(this.env), id)) return error(403, 'hosting_closed', HOSTING_CLOSED);
     const b = await readJson<TokenAsk>(request);
     if (!b || !isRegion(b.region)) return error(400, 'bad_region');
-    const ask = this.tokenAsk(b, cp.registry.isTrusted(id));
+    const ask = this.tokenAsk(b, trusted);
     if (ask instanceof Response) return ask;
-    const name = sanitizeName(decodeHeader(request.headers.get('x-operator-name'))) ?? id.slice(0, 6);
-    // Before a token exists: one that could never register would only wait an hour in the list.
+    // A name the session could not hand on is never the start of the account's id (the public list's operator name).
+    const name = sanitizeName(decodeHeader(request.headers.get('x-operator-name'))) ?? PUBLIC_HOST_LABEL;
+    // One request at a time per community account: hostGate checks its caps before it awaits
+    // AccountsDO, and a token counts only once minted, so two at once would both pass them.
+    if (!trusted && this.tokenAsks.has(id)) return error(429, 'rate_limited', 'a code is being made for this account already: try again in a moment');
+    if (!trusted) this.tokenAsks.add(id);
+    try {
+      if (!trusted) {
+        const refused = await this.hostGate(request, cp, id, name, b, ask);
+        if (refused) return refused;
+      } else {
+        // Before a token exists: one that could never register would only wait an hour in the list.
+        const slots = cp.registry.slots(id);
+        if (slots.used >= slots.max) {
+          this.audit(`ALERT admin ${name} (${id}): no token created, the operator already has its ${slots.max} nodes`);
+          return error(409, 'too_many_nodes', `this account has its ${slots.max} nodes: retire one first`);
+        }
+        if (this.limited('tokens:' + id, TOKENS_PER_ACCOUNT_PER_DAY, DAY_MS)) return error(429, 'rate_limited', `at most ${TOKENS_PER_ACCOUNT_PER_DAY} tokens a day`);
+      }
+      const t = await cp.registry.createToken({ id, name }, b.region, Date.now(), ask.name ?? undefined, { publicHost: ask.publicHost, roles: ask.roles });
+      if (!trusted) this.store?.tokenMinted(id, Date.now());
+      const base = publicBase(env);
+      return json(
+        {
+          token: t.token,
+          expiresAt: t.expiresAt,
+          ttlMinutes: TOKEN_TTL_MS / 60_000,
+          install: { linux: installLine(base, t.token, ask) },
+        },
+        200,
+        { 'cache-control': 'no-store' },
+      );
+    } finally {
+      if (!trusted) this.tokenAsks.delete(id);
+    }
+  }
+
+  /**
+   * The gate of an account outside the project, once hosting is open for it (Prompt 2: A2, A3, A4),
+   * in the order its refusals come: blocked (403 operator_blocked); what hostPolicy.ts asks of the
+   * account, read from AccountsDO's GET /me (403 email_required, deletion_pending, account_too_new
+   * with daysLeft, terms_required with the version); the rules for hosts of the terms in force (its
+   * 'host' consents row: without one, 403 terms_required unless the request carries acceptHost, and
+   * then 403 adult_required unless it carries adult); its node cap (409 too_many_nodes), its tokens
+   * of the last 24 hours and its unused ones (409 too_many_tokens); a name no node of the region
+   * holds (409 name_taken). Only then, the request's acceptance is written (AccountsDO /host-consent:
+   * one 'host' row per version, never without the declaration). null: the token may be minted.
+   * `name`: the account's, for the line on the community nodes' channel at its node cap.
+   */
+  private async hostGate(request: Request, cp: ControlPlane, id: string, name: string, b: TokenAsk, ask: InstallAsk): Promise<Response | null> {
+    const now = Date.now();
+    const version = termsVersion(this.env);
+    if (version === null) return error(403, 'hosting_closed', HOSTING_CLOSED); // hostingMode is closed then: never here
+    if (this.blocked(id)) return error(403, 'operator_blocked', 'this account may not host servers');
+    const account = await this.hostAccount(id, now);
+    if (account instanceof Response) return account;
+    const since = Number(request.headers.get('x-operator-since'));
+    const r = hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version });
+    const first = r.missing[0];
+    if (first === 'email_required') return error(403, first, 'the account needs a verified email address first');
+    if (first === 'deletion_pending') return error(403, first, 'the account has a deletion pending: call it off first');
+    if (first === 'account_too_new') return json({ error: first, message: `the account is too new: ${r.daysLeft} more days`, daysLeft: r.daysLeft }, 403);
+    if (first === 'terms_required') return json({ error: first, message: 'accept the terms in force first', version }, 403);
+    const consent = account.hostTerms !== version;
+    if (consent && b.acceptHost !== true) return json({ error: 'terms_required', message: 'accept the rules for hosts (Terms section 12 and Annex B) with the request', version }, 403);
+    if (consent && b.adult !== true) return error(403, 'adult_required', 'declare you are 18 or older with the request');
     const slots = cp.registry.slots(id);
     if (slots.used >= slots.max) {
-      this.audit(`ALERT admin ${name} (${id}): no token created, the operator already has its ${slots.max} nodes`);
-      return error(409, 'too_many_nodes', `this account has its ${slots.max} nodes: retire one first`);
+      // On the community nodes' channel and the panel's ring, never the team's: the project's alerts never wait behind these.
+      this.communityAlert(`ALERT community operator ${clip(name)} (${id}): no token created, it already has its ${slots.max} servers`, `cap:${id}`);
+      return error(409, 'too_many_nodes', `this account has its ${slots.max} servers: retire one first`);
     }
-    if (this.limited('tokens:' + id, TOKENS_PER_ACCOUNT_PER_DAY, DAY_MS)) return error(429, 'rate_limited', `at most ${TOKENS_PER_ACCOUNT_PER_DAY} tokens a day`);
-    const t = await cp.registry.createToken({ id, name }, b.region, Date.now(), ask.name ?? undefined, { publicHost: ask.publicHost, roles: ask.roles });
-    const base = publicBase(env);
-    return json(
-      {
-        token: t.token,
-        expiresAt: t.expiresAt,
-        ttlMinutes: TOKEN_TTL_MS / 60_000,
-        install: { linux: installLine(base, t.token, ask) },
-      },
-      200,
-      { 'cache-control': 'no-store' },
-    );
+    if ((this.store?.tokensToday(id, now) ?? 0) >= COMMUNITY_TOKENS_PER_DAY) return error(409, 'too_many_tokens', `at most ${COMMUNITY_TOKENS_PER_DAY} codes a day`);
+    const unused = cp.registry.tokenList().filter((t) => t.operatorId === id && tokenState(t, now) === 'unused').length;
+    if (unused >= COMMUNITY_OUTSTANDING) return error(409, 'too_many_tokens', `at most ${COMMUNITY_OUTSTANDING} unused codes at once: use or revoke one`);
+    if (ask.name !== null && cp.registry.nameTaken(b.region as string, ask.name)) return error(409, 'name_taken', `a server of the region is already called ${ask.name}`);
+    if (consent) {
+      const w = await accountsCall(this.env, '/host-consent', { userId: id, version, adult: true });
+      this.hostAccounts.delete(id);
+      if (!w.ok) {
+        const got = (await w.json().catch(() => null)) as { error?: unknown; purgeAt?: unknown } | null;
+        if (got?.error === 'terms_changed' || got?.error === 'terms_required') return json({ error: 'terms_required', message: 'the terms changed: read them again', version: termsVersion(this.env) }, 403);
+        if (got?.error === 'deletion_pending') return error(403, 'deletion_pending', 'the account has a deletion pending: call it off first');
+        this.log(`host consent of ${id} not written (${w.status} ${String(got?.error ?? '')}): no token`);
+        return error(503, 'nodes_unavailable', UNAVAILABLE);
+      }
+      await w.body?.cancel().catch(() => undefined);
+      this.log(`community operator ${id} accepted the rules for hosts of ${version} and declared 18 or older`);
+    }
+    return null;
+  }
+
+  /** An account as the token's checks read it (AccountsDO GET /me, kept HOST_ACCOUNT_TTL_MS), or the refusal. */
+  private async hostAccount(id: string, now: number): Promise<HostAccount | Response> {
+    const kept = this.hostAccounts.get(id);
+    if (kept && now - kept.at < HOST_ACCOUNT_TTL_MS) return kept.account;
+    const res = await accountsCall(this.env, '/me?userId=' + id);
+    if (res.status === 404) {
+      await res.body?.cancel();
+      return error(403, 'account_required', 'no such account');
+    }
+    const account = res.ok ? hostAccountOf(await res.json().catch(() => null)) : null;
+    if (!res.ok) await res.body?.cancel();
+    if (account === null) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    this.hostAccounts.delete(id);
+    if (this.hostAccounts.size >= HOST_ACCOUNTS_MAX) this.hostAccounts.delete(this.hostAccounts.keys().next().value as string);
+    this.hostAccounts.set(id, { at: now, account });
+    return account;
   }
 
   /**
    * The token's options, each checked before it goes into the install line, or the refusal (400
    * bad_name / bad_public_host / bad_roles / bad_matches / bad_egress_cap, 403 verify_reserved). A
    * public host is a DNS name (validPublicHost: install.sh's is_dns_name) the object may probe
-   * (probeTargetOk: a public one, not an IP address).
+   * (probeTargetOk: a public one, not an IP address). An account outside the project must name one,
+   * never under the project's domain (A5): its node is a VPS by wss, pinned to that name.
    */
   private tokenAsk(b: TokenAsk, trusted: boolean): InstallAsk | Response {
     let name: string | null = null;
@@ -1392,8 +1599,10 @@ export class NodeRegistryDO extends DurableObject<Env> {
     if (b.publicHost !== undefined && b.publicHost !== null) {
       const h = validPublicHost(b.publicHost);
       if (h === null || !probeTargetOk(`https://${h}/healthz`, this.loopbackOk)) return error(400, 'bad_public_host', 'publicHost: a public DNS name, with no scheme, port or path, never an IP address');
+      if (!trusted && underReservedDomain(h)) return error(400, 'bad_public_host', `publicHost: a name of your own, never under ${RESERVED_HOST_DOMAIN}`);
       publicHost = h;
     }
+    if (!trusted && publicHost === null) return error(400, 'bad_public_host', 'publicHost: the DNS name of your server (a record that points at it, DNS only)');
     let roles: NodeRole[] | null = null;
     if (b.roles !== undefined && b.roles !== null) {
       const list = typeof b.roles === 'string' ? b.roles.split(',') : Array.isArray(b.roles) ? b.roles : null;
@@ -1432,6 +1641,31 @@ export class NodeRegistryDO extends DurableObject<Env> {
       200,
       { 'cache-control': 'no-store' },
     );
+  }
+
+  /**
+   * POST /nodes/mine/public { show } (A14): whether the public list names this operator, outside the
+   * project, by its name (its nodes and the hosts' ranking) or as "Anfitrión <n>". Its consent: on
+   * only while hosting is open for it (403 hosting_closed: nothing is stored before the opening),
+   * off at any time; written only when it changes (operators.show_public), a log line and no ALERT.
+   * The purge of the account turns it off for good (operatorDeleted). A project account is always
+   * named: 409 trusted.
+   */
+  private async minePublic(request: Request, cp: ControlPlane): Promise<Response> {
+    const id = request.headers.get('x-operator-id') ?? '';
+    if (!ACCOUNT_ID_RE.test(id)) return error(400, 'bad_request');
+    const b = await readJson<{ show?: unknown }>(request);
+    if (!b || typeof b.show !== 'boolean') return error(400, 'bad_request', 'show: true or false');
+    if (cp.registry.isTrusted(id)) return error(409, 'trusted', 'a project account is always shown by its name');
+    if (b.show && !hostingOpenFor(await hostingMode(this.env), id)) return error(403, 'hosting_closed', HOSTING_CLOSED);
+    const was = this.operators.get(id);
+    if ((was?.showPublic === true) !== b.show && this.store) {
+      const at = Date.now();
+      this.store.setShowPublic(id, b.show, at);
+      this.operators.set(id, was ? { ...was, showPublic: b.show } : { operatorId: id, status: 'ok', reason: null, actor: null, at, showPublic: b.show });
+      this.log(`community operator ${id} ${b.show ? 'shows' : 'no longer shows'} its name in the public list`);
+    }
+    return json({ showPublic: b.show }, 200, { 'cache-control': 'no-store' });
   }
 
   private async place(request: Request, cp: ControlPlane): Promise<Response> {
@@ -1511,9 +1745,14 @@ export class NodeRegistryDO extends DurableObject<Env> {
     return json({ replays, history: this.pruneHistory() });
   }
 
-  /** The maintainers' history past HISTORY_DAYS (node_events, node_match_history, node_alerts), on the cron's schedule too: the matches pruned. Never throws. */
+  /**
+   * The maintainers' history past HISTORY_DAYS (node_events, node_match_history, node_alerts), the
+   * opening's rows past theirs (NodeStore.pruneHistory), and the node tokens an hour past their
+   * expiry (Registry.pruneTokens), on the cron's schedule too: the matches pruned. Never throws.
+   */
   private pruneHistory(): number {
     try {
+      this.cp?.registry.pruneTokens(Date.now());
       const n = this.store?.pruneHistory(Date.now()) ?? 0;
       if (n > 0) this.log(`history: ${n} settled matches past ${HISTORY_DAYS} days pruned`);
       return n;
@@ -1592,9 +1831,12 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (what === 'alerts') return this.adminAlerts(url, id, actor);
       if (what === 'matches') return await this.adminMatches(cp, id, actor);
       if (what === 'replay') return await this.adminReplay(url, cp, actor);
+      if (what === 'operators') return this.adminOperators(cp, id, actor);
       return error(404, 'not_found');
     }
     if (request.method !== 'POST') return error(404, 'not_found');
+    if (what === 'flags') return await this.adminFlags(request, actor);
+    if (what === 'operator') return await this.adminOperator(request, cp, actor);
     if (what === 'update') return await this.adminUpdate(cp, actor);
     if (what === 'grant' || what === 'revoke' || what === 'unfreeze') return await this.adminInventory(request, actor, what);
     if (what === 'delist') return await this.adminDelist(request, actor);
@@ -1635,6 +1877,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       flags: await this.flagValues(),
       webhook: !!this.env.NODE_ALERT_WEBHOOK,
       voids: this.store?.voidsSince(now - DAY_MS) ?? [],
+      hosting: await this.hostingView(),
     });
     const count = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`;
     this.readAudit(id, actor, `the overview (${count(body.nodes.length, 'node')}, with their addresses, and ${count(body.tokens.length, 'token')})`);
@@ -1665,6 +1908,137 @@ export class NodeRegistryDO extends DurableObject<Env> {
   private async adminFrozen(id: string, actor: string): Promise<Response> {
     this.readAudit(id, actor, 'the frozen wallets');
     return passOn(await accountsCall(this.env, '/host-frozen'));
+  }
+
+  /**
+   * The opening of hosting as the overview shows it (nodeOverview.ts HostingView): the flag as it is
+   * stored, read with the others (flagValues), even while the terms keep it closed: a value set
+   * before them would open hosting at the deploy that brings them.
+   */
+  private async hostingView(): Promise<HostingView> {
+    const raw = (await this.flagValues()).get(HOSTING_FLAG) ?? null;
+    const inForce = hostingTermsInForce(this.env);
+    return {
+      flag: HOSTING_FLAG,
+      raw,
+      stage: hostingStage(inForce ? hostingModeOf(raw) : 'closed'),
+      terms: { inForce, version: termsVersion(this.env), needed: termsVersion({ TERMS_VERSION: this.env.NODE_HOSTING_TERMS }) },
+      changes: this.store?.adminAuditList(HOSTING_CHANGES_SHOWN) ?? [],
+      communityWebhook: !!this.env.NODE_COMMUNITY_WEBHOOK,
+    };
+  }
+
+  /**
+   * POST /nodes/admin/flags { name, value, reason } (A1): the opening of hosting, the KV flag
+   * node_operators (env.ts HOSTING_FLAG), the only flag the Worker writes and its only KV write:
+   * '0' closes, '1' opens to every account, a list of account ids to a canary (hostingFlagValue,
+   * deduplicated, HOSTING_CANARY_MAX at most). A reason is required. While the terms in force do
+   * not describe hosting (NODE_HOSTING_TERMS) every value is refused, '0' too (409 hosting_terms,
+   * nothing written, a log line and no ALERT): a value that opens would open nothing then, and could
+   * open at the deploy that sets it, and under those terms no admin_audit row or ALERT about the
+   * opening exists at all (a value set by hand is cleared with wrangler).
+   * Written, it is an admin_audit row (the values before and after, the canary's ids included) and
+   * an ALERT naming who did it, which says how many accounts it opens to, never their ids. KV's edge
+   * cache keeps the old value up to a minute or two wherever it was read. It decides who may ask for
+   * a token only: whose matches a node gets is nodes_on's.
+   */
+  private async adminFlags(request: Request, actor: string): Promise<Response> {
+    const store = this.store;
+    if (!store) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
+    const b = await readJson<{ name?: unknown; value?: unknown; reason?: unknown }>(request);
+    if (!b || b.name !== HOSTING_FLAG) return refuse(400, 'bad_flag', `name: ${HOSTING_FLAG}, the only flag the panel writes`);
+    const value = hostingFlagValue(b.value);
+    if (value === null) return refuse(400, 'bad_value', `value: '0', '1' or account ids (16 hex characters), comma-separated, at most ${HOSTING_CANARY_MAX}`);
+    const reason = reasonOf(b.reason);
+    if (!reason) return refuse(400, 'reason_required', 'reason: why the opening changes');
+    if (!hostingTermsInForce(this.env)) {
+      this.log(`admin ${actor}: the hosting flag ${HOSTING_FLAG} not set (${hostingWords(value)}): the terms in force do not describe hosting yet`);
+      return refuse(409, 'hosting_terms', 'the terms in force do not describe hosting yet (NODE_HOSTING_TERMS): nothing was written');
+    }
+    let old: string | null;
+    try {
+      old = await this.env.FLAGS.get(HOSTING_FLAG);
+      await this.env.FLAGS.put(HOSTING_FLAG, value);
+    } catch (e) {
+      this.audit(`ALERT admin ${actor}: the hosting flag ${HOSTING_FLAG} not written (${hostingWords(value)}): ${clip(String(e), 120)}`);
+      return refuse(503, 'flag_not_written', 'KV did not take it: nothing changed');
+    }
+    const at = Date.now();
+    try {
+      store.adminAudit({ at, actor, flag: HOSTING_FLAG, old, new: value, reason });
+    } catch (e) {
+      this.log(`admin_audit row not written: ${String(e)}`);
+    }
+    this.flagsMemo = null;
+    this.audit(`ALERT admin ${actor}: hosting ${hostingWords(old)} -> ${hostingWords(value)} (${HOSTING_FLAG}): ${reason}`);
+    return json({ name: HOSTING_FLAG, value, was: old, stage: hostingStage(hostingModeOf(value)), lands: 'within a minute or two (KV is cached 60 s at the edge)' }, 200, { 'cache-control': 'no-store' });
+  }
+
+  /**
+   * POST /nodes/admin/operator { operatorId, action, reason } (A4), on an operator outside the
+   * project (409 trusted for one of its accounts):
+   *   block        every node of it is refused from now on (no token, no registration, its sockets
+   *                closed 4403 and every login refused) and its wallet frozen (AccountsDO
+   *                /host-freeze, with the reason): its claims wait for a maintainer's /unfreeze
+   *   unblock      it may host again; its wallet stays as it is (unfreeze it apart)
+   *   suspend_all  every node of it in service (pending, probation, active) suspended, for review
+   * A reason is required for block and suspend_all. An ALERT naming who did it, the account id and
+   * the reason, every time. A purged account's nodes are banned by operatorDeleted, not here.
+   */
+  private async adminOperator(request: Request, cp: ControlPlane, actor: string): Promise<Response> {
+    const store = this.store;
+    if (!store) return refuse(503, 'nodes_unavailable', UNAVAILABLE);
+    const b = await readJson<{ operatorId?: unknown; action?: unknown; reason?: unknown }>(request);
+    if (!b || !isHex(b.operatorId, 16)) return refuse(400, 'bad_account', 'operatorId: the 16 hex characters of an account id');
+    const op = b.operatorId;
+    if (b.action !== 'block' && b.action !== 'unblock' && b.action !== 'suspend_all') return refuse(400, 'bad_action', 'action: block, unblock or suspend_all');
+    const reason = reasonOf(b.reason);
+    if (!reason && b.action !== 'unblock') return refuse(400, 'reason_required', 'reason: why');
+    if (cp.registry.isTrusted(op)) return refuse(409, 'trusted', 'a project account is never blocked');
+    const at = Date.now();
+    const nodes = cp.registry.byOperator(op).filter((n) => !isRetired(n));
+    if (b.action === 'suspend_all') {
+      let suspended = 0;
+      for (const n of nodes) {
+        if (n.status !== 'pending' && n.status !== 'probation' && n.status !== 'active') continue;
+        this.as(actor, () => cp.setStatus(n.nodeId, 'suspended', reason));
+        this.watch.statusSet(n);
+        suspended++;
+      }
+      this.keepOffline();
+      this.audit(`ALERT admin ${actor}: operator ${op}: ${suspended} node${suspended === 1 ? '' : 's'} suspended: ${reason}`);
+      return json({ operatorId: op, suspended }, 200, { 'cache-control': 'no-store' });
+    }
+    const status = b.action === 'block' ? 'blocked' : 'ok';
+    const was = this.operators.get(op);
+    const row: OperatorRow = { operatorId: op, status, reason, actor, at, showPublic: was?.showPublic === true };
+    store.setOperatorStatus(row);
+    this.operators.set(op, row);
+    if (status === 'ok') {
+      this.audit(`ALERT admin ${actor}: operator ${op} unblocked${reason ? `: ${reason}` : ''} (its wallet stays as it is: /unfreeze)`);
+      return json({ operatorId: op, status, already: was?.status !== 'blocked' }, 200, { 'cache-control': 'no-store' });
+    }
+    // Its nodes leave at once: their sockets close, and every login is refused (helloRefused).
+    for (const n of nodes) this.closeNode(n.nodeId, 4403, 'operator blocked');
+    const freeze = await accountsCall(this.env, '/host-freeze', { userId: op, reason: `operator_blocked:${reason}`.slice(0, 120), at });
+    const frozen = freeze.ok;
+    await freeze.body?.cancel().catch(() => undefined);
+    this.audit(`ALERT admin ${actor}: operator ${op} blocked (${nodes.length} node${nodes.length === 1 ? '' : 's'} off, wallet ${frozen ? 'frozen' : `NOT frozen: AccountsDO answered ${freeze.status}`}): ${reason}`);
+    return json({ operatorId: op, status, already: was?.status === 'blocked', nodes: nodes.length, walletFrozen: frozen }, 200, { 'cache-control': 'no-store' });
+  }
+
+  /**
+   * GET /nodes/admin/operators: every operator outside the project that has a node or a row, for
+   * the Operadores tab (nodeOverview.ts operatorView). A read: in the read window.
+   */
+  private adminOperators(cp: ControlPlane, id: string, actor: string): Response {
+    const now = Date.now();
+    const ids = new Set<string>();
+    for (const n of cp.registry.list()) if (!cp.registry.isTrusted(n.operatorId)) ids.add(n.operatorId);
+    for (const k of this.operators.keys()) if (!cp.registry.isTrusted(k)) ids.add(k);
+    const operators = [...ids].map((op) => operatorView(cp, op, { now, row: this.operators.get(op) ?? null, tokensToday: this.store?.tokensToday(op, now) ?? 0 }));
+    this.readAudit(id, actor, `the community operators (${operators.length})`);
+    return json({ at: now, operators }, 200, { 'cache-control': 'no-store' });
   }
 
   /** POST READ_AUDIT_ROUTE { what }: a read the Worker answered (account-stats, queue-stats), in the one window of every read. */
@@ -2004,8 +2378,12 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * left as it is too: it is refused at every login already, and banning it would change nothing but
    * its status in the panel. Every purged account comes here, a player's too: its name and id leave
    * every seat of the maintainers' history (NodeStore.forgetPlayer), the seat of a match it is still
-   * in when that match settles, and the open matches' list. A NODE_TRUSTED_OPERATORS id
-   * (the project's account is never deleted) changes nothing: 409 trusted.
+   * in when that match settles, and the open matches' list. An operator's name choice goes for good
+   * (the public list calls it "Anfitrión <n>" from now on), its token counts with it, its unused
+   * tokens are revoked, a maintainer's status row stays under an opaque key instead of the id, and
+   * the id leaves the opening's audit (NodeStore.forgetOperator; decisions.md: the chosen name and
+   * the account id go with the account). A NODE_TRUSTED_OPERATORS id (the project's account is
+   * never deleted) changes nothing: 409 trusted.
    */
   private async operatorDeleted(request: Request, cp: ControlPlane): Promise<Response> {
     const b = await readJson<{ userId?: unknown }>(request);
@@ -2017,6 +2395,15 @@ export class NodeRegistryDO extends DurableObject<Env> {
     }
     // Every purged account comes here, a player's too: its name and id leave the maintainers' history.
     this.store?.forgetPlayer(id);
+    const row = this.operators.get(id);
+    const alias = `deleted:${randomHex(6)}`;
+    this.store?.forgetOperator(id, alias);
+    this.operators.delete(id);
+    if (row && row.actor !== null) this.operators.set(alias, { ...row, operatorId: alias, showPublic: false });
+    this.hostAccounts.delete(id);
+    // A code it asked for and never used registers nothing now: the account is gone.
+    const now = Date.now();
+    for (const t of cp.registry.tokenList()) if (t.operatorId === id && tokenState(t, now) === 'unused') cp.registry.revokeToken(t.hash, now);
     let banned = 0;
     for (const n of cp.registry.byOperator(id)) {
       if (n.status === 'banned' || isRetired(n)) continue;
@@ -2140,6 +2527,10 @@ interface TokenAsk {
   roles?: unknown;
   matches?: unknown;
   egressCapGB?: unknown;
+  /** An account outside the project accepts the rules for hosts of the terms in force (Terms section 12, Annex B) with this request. */
+  acceptHost?: unknown;
+  /** And declares it is 18 or older: the 'host' row is never written without both. */
+  adult?: unknown;
 }
 
 /** A token's checked options (NodeRegistryDO.tokenAsk): what its install line carries. */
