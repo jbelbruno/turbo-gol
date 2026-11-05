@@ -1,8 +1,10 @@
 /**
  * LobbyDO: one custom-match lobby (private by code, or listed in the public lobby browser): a
  * join code, an optional password, public or private, the host's settings (name,
- * playlist, match length; `net` is always 'p2p' since the modes redesign: a 'server' sent by an
- * older page, or stored by one, is read as 'p2p') and the members on two teams. Hibernating WebSockets
+ * playlist, match length, the bots' level: LOBBY_BOTS_DEFAULT unless the host picks another, sent
+ * to the members and to /custom, never to the public list; `net` is always 'p2p' since the modes
+ * redesign: a 'server' sent by an older page, or stored by one, is read as 'p2p') and the members
+ * on two teams. Hibernating WebSockets
  * (JSON text frames, src/net/account.ts LobbyServerMsg / LobbyClientMsg): a lobby where nobody
  * talks costs nothing; the whole state lives in one storage record so a wake-up rebuilds it.
  *
@@ -48,10 +50,10 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { NEED_PLAYERS_TEXT, error, json, readJson } from './env';
+import { NEED_PLAYERS_TEXT, error, isBotLevel, json, readJson } from './env';
 import { INTERNAL_HEADER, checkInternal, internalSecret } from './auth';
 import { MODES } from '../../src/sim/constants';
-import { LOBBY_LENGTHS, isPlaylist, lobbyNameIssue, sanitizeLobbyName } from '../../src/net/account';
+import { LOBBY_BOTS_DEFAULT, LOBBY_LENGTHS, isPlaylist, lobbyBots, lobbyNameIssue, sanitizeLobbyName } from '../../src/net/account';
 import { guestNameOf } from '../../src/net/guestName';
 import { DEFAULT_MATCH_SECONDS } from '../../src/game/Match';
 import { parseLobbyRules } from '../../src/game/physicsRules';
@@ -292,11 +294,17 @@ function parseSettings(v: unknown, base: LobbySettings): LobbySettings | string 
     if (rules === 'bad') return 'bad_physics';
     out.physics = rules;
   }
+  // The bots' level of the lobby's matches (absent: it stays; an older page never sends one).
+  if (o.bots !== undefined) {
+    if (!isBotLevel(o.bots)) return 'bad_bots';
+    out.bots = o.bots;
+  }
+  out.bots = lobbyBots(out);
   return out;
 }
 
 export function defaultLobbySettings(name: string): LobbySettings {
-  return { name, mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: DEFAULT_MATCH_SECONDS, physics: null };
+  return { name, mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: DEFAULT_MATCH_SECONDS, physics: null, bots: LOBBY_BOTS_DEFAULT };
 }
 
 export { parseSettings as parseLobbySettings };
@@ -852,6 +860,8 @@ export class LobbyDO extends DurableObject<Env> {
           members: rec.members.map((m) => ({ playerId: m.playerId, name: m.name, team: m.team, guest: m.guest, ...(m.car !== undefined ? { car: m.car } : {}) })),
           // Experimental rules travel as the copy the lobby holds (the matchmaker checks them again).
           physics: lobbyPhysics(rec.settings),
+          // The host's bots level: the room's (every peer runs it).
+          bots: lobbyBots(rec.settings),
         }),
       });
     } catch (e) {
@@ -888,7 +898,8 @@ export class LobbyDO extends DurableObject<Env> {
   private stateFor(memberId: string): LobbyState {
     const rec = this.rec as LobbyRecord;
     const members: LobbyMember[] = rec.members.map((m) => ({ id: m.id, name: m.name, team: m.team, host: m.id === rec.hostId, guest: m.guest, inGame: m.inGame, away: m.awayAt !== undefined, ready: m.ready === true, ...(m.car !== undefined ? { car: m.car } : {}) }));
-    return { code: rec.code, settings: { ...rec.settings, physics: lobbyPhysics(rec.settings) }, hasPassword: rec.pwHash !== null, region: rec.region, members, you: memberId, status: rec.status };
+    // The members see the bots' level; the public list never does (summary).
+    return { code: rec.code, settings: { ...rec.settings, physics: lobbyPhysics(rec.settings), bots: lobbyBots(rec.settings) }, hasPassword: rec.pwHash !== null, region: rec.region, members, you: memberId, status: rec.status };
   }
 
   private send(ws: WebSocket, msg: LobbyServerMsg): void {

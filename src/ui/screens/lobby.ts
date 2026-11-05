@@ -30,6 +30,7 @@
  */
 import { h, setChildren, copyText, navButton } from '../dom';
 import type { LobbyMember, LobbyState } from '../../net/account';
+import { lobbyBots } from '../../net/account';
 import type { LobbyCreate } from '../../net/LobbyClient';
 import { AccountError } from '../../net/AccountClient';
 import { lobbyCloseText } from '../../net/LobbyClient';
@@ -40,7 +41,7 @@ import { takeLobbyStay } from '../../game/rejoinStore';
 import { GAME_NAME } from '../../brand';
 import { serverText, t } from '../../i18n';
 import { lobbyRulesLine } from '../../render/rulesText';
-import { lobbyTitle, playerName } from '../names';
+import { difficultyName, lobbyTitle, playerName } from '../names';
 import type { Menu, Screen } from '../Menu';
 import { icon } from '../components/icons';
 import { qrSvg } from '../components/qr';
@@ -318,11 +319,12 @@ export function installLobbyReturn(menu: Menu): void {
   go();
 }
 
-/** The Sala's settings line: "2v2 · 5 min · Private" (lobbies are always P2P). */
+/** The Sala's settings line: "2v2 · 5 min · Bots: Hard · Private" (lobbies are always P2P; the bots' level only here, never in the public list). */
 function infoLine(s: LobbyState): string {
   return t('custom.info', {
     mode: s.settings.mode,
     length: lengthLabel(s.settings.matchLengthSeconds),
+    bots: t('custom.infoBots', { level: difficultyName(lobbyBots(s.settings)) }),
     visibility: s.settings.visibility === 'public' ? t('custom.public') : t('custom.private'),
     lock: '',
   });

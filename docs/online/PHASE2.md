@@ -435,3 +435,23 @@ Tests: `server/test/room.test.mjs` (the room and the matchmaker), `server/test/n
 `server/test/experimental-lobby.test.mjs` (LobbyDO, the Worker, every standard-physics-only path),
 `tests/p2p-session.test.mjs` (the client, and two sessions on the real engine + wasm + bots under a
 preset), `server/test/smoke-accounts.mjs` (an experimental lobby against wrangler dev).
+
+## The bots' level (protocol 6, 2026-11-04)
+
+A lobby's host picks the bots' level of its matches (SETTINGS, "Bot difficulty": Easy, Normal or
+Hard; Hard by default, also for a lobby stored before the setting). Before, every peer ran a
+constant medium (`P2P_BOT_DIFFICULTY`).
+
+- **Protocol 6** (`P2P_PROTOCOL_VERSION`, `ROOM_PROTOCOL`): `RoomWelcome.botDifficulty`, always
+  present. The level is part of the shared simulation, so a page of protocol 5 (a constant medium)
+  is refused at the welcome with `reload_required` and reloads instead of desyncing, and RoomClient
+  refuses a protocol-6 welcome without a level it knows the same way.
+- **It travels once**, checked at every step: `LobbySettings.bots` (LobbyDO `parseSettings`,
+  `bad_bots`), the start's `/custom { bots }` (400 `bad_bots`; absent = hard), RoomDO
+  `/internal/create { botDifficulty }` (400 `bad_bots`; a record without it plays medium), every
+  welcome and `/internal/status`. `P2PSession` builds both BotTeams with it (`window.__game.p2p.botLevel`).
+- **Members only**: the lobby state carries it and the Sala's line shows it ("2v2 · 5 min · Bots:
+  Hard · Private"); the public list's row and the join link's peek are built field by field without
+  it (the privacy policy lists what the public list shows).
+- Casual's own bots (MatchDO and nodes) follow the KV flag `bot_level` instead (server/README.md);
+  ranked never sends a level.

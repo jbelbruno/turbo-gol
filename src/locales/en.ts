@@ -462,12 +462,14 @@ export default {
   'custom.colHost': 'Host',
   'custom.colState': 'Status',
   'custom.loading': 'Loading lobbies…',
-  // Lobby settings labels (settingMode ... settingLength)
+  // Lobby settings labels (settingMode ... settingBots)
   'custom.settingMode': 'Mode',
   'custom.settingVisibility': 'Visibility',
   'custom.visibilityPublicListed': 'Public (listed)',
   'custom.visibilityPrivateCode': 'Private (code only)',
   'custom.settingLength': 'Duration',
+  // The level of the bots in the lobby's empty slots (Easy, Normal, Hard); every player's game runs the same
+  'custom.settingBots': 'Bot difficulty',
   'custom.nameField': 'Lobby name',
   'custom.passwordOptional': 'Password (optional)',
   // Placeholder of the optional password field
@@ -493,8 +495,10 @@ export default {
   'custom.joining': 'Joining the lobby…',
   'custom.notInLobby': "You're not in a lobby",
   'custom.back': 'BACK',
-  // Lobby summary line, e.g. '2v2 · 5 min · Public' (lobbies are always P2P). {lock} is ' · 🔒' when the lobby has a password, else empty.
-  'custom.info': '{mode} · {length} · {visibility}{lock}',
+  // Lobby summary line, e.g. '2v2 · 5 min · Bots: Hard · Public' (lobbies are always P2P); {bots} is custom.infoBots. {lock} is ' · 🔒' when the lobby has a password, else empty.
+  'custom.info': '{mode} · {length} · {bots} · {visibility}{lock}',
+  // The bots' level in that line; {level} is Easy, Normal or Hard
+  'custom.infoBots': 'Bots: {level}',
   'custom.public': 'Public',
   'custom.private': 'Private',
   // Label next to the lobby's join code
@@ -2114,6 +2118,11 @@ export default {
   'settings.groupInterface': 'Interface',
   // Game tab: the size of the menus' text and boxes (100 / 115 / 130 / 150 %)
   'settings.uiSize': 'Interface size',
+  // Game tab: the page goes full screen when a match or training starts (a computer), or at a tap
+  // (Android: the second help line); off, it never does. Not listed on an iPhone, an iPad or a TV
+  'settings.fullscreen': 'Full screen when playing',
+  'settings.fullscreenHelp': 'Entering the pitch fills the screen. To leave it, hold Esc.',
+  'settings.fullscreenHelpTap': 'A tap puts the game in full screen, in landscape.',
   'settings.reducedMotion': 'Reduced motion',
   'settings.reducedMotionHelp': 'Nothing slides or bounces in the menus.',
   // Reduced motion's first option: follow the system's setting
@@ -2606,7 +2615,9 @@ export default {
   'replay.nextGoal': 'Next goal',
   'replay.orbitHint': 'Drag: turn · Wheel: zoom · Right drag: move · Double click: follow the ball',
   'replay.chaseHint': 'Wheel: distance · B: ball or car cam · [ ]: goals',
-  'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu',
+  'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu · F: full screen',
+  // The replay viewer's button (and its F key): full screen on, or off again
+  'replay.fullscreen': 'Full screen',
   // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
   // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
   // Its consent covers what it names: storage in the United States and Brazil (the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)

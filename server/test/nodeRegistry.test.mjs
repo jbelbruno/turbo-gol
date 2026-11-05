@@ -774,7 +774,7 @@ test('a casual match only frees its locks; a 5xx is tried again later, further a
   await tick();
   const late = alerts().filter((l) => l.includes(' outbox '));
   assert.equal(late.length, 1, 'once');
-  assert.match(late[0], /ALERT outbox \/release for match \w{8} \(mm:SA\) undelivered for a day, 3 tries/);
+  assert.match(late[0], /ALERT outbox \/release for match \w{8} \(hub\) undelivered for a day, 3 tries/, 'the row names the queue hub (nodeOutcome.ts HUB_TARGET)');
   assert.equal(rows(h, 'outbox')[0].next_at - clock, 8_000);
   env.MATCHMAKER.answer = () => new RealResponse('{"ok":true}');
   clock += 300_000;

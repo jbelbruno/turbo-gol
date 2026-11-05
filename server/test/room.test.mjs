@@ -1264,10 +1264,36 @@ const PEERS_1V1 = [
 ];
 const errorsOf = (ws) => ws.of('error').map((e) => e.code);
 
-test('RoomDO: ROOM_PROTOCOL is 5 (experimental rules in the welcome, the ready fingerprint)', () => {
-  assert.equal(R.ROOM_PROTOCOL, 5);
+test('RoomDO: ROOM_PROTOCOL is 6 (the bots level in the welcome; 5: experimental rules in the welcome, the ready fingerprint)', () => {
+  assert.equal(R.ROOM_PROTOCOL, 6);
   assert.equal(R.PHYSICS_MISMATCH, 'physics_mismatch');
   assert.notEqual(RULES_FP, STOCK_FP);
+});
+
+test("RoomDO: the bots' level is persisted at create and carried by every welcome (first, late, replacement) and /internal/status; a record without it plays medium; junk is 400 bad_bots", async () => {
+  const h = await makeRoom(PEERS_1V1, '1v1', ENV, { botDifficulty: 'easy' });
+  assert.equal(h.ctx.storage.map.get('record').botDifficulty, 'easy', 'persisted with the record');
+  const a = await h.join(0);
+  assert.deepEqual([a.of('room')[0].protocol, a.of('room')[0].botDifficulty], [6, 'easy'], 'first socket');
+  const b = await h.join(1);
+  assert.equal(b.of('room')[0].botDifficulty, 'easy', 'second socket');
+  await h.send(a, { type: 'ready' });
+  await h.send(b, { type: 'ready' });
+  assert.equal(a.of('start').length, 1);
+  const b2 = await h.join(1);
+  assert.equal(b2.of('room')[0].botDifficulty, 'easy', 'replacement socket');
+  assert.equal((await h.internal('/internal/status')).json.botDifficulty, 'easy');
+  // A room of an older build (no level in its record): the medium every room played before.
+  assert.equal(R.roomBots({ roomId: 'r', mode: '1v1', region: 'SA', seed: 1, slots: [], matchLengthSeconds: 300, createdAt: 0 }), 'medium');
+  const old = await makeRoom(PEERS_1V1, '1v1');
+  assert.equal('botDifficulty' in old.ctx.storage.map.get('record'), false);
+  assert.equal((await old.join(0)).of('room')[0].botDifficulty, 'medium');
+  const secret = await internalSecret(SECRET);
+  for (const bad of ['insane', 'Hard', 3, null]) {
+    const room = new R.RoomDO(new FakeCtx(), ENV);
+    const res = await room.fetch(new Request('https://room/internal/create', { method: 'POST', headers: { [INTERNAL_HEADER]: secret, 'content-type': 'application/json' }, body: JSON.stringify({ roomId: 'r9', mode: '1v1', region: 'test', seed: 1, slots: PEERS_1V1, matchLengthSeconds: 300, createdAt: Date.now(), physics: null, botDifficulty: bad }) }));
+    assert.deepEqual([res.status, (await res.json()).error], [400, 'bad_bots'], JSON.stringify(bad));
+  }
 });
 
 test('RoomDO: physicsReady: with rules the fingerprint is required and must be theirs; standard rooms check one that is present', () => {
@@ -1285,7 +1311,7 @@ test('RoomDO: experimental rules are persisted at create and carried by every we
   assert.deepEqual(h.ctx.storage.map.get('record').physics, RULES, 'persisted with the record');
   const a = await h.join(0);
   assert.deepEqual(a.of('room')[0].physics, RULES, 'first socket');
-  assert.equal(a.of('room')[0].protocol, 5);
+  assert.equal(a.of('room')[0].protocol, R.ROOM_PROTOCOL);
   const b = await h.join(1);
   assert.deepEqual(b.of('room')[0].physics, RULES, 'second socket');
   await h.send(a, { type: 'ready', physicsFp: RULES_FP });

@@ -42,7 +42,7 @@ function randomPacked(count, seed) {
 }
 
 test('constants: header sizes and message ids match the layouts', () => {
-  assert.equal(P.P2P_PROTOCOL_VERSION, 5, 'v5: experimental rules (RoomWelcome.physics, the ready physicsFp) and the mutator wasm (v4: the bots; v3: the rounded goals; v2: signal_dropped, RoomSlot.left, no-show peerLeft, start waits for absent slots, p2pProtocol in the queue)');
+  assert.equal(P.P2P_PROTOCOL_VERSION, 6, "v6: the room's bots level (RoomWelcome.botDifficulty, the lobby host's pick) (v5: experimental rules, RoomWelcome.physics, the ready physicsFp, and the mutator wasm; v4: the bots; v3: the rounded goals; v2: signal_dropped, RoomSlot.left, no-show peerLeft, start waits for absent slots, p2pProtocol in the queue)");
   assert.equal(P.ROOM_ERROR_PHYSICS_MISMATCH, 'physics_mismatch');
   assert.equal(P.P2P_ERROR_BAD_PHYSICS, 'bad_physics');
   assert.equal(P.P2P_ERROR_RELOAD, 'reload_required');
