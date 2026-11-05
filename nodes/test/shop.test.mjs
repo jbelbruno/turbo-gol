@@ -10,7 +10,7 @@ const { CARS, DEFAULT_CAR } = await import('../../src/game/cosmetics.ts');
 /** A car of the catalog, pinned to 'soon' whatever its body's state (cosmetics.ts flips them as the bodies land). */
 function shopWithSoonCar(L) {
   const S = new Shop(L);
-  S.setItemStatus('pampero', 'soon');
+  S.setItemStatus('cyclone', 'soon');
   return S;
 }
 
@@ -54,34 +54,34 @@ test('items cost points; announced items are not claimable until the game has th
   earn(L, 'op', 1000, 1);
   earn(L, 'op', 900, 2);
   assert.equal(S.wallet('op').balance, 1900);
-  assert.equal(S.claim('op', 'pampero', 3).code, 'not_available');
+  assert.equal(S.claim('op', 'cyclone', 3).code, 'not_available');
   // The game ships the car: the catalog entry flips to available.
-  assert.ok(S.setItemStatus('pampero', 'available'));
-  assert.equal(S.claim('op', 'pampero', 4).ok, true);
+  assert.ok(S.setItemStatus('cyclone', 'available'));
+  assert.equal(S.claim('op', 'cyclone', 4).ok, true);
   assert.equal(S.wallet('op').balance, 400);
-  assert.ok(S.owns('op', 'pampero'));
+  assert.ok(S.owns('op', 'cyclone'));
   S.setItemStatus('boost-next-1', 'available');
   assert.equal(S.claim('op', 'boost-next-1', 5).code, 'insufficient');
   assert.equal(S.claim('op', 'nope', 6).code, 'unknown_item');
   // Retired: owners keep it and still see it; others do not.
-  S.setItemStatus('pampero', 'retired');
-  assert.ok(S.view('op').some((i) => i.id === 'pampero' && i.owned));
-  assert.ok(!S.view('other').some((i) => i.id === 'pampero'));
+  S.setItemStatus('cyclone', 'retired');
+  assert.ok(S.view('op').some((i) => i.id === 'cyclone' && i.owned));
+  assert.ok(!S.view('other').some((i) => i.id === 'cyclone'));
 });
 
 test('a frozen wallet (failed verification under review) cannot claim; points are not transferable', () => {
   const L = new Ledger();
   const S = shopWithSoonCar(L);
   earn(L, 'op', 3000);
-  S.setItemStatus('pampero', 'available');
+  S.setItemStatus('cyclone', 'available');
   S.freeze('op', 'verification_failed:abc');
-  assert.equal(S.claim('op', 'pampero', 1).code, 'frozen');
+  assert.equal(S.claim('op', 'cyclone', 1).code, 'frozen');
   assert.equal(S.wallet('op').frozen, 'verification_failed:abc');
   S.unfreeze('op');
-  assert.equal(S.claim('op', 'pampero', 2).ok, true);
+  assert.equal(S.claim('op', 'cyclone', 2).ok, true);
   // Somebody who never hosted has nothing, whatever they do.
   assert.equal(S.wallet('player').balance, 0);
-  assert.equal(S.claim('player', 'pampero', 3).code, 'insufficient');
+  assert.equal(S.claim('player', 'cyclone', 3).code, 'insufficient');
 });
 
 test('catalog view: claimable flags and reasons', () => {
@@ -92,7 +92,7 @@ test('catalog view: claimable flags and reasons', () => {
   assert.equal(v.length, CATALOG.length);
   const badge = v.find((i) => i.id === 'badge-host');
   assert.equal(badge.claimable, true);
-  const car = v.find((i) => i.id === 'pampero');
+  const car = v.find((i) => i.id === 'cyclone');
   assert.equal(car.claimable, false);
   assert.equal(car.blocked, 'not_available');
   assert.throws(() => S.upsertItem({ id: 'BAD ID', kind: 'car', name: 'x', description: '', cost: 1, status: 'soon' }));

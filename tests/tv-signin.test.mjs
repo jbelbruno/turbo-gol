@@ -120,7 +120,7 @@ test('/tv: a TV whose clock is minutes off the server still gets its code\'s who
 
 test('AccountClient: tvStart, tvPoll pending then approved (adopted only by signInWith), tvConfirm with the Bearer', async () => {
   const calls = [];
-  const session = { kind: 'account', playerId: 'u1', name: 'Ana', session: 'jwt', expiresAt: Date.now() + 3_600_000, car: 'pampero' };
+  const session = { kind: 'account', playerId: 'u1', name: 'Ana', session: 'jwt', expiresAt: Date.now() + 3_600_000, car: 'cyclone' };
   let approve = false;
   const acc = new AccountClient({
     storage: null,
@@ -147,7 +147,7 @@ test('AccountClient: tvStart, tvPoll pending then approved (adopted only by sign
   acc.signInWith(r);
   assert.equal(acc.signedIn, true);
   assert.equal(acc.account.name, 'Ana');
-  assert.equal(acc.account.car, 'pampero', "the session's car (PR 8): the garage's pick before the shop answers");
+  assert.equal(acc.account.car, 'cyclone', "the session's car (PR 8): the garage's pick before the shop answers");
   assert.equal(changes, 1);
   await acc.tvConfirm('ABC234');
   assert.equal(calls.at(-1).auth, 'Bearer jwt');

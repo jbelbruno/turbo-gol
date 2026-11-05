@@ -1,5 +1,5 @@
 /**
- * The Magma ('tero': small, loud, territorial): a compact retro rally
+ * The Magma ('magma': small, loud, territorial): a compact retro rally
  * hatchback. A short two-box body with a tall glasshouse (raked screen under a white sun strip,
  * blacked-out B-pillar, thick C-pillars, a painted tailgate under a small rear glass) and a crowned
  * roof, flanks bowed out a little at the doors, square-cut bolted-on box flares over all four wheels
@@ -39,7 +39,7 @@ const ACCENT = 0xffc21a;
 
 /** Knobby gravel tyres on white six-spoke rally rims over a dark dish, a white outer lip, a team hub cap. */
 export const TERO_WHEEL: WheelStyle = {
-  id: 'tero-rally-6',
+  id: 'magma-rally-6',
   tyre: 'knobby',
   spokes: 6,
   spokeWidth: 0.24,
@@ -1074,8 +1074,8 @@ function build(k: BodyKit): void {
   tail(k);
 }
 
-export const TERO: CarBodySpec = {
-  id: 'tero',
+export const MAGMA: CarBodySpec = {
+  id: 'magma',
   build,
   // The same tyre size (14.25 uu) front and rear: the rear's `visual` is its own (the sim's rear
   // wheels are bigger), full-width gravel tyres filling the flares.

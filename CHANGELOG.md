@@ -172,7 +172,7 @@ All notable changes to Turbogol are documented here. The format follows
   show in the top bar in GARAGE and PROFILE.
 - STADIUMS in GARAGE: Night harbour, Red canyon and Alpine valley, the same list as MODES › VS AI's
   Stadium row; the one you pick is used in your offline matches, in training and behind the menus.
-- The player plate on PLAY shows the car you drive (GARAGE · Pampero).
+- The player plate on PLAY shows the car you drive (GARAGE · Cyclone).
 - Music, made entirely in code (no audio files). A calm theme plays in the menus and an
   electronic track plays during a match. The track builds up, breaks down after every goal and
   drops back in at kickoff. It gets more intense in the last 30 seconds and in overtime, and it

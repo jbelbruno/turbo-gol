@@ -1340,8 +1340,8 @@ const C1 = 'c1c1c1c1c1c1c1c1';
 const C2 = 'c2c2c2c2c2c2c2c2';
 
 test('parsePlace keeps a known car with each human (for the rejoin answer) and drops one of another shape; nothing else changes', () => {
-  const p = D.parsePlace(placeBody({ humans: [{ playerId: A, name: 'P0', car: 'tero', account: true, accountAgeDays: 9 }, { playerId: B, name: 'P1', car: 'ferrari' }] }));
-  assert.deepEqual(p.humans, [{ playerId: A, name: 'P0', account: true, accountAgeDays: 9, car: 'tero' }, { playerId: B, name: 'P1' }]);
+  const p = D.parsePlace(placeBody({ humans: [{ playerId: A, name: 'P0', car: 'magma', account: true, accountAgeDays: 9 }, { playerId: B, name: 'P1', car: 'ferrari' }] }));
+  assert.deepEqual(p.humans, [{ playerId: A, name: 'P0', account: true, accountAgeDays: 9, car: 'magma' }, { playerId: B, name: 'P1' }]);
   assert.deepEqual(D.parsePlace(placeBody()).humans, humans(A, B), 'a placement without cars: as before');
 });
 
@@ -1350,25 +1350,25 @@ test('a node match with cars: the assignment the node gets is byte for byte the 
   let h = await boot(env);
   const { ws } = await liveNode(h);
   const plain = await call(h, 'POST', '/internal/place', { body: placeBody() });
-  const withCars = await call(h, 'POST', '/internal/place', { body: placeBody({ humans: [{ playerId: A, name: 'P0', car: 'tero' }, { playerId: B, name: 'P1' }] }) });
+  const withCars = await call(h, 'POST', '/internal/place', { body: placeBody({ humans: [{ playerId: A, name: 'P0', car: 'magma' }, { playerId: B, name: 'P1' }] }) });
   assert.equal(withCars.status, 200, JSON.stringify(withCars.json));
   const assigns = ws.of('assign').map((m) => m.match);
   assert.equal(assigns.length, 2);
   // The id and the kickoff seed are random per match; everything else must be the same bytes.
   const bytes = (a) => JSON.stringify({ ...a, matchId: 'x', kickoffSeed: 0 });
   assert.equal(bytes(assigns[1]), bytes(assigns[0]));
-  assert.ok(!JSON.stringify(ws.sent).includes('tero'), 'nothing the node is sent names a car');
+  assert.ok(!JSON.stringify(ws.sent).includes('magma'), 'nothing the node is sent names a car');
   assert.deepEqual(Object.keys(assigns[1].roster[0]).sort(), ['kind', 'name', 'playerId', 'slot', 'team']);
   const id = withCars.json.placement.matchId;
-  assert.deepEqual(JSON.parse(rows(h, 'node_matches').find((r) => r.match_id === id).data).humans[0], { playerId: A, name: 'P0', car: 'tero' }, 'kept with the match');
+  assert.deepEqual(JSON.parse(rows(h, 'node_matches').find((r) => r.match_id === id).data).humans[0], { playerId: A, name: 'P0', car: 'magma' }, 'kept with the match');
   let rj = await call(h, 'POST', '/internal/rejoin', { body: { matchId: id, playerId: B } });
-  assert.deepEqual(rj.json.cars, ['tero', null]);
+  assert.deepEqual(rj.json.cars, ['magma', null]);
   rj = await call(h, 'POST', '/internal/rejoin', { body: { matchId: plain.json.placement.matchId, playerId: A } });
   assert.equal('cars' in rj.json, false, 'every seat on the default car: no field');
   ws.close(1012, 'deploy');
   h = await boot(env, new FakeCtx(h.ctx.db));
   rj = await call(h, 'POST', '/internal/rejoin', { body: { matchId: id, playerId: A } });
-  assert.deepEqual([rj.status, rj.json.cars], [200, ['tero', null]], 'restored from the row');
+  assert.deepEqual([rj.status, rj.json.cars], [200, ['magma', null]], 'restored from the row');
 });
 
 /**
@@ -1512,30 +1512,30 @@ test("the maintainers' inventory routes: grant, revoke and unfreeze go to Accoun
   env.ACCOUNTS.answer = (name, path, body) => new RealResponse(JSON.stringify(path === '/host-unfreeze' ? { unfrozen: true } : path === '/host-grant' ? { granted: true, items: [body.item] } : { revoked: true, refunded: 0, items: [] }), { headers: { 'content-type': 'application/json' } });
   const admin = { 'x-operator-id': PROJECT, 'x-operator-name': encodeURIComponent('Proyecto Señor') };
   const run = (what, body, headers = admin) => call(h, 'POST', '/nodes/admin/' + what, { body, headers });
-  assert.equal((await run('grant', { account: A, item: 'tero' }, { 'x-operator-id': STRANGER })).status, 403);
-  assert.equal((await run('grant', { account: 'nope', item: 'tero' })).json.error, 'bad_account');
+  assert.equal((await run('grant', { account: A, item: 'magma' }, { 'x-operator-id': STRANGER })).status, 403);
+  assert.equal((await run('grant', { account: 'nope', item: 'magma' })).json.error, 'bad_account');
   assert.equal((await run('grant', { account: A, item: 'car-next-1' })).json.error, 'unknown_item');
   assert.equal((await run('revoke', { account: A })).json.error, 'unknown_item');
   assert.equal(env.ACCOUNTS.calls.length, 0, 'nothing reached AccountsDO');
-  const g = await run('grant', { account: A, item: 'tero' });
-  assert.deepEqual([g.status, g.json], [200, { granted: true, items: ['tero'] }]);
-  assert.deepEqual((await run('revoke', { account: A, item: 'tero' })).json, { revoked: true, refunded: 0, items: [] });
+  const g = await run('grant', { account: A, item: 'magma' });
+  assert.deepEqual([g.status, g.json], [200, { granted: true, items: ['magma'] }]);
+  assert.deepEqual((await run('revoke', { account: A, item: 'magma' })).json, { revoked: true, refunded: 0, items: [] });
   assert.deepEqual((await run('unfreeze', { account: B, item: 'ignored' })).json, { unfrozen: true });
   assert.deepEqual(env.ACCOUNTS.calls.map((c) => [c.name, c.path, c.body]), [
-    ['accounts-v1', '/host-grant', { userId: A, item: 'tero' }],
-    ['accounts-v1', '/host-revoke', { userId: A, item: 'tero' }],
+    ['accounts-v1', '/host-grant', { userId: A, item: 'magma' }],
+    ['accounts-v1', '/host-revoke', { userId: A, item: 'magma' }],
     ['accounts-v1', '/host-unfreeze', { userId: B }],
   ]);
   // AccountsDO's refusal is passed on as it is.
   env.ACCOUNTS.answer = () => new RealResponse('{"error":"no_user"}', { status: 404 });
-  assert.deepEqual((await run('grant', { account: A, item: 'pampero' })).json, { error: 'no_user' });
+  assert.deepEqual((await run('grant', { account: A, item: 'cyclone' })).json, { error: 'no_user' });
   await h.ctx.settle();
   const actor = 'admin Proyecto Señor (a1b2c3d4e5f60718)';
   assert.deepEqual(posted().map((p) => p.replace(/ -> (\d+) .*`$/, ' -> $1`')), [
-    `**ALERT** \`${actor}: grant tero for account ${A} -> 200\``,
-    `**ALERT** \`${actor}: revoke tero for account ${A} -> 200\``,
+    `**ALERT** \`${actor}: grant magma for account ${A} -> 200\``,
+    `**ALERT** \`${actor}: revoke magma for account ${A} -> 200\``,
     `**ALERT** \`${actor}: unfreeze for account ${B} -> 200\``,
-    `**ALERT** \`${actor}: grant pampero for account ${A} -> 404\``,
+    `**ALERT** \`${actor}: grant cyclone for account ${A} -> 404\``,
   ]);
 });
 
@@ -1861,8 +1861,8 @@ test('the points tab: a wallet (AccountsDO /shop and /items) and the frozen wall
   const reason = 'verification_failed:' + 'f'.repeat(64);
   env.ACCOUNTS.answer = (name, path, body) => {
     const j = (v, status = 200) => new RealResponse(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
-    if (path === `/shop?userId=${A}`) return j({ items: [{ id: 'tero', cost: 300, claimable: false }], wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason } });
-    if (path === `/items?userId=${A}`) return j({ items: ['badge-host'], car: 'pampero', cars: ['pampero'] });
+    if (path === `/shop?userId=${A}`) return j({ items: [{ id: 'magma', cost: 300, claimable: false }], wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason } });
+    if (path === `/items?userId=${A}`) return j({ items: ['badge-host'], car: 'cyclone', cars: ['cyclone'] });
     if (path === '/host-frozen') return j({ frozen: [{ account: A, reason, at: 1234 }], more: false });
     if (path.startsWith('/shop?') || path.startsWith('/items?')) return j({ error: 'no_user' }, 404);
     return j(path === '/host-unfreeze' ? { unfrozen: true } : { granted: true, items: [body?.item] });
@@ -1871,19 +1871,19 @@ test('the points tab: a wallet (AccountsDO /shop and /items) and the frozen wall
   assert.equal(env.ACCOUNTS.calls.length, 0);
   const w = await call(h, 'GET', `/nodes/admin/wallet?account=${A}`, { headers: ADMIN });
   assert.equal(w.headers.get('cache-control'), 'no-store');
-  assert.deepEqual(w.json, { account: A, wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason }, items: ['badge-host'], car: 'pampero', catalog: [{ id: 'tero', cost: 300, claimable: false }] });
+  assert.deepEqual(w.json, { account: A, wallet: { earned: 12.5, spent: 0, balance: 12.5, frozen: reason }, items: ['badge-host'], car: 'cyclone', catalog: [{ id: 'magma', cost: 300, claimable: false }] });
   assert.deepEqual(env.ACCOUNTS.calls.map((c) => [c.path, c.body]).sort(), [[`/items?userId=${A}`, null], [`/shop?userId=${A}`, null]]);
   const none = await call(h, 'GET', `/nodes/admin/wallet?account=${B}`, { headers: ADMIN });
   assert.deepEqual([none.status, none.json], [404, { error: 'no_user' }]);
   const fz = await call(h, 'GET', '/nodes/admin/frozen', { headers: ADMIN });
   assert.deepEqual([fz.status, fz.json, fz.headers.get('cache-control')], [200, { frozen: [{ account: A, reason, at: 1234 }], more: false }, 'no-store']);
   assert.equal((await call(h, 'POST', '/nodes/admin/unfreeze', { body: { account: A, reason: 'replay\nchecked by hand' }, headers: ADMIN })).status, 200);
-  assert.equal((await call(h, 'POST', '/nodes/admin/grant', { body: { account: A, item: 'tero' }, headers: ADMIN })).status, 200);
+  assert.equal((await call(h, 'POST', '/nodes/admin/grant', { body: { account: A, item: 'magma' }, headers: ADMIN })).status, 200);
   await h.ctx.settle();
   assert.deepEqual(posted().map((p) => p.replace(/ -> (\d+) .*`$/, ' -> $1`')), [
     `**ALERT** \`${ACTOR}: read the wallet of account ${A} (a maintainer's reads come here once per 30 min, every one is in the logs)\``,
     `**ALERT** \`${ACTOR}: unfreeze for account ${A} (replay checked by hand) -> 200\``,
-    `**ALERT** \`${ACTOR}: grant tero for account ${A} -> 200\``,
+    `**ALERT** \`${ACTOR}: grant magma for account ${A} -> 200\``,
   ]);
 });
 

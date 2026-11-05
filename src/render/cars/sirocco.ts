@@ -1,5 +1,5 @@
 /**
- * The Sirocco ('condor'): an aero jet racer after the Andean condor gliding. A low lofted fuselage
+ * The Sirocco ('sirocco'): an aero jet racer after the Andean sirocco gliding. A low lofted fuselage
  * ending in a sharp white beak hooked down to a point (the ruff's white), a cab-forward bubble
  * canopy, a proud white ruff behind the glass and a low spine running back to a tall swept dorsal
  * fin (an ice-white leading edge) with a T-tail; the fuselage ends in a dark engine bay, twin
@@ -503,7 +503,7 @@ function build(k: BodyKit): void {
  * turbine vanes standing proud of it, a light ring round it, six bolts on high and a team-paint hub.
  */
 export const CONDOR_AERO: WheelStyle = {
-  id: 'condor-aero',
+  id: 'sirocco-aero',
   tyre: 'slick',
   spokes: 5,
   spokeWidth: 0.16,
@@ -517,8 +517,8 @@ export const CONDOR_AERO: WheelStyle = {
   budget: { low: 340, high: 664 },
 };
 
-export const CONDOR: CarBodySpec = {
-  id: 'condor',
+export const SIROCCO: CarBodySpec = {
+  id: 'sirocco',
   build,
   wheels: { style: CONDOR_AERO, visual: 1.04, outer: 38.5, rear: { visual: 1.08, outer: 40, width: 1 } },
   // Car-local uu (the build frame + (13.88, 20.76, 0)): the two-tone line low on the body at

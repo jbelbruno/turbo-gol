@@ -29,7 +29,7 @@ const es = (await import('../src/locales/es.ts')).default;
 const ROOT = resolve(import.meta.dirname, '..');
 
 test('catalog: the default car and the four to come, in menu order, one price table', () => {
-  assert.deepEqual(CAR_IDS, ['dune', 'pampero', 'carpincho', 'condor', 'tero']);
+  assert.deepEqual(CAR_IDS, ['dune', 'cyclone', 'vortex', 'sirocco', 'magma']);
   assert.equal(DEFAULT_CAR, 'dune');
   assert.deepEqual(CARS.map((c) => c.id), CAR_IDS);
   for (const c of CARS) {
@@ -39,7 +39,7 @@ test('catalog: the default car and the four to come, in menu order, one price ta
     assert.equal(carCosmetic(c.id), c);
   }
   assert.deepEqual(carCosmetic('dune'), { id: 'dune', nameKey: 'car.dune', descKey: 'car.duneDesc', price: 0, status: 'available' });
-  for (const id of ['pampero', 'carpincho', 'condor', 'tero']) assert.equal(carCosmetic(id).price, 1500, `${id} price`);
+  for (const id of ['cyclone', 'vortex', 'sirocco', 'magma']) assert.equal(carCosmetic(id).price, 1500, `${id} price`);
   for (const id of CAR_IDS) assert.ok(isCarId(id));
   for (const bad of ['', 'Dune', 'car-next-1', 'dune ', 0, null, undefined, {}]) assert.equal(isCarId(bad), false, String(bad));
 });
@@ -55,16 +55,18 @@ test('catalog: a car is available exactly when its body module has a body; a car
 test('every car has a name and a one-line description in English and Spanish', () => {
   const names = {
     dune: ['Dune', 'Dune'],
-    pampero: ['Cyclone', 'Cyclone'],
-    carpincho: ['Vortex', 'Vortex'],
-    condor: ['Sirocco', 'Sirocco'],
-    tero: ['Magma', 'Magma'],
+    cyclone: ['Cyclone', 'Cyclone'],
+    vortex: ['Vortex', 'Vortex'],
+    sirocco: ['Sirocco', 'Sirocco'],
+    magma: ['Magma', 'Magma'],
   };
   assert.deepEqual(Object.keys(names), [...CAR_IDS]);
   for (const id of CAR_IDS) {
     assert.equal(en[`car.${id}`], names[id][0], `${id} (en)`);
     assert.equal(es[`car.${id}`], names[id][1], `${id} (es)`);
     for (const lang of [en, es]) {
+      const story = lang[`car.${id}Story`];
+      assert.ok(typeof story === 'string' && story.length > 60 && story.length <= 200 && story.includes(en[`car.${id}`]), `${id} story is two sentences that name the car: ${story}`);
       const desc = lang[`car.${id}Desc`];
       assert.ok(typeof desc === 'string' && desc.length > 10 && desc.length <= 64, `${id} description fits a menu line: ${desc}`);
     }
@@ -92,29 +94,29 @@ test('car pick: only a car the player is entitled to (a guest: the default car a
   const store = memoryStorage();
   const sel = new CarSelection({ storage: store });
   assert.equal(sel.current, 'dune');
-  assert.equal(sel.select('pampero'), false, 'not owned: refused');
+  assert.equal(sel.select('cyclone'), false, 'not owned: refused');
   assert.equal(sel.current, 'dune');
   assert.equal(store.map.has(CAR_PICK_KEY), false);
   assert.equal(sel.select('dune'), true);
   assert.equal(store.map.get(CAR_PICK_KEY), 'dune');
   // A saved pick the player is not entitled to (edited by hand, an expired grant) reads as the default.
-  assert.equal(new CarSelection({ storage: memoryStorage({ [CAR_PICK_KEY]: 'tero' }) }).current, 'dune');
+  assert.equal(new CarSelection({ storage: memoryStorage({ [CAR_PICK_KEY]: 'magma' }) }).current, 'dune');
   assert.equal(new CarSelection({ storage: memoryStorage({ [CAR_PICK_KEY]: 'not-a-car' }) }).current, 'dune');
 });
 
 test('car pick: a wider entitlement (the cars an account owns: src/game/garage.ts) keeps the pick while it lasts', () => {
-  let owned = ['dune', 'tero'];
+  let owned = ['dune', 'magma'];
   const store = memoryStorage();
   const sel = new CarSelection({ storage: store, entitled: () => owned });
-  assert.equal(sel.select('tero'), true);
-  assert.equal(sel.current, 'tero');
-  assert.equal(new CarSelection({ storage: store, entitled: () => owned }).current, 'tero', 'the next visit');
+  assert.equal(sel.select('magma'), true);
+  assert.equal(sel.current, 'magma');
+  assert.equal(new CarSelection({ storage: store, entitled: () => owned }).current, 'magma', 'the next visit');
   owned = ['dune']; // signed out, or the grant revoked
   assert.equal(sel.current, 'dune');
   // No storage at all (private mode): the pick holds for the page.
-  const bare = new CarSelection({ storage: null, entitled: () => ['dune', 'tero'] });
-  assert.equal(bare.select('tero'), true);
-  assert.equal(bare.current, 'tero');
+  const bare = new CarSelection({ storage: null, entitled: () => ['dune', 'magma'] });
+  assert.equal(bare.select('magma'), true);
+  assert.equal(bare.current, 'magma');
   // Throwing storage (a sandboxed frame).
   const throwing = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
   assert.equal(new CarSelection({ storage: throwing }).current, 'dune');
@@ -129,14 +131,14 @@ test('preview flags: #car and #showroom parse anywhere, apply only on a dev serv
   assert.equal(previewCarsAllowed({ DEV: false, VITE_PREVIEW_CARS: '1' }), true, 'a preview build');
   assert.deepEqual(parseHashFlags('').cars, []);
   assert.equal(parseHashFlags('').showroom, null);
-  assert.deepEqual(parseHashFlags('#car=tero&diag').cars, ['tero'], 'the player only');
-  assert.deepEqual(parseHashFlags('#car=tero,tero').cars, ['tero', 'tero'], 'the player and the first bot (a 1v1: the red one)');
-  assert.deepEqual(parseHashFlags('#car=,condor').cars, ['', 'condor'], 'the player keeps their own pick');
+  assert.deepEqual(parseHashFlags('#car=magma&diag').cars, ['magma'], 'the player only');
+  assert.deepEqual(parseHashFlags('#car=magma,magma').cars, ['magma', 'magma'], 'the player and the first bot (a 1v1: the red one)');
+  assert.deepEqual(parseHashFlags('#car=,sirocco').cars, ['', 'sirocco'], 'the player keeps their own pick');
   assert.deepEqual(parseHashFlags('#car=').cars, []);
   assert.deepEqual(parseHashFlags('#carousel').cars, [], 'whole words only');
   assert.deepEqual(parseHashFlags('#showroom=35&high').showroom, { yawDeg: 35, pitchDeg: null, slot: null });
   assert.deepEqual(parseHashFlags('#superlow&showroom=145,20').showroom, { yawDeg: 145, pitchDeg: 20, slot: null });
-  assert.deepEqual(parseHashFlags('#car=tero,tero&showroom=35,12,1').showroom, { yawDeg: 35, pitchDeg: 12, slot: 1 }, 'the red car of a 1v1');
+  assert.deepEqual(parseHashFlags('#car=magma,magma&showroom=35,12,1').showroom, { yawDeg: 35, pitchDeg: 12, slot: 1 }, 'the red car of a 1v1');
   assert.deepEqual(parseHashFlags('#showroom').showroom, { yawDeg: null, pitchDeg: null, slot: null }, 'bare: the slow orbit');
   assert.deepEqual(parseShowroom(',80'), { yawDeg: null, pitchDeg: 80, slot: null });
   assert.deepEqual(parseShowroom('90,,3'), { yawDeg: 90, pitchDeg: null, slot: 3 });

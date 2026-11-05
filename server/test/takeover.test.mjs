@@ -343,8 +343,8 @@ test('auth-1: a TV signed in with the phone gets a limited scope: the tv claim, 
   const r1 = await refresh(env, tv.rt, ip(10));
   assert.equal(claims(r1.json.session).tv, 1, 'refreshed: still a TV');
   // Its car pick re-signs the session: the scope stays.
-  obj.store.grant(ana.id, 'pampero', Date.now());
-  const car = await post(env, '/api/me/car', { ip: ip(10), bearer: r1.json.session, body: { car: 'pampero' } });
+  obj.store.grant(ana.id, 'cyclone', Date.now());
+  const car = await post(env, '/api/me/car', { ip: ip(10), bearer: r1.json.session, body: { car: 'cyclone' } });
   assert.equal(car.status, 200);
   assert.equal(claims(car.json.session).tv, 1, 'no laundering the scope through /api/me/car');
   // It plays as the account: its profile answers.
@@ -366,15 +366,15 @@ test('auth-1 / auth-11: every credential, linking, redeem, TV-approval, device a
     ['POST', '/api/auth/reauth/code', {}],
     ['POST', '/api/auth/reauth/code/verify', { attempt: 'A'.repeat(43), code: '123456' }],
     ['POST', '/api/me/username', { username: 'Robado', password: KEY, newPassword: KEY2 }],
-    ['POST', '/api/me/shop/claim', { item: 'pampero' }],
-    ['POST', '/nodes/shop/claim', { item: 'pampero' }],
+    ['POST', '/api/me/shop/claim', { item: 'cyclone' }],
+    ['POST', '/nodes/shop/claim', { item: 'cyclone' }],
     ['POST', '/api/auth/tv/confirm', { code: other.json.code }],
     ['GET', '/api/auth/sessions', undefined],
     ['POST', '/api/auth/sessions/revoke', { id: 'a'.repeat(32) }],
     ['POST', '/api/auth/sessions/revoke-all', {}],
     ['POST', '/nodes/tokens', { region: 'SA' }],
     ['GET', '/nodes/admin/nodes', undefined],
-    ['POST', '/nodes/admin/grant', { account: ana.id, item: 'pampero' }],
+    ['POST', '/nodes/admin/grant', { account: ana.id, item: 'cyclone' }],
     ['POST', '/nodes/admin/drain', { nodeId: 'n1', reason: 'x' }],
   ];
   for (const [method, path, body] of calls) {
@@ -713,7 +713,7 @@ test('auth-11 / econ-2: a maintainer\'s 1-hour Bearer or refresh cookie alone gr
   const calls = [
     ['POST', '/nodes/tokens', { region: 'SA' }],
     ['GET', '/nodes/admin/nodes', undefined],
-    ['POST', '/nodes/admin/grant', { account: s.json.playerId, item: 'pampero' }],
+    ['POST', '/nodes/admin/grant', { account: s.json.playerId, item: 'cyclone' }],
     ['POST', '/nodes/admin/status', { nodeId: 'n1', status: 'banned', reason: 'x' }],
     ['POST', '/nodes/admin/drain', { nodeId: 'n1', reason: 'x' }],
     ['POST', '/nodes/admin/unfreeze', { account: s.json.playerId }],

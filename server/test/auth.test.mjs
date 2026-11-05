@@ -141,7 +141,7 @@ test('auth-9: tokens signed before the types keep working for their life (no sig
   const guest = await A.verifySession(SECRET, legacyGuest, now);
   assert.equal(guest?.sub, '0123456789abcdef', 'an untyped 24 h guest session');
   assert.notEqual(guest.acct, 1);
-  const legacyAccount = await A.signJwt(SECRET, { sub: '0123456789abcdef', name: 'Ana', iat, exp: iat + 3600, acct: 1, car: 'pampero' });
+  const legacyAccount = await A.signJwt(SECRET, { sub: '0123456789abcdef', name: 'Ana', iat, exp: iat + 3600, acct: 1, car: 'cyclone' });
   assert.equal((await A.verifySession(SECRET, legacyAccount, now)).acct, 1, 'an untyped 1 h account session');
   const legacyTicket = await A.signJwt(SECRET, { sub: '0123456789abcdef', mid, team: 1, slot: 2, role: 'peer', name: 'Ana', iat, exp: iat + 90, jti: 'd'.repeat(32) });
   assert.ok(await A.verifyTicket(SECRET, legacyTicket, mid, now, 'peer'), 'an untyped 90 s ticket still opens its socket');

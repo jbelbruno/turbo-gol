@@ -1,5 +1,5 @@
 /**
- * The Vortex ('carpincho'): a friendly armoured off-road brute, chunky and calm like the
+ * The Vortex ('vortex'): a friendly armoured off-road brute, chunky and calm like the
  * capybara. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
  * (a cream roof cap, a dark visor round the split windshield) whose roof rolls down into a round
  * rump; a tall, blunt, square muzzle with two oval nostril intakes and its round headlamps set high
@@ -66,7 +66,7 @@ const CAN_LO: Surface = { ...EXHAUST, color: 0x30343c, metal: 0.55, rough: 0.45 
  * wheel budget.
  */
 export const CARPINCHO_WHEEL: WheelStyle = {
-  id: 'carpincho-beadlock',
+  id: 'vortex-beadlock',
   tyre: 'knobby',
   spokes: 6,
   spokeWidth: 0.13,
@@ -796,8 +796,8 @@ function build(k: BodyKit): void {
   k.box(TRIM, 2.2, 3, 30, -hl + 1.3, -11.6, 0);
 }
 
-export const CARPINCHO: CarBodySpec = {
-  id: 'carpincho',
+export const VORTEX: CarBodySpec = {
+  id: 'vortex',
   build,
   // One wheel size all round (radius 15 at rest: 1.2 x the front's physics radius, 1.0 x the
   // rear's), fat (1.15 x 18 uu), their outer faces just inside the fenders' wrapped-down roll.

@@ -72,6 +72,11 @@ export function carDescription(id: CarId): string {
   return t(`car.${id}Desc`);
 }
 
+/** A cosmetic car's story: two sentences about the name, in the garage's detail card. */
+export function carStory(id: CarId): string {
+  return t(`car.${id}Story`);
+}
+
 const ROMAN = ['I', 'II', 'III'];
 
 /** 'Gold II' from a tier ('gold-2'); single-division tiers ('legend') have no numeral. */

@@ -119,6 +119,7 @@ html.tg-superlow .mn[data-screen='garage'] {
 }
 
 .mn-gar-desc,
+.mn-gar-story,
 .mn-gar-text {
   margin: 0.375rem 0 0;
   font-size: var(--t-small);
@@ -620,6 +621,7 @@ html[data-shell='tabs'] .mn-pill-points {
 
 /* ---- Short PC: the cards lose their long lines ------------------------------------------------ */
 html[data-layout='short'] .mn-gar-desc,
+html[data-layout='short'] .mn-gar-story,
 html[data-layout='short'] .mn-gar-earn-sub {
   display: none;
 }
@@ -716,6 +718,12 @@ html[data-layout='portrait'] .mn-gar-detail {
 
 html[data-shell='rail'] .mn-gar-det-head,
 html[data-layout='portrait'] .mn-gar-det-head {
+  display: none;
+}
+
+/* No room for the car's story either. */
+html[data-shell='rail'] .mn-gar-story,
+html[data-layout='portrait'] .mn-gar-story {
   display: none;
 }
 

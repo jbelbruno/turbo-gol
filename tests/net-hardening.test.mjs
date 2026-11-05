@@ -1115,15 +1115,15 @@ test('OnlineSession: an automatic reconnection whose rejoin finds the match over
 
 test('cars on a community node\'s match: the Worker\'s list alone; a car the node writes in its own Welcome is never drawn', async () => {
   const roster = [
-    { carId: 1, slot: 0, team: 0, name: 'Tester', kind: 'player', car: 'tero' },
-    { carId: 2, slot: 1, team: 1, name: 'Amigo', kind: 'player', car: 'condor' },
+    { carId: 1, slot: 0, team: 0, name: 'Tester', kind: 'player', car: 'magma' },
+    { carId: 2, slot: 1, team: 1, name: 'Amigo', kind: 'player', car: 'sirocco' },
   ];
   const nodeQueue = (cars) => ({ '/api/queue': () => jsonResponse(200, { status: 'matched', matchId: 'm1', ticket: 'tkt', wsUrl: 'wss://node/ws/m1', node: true, ...(cars ? { cars } : {}) }) });
   const welcome = { hostColo: 'node:sao-paulo-1', roster };
-  // The Worker seated the player on pampero and the other seat on the default car.
-  let s = await playingSession(nodeQueue(['pampero', null]), { welcome });
+  // The Worker seated the player on cyclone and the other seat on the default car.
+  let s = await playingSession(nodeQueue(['cyclone', null]), { welcome });
   let call = s.game.rosterCalls.at(-1);
-  assert.deepEqual(seatCars(call.w.roster, call.cars), ['pampero', 'dune']);
+  assert.deepEqual(seatCars(call.w.roster, call.cars), ['cyclone', 'dune']);
   s.session.leave();
   // Every seat on the default car: the Worker sends no `cars`, and the node's cars still do not count.
   s = await playingSession(nodeQueue(null), { welcome });
@@ -1135,6 +1135,6 @@ test('cars on a community node\'s match: the Worker\'s list alone; a car the nod
   s = await playingSession({}, { welcome: { roster } });
   call = s.game.rosterCalls.at(-1);
   assert.equal(call.cars, null);
-  assert.deepEqual(seatCars(call.w.roster, call.cars), ['tero', 'condor']);
+  assert.deepEqual(seatCars(call.w.roster, call.cars), ['magma', 'sirocco']);
   s.session.leave();
 });
