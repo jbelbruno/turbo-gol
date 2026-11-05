@@ -429,6 +429,25 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- The white rail on top of the stadium boards no longer shows as dashes from across the pitch (on
+  every quality tier, worse at low resolutions). It was 7 uu thick, under a pixel at that distance,
+  and drawn with a hard cut in the shader, which MSAA does not smooth: each pixel caught it or missed
+  it. The boards' bands (the LED face, its dark frame, the rail) are now drawn by their coverage of
+  the pixel, and the rail is 21 uu thick and a little calmer, so it reads as one soft continuous
+  line (`src/render/stadium/boards.ts`, `layout.ts`, `palette.ts`).
+- Firefox: a stadium baked while the grass and cloud shaders failed to compile (before the Firefox fix) is discarded: the world cache version is raised, so the sky and the skyline are baked again on the next visit (the first load after this takes a moment longer).
+- Firefox (WebGPU): the Ultra grass and the sky's clouds no longer fail to compile. Two shader expressions called a math function with only literal numbers (a smoothstep and a mix), which Firefox's validator rejects ("Abstract types may only appear in constant expressions"); the game fell back to a lower tier and the sky and background looked wrong. Both are evaluated in JavaScript or written differently now; every shader the game compiles passes Firefox 159's validator.
+- Community nodes (from node release 0.3.1): a node the control plane refuses for good (banned,
+  retired, or on an address its token does not allow) no longer keeps logging in (about every 30
+  seconds after a ban or retirement, every second on a refused address): it finishes its matches,
+  says in its log what to do next, and stops, and the launcher does not restart it. A node the
+  control plane is limiting (too many hellos or address changes) waits an hour before its next
+  login. A player whose connection goes silent (no input or ping for 10 seconds) is disconnected,
+  as if the socket had closed, so their car no longer repeats their last input to the end,
+  recorded in the replay as theirs. `turbogol-node status` shows what the control plane last told
+  this node, also when it is pending, suspended or banned (it said "unknown") and after a restart
+  while the control plane cannot be reached, from `<data>/status.json`, and says when the node is
+  not running.
 - Replays: "My replays" also finds the matches listed before the seats were kept (the first days: they have no seat, so they are found by the account's username).
 - You can choose the stadium again. In MODES › VS AI, Stadium opened an empty GARAGE; now it opens
   the list of stadiums (Night harbour, Red canyon, Alpine valley) with yours marked. Pick one with
@@ -571,6 +590,12 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- A softer picture on High and Ultra, to fix the hard, cut look of far edges: a fine film grain
+  (hides the banding of the gradients and the stair steps of far edges), a light sharpening of the
+  scene colour so it stays crisp, wider and softer car shadows (PCF radius 7 on High, 14 on Ultra),
+  and no live fog over the stadium (the baked sky keeps its haze). Low and Super low are untouched
+  and pay nothing for it: the passes are only built on the tiers that ask for them (`grain`,
+  `sharpen`, `fogScale` in `TierSpec`, `src/render/quality.ts`, `src/render/post/pipeline.ts`).
 - Casual: the bots that fill the free seats, and the 5:00 match against bots, now play hard (they
   played normal), on the project's servers and on community nodes alike; the owner can change their
   level without a deploy (KV `bot_level`, server/README.md). A Competitive match keeps normal bots
@@ -752,6 +777,25 @@ All notable changes to Turbogol are documented here. The format follows
   points ranking, never its username or the start of its account id. A server registered without a
   name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
   the legal texts that describe it.
+- Community node docs: the operator guide the game links to (`nodes/README.md`, `README.es.md`)
+  gives the real state: the matchmaker sends matches to nodes, so far only to the project's servers,
+  today one per region (São Paulo, Germany and Malaysia host and verify and, for now, there are also
+  servers in South Africa, Australia and the United States, which only host), each taking its
+  region's Casual and Competitive matches, and hosting is not open to the community yet. The
+  production plan marks the first real ranked match on the São Paulo server done (2026-10-21, two
+  accounts that run no server, verified and rated) and the second trusted verifier too; the online
+  decisions record the six servers and their budget, without the old Hetzner plan; and the four
+  cars are no longer "coming soon" in the rewards docs.
+- Community nodes: the VPS installer registers a new wss server only under a DNS name
+  (`--public-host`). With none, or with an IP address, it stops before it installs anything, as the
+  control plane refuses an IP address anyway; it no longer falls back to the machine's IPv4.
+  `--allow-ip` takes an IP address for a development control plane, and a node already registered
+  on one still runs the installer again and restores with `--restore` as before. `--node-version`
+  sets the Node.js the node runs, from NodeSource (a major, a major and minor, or an exact version;
+  the last two are held with `apt-mark hold`), and the installer now checks the Node.js at
+  `/usr/bin/node`, the one the service runs. A run ends with the node's page on the website
+  (`/#servers`, "Mis servidores") and the operator guide. It reaches the machines with the next
+  node release.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,

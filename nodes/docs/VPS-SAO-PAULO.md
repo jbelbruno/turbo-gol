@@ -190,9 +190,10 @@ bash /tmp/turbogol-install.sh --control https://turbo-gol.com --token '<tgn1_...
 
 - **`--roles host,verify`:** hostea y verifica. Los roles se fijan al registrar: cambiarlos pide
   un token nuevo.
-- **`--public-host <host>`:** sin esto, el instalador registra la IPv4 que ve `/nodes/whoami`, y
-  el chequeo de alcance nunca pasa: un Worker no puede pedir una IP. Nunca le pongas un puerto:
-  todo lo que tiene `:` se toma como IPv6.
+- **`--public-host <host>`:** el nombre del nodo. Sin él, o con una IP, una instalación nueva por
+  wss se detiene antes de instalar nada: el chequeo de alcance corre en un Worker, que no puede
+  pedir una IP, y el plano de control la rechaza (`ip_not_supported`). `--allow-ip` acepta una IP
+  solo para un plano de control de desarrollo. Nunca le pongas un puerto ni `https://`.
 - **`--egress-cap-gb <tope-gb>`:** el nodo cuenta lo que mandan las partidas que terminan
   (`node/runtime.ts:514-519`), por mes calendario UTC (`:617-620`), y el scheduler deja de
   mandarle partidas al 95 % del tope (`control-plane/scheduler.ts:55`). El tope tiene que dejar
@@ -339,13 +340,13 @@ del PR [7]: los jugadores con un lock de partida de nodo quedarían atascados ha
   y anota en el log cuántos segundos estuvo callado: desde ahí le quedan de 25 a 30 s para
   reconectarse. Los 60 s se cuentan por partida y en total, así que un corte anterior en la misma
   partida se descuenta. El nodo suma un strike, pero un nodo del proyecto no se pausa.
-- Las ranked de Sudamérica vuelven a `MatchDO`, como hoy, mientras no haya otro verificador: una
-  ranked solo va a un nodo si alguien puede re-simularla (`control-plane/controlPlane.ts:637`).
+- Desde noviembre de 2026 también verifican los servidores del proyecto en Alemania y Malasia
+  (`VPS-PROYECTO.md`): mientras uno de los dos esté en línea con la versión del nodo, las ranked
+  siguen yendo a nodos. Una ranked solo va a un nodo si alguien puede re-simularla
+  (`control-plane/controlPlane.ts:1201`); si no queda ningún verificador, vuelve a `MatchDO`.
 - Las partidas terminadas esperan su verificación hasta 6 horas
-  (`control-plane/controlPlane.ts:81`) y después se anulan sin penalizar a nadie. Eso vale solo
-  cuando el plano de control guarde su estado (PR [1]): hoy un deploy del Worker las borraría.
-- Más adelante conviene un segundo verificador de confianza. `docs/online/DECISIONS.md` lo pone
-  en Hetzner, Ashburn o Falkenstein.
+  (`control-plane/controlPlane.ts:111`) y después se anulan sin penalizar a nadie. La cola vive en
+  el SQLite del `NodeRegistryDO` (PR [1] y [6]), así que un deploy del Worker no la borra.
 
 ## Probarlo con jugadores
 

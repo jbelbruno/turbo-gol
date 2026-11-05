@@ -2,9 +2,11 @@
 
 Lo que hay que cambiar fuera de esta carpeta para que los nodos comunitarios reciban partidas de
 verdad. La etapa 1 lo reparte en ocho PR, con su orden y los ajustes a este diseño, en
-`PRODUCCION.md`: donde los dos no coinciden, manda esa lista. El plano de control en el Worker
-(§1, §2 y §4) lo aplica [6] (#28). Falta el gancho del matchmaker (§3), que es [7]: hasta
-entonces ninguna partida va a un nodo. Las líneas citadas se revisaron contra el commit `dead8ec`.
+`PRODUCCION.md`: donde los dos no coinciden, manda esa lista. La etapa 1 ya está aplicada: el
+plano de control en el Worker (§1, §2 y §4) con [6] (#28), el gancho del matchmaker (§3) con [7]
+(#29), el cliente de la etapa 1 (§5) con [3] (#25) y la operación (§6) con [8] (#30). Desde el
+21/10/2026 los nodos reciben partidas. Falta lo de la etapa 2, como el adaptador WebRTC del cliente
+(§5). Las líneas citadas se revisaron contra el commit `dead8ec`.
 El plano de control va en el dominio del juego: `https://turbo-gol.com/nodes/…`.
 
 ## 0. Dónde va el código
