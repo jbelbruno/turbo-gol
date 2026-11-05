@@ -561,10 +561,30 @@ export class Registry {
    * `name` is not free for a community node of `region` (A13): a node of that region that is not
    * retired holds it, whatever the case, or a project node anywhere does (a community server must
    * never pass for one of the project's). Project nodes are never asked: their names are the team's.
+   * `except`: a node renamed (rename) does not hold its own name against itself.
    */
-  nameTaken(region: string, name: string): boolean {
+  nameTaken(region: string, name: string, except: string | null = null): boolean {
     const k = name.toLowerCase();
-    return this.list().some((n) => n.name.toLowerCase() === k && (n.trusted || (n.region === region && !isRetired(n))));
+    return this.list().some((n) => n.nodeId !== except && n.name.toLowerCase() === k && (n.trusted || (n.region === region && !isRetired(n))));
+  }
+
+  /**
+   * Its operator renames a node (POST /nodes/mine/rename, Prompt 2 A12): `name` as a registration's
+   * --name is cleaned, at least 2 characters left (bad_name), and for a community node free in its
+   * region (nameTaken, A13: name_taken). Written; the node's own process keeps the name it runs
+   * with (its Welcome is the node's word: the players' mark is the Worker's, A15). Null when there is
+   * no such node or it is retired.
+   */
+  rename(id: string, name: string): { ok: true; node: NodeRecord; was: string } | { ok: false; code: 'bad_name' | 'name_taken' } | null {
+    const n = this.nodes.get(id);
+    if (!n || isRetired(n)) return null;
+    const clean = cleanName(name, '');
+    if (clean === '') return { ok: false, code: 'bad_name' };
+    if (!n.trusted && this.opts.community && this.nameTaken(n.region, clean, n.nodeId)) return { ok: false, code: 'name_taken' };
+    const was = n.name;
+    n.name = clean;
+    this.save(n);
+    return { ok: true, node: n, was };
   }
 
   /** The CommunityRules refusal of a host's registration, or null (`host`: its wss host; its transports are wss alone, checked before). */

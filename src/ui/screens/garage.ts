@@ -11,7 +11,9 @@
  * or a sign-in comes back here; a paused account's --warn line) and the earn card, ALOJAR UN
  * SERVIDOR DA PUNTOS: AÚN NO ABIERTO, which says how points are earned (today only the project
  * registers a server, Terms 11.1 and 12.1.2; the hosting guide: a new tab with a mouse, a keyboard
- * or a finger; with a controller, a remote or on a TV a sheet with its QR). Right: the tabs
+ * or a finger; with a controller, a remote or on a TV a sheet with its QR). Once GET /api/config says
+ * hosting is open (Prompt 2, B1), the card, the compact button and a paused car lead to "Mis servidores"
+ * (screens/servers.ts) with the open words instead (serversModel.ts hostEntry). Right: the tabs
  * AUTOS │ ESTADIOS (`.mn-tabs`: Q / E, LT / RT, CH± / PgUp / PgDn step them, Menu.stepTabs;
  * focus = selection), the list (a row per car with its outline, components/carRow.ts; or the
  * three stadiums) and the detail card: the car's name and price, its action and why it cannot be
@@ -56,6 +58,7 @@ import { garageRow, type GarageRow } from '../components/carRow';
 import { chooseStadium, stadiumOptions } from '../components/stadium';
 import { detailView, earnIsLime, pointsCard, PREVIEW_MS, REDEEM_HOLD_MS, redeemBalance, revealDelta, rowLine, type Line } from './garageModel';
 import { dropDetour, keepDetour } from './accountLinksModel';
+import { hostEntry, hostingOpen } from './serversModel';
 
 /** How a community server is hosted (the nodes' README, in the page's language when there is one). */
 function guideUrl(): string {
@@ -127,14 +130,20 @@ export function garageScreen(menu: Menu): Screen {
   const yourCard = h('section.mn-gar-card.mn-gar-your', null, h('span.mn-gar-corner', null, icon('check'), t('garage.equippedTag')), h('span.mn-gar-label', null, t('garage.yourCar')), yourName, yourFree, yourDesc);
   const pointsBody = h('div.mn-gar-points-body');
   const pointsCardEl = h('section.mn-gar-card.mn-gar-points', null, h('span.mn-gar-label', null, t('points.title')), pointsBody);
+  // The earn card's words: the closed ones (pinned by tests/garage-screen.test.mjs) until GET
+  // /api/config says hosting is open (Prompt 2, decision 1), then the open ones (render: earnWords).
+  const earnTitle = h('b.mn-gar-earn-title', null, t('garage.earn'));
+  const earnSub = h('span.mn-gar-earn-subtext', null, t('garage.earnSub'));
   const earn = h(
     'a.mn-gar-earn',
     { href: guideUrl(), target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'garage-earn', onclick: (e: MouseEvent) => earnClick(e) },
     h('span.mn-gar-earn-bg'),
     h('span.mn-gar-label', null, t('garage.eachCar', { points: formatPoints(EACH_CAR) })),
-    h('b.mn-gar-earn-title', null, t('garage.earn')),
-    h('span.mn-gar-earn-sub', null, t('garage.earnSub'), icon('next')),
+    earnTitle,
+    h('span.mn-gar-earn-sub', null, earnSub, icon('next')),
   );
+  /** Hosting is open (GET /api/config): GARAJE's hosting entries lead to "Mis servidores" (Prompt 2, B1), else the guide. */
+  const open = (): boolean => hostEntry(hostingOpen(menu.cfg)) === 'servers';
   const left = h('div.mn-gar-left', null, yourCard, pointsCardEl, earn);
 
   // The showroom fits the car into this box (frame()): the screen's see-through middle.
@@ -153,7 +162,8 @@ export function garageScreen(menu: Menu): Screen {
   };
   const tabs = h('div.mn-tabs.mn-gar-tabs', { role: 'tablist', 'aria-label': t('nav.garage'), 'data-nav-row': true }, tabButton('cars', t('garage.tabCars'), 'key-q', 'pad-lt'), tabButton('stadiums', t('garage.tabStadiums'), 'key-e', 'pad-rt'));
   const compactPts = h('b.mn-gar-pts-num');
-  const compact = h('button.mn-gar-compact', { type: 'button', 'data-nav': true, 'data-key': 'garage-compact', onclick: () => openGuide() }, icon('points', 'mn-gar-pts-icon'), compactPts, h('span.mn-gar-pts-unit', null, t('garage.pts')), h('span.mn-gar-compact-sep', null, '·'), h('span', null, t('garage.earnShort')), icon('next'));
+  const compactShort = h('span', null, t('garage.earnShort'));
+  const compact = h('button.mn-gar-compact', { type: 'button', 'data-nav': true, 'data-key': 'garage-compact', onclick: () => earnGo() }, icon('points', 'mn-gar-pts-icon'), compactPts, h('span.mn-gar-pts-unit', null, t('garage.pts')), h('span.mn-gar-compact-sep', null, '·'), compactShort, icon('next'));
 
   const rows = new Map<CarId, GarageRow>();
   for (const c of CARS) {
@@ -287,17 +297,20 @@ export function garageScreen(menu: Menu): Screen {
       return;
     }
     const balance = (): HTMLElement => h('div.mn-gar-balance', null, icon('points', 'mn-gar-balance-icon'), h('b.mn-gar-balance-num', null, formatPoints(p.points)), h('span.mn-gar-balance-unit', null, t('garage.pts')));
-    const only = (): HTMLElement => h('p.mn-gar-text', null, t('points.only'));
+    // The closed copy (Terms 11.1: "hasta la apertura ... nadie puede ganarlos") until hosting opens, then the open one.
+    const opened = open();
+    const only = (): HTMLElement => h('p.mn-gar-text', null, t(opened ? 'points.onlyOpen' : 'points.only'));
     switch (p.kind) {
       case 'guest':
-        draw(pointsBody, 'guest', () => [
+        draw(pointsBody, `guest:${opened}`, () => [
           balance(),
           only(),
           h('div.mn-gar-signin', null, h('button.mn-btn.mn-gar-signin-btn', { type: 'button', 'data-nav': true, 'data-key': 'garage-signin', onclick: () => signIn() }, t('garage.signIn')), h('span.mn-gar-guest', null, t('garage.guest'))),
         ]);
         return;
       case 'account':
-        draw(pointsBody, `a:${p.points}:${p.paused}`, () => [balance(), only(), p.paused ? h('p.mn-gar-warn', null, icon('warning'), t('garage.paused')) : null]);
+        // Paused: PERFIL's MI SERVIDOR while hosting is closed; "Mis servidores" (its reason and the review) once it is open.
+        draw(pointsBody, `a:${p.points}:${p.paused}:${opened}`, () => [balance(), only(), p.paused ? h('p.mn-gar-warn', null, icon('warning'), t(opened ? 'garage.pausedOpen' : 'garage.paused')) : null]);
         return;
       case 'error': {
         const error = store().error ?? '';
@@ -376,6 +389,7 @@ export function garageScreen(menu: Menu): Screen {
     }
     const actFocused = document.activeElement === detAction;
     drawPoints(v);
+    earnWords();
     earn.classList.toggle('mn-gar-earn-lime', earnIsLime(v));
     if (tab === 'cars') drawCars(v);
     else drawStadiums();
@@ -414,10 +428,11 @@ export function garageScreen(menu: Menu): Screen {
         signIn();
         return;
       case 'earn':
-        openGuide();
+        earnGo();
         return;
       case 'profile':
-        menu.open('profile');
+        // A paused wallet: its reason and what to do are in "Mis servidores" once hosting is open, PERFIL before.
+        menu.open(open() ? 'servers' : 'profile');
         return;
       default:
         return;
@@ -548,11 +563,33 @@ export function garageScreen(menu: Menu): Screen {
     });
   };
 
-  /** The earn card (ALOJAR UN SERVIDOR DA PUNTOS): the guide in a new tab, or (a TV, a remote, a controller: no pop-up from a pad press) its sheet. */
+  /**
+   * The earn card (ALOJAR UN SERVIDOR DA PUNTOS): the guide in a new tab, or (a TV, a remote, a
+   * controller: no pop-up from a pad press) its sheet; once hosting is open, "Mis servidores".
+   */
   const earnClick = (e: MouseEvent): void => {
+    if (open()) {
+      e.preventDefault();
+      menu.open('servers');
+      return;
+    }
     if (!noPopup()) return;
     e.preventDefault();
     openGuide();
+  };
+
+  /** GANA PUNTOS' press elsewhere (the compact button, a locked car's CANJEAR): "Mis servidores" once hosting is open, else the guide's sheet. */
+  const earnGo = (): void => (open() ? menu.open('servers') : openGuide());
+
+  /** The earn card's and the compact button's words for the gate as it is now (GET /api/config arrives after the first draw). */
+  const earnWords = (): void => {
+    const o = open();
+    const set = (e: HTMLElement, text: string): void => {
+      if (e.textContent !== text) e.textContent = text;
+    };
+    set(earnTitle, t(o ? 'garage.earnOpen' : 'garage.earn'));
+    set(earnSub, t(o ? 'garage.earnSubOpen' : 'garage.earnSub'));
+    set(compactShort, t(o ? 'garage.earnShortOpen' : 'garage.earnShort'));
   };
 
   // A sign-in on PERFIL (SIGN IN here): back to GARAJE (its points, its cars) as Back would come,

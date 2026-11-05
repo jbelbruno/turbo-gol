@@ -422,6 +422,50 @@ test('early re-POST: a prefer or local change aborts the long-poll in flight and
   await assert.rejects(p, (err) => err instanceof NetError && err.code === 'cancelled');
 });
 
+test('queue body: "Solo servidores del proyecto" (Prompt 2, A15) as `projectOnly: true` only when set (none by default: the body of before); a change re-POSTs a running search at once', async () => {
+  let n = 0;
+  const h = makeClient(
+    { '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': (init) => (++n === 1 ? jsonResponse(200, WAITING) : hanging(init)) },
+    { queueTiming: { retryMs: [60_000], repostMinMs: 1 }, visible: () => true },
+  );
+  assert.equal(h.client.queueProjectOnly, false);
+  const p = h.client.queue('2v2', 'server');
+  for (let i = 0; i < 20 && queueCalls(h).length < 2; i++) await tick(1);
+  assert.equal('projectOnly' in queueCalls(h)[0].body, false, 'off (and before any opening it cannot be on): no field at all');
+  h.client.queueProjectOnly = true;
+  for (let i = 0; i < 20 && queueCalls(h).length < 3; i++) await tick(1);
+  assert.equal(queueCalls(h).length, 3, 'the change re-POSTed at once');
+  assert.equal(queueCalls(h)[2].body.projectOnly, true);
+  h.client.queueProjectOnly = true;
+  await tick(30);
+  assert.equal(queueCalls(h).length, 3, 'the same value: no re-POST');
+  h.client.queueProjectOnly = false;
+  for (let i = 0; i < 20 && queueCalls(h).length < 4; i++) await tick(1);
+  assert.equal('projectOnly' in queueCalls(h)[3].body, false, 'off again: no field');
+  h.client.cancelQueue();
+  await assert.rejects(p, (err) => err instanceof NetError && err.code === 'cancelled');
+});
+
+test("the server's mark (Prompt 2, A15) is kept by match: the matched answer's, a rejoin's, never another match's; a malformed one is none", async () => {
+  const mark = { name: 'casa-de-ana', community: true };
+  const h = makeClient({
+    '/api/guest': () => jsonResponse(200, GUEST),
+    '/api/queue': () => jsonResponse(200, { ...MATCHED, node: true, server: mark }),
+    '/api/rejoin': (init) => jsonResponse(200, { status: 'matched', matchId: JSON.parse(init.body).matchId, ticket: 'T2', wsUrl: '/ws/m2', ...(JSON.parse(init.body).matchId === 'm2' ? { server: { name: 'sao-paulo-1', community: false } } : {}) }),
+  });
+  await h.client.queue('2v2', 'server');
+  assert.deepEqual(h.client.serverMarkOf('m1'), mark);
+  assert.equal(h.client.serverMarkOf('m9'), null, "another match's: none");
+  assert.equal(h.client.serverMarkOf(null), null);
+  await h.client.rejoin('m1');
+  assert.deepEqual(h.client.serverMarkOf('m1'), mark, "a rejoin without one keeps the queue's of the same match");
+  await h.client.rejoin('m2');
+  assert.deepEqual(h.client.serverMarkOf('m2'), { name: 'sao-paulo-1', community: false }, "a rejoin's own (a reload): a project server's mark, never a community one");
+  assert.equal(h.client.serverMarkOf('m1'), null);
+  for (const bad of [null, 'x', { name: '' , community: true }, { name: 'a', community: 'yes' }, { name: 7, community: true }]) assert.equal(NC.serverMarkOf(bad), null, JSON.stringify(bad));
+  assert.deepEqual(NC.serverMarkOf({ name: 'n'.repeat(80), community: false }), { name: 'n'.repeat(64), community: false });
+});
+
 test("queue body: Casual's solo bots level as `bots` (none while null); a change re-POSTs a running search at once, the same value never", async () => {
   let n = 0;
   const h = makeClient(

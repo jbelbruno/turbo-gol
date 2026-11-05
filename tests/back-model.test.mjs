@@ -156,6 +156,27 @@ test("PERFIL's CONTROL DE NODOS (SCREEN_SECTION): opened from PERFIL it stacks o
   assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home', 'play'] }, 'nodes-admin'), { section: 'profile', stack: ['profile', 'nodes-admin'] });
 });
 
+test('"Mis servidores" (Prompt 2, B1, option (b): EVERY_SECTION): stacked on the section shown, Back returns there; a guest\'s SIGN IN is a detour Back (or the sign-in) comes back from', () => {
+  assert.deepEqual(S.EVERY_SECTION, ['settings', 'servers']);
+  assert.equal(S.rootSection('servers'), null);
+  // From GARAJE (its card, its compact button, a paused car's press): GARAJE's, and Back is GARAJE.
+  const garage = B.stackAfterOpen({ section: 'garage', stack: ['garage'] }, 'servers');
+  assert.deepEqual(garage, { section: 'garage', stack: ['garage', 'servers'] });
+  assert.equal(B.menuBack(menu({ section: garage.section, depth: garage.stack.length })), 'pop');
+  // From PERFIL (MI SERVIDOR, COMUNIDAD): PERFIL's.
+  assert.deepEqual(B.stackAfterOpen({ section: 'profile', stack: ['profile'] }, 'servers'), { section: 'profile', stack: ['profile', 'servers'] });
+  // #servers on a load (Inicio up): Inicio's, Back goes there and never leaves the site.
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home'] }, 'servers'), { section: 'play', stack: ['home', 'servers'] });
+  // A guest's INICIAR SESIÓN from GARAJE's "Mis servidores": PERFIL stacked on it, Back pops back to it.
+  const detour = B.stackAfterOpen(garage, 'profile', false, true);
+  assert.deepEqual(detour, { section: 'garage', stack: ['garage', 'servers', 'profile'] });
+  assert.equal(B.menuBack(menu({ section: detour.section, depth: detour.stack.length })), 'pop');
+  // Opened again while it is up (a second #servers): brought to the top, nothing stacked twice.
+  assert.deepEqual(B.stackAfterOpen(detour, 'servers'), { section: 'garage', stack: ['garage', 'servers'] });
+  // Its own Back (the checklist back to the form) closes the step first.
+  assert.equal(B.menuBack(menu({ section: 'garage', depth: 2, screenBack: true })), 'screen');
+});
+
 test('sections: LB / RB and Q / E step one, no wrap', () => {
   assert.equal(S.stepSection('play', 1), 'training');
   assert.equal(S.stepSection('training', -1), 'play');

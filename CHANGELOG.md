@@ -26,6 +26,37 @@ All notable changes to Turbogol are documented here. The format follows
   can choose to show its name in the public list. Community alerts go to a second staff-only
   channel (`NODE_COMMUNITY_WEBHOOK`, never one the community reads), not the team's
   (`server/src/hostPolicy.ts`, `server/README.md`).
+- Community nodes: "Mis servidores" on the server, shipped closed with the rest of hosting.
+  `GET /nodes/mine` now gives an operator its whole hosting: each server's service state, last
+  probe, progress to active, strikes, refusals and the matches it may run, its own codes and limits,
+  today's points against the daily cap and, once hosting is open for it, what it still lacks and
+  whether it accepted the rules for hosts. A host can drain, rename (once hosting is open; never
+  while blocked) and retire (never while suspended) its own servers and revoke its own unused
+  codes; the project's servers stay the panel's. The queue's and the rejoin's answers now carry
+  the server's mark (the Worker's word, never the server's own: a community server's always; a
+  project server's, never marked as a community one, once the terms that describe hosting are in
+  force), which the game shows in a later change. Once those terms are in force, the queue takes
+  "Solo servidores del proyecto" (one player asking for it takes the whole match to a project
+  server or a Cloudflare one, never a community server, whatever the opening's flag says later)
+  and a player can report a community server a match of theirs was played on (a closed list of
+  reasons, once per match, 20 a day, kept 30 days for the team only and deleted with the
+  reporter's account; a report alone never sanctions a host). Before, none of it is stored or
+  shown (`server/README.md`).
+- Community nodes: "Mis servidores" in the game, shipped closed: nothing of it shows until
+  `GET /api/config` says hosting is open (before, `/#servers` opens PERFIL, and PERFIL and GARAJE
+  keep the guide). Once it is open, PERFIL's MI SERVIDOR and COMUNIDAD and GARAJE's points card lead
+  to it: what the account still lacks with its fix, then a Linux VPS with a DNS name by region,
+  name and DNS name, a checklist, the rules for hosts and Annex B accepted with the 18-or-older
+  switch right above PEDIR CÓDIGO, "confirm it's you" (the password or a mailed code), the code's
+  install line with COPIAR and its follow-up to active; each server's state, load, egress, version,
+  strikes and refusals with DRENAR, RENOMBRAR and RETIRAR (held to confirm, then how to uninstall),
+  its own codes, today's points against the cap and the balance, and the name in the public list by
+  the host's choice. A TV lists the servers and shows a QR to `/#servers`. PARTIDO ENCONTRADO and
+  the FINAL say "servidor de la comunidad" only for a community server (no longer for every node),
+  whose FINAL offers REPORTAR SERVIDOR once per match; both follow the server's mark, never the
+  opening's flag. Ajustes › JUEGO gets "Solo servidores del proyecto" once hosting is open, sent
+  with every search while it is on (and kept shown while it is, so it can always be turned off);
+  CONTROL DE NODOS gets an Operadores tab and the opening's control in RESUMEN.
 - Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
   P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
   in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and

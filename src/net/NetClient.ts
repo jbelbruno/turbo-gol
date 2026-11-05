@@ -13,8 +13,9 @@
  *                   client-side challenge failure reject with NetError 'turnstile'. Inicio pre-warms
  *                   one token (prewarmAntiBot, kept WARM_MS) for the next registration; a check that
  *                   wants the player says so (onAntiBotAsk: the menus' sheet, its CANCEL ends it)
- *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, bots?, local?, visible,
- *                   first? } (Bearer session) long-poll loop until 'matched' (the modes redesign,
+ *   matchmaking     POST /api/queue { api, mode, modes?, kind, region?, prefer?, bots?, projectOnly?, local?,
+ *                   visible, first? } (Bearer session; `projectOnly` true only, queueProjectOnly: "Solo
+ *                   servidores del proyecto", the player's choice) long-poll loop until 'matched' (the modes redesign,
  *                   November 2026: `api` is QUEUE_API, src/net/queueWait.ts, and a page without it
  *                   gets 426 reload_required; Casual is kind 'server' and pools every format, its
  *                   `prefer` the format of its online bots match and `bots` (queueBots) that
@@ -26,7 +27,7 @@
  *                   it came: a reloaded page's search too, whose waiter the hub still holds), then
  *                   each POST long-polls (25 s); a waiting answer's `wait` (QueueWait: the counts,
  *                   the estimate, the 5:00 countdown, the widening) is `lastWait` and its `region`
- *                   `lastWaitRegion`, a matched one's `mode` / `host` / `humans` are `lastMatched`.
+ *                   `lastWaitRegion`, a matched one's `mode` / `host` / `humans` / `server` are `lastMatched`.
  *                   The loop goes on through a network error, a 500 / 502 / 504 or a 503 without a
  *                   known code, its session's (a guest's registration, an account's refresh) too:
  *                   it waits QUEUE_RETRY_MS (1, 2, 4, 8, 15, then 30 s, forever while not
@@ -102,7 +103,7 @@ import { STORAGE_PREFIX } from '../brand';
 import { ClockSync } from './ClockSync';
 import { LossEstimator } from './NetStats';
 import type { IceServer, QueueResultP2p } from './p2p/protocol';
-import { QUEUE_API, type QueueMatchedExtra, type QueueWait } from './queueWait';
+import { QUEUE_API, type QueueMatchedExtra, type QueueWait, type ServerMark } from './queueWait';
 import type { GameMode } from '../sim/constants';
 import type { Difficulty } from '../ai/Bot';
 import { getToken as turnstileToken, type TurnstileLoader } from './Turnstile';
@@ -201,13 +202,21 @@ export function parseQueueWait(v: unknown): QueueWait | null {
   return out;
 }
 
-/** The matched answer's extras (the hub's: the format, the host region, how many humans), each only when well formed. */
+/** A node match's server mark (the Worker's word, never the node's Welcome): a name cut to 64 and `community` a boolean, else null. */
+export function serverMarkOf(v: unknown): ServerMark | null {
+  const s = v as { name?: unknown; community?: unknown } | null | undefined;
+  return typeof s === 'object' && s !== null && typeof s.name === 'string' && s.name.length > 0 && typeof s.community === 'boolean' ? { name: s.name.slice(0, 64), community: s.community } : null;
+}
+
+/** The matched answer's extras (the hub's: the format, the host region, how many humans, the server's mark), each only when well formed. */
 function matchedExtraOf(q: unknown): QueueMatchedExtra {
   const o = q as Record<string, unknown>;
   const out: QueueMatchedExtra = {};
   if (o.mode === '1v1' || o.mode === '2v2' || o.mode === '3v3') out.mode = o.mode;
   if (typeof o.host === 'string' && o.host.length > 0) out.host = o.host;
   if (typeof o.humans === 'number' && Number.isFinite(o.humans)) out.humans = o.humans;
+  const server = serverMarkOf(o.server);
+  if (server !== null) out.server = server;
   return out;
 }
 
@@ -455,8 +464,9 @@ export interface ServerConfig {
   terms?: string;
   /**
    * Whether accounts outside the project may host a server: closed until the terms in force describe
-   * it and the opening's flag opens it (a canary first). The hosting screens, the community server's
-   * mark and its report stay hidden while it is closed. Absent from an older Worker: closed.
+   * it and the opening's flag opens it (a canary first). The hosting screens stay hidden while it is
+   * closed (the community server's mark and its report follow the Worker's mark instead). Absent from
+   * an older Worker: closed.
    */
   hosting?: { open: boolean; stage: 'closed' | 'canary' | 'all' };
 }
@@ -473,6 +483,7 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
   // The terms version only once the owner published one (unpublished, the config is read as before).
   const terms = typeof o.legal === 'object' && o.legal !== null ? (o.legal as Record<string, unknown>).terms : undefined;
   const queue = queueTimesOf(o.queue);
+  const hosting = hostingOf(o.hosting);
   return {
     turnstileSiteKey: typeof key === 'string' && key.length > 0 ? key : null,
     protocol: typeof o.protocol === 'number' ? o.protocol : 0,
@@ -483,7 +494,16 @@ export function parseServerConfig(v: unknown): ServerConfig | null {
     botFillMs: typeof o.botFillMs === 'number' && Number.isFinite(o.botFillMs) && o.botFillMs > 0 ? o.botFillMs : null,
     ...(typeof terms === 'string' && TERMS_VERSION_RE.test(terms) ? { terms } : {}),
     ...(queue !== null ? { queue } : {}),
+    ...(hosting !== null ? { hosting } : {}),
   };
+}
+
+/** GET /api/config's `hosting`: open only as a boolean true with a known stage; anything else (or none) is no field, read as closed. */
+function hostingOf(v: unknown): ServerConfig['hosting'] | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  const stage = o.stage === 'canary' || o.stage === 'all' ? o.stage : 'closed';
+  return { open: o.open === true && stage !== 'closed', stage };
 }
 
 /** GET /api/config's `queue`: each time a positive number, else the hub's (300 s, 60 s, 120 s), and botLevel only as one of the three levels; null when there is no object. */
@@ -771,6 +791,9 @@ export class NetClient {
   queueRetrying = false;
   private preferValue: GameMode | null = null;
   private botsValue: Difficulty | null = null;
+  private projectOnlyValue = false;
+  /** The server mark of the match this client was matched or rejoined to (the Worker's word: the matched answer's, a rejoin's), by its match id. */
+  private serverMarkFor: { matchId: string; mark: ServerMark } | null = null;
   private localValue: 'bots' | 'training' | null = null;
   private readonly visibleFn: () => boolean;
   private lastVisible: boolean;
@@ -858,6 +881,27 @@ export class NetClient {
     if (v === this.botsValue) return;
     this.botsValue = v;
     this.requestRepost();
+  }
+
+  /**
+   * "Solo servidores del proyecto" (Ajustes › JUEGO, Prompt 2 A15), sent as `projectOnly: true` only
+   * when true (false: no field at all, the body of before). The game sets it from the player's choice
+   * (Game.menuSearch), which can only be on once GET /api/config said hosting is open; a change
+   * re-POSTs a running search at once, as queueBots does (the hub updates the waiter in place).
+   */
+  get queueProjectOnly(): boolean {
+    return this.projectOnlyValue;
+  }
+
+  set queueProjectOnly(v: boolean) {
+    if (v === this.projectOnlyValue) return;
+    this.projectOnlyValue = v;
+    this.requestRepost();
+  }
+
+  /** The server mark (Prompt 2, A15) of match `matchId`, as the queue's matched answer or a rejoin's carried it; null without one (a MatchDO, a project server while dark, another match). */
+  serverMarkOf(matchId: string | null): ServerMark | null {
+    return matchId !== null && this.serverMarkFor !== null && this.serverMarkFor.matchId === matchId ? this.serverMarkFor.mark : null;
   }
 
   /** What the player does locally while searching, sent as `local` (the counters only); a change re-POSTs as queuePrefer does. */
@@ -1457,6 +1501,7 @@ export class NetClient {
           this.matchCars = cars ?? null;
           if (cars) out.cars = cars;
           this.lastMatched = matchedExtraOf(q);
+          this.serverMarkFor = this.lastMatched.server !== undefined ? { matchId, mark: this.lastMatched.server } : null;
           return out;
         }
         const waiting = (q as QueueResult).waiting;
@@ -1635,6 +1680,7 @@ export class NetClient {
     if (this.region !== null) body.region = this.region;
     if (this.preferValue !== null) body.prefer = this.preferValue;
     if (this.botsValue !== null) body.bots = this.botsValue;
+    if (this.projectOnlyValue) body.projectOnly = true;
     if (this.localValue !== null) body.local = this.localValue;
     body.visible = this.visibleFn();
     if (first) body.first = true;
@@ -1930,6 +1976,10 @@ export class NetClient {
     const q = (await res.json()) as CosmeticQueueResult;
     if (typeof q.ticket !== 'string' || typeof q.wsUrl !== 'string') throw new NetError('protocol', 'rejoin without ticket / wsUrl');
     this.matchId = q.matchId ?? matchId;
+    // Its server's mark again (A15: the object's, passed on by the Worker's nodeRejoin), for the FINAL
+    // after a reload; an answer without one keeps the queue's of the same match.
+    const mark = serverMarkOf((q as { server?: unknown }).server);
+    if (mark !== null) this.serverMarkFor = { matchId: this.matchId, mark };
     // A node match's answer carries its cars again (NodeRegistryDO keeps them with the match).
     const cars = nodeCarsOf(q);
     this.matchCars = cars ?? null;

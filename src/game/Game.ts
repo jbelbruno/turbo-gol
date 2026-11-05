@@ -233,6 +233,8 @@ import { installTvSamples } from '../ui/screens/tvSignInSamples';
 import { installSalaSamples } from '../ui/screens/lobbySamples';
 import { openLostSheet } from '../ui/screens/match/lost';
 import { installAccountLinks } from '../ui/screens/accountLinks';
+import { installServersLink, installServersSample } from '../ui/screens/servers';
+import { communityMarked, hostingOpen, projectOnlyShown } from '../ui/screens/serversModel';
 import { emailNudge } from '../net/emailAuth';
 import { REGIONS, isPlaylist, isRegion } from '../net/account';
 import type { RegionId } from '../net/account';
@@ -919,10 +921,11 @@ export class Game implements P2PGameHooks {
   /**
    * The one arbiter of URL-driven sheets (the sign-in design's §3.0): the OAuth result (#auth=…, its
    * confirm sheet), then a mailed link (/account#verify=…, #reset=…, #forgot, or a sign-up waiting
-   * for its code), then the phone's /tv, each after the one before is done (a join link, #sala=…,
-   * waits for no sheet at all: lobby.ts installJoinLink).
+   * for its code), then "Mis servidores"' #servers (screens/servers.ts installServersLink: after the
+   * account's restore and the mail's sheets), then the phone's /tv, each after the one before is done
+   * (a join link, #sala=…, waits for no sheet at all: lobby.ts installJoinLink).
    */
-  private readonly urlSheets = new UrlSheets(['auth', 'account', 'tv'] as const);
+  private readonly urlSheets = new UrlSheets(['auth', 'account', 'servers', 'tv'] as const);
   /** Training records: this browser for a guest, the account (server + local copy) when signed in. */
   readonly trainingStore: TrainingStore;
   /** Settings > Experimental: the account's switch and physics presets (server + local copy); nothing for a guest. */
@@ -1290,6 +1293,7 @@ export class Game implements P2PGameHooks {
     this.menu.register('settings', (m) => settingsScreen(m, this.menuSettings));
     this.pauseSettings = new SettingsOverlay(opts.hudContainer, () => this.settingsOptions());
     installFinalSample(this.menu);
+    installServersSample(this.menu);
     installSalaSamples(this.menu);
     installTvSamples(this.menu);
     // A mailed link (/account#verify=… / #reset=…, sign-in PR 8) or a sign-up waiting for its code:
@@ -1298,6 +1302,13 @@ export class Game implements P2PGameHooks {
     void installAccountLinks(this.menu, () => this.urlSheets.turn('account'))
       .catch((err: unknown) => console.warn('[accounts] link failed', err))
       .finally(() => this.urlSheets.done('account'));
+    // #servers (the installer's last line, a TV's QR): "Mis servidores" once hosting is open, PERFIL
+    // before (dark: no new text); the hash cleared at once, the screen in its turn.
+    if (typeof window !== 'undefined' && typeof history !== 'undefined') {
+      void installServersLink(this.menu, () => this.urlSheets.turn('servers'))
+        .catch((err: unknown) => console.warn('[servers] link failed', err))
+        .finally(() => this.urlSheets.done('servers'));
+    } else this.urlSheets.done('servers');
     this.found = new MatchFound(opts.hudContainer);
     this.backGuard = typeof window !== 'undefined' && typeof history !== 'undefined' ? new BackGuard(window, () => this.onSystemBack()) : null;
     this.device = typeof window !== 'undefined' && typeof document !== 'undefined' ? installDevice({ tvFlag: pageFlags().tv, padConnected: () => this.input.hasGamepad, ui: this.settings.ui }) : null;
@@ -1559,7 +1570,7 @@ export class Game implements P2PGameHooks {
         if (net === null) return { regions: REGIONS, autoRegion: '', oauth: [], online: false, botFillMs: null, queue: null };
         const c = await net.config();
         game.queueTimes = c.queue ?? null;
-        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, queue: c.queue ?? null, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null };
+        return { regions: REGIONS, autoRegion: c.autoRegion ?? '', oauth: c.oauth ?? [], online: true, queue: c.queue ?? null, botFillMs: c.botFillMs ?? null, terms: c.terms ?? null, hosting: c.hosting ?? null };
       },
       // A guest's only: an account (or a page that was one: its hint) registers no guest.
       prewarmAntiBot: () => {
@@ -1681,6 +1692,10 @@ export class Game implements P2PGameHooks {
     client.queuePrefer = req.kind === 'casual' ? mode : null;
     // Casual's solo bots level (the player's pick); ranked never sends one.
     client.queueBots = req.kind === 'casual' ? (req.bots ?? null) : null;
+    // "Solo servidores del proyecto" (Ajustes › JUEGO), both kinds: sent whenever it is on, never keyed
+    // on GET /api/config (a flag closed again, or its failed read, must not send a player who chose it
+    // to a community server). It can only be on once its row was shown: before, the body of before.
+    client.queueProjectOnly = this.menu.prefs.projectOnly;
     client.queueLocal = queueLocal(this.wait);
     this.searchReq = { ...req, modes: req.modes.slice() };
     this.searchSince = performance.now();
@@ -1823,6 +1838,21 @@ export class Game implements P2PGameHooks {
       setResolutionScale: (pct) => this.setResolutionScale(pct),
       setFpsCap: (cap) => this.setFpsCap(cap),
       setMenuSceneAnimated: (on) => this.setMenuSceneAnimated(on),
+      // JUEGO's "Solo servidores del proyecto" (Prompt 2, A15): once hosting is open (decision 1), and
+      // while it is on whatever the config says (projectOnlyShown: it can always be turned off); kept
+      // with the menus' prefs on this device; a search running carries the change at once.
+      ...(projectOnlyShown(hostingOpen(this.menu.cfg), this.menu.prefs.projectOnly)
+        ? {
+            projectOnly: {
+              get: () => this.menu.prefs.projectOnly,
+              set: (on: boolean) => {
+                this.menu.prefs.projectOnly = on;
+                this.menu.savePrefs();
+                if (this.searchReq !== null && this.online !== null) this.online.client.queueProjectOnly = on;
+              },
+            },
+          }
+        : {}),
     };
   }
 
@@ -4876,6 +4906,11 @@ export class Game implements P2PGameHooks {
       players,
       node: isNodeHost(host) ? host.slice(host.indexOf(':') + 1) : null,
       rankedMatchId: onServer && online.ranked ? online.lastRankedMatchId : null,
+      // The server's mark (Prompt 2, A15: the Worker's, never the Welcome's), the match's id and this
+      // client's numbers, for the FINAL's line and REPORTAR SERVIDOR (a community server's mark only).
+      server: onServer ? online.client.serverMarkOf(online.client.matchId) : null,
+      matchId: onServer ? online.client.matchId : null,
+      net: onServer && this.session !== null ? { ping: this.session.stats.rttMs, corrections: this.session.stats.mispredictions } : null,
     };
   }
 
@@ -4892,7 +4927,10 @@ export class Game implements P2PGameHooks {
     const extra = this.online !== null && this.session === this.online ? this.online.client.lastMatched : null;
     // The answer's format and host; without its format (a 409 rejoin, an older server) today's line.
     const p = foundParts(req, extra, this.menu.regionId, isRegion);
-    const line = [t(p.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...p.modes, p.region !== null ? regionName(p.region) : null].filter((x) => x !== null).join(' · ');
+    // A community server's match says so (Prompt 2, decision 6: the Worker's mark alone, never the
+    // config, Terms 7.6); a project server never.
+    const community = communityMarked(extra?.server) ? t('found.community') : null;
+    const line = [t(p.kind === 'ranked' ? 'play.rankedTitle' : 'play.casualTitle'), ...p.modes, p.region !== null ? regionName(p.region) : null, community].filter((x) => x !== null).join(' · ');
     this.found.show(line);
     if (!this.foundCued) this.audio.play('matchFound');
     this.foundCued = false;

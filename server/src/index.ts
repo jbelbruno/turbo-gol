@@ -4,7 +4,7 @@
  *   POST /api/guest   { turnstileToken? }               -> GuestSession (24 h HS256 session). The name is the
  *                       server's, 'Invitado 4821' from the player id (src/net/guestName.ts); a `name` sent is
  *                       ignored
- *   POST /api/queue   { api: 2, mode | modes, kind?, prefer?, region?, local?, visible?, first? }  Bearer session
+ *   POST /api/queue   { api: 2, mode | modes, kind?, prefer?, region?, local?, visible?, first?, projectOnly? }  Bearer session
  *                    -> every public queue is in the queue hub (MatchmakerDO 'mm:SA', env.ts queueHubOf), the
  *                       player's region kept as its `home`. kind: 'server' (Casual, the default; 'p2p' of an
  *                       older caller is read as it) or 'ranked'. The first answer of a search comes at once
@@ -13,7 +13,11 @@
  *                       each search loop: a page reloaded mid-search finds its waiter still queued); every
  *                       later POST long-polls <= 25 s. Matched: the phase 1 QueueResult (a MatchDO match, wsUrl
  *                       /ws/<matchId>; or, with the nodes on, a match on a community node: node: true, wsUrl the
- *                       node's own wss://) plus mode, host, humans and region (the home). 403 'account_required' for
+ *                       node's own wss://) plus mode, host, humans and region (the home), and on a node match its
+ *                       server's mark (`server`: a community server's always, a project server's once the terms in
+ *                       force describe hosting). projectOnly: true, taken once the terms in force describe hosting
+ *                       (env.ts hostingTermsInForce, no KV read: it never fails open; before, ignored and kept
+ *                       nowhere): its matches never go to a community server (MatchmakerDO). 403 'account_required' for
  *                       a guest session, any kind (Casual and ranked are for accounts); 426 'reload_required' for an
  *                       account's request without api >= 2 (a page cached from before the modes redesign);
  *                       400 'experimental_lobby_only' for a body that carries `physics`: experimental rules
@@ -21,7 +25,7 @@
  *                       car comes from the session (an account's `car` claim, seatFields), never from the
  *                       body; a node match's result carries the match's `cars` by slot (src/net/cosmetics.ts)
  *   POST /api/rejoin  { matchId } Bearer session        -> QueueResult with a fresh ticket (MatchDO and node matches, a node
- *                       match's with its `cars`; a RoomDO room id answers 410 'p2p_room': a P2P room is never
+ *                       match's with its `cars` and its server's mark as the queue's; a RoomDO room id answers 410 'p2p_room': a P2P room is never
  *                       rejoined, POST /api/leave frees its lock;
  *                       a match the player quit with POST /api/leave { matchId } answers 410 'left', or 404 once
  *                       that quit was its last human's: the match ended). An id no MatchDO, RoomDO or node match
@@ -106,7 +110,7 @@
  * which flag stops what.
  */
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, hostingMode, hostingStage, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, hostingMode, hostingStage, hostingTermsInForce, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
@@ -124,6 +128,7 @@ import type { AnyQueueResult } from './MatchmakerDO';
 import { RELOAD_REQUIRED } from './RoomDO';
 import { CASUAL_WIDEN_MS, RANKED_WIDEN_MS, SOLO_AFTER_MS, normalizeHome } from './queuePlan';
 import { QUEUE_API } from '../../src/net/queueWait';
+import type { QueueMatchedExtra } from '../../src/net/queueWait';
 import { nodeHealthCheck, nodeRoute } from './nodeRoutes';
 import { NODE_ROUTES, askNodes, rejoinTicketOf, replyCode } from './nodeApi';
 import type { NodesReply } from './nodeApi';
@@ -451,6 +456,15 @@ interface QueueBody {
   physics?: unknown;
   /** Casual: the bots' level of the player's solo match (easy | medium | hard); anything else, or ranked, is not passed on. */
   bots?: unknown;
+  /**
+   * true: "Solo servidores del proyecto" (Ajustes › JUEGO, Prompt 2 A15): the player's matches never
+   * go to a community server. Passed on once the terms in force describe hosting (env.ts
+   * hostingTermsInForce: no KV read, so neither a failed read nor the flag closed again drops it while
+   * community servers still host); before, ignored and kept nowhere. The game shows the switch only
+   * once GET /api/config says hosting is open (the privacy policy's "desde la apertura"), and before
+   * the opening no community server exists. Anything but true is no choice.
+   */
+  projectOnly?: unknown;
 }
 
 /**
@@ -505,6 +519,10 @@ async function queue(request: Request, env: Env): Promise<Response> {
     }
     ratings = c.ratings;
   }
+  // "Solo servidores del proyecto" (A15): kept nowhere before the terms describe hosting (dark), and
+  // from then on always taken: never the KV flag, whose failed read (null: closed) or a close after
+  // the opening, while community servers still host, would drop it and fail open.
+  const projectOnly = body.projectOnly === true && nodesConfigured(env) && hostingTermsInForce(env);
   const headers = await internalHeaders(env, hub.region);
   let res = await hub.stub.fetch('https://matchmaker/join', {
     method: 'POST',
@@ -523,6 +541,7 @@ async function queue(request: Request, env: Env): Promise<Response> {
       visible: body.visible !== false,
       // Casual's solo bots level, the player's pick (privacy policy, the search's row).
       bots: kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined,
+      ...(projectOnly ? { projectOnly: true } : {}),
       ...seatFields(session, now),
     }),
   });
@@ -771,8 +790,9 @@ async function nodeRejoin(request: Request, env: Env, playerId: string, matchId:
       console.error('node rejoin: the 200 is not a ticket');
       return error(503, 'offline', 'the node match cannot be reached right now: try again in a moment');
     }
-    // The match's cars (src/net/cosmetics.ts): a node's own welcome never carries them.
-    const out: CosmeticQueueResult = { status: 'matched', matchId, ticket: t.ticket, wsUrl: t.wsUrl, node: true, ...(t.cars ? { cars: t.cars } : {}) };
+    // The match's cars (src/net/cosmetics.ts): a node's own welcome never carries them. Its server's
+    // mark (A15) as the placement's: the object's word, absent for a project server before the terms describe hosting.
+    const out: CosmeticQueueResult & Pick<QueueMatchedExtra, 'server'> = { status: 'matched', matchId, ticket: t.ticket, wsUrl: t.wsUrl, node: true, ...(t.cars ? { cars: t.cars } : {}), ...(t.server ? { server: t.server } : {}) };
     return json(out);
   }
   if (r.status === 404 || (r.status === 410 && replyCode(r.body) !== 'left')) await releaseLock(request, env, playerId, matchId, region);

@@ -42,8 +42,12 @@ export function rootSection(screenId: string): SectionId | null {
   return SECTIONS.find((s) => s.root === screenId)?.id ?? null;
 }
 
-/** Screens of every section (Ajustes, from the top bar's gear or Start anywhere): stacked on the screen shown (backModel.ts stackAfterOpen). */
-export const EVERY_SECTION: readonly string[] = ['settings'];
+/**
+ * Screens of every section, stacked on the screen shown (backModel.ts stackAfterOpen), so Back
+ * returns there: Ajustes (the top bar's gear, Start anywhere) and "Mis servidores" (Prompt 2, B1's
+ * option (b): opened from GARAJE it stays GARAJE's, from PERFIL PERFIL's, from `#servers` Inicio's).
+ */
+export const EVERY_SECTION: readonly string[] = ['settings', 'servers'];
 
 /**
  * The stacked screens of a section other than JUGAR, by id: opened from that section's root they

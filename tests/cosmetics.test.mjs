@@ -199,6 +199,8 @@ test('the community nodes bundle never imports the car catalog, the car pick or 
   for (const file of ['src/game/cosmetics.ts', 'src/game/carSelection.ts', 'src/game/garage.ts', 'src/net/cosmetics.ts', 'nodes/control-plane/shop.ts']) {
     assert.equal(closure.has(file), false, `${file} is in the node bundle: adding a car would need a node release`);
   }
+  // The queue's wait and matched extras (the community server's mark, Prompt 2 A15) are the Worker's: never the node's.
+  assert.equal(closure.has('src/net/queueWait.ts'), false, 'src/net/queueWait.ts is in the node bundle: the server mark would need a node release');
   for (const file of closure) assert.ok(!file.startsWith('src/render/'), `${file}: render code in the node bundle`);
   // And the catalog stays pure data: no import of its own, so nothing reaches it through it.
   assert.deepEqual(runtimeImports(join(ROOT, 'src/game/cosmetics.ts')), []);
