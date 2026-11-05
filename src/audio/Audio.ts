@@ -33,6 +33,9 @@ const MUSIC_LEVEL = 0.4;
 export class Audio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** The limiter before the speakers, and the optional tap after it that a recording reads (recordingStream). */
+  private comp: DynamicsCompressorNode | null = null;
+  private recDest: MediaStreamAudioDestinationNode | null = null;
   private kit: SfxKit | null = null;
 
   // Continuous layers (sfx/layers.ts), in update order, and the frame they all read (reused).
@@ -198,6 +201,20 @@ export class Audio {
     if (this.running) this.musicNode?.port.postMessage({ type: 'goal' });
   }
 
+  /**
+   * The mix as a MediaStream, for a recording to carry as its audio track (the replay viewer's clips): a tap
+   * after the limiter, made on the first call. Null before the graph exists (resume() builds it).
+   */
+  recordingStream(): MediaStream | null {
+    const ctx = this.ctx;
+    if (ctx === null || this.comp === null) return null;
+    if (this.recDest === null) {
+      this.recDest = ctx.createMediaStreamDestination();
+      this.comp.connect(this.recDest);
+    }
+    return this.recDest.stream;
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -212,6 +229,8 @@ export class Audio {
     void ctx.close().catch(() => undefined);
     this.ctx = null;
     this.master = null;
+    this.comp = null;
+    this.recDest = null;
     this.kit = null;
     this.boost = null;
     this.layers = [];
@@ -237,6 +256,7 @@ export class Audio {
     comp.attack.value = 0.003;
     comp.release.value = 0.18;
     comp.connect(ctx.destination);
+    this.comp = comp;
     const master = ctx.createGain();
     master.gain.value = this.volume;
     master.connect(comp);

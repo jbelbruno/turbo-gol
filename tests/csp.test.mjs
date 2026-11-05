@@ -161,7 +161,17 @@ test('the game works under it: wasm, the music worklet, the sockets and the comm
   // bytes, a navigation no fetch directive gates, never a script, worker or worklet.
   const DOWNLOADS = ['src/ui/screens/nodesAdmin.ts'];
   const blobs = code.filter((f) => /createObjectURL/.test(readFileSync(f, 'utf8'))).map((f) => relative(ROOT, f).split(sep).join('/'));
-  assert.deepEqual(blobs.filter((f) => !DOWNLOADS.includes(f)), [], 'a blob: URL for a script, worker or worklet would need blob: in script-src / worker-src');
+  // The other is the replay viewer's clip (src/replay/player.ts showClipSheet): the recorded video as an
+  // <a download> and a navigator.share file, previewed by a data: JPEG, never played from a blob: (no
+  // media-src blob:), never a script.
+  const CLIP_DOWNLOADS = ['src/replay/player.ts'];
+  assert.deepEqual(blobs.filter((f) => !DOWNLOADS.includes(f) && !CLIP_DOWNLOADS.includes(f)), [], 'a blob: URL for a script, worker or worklet would need blob: in script-src / worker-src');
+  for (const f of CLIP_DOWNLOADS) {
+    const uses = [...read(f).matchAll(/createObjectURL\(([^\n]*)/g)].map((m) => m[1]);
+    assert.deepEqual(uses, ['r2.blob);'], f + ': only the recorded clip');
+    assert.match(read(f), /href: clipUrl, download: name/);
+    assert.doesNotMatch(read(f), /createElement\('video'\)|\.src = clipUrl/);
+  }
   for (const f of DOWNLOADS) {
     const uses = [...read(f).matchAll(/createObjectURL\(([^\n]*)/g)].map((m) => m[1]);
     assert.deepEqual(uses, ["new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));"], f + ': its bytes saved, nothing run');

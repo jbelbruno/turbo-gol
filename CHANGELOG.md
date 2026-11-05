@@ -7,6 +7,26 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Clips and links in the replay viewer (`replay.html`): a **Clip / Share** button opens a clip editor, a
+  video editor's layout. The goals are on the left, the player is in the middle (the canvas in the
+  clip's shape with the scorebug, the goal caption and the watermark drawn over it as they will be
+  recorded), the format (9:16 for TikTok, Reels and Shorts, 1:1, 16:9), the quality (720p, 1080p, 1080p
+  at 60 fps), the camera, the scorer's name and the sound are on the right, and under it all a
+  timeline: a ruler, the whole match with its goals, the clip's range with a handle at each end (drag an
+  end to trim, the body to move it), the playhead (click or drag to scrub), zoom, and I / O to set the
+  start and the end at the playhead. The range is whatever the player wants, 1 to 60 s, goal or not.
+  Export records it in the browser (`captureStream` + `MediaRecorder`, MP4 where the browser writes it,
+  WebM in Firefox) with nothing uploaded; the sheet after it offers Download, Share (the phone's share
+  sheet, which lists TikTok, Instagram, WhatsApp) and Copy link. A goal's link is
+  `replay?id=<match>&t=<tick>` and opens the viewer four seconds before it. With sound the file carries
+  the game's own audio (the music, the horn, the hits), its volume and music level set by the player
+  (`src/replay/clip.ts`, `timeline.ts`, `sound.ts`, `player.ts`, `src/audio/Audio.ts` recordingStream).
+- Sound in the replay viewer: the game's audio follows the re-simulation (music, countdown, goal horn, ball
+  and car hits, and the engine, boost and wind of the car a chase camera follows), at the game's saved
+  volumes, with a Sound switch on the bar.
+- The goal explosion and the ball-hit sparks in the replay viewer, which only the live game had, and an
+  animated goal caption in clips (the word drops in and bounces, a ring and spokes burst out, the frame
+  shakes and flashes in the team's colour, the scorer's name pops in letter by letter).
 - Community nodes: the server side of opening hosting to anyone with an account, shipped closed.
   Nothing changes for players or for the project's servers until the terms that describe hosting
   are in force (`NODE_HOSTING_TERMS`, unset until then) and the maintainers open it in the panel
@@ -605,6 +625,9 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- The replay viewer on small screens (a phone upright or on its side): the control bar is one thin line
+  (play, timeline, time, Clip / Share; a ··· button opens the rest on a short screen) and the editor puts
+  its goals and settings in an Options sheet, so the match keeps the screen.
 - Node.js 26 (the LTS since 2026-10-28) is the minimum for development, CI and community nodes. The
   next node release (0.3.1) needs it (`nodeMajor: 26`): a node on an older Node.js keeps running
   the release it has until its operator upgrades. The installers set up 26 where Node.js is missing

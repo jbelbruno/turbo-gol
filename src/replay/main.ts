@@ -28,6 +28,7 @@ import { LoadingOverlay } from '../ui/LoadingOverlay';
 import { clockText, el, sameBuild, showList } from './list';
 import { replayNotice } from './names';
 import type { ReplaySource } from './names';
+import { parseStartTick } from './clip';
 import { endTickOf, scan, startPlayer } from './player';
 
 const $ = (id: string): HTMLElement => {
@@ -94,7 +95,7 @@ function notice(text: string, ok: boolean, hideMs: number | null = ok ? 4000 : n
 /** A replay's bytes and where they came from (the server's view, with its verified flag, or a file). */
 type Loaded = { bytes: Uint8Array; from: ReplaySource };
 
-async function play(source: () => Promise<Loaded | null>): Promise<void> {
+async function play(source: () => Promise<Loaded | null>, matchId: string | null = null): Promise<void> {
   document.title = `${t('replay.title')} · Turbogol`;
   $('list').classList.add('rp-hidden');
   await overlay.show(t('replay.preparing'));
@@ -134,7 +135,7 @@ async function play(source: () => Promise<Loaded | null>): Promise<void> {
   overlay.progress(0.35);
   const result = await scan(r, mesh, (p) => overlay.progress(0.35 + 0.6 * p, 60));
   if (dead) return;
-  stopPlayer = await startPlayer({ replay: r, scan: result, renderer, mesh, hudRoot: $('hud'), tagsRoot: $('tags'), bar: $('bar') });
+  stopPlayer = await startPlayer({ replay: r, scan: result, renderer, mesh, hudRoot: $('hud'), tagsRoot: $('tags'), bar: $('bar'), matchId, startTick: parseStartTick(location.search) });
   if (dead) {
     stopPlayer();
     return;
@@ -172,7 +173,7 @@ function boot(): void {
     }
   }
   if (id !== null && MATCH_ID.test(id)) {
-    void play(() => fetchServed(id)).catch((e: unknown) => fail(t('replay.error'), e));
+    void play(() => fetchServed(id), id).catch((e: unknown) => fail(t('replay.error'), e));
   } else if (file !== null) {
     const path = file;
     void play(() => fetchFile(path)).catch((e: unknown) => fail(t('replay.error'), e));
