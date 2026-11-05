@@ -48,9 +48,12 @@ export const LED_LO = 112;
 export const LED_HI = 328;
 /** Dark frame inside the LED band, top and bottom (uu). */
 export const LED_FRAME = 7;
-/** The white LED rail on top of the boards (profile distance). */
+/**
+ * The white LED rail on top of the boards (profile distance). 21 uu thick: at 7 uu it was under a
+ * pixel from across the pitch and showed as dashes, now it holds a continuous (soft) line.
+ */
 export const RAIL_LO = 333;
-export const RAIL_HI = 340;
+export const RAIL_HI = 354;
 /** Length of the field outline (the rounded rectangle at the foot of the walls). */
 export const OUTLINE_LENGTH = 4 * (FIELD.cz + FIELD.cx) + 2 * Math.PI * FIELD.cornerR;
 /**

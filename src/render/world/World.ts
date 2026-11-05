@@ -382,7 +382,7 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
     const top = preset.proxyTop ?? PROXY_TOP;
     dome.top.value.set(top[0], top[1]);
     fogColor.value.setRGB(tw.fog.color[0], tw.fog.color[1], tw.fog.color[2]);
-    fogDensity.value = tw.fog.density;
+    fogDensity.value = tw.fog.density * spec.fogScale;
     gpu.setClearColor(_c.setRGB(tw.fog.color[0], tw.fog.color[1], tw.fog.color[2]), 1);
     scene.environmentIntensity = lightsOf(tw, spec.output).fill.env;
     shown = t;
@@ -640,6 +640,7 @@ export function createWorld(gpu: THREE.WebGPURenderer, scene: THREE.Scene, quali
         // the image-based light's intensity of the tier's path (the theme's low fill on the direct
         // one), and the live layer at the tier's level of detail (built on its first use)
         scene.environmentIntensity = lightsOf(themeWorld(shown), next.output).fill.env;
+        fogDensity.value = themeWorld(shown).fog.density * next.fogScale;
         showLive(worldPreset(shown).skyline);
       }
       // environment size: a new probe now (scene.environment changes here, while the views rebuild)
