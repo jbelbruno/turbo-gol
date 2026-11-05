@@ -7,6 +7,25 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Community nodes: the server side of opening hosting to anyone with an account, shipped closed.
+  Nothing changes for players or for the project's servers until the terms that describe hosting
+  are in force (`NODE_HOSTING_TERMS`, unset until then) and the maintainers open it in the panel
+  (the KV key `node_operators`: closed, a canary of accounts, or everyone; `POST
+  /nodes/admin/flags`, the Worker's only KV write, audited a year, its Discord line counting the
+  accounts, never naming them). `GET /api/config` says whether it is open. Once it is, an account
+  asks for a code with a verified email, 7 days of age, the terms accepted, and the rules for hosts
+  accepted with the 18-or-older declaration (a `host` consent row, written only then), for a server
+  of its own by `wss` on port 443, in its token's continent, under a name nobody in its region
+  holds; at most 3 servers, 3 codes a day and 2 unused at once, counted through deploys. A
+  community server gets at most 4 matches at a time on probation and 16 active (32 for all of an
+  operator's), no Competitive match, an hour out after 3 unexcused refusals in 10, none on probation
+  while the verification queue is behind (which now serves Competitive first), and its points are
+  capped at 300 a day per host, each player's repeat decays on its own, a lone player's match
+  against bots and a void match earn nothing. Maintainers can block an operator (its servers off,
+  its wallet frozen), unblock it or suspend its servers, and list the community operators; a host
+  can choose to show its name in the public list. Community alerts go to a second staff-only
+  channel (`NODE_COMMUNITY_WEBHOOK`, never one the community reads), not the team's
+  (`server/src/hostPolicy.ts`, `server/README.md`).
 - Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
   P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
   in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and

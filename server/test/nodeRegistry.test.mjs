@@ -438,9 +438,9 @@ test('without the node settings the object serves nothing; every route needs the
 
 // ---- tokens, registration ------------------------------------------------------------------------
 
-test('tokens: a trusted operator only, a known region, 10 a day; the answer carries the install line', async () => {
+test('tokens: a trusted operator only while hosting is closed, a known region, 10 a day; the answer carries the install line', async () => {
   const h = await boot(makeEnv());
-  assert.deepEqual((await tokenFor(h, STRANGER)).json.error, 'not_trusted');
+  assert.deepEqual((await tokenFor(h, STRANGER)).json.error, 'hosting_closed');
   assert.equal((await tokenFor(h, STRANGER)).status, 403);
   assert.equal((await tokenFor(h, PROJECT, 'XX')).status, 400);
   const t = await tokenFor(h);
@@ -1546,11 +1546,15 @@ const ACTOR = 'admin Proyecto Señor (a1b2c3d4e5f60718)';
 const { REGIONS } = await import('../../src/net/account.ts');
 const { KV_FLAGS } = await import('../src/env.ts');
 
-/** A community operator's node (STRANGER's), registered with a token the registry mints directly: the token route is the project's. */
+/**
+ * A community operator's node (STRANGER's), registered with a token the registry mints directly:
+ * the token route stays the project's while hosting is closed. Seen from its token's continent, as
+ * a community node must be (hosting.test.mjs checks the rule).
+ */
 async function communityNode(h, { ip = '198.51.100.40', publicUrl = 'wss://juan.turbo-gol.test' } = {}) {
   const { token } = await h.obj.cp.registry.createToken({ id: STRANGER, name: 'Juan' }, 'SA', clock);
   const keys = await generateEd25519();
-  const r = await call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': ip } });
+  const r = await call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': ip, 'x-client-continent': 'SA' } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return { ...r.json, key: await importPrivateKey(keys.privateKey), publicUrl };
 }
@@ -1817,13 +1821,15 @@ test('the overview: every node in full (specs, last probe, link cuts, pins), the
   assert.deepEqual(o.alerts, { webhook: true });
   assert.deepEqual(o.warnings.map((w) => w.kind).sort(), ['trusted_off_channel', 'trusted_off_channel', 'verifier_node_versions']);
   assert.deepEqual(o.warnings.find((w) => w.kind === 'verifier_node_versions').nodes.map((x) => x.node).sort(), ['22', '24']);
-  // Ten reads in five minutes: one line in the channel, ten in the logs; the flags read once a minute.
-  assert.equal(kvReads, KV_FLAGS.length);
+  // Ten reads in five minutes: one line in the channel, ten in the logs; the flags read once a minute
+  // (the eight and the opening's, node_operators, which the overview shows apart: closed, the terms not in force).
+  assert.equal(kvReads, KV_FLAGS.length + 1);
+  assert.deepEqual([o.hosting.flag, o.hosting.raw, o.hosting.stage, o.hosting.terms.inForce, o.hosting.changes], ['node_operators', null, 'closed', false, []]);
   for (let i = 1; i < 10; i++) {
     clock += 30_000;
     assert.equal((await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).status, 200);
   }
-  assert.ok(kvReads <= KV_FLAGS.length * 5, `${kvReads} KV reads`);
+  assert.ok(kvReads <= (KV_FLAGS.length + 1) * 5, `${kvReads} KV reads`);
   await h.ctx.settle();
   const reads = () => posted().filter((p) => p.includes(': read '));
   assert.deepEqual(reads(), [`**ALERT** \`${ACTOR}: read the overview (2 nodes, with their addresses, and 2 tokens) (a maintainer's reads come here once per 30 min, every one is in the logs)\``]);

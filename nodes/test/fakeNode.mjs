@@ -57,6 +57,8 @@ export const human = (c, extra = {}) => ({ playerId: c.repeat(16), name: c.toUpp
  *   opts.onSend(m)        sees every message the control plane sends the node, in order
  *   opts.onOutcome(o)     sees every outcome as the control plane hands it on
  *   opts.noInline, opts.verify, opts.casualVerifyRate, opts.getDelay (a slow replay store)
+ *   opts.community        the ControlPlane's community policy (CommunityPolicy; none by default)
+ *   opts.ledger           a function making the Ledger (default: new Ledger())
  */
 export async function setup(opts = {}) {
   const build = await testBuild();
@@ -106,7 +108,8 @@ export async function setup(opts = {}) {
       build: () => build,
       channel: opts.channel ?? (() => ({ stable: build.version, minimum: '0.0.0' })),
       registry,
-      ledger: new Ledger(),
+      ledger: opts.ledger ? opts.ledger() : new Ledger(),
+      community: opts.community,
       replays: {
         put: async (id, b) => void replays.set(id, b),
         get: async (id) => {

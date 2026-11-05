@@ -58,7 +58,10 @@
  *                        auth: { devSignIn: the dev-only sign-in is open (mail.ts isDevAuth), email: the
  *                        flows that send mail may show (mail.ts emailAvailable), legacy: { phase, until }:
  *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) },
- *                        legal: { terms: TERMS_VERSION or null, deletion: DELETION_OPEN is '1', graceDays } (env.ts legalConfig) }
+ *                        legal: { terms: TERMS_VERSION or null, deletion: DELETION_OPEN is '1', graceDays } (env.ts legalConfig),
+ *                        hosting: { open, stage: 'closed' | 'canary' | 'all' }: whether accounts outside the project
+ *                        may host a server (env.ts hostingMode: closed until the terms in force describe it and
+ *                        the KV flag node_operators opens it; always closed without the node settings) }
  *                        (no auth; the client fetches it once per page load before its first POST /api/guest)
  *   GET  /terminos, /privacidad, /terms, /privacy  the terms and the privacy policy (legalPages.ts), only
  *                       while TERMS_VERSION is set; 404 not_found before (wrangler.jsonc routes them here first)
@@ -103,7 +106,7 @@
  * which flag stops what.
  */
 import type { Env } from './env';
-import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, hostingMode, hostingStage, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
 import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
@@ -917,7 +920,10 @@ export default {
       // its player picked none (the queue's `bots`); MODOS › CASUAL shows it picked until they pick.
       const queue = { ...(cfg.queue as Record<string, unknown>), botLevel: await casualBotLevel(env) };
       // legal (env.ts legalConfig): the terms version in force (null until the owner publishes) and DELETION_OPEN.
-      return withCors(json({ ...cfg, queue, auth, legal: legalConfig(env) }, 200, { 'cache-control': 'no-store' }), cors);
+      // hosting (env.ts hostingMode): whether anyone outside the project may host a server yet; the game
+      // shows its hosting screens, the community server's mark and its report only once it is.
+      const stage = nodesConfigured(env) ? hostingStage(await hostingMode(env)) : 'closed';
+      return withCors(json({ ...cfg, queue, auth, legal: legalConfig(env), hosting: { open: stage !== 'closed', stage } }, 200, { 'cache-control': 'no-store' }), cors);
     }
     // ---- /api/where (edge colo / country / masked ip; no secret needed) ----
     if (path === '/api/where') return withCors(where(request), cors);

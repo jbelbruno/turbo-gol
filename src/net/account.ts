@@ -535,6 +535,8 @@ export interface MeInfo {
   news?: boolean;
   /** The terms version the account accepted last (consents, kind 'terms'); null: none yet. Absent from older servers. */
   terms?: string | null;
+  /** The version of the rules for hosts it accepted last, with its 18-or-older declaration (consents, kind 'host'); null: none. Absent from older servers. */
+  hostTerms?: string | null;
   /** A deletion was asked: the account is purged at this time (ms); 0 = none. */
   deletionAt?: number;
   /** How many ways in it has: Google, Discord, and a password while it can still sign in with one. */

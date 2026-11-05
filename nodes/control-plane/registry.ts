@@ -30,6 +30,10 @@
  *                  its record stays for the panel.
  *   trustRemovedAt its operator left the trusted operators (NODE_TRUSTED_OPERATORS) while the node
  *                  was trusted: restore() sent it back to probation, its 20 verified matches to earn.
+ *
+ * A community operator (one outside the project) has at most MAX_NODES_PER_OPERATOR nodes and, when
+ * the registry is given CommunityRules (the NodeRegistryDO), registers only a wss host on port 443
+ * behind a DNS name, seen from its token's continent, under a name of its own (communityRefusal).
  */
 import { HEARTBEAT_TIMEOUT_MS } from '../shared/controlProtocol';
 import type { BuildId, HeartbeatData, HelloData, NodeCapacity, NodeRole, NodeSpecs, NodeStatus, NodeTransport, RegisterRequest } from '../shared/controlProtocol';
@@ -45,7 +49,12 @@ export const STRIKE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const STRIKE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 /** A second strike pause within this window sends an active node back to probation (20 verified matches again). */
 export const REPEAT_PAUSE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-export const MAX_NODES_PER_OPERATOR = 10;
+/**
+ * The nodes an operator outside the project may have (the owner's COMMUNITY_MAX_NODES), its banned
+ * ones included (takesSlot): with OPERATOR_MATCHES_MAX (controlPlane.ts), what keeps one operator
+ * from filling a region.
+ */
+export const MAX_NODES_PER_OPERATOR = 3;
 /**
  * The nodes a trusted operator (the project) may have: RegistryOptions.maxTrustedNodes, the Worker's
  * NODE_TRUSTED_MAX_NODES var, bounded by trustedNodeCap to TRUSTED_NODES_MIN..TRUSTED_NODES_MAX; this
@@ -186,6 +195,12 @@ export interface NodeCounters {
   strikes: number;
   /** Verified matches since the node last entered probation (promotion to active counts these). */
   probationVerified: number;
+  /**
+   * Assignments a community node refused with no excuse (when the assign was sent it was online,
+   * and by the control plane's own count not full, draining or at its egress cap: ControlPlane's
+   * refusal rule). 0 in rows from before it (persist.ts), and always on the project's nodes.
+   */
+  refused?: number;
 }
 
 export interface NodeRecord {
@@ -242,6 +257,12 @@ export interface NodeRecord {
    * offline node was last heard. Null before its first transition, and in rows from before it.
    */
   seenAt?: number | null;
+  /**
+   * The continent Cloudflare saw the registration come from (a two-letter code, '' when it said
+   * none), or null when nobody told (the reference server, rows from before it). A community node's
+   * must be its token's region (CommunityRules.regionCheck); a project node's only shows in the panel.
+   */
+  seenContinent?: string | null;
 }
 
 export type RegisterResult = { ok: true; node: NodeRecord } | { ok: false; code: string; message?: string };
@@ -268,7 +289,35 @@ export interface RegistryOptions {
   refuseIpUrls?: boolean;
   /** A node's events, for the maintainers' history (none: not kept). */
   events?: NodeEventSink;
+  /**
+   * The rules a node of an operator outside the project registers under (the NodeRegistryDO sets
+   * them; the reference server and the tests, which run home PCs and addresses, do not). Each is
+   * checked before the token is spent, so the installer can be run again.
+   */
+  community?: CommunityRules;
+  /** The operator may not host any more (a maintainer blocked it): its tokens register nothing (operator_blocked). */
+  operatorBlocked?: (operatorId: string) => boolean;
 }
+
+/**
+ * What a community node must be to register (Prompt 2, A5, A6, A13). Only a VPS behind a DNS name
+ * for now: wss on port 443 (rtc_not_available for WebRTC, bad_public_url for another port or a name
+ * under a reserved domain), in the continent its token's region names (region_mismatch), with a
+ * name no node of its region holds whatever the case, nor any project node (name_taken).
+ */
+export interface CommunityRules {
+  /** Domains no community node's host may be, or be under (the project's). */
+  reservedDomains: readonly string[];
+  /** The continent Cloudflare saw (register's `seen`) must be the token's region; none or another one is refused. */
+  regionCheck: boolean;
+}
+
+/** `host` is one of the rules' reserved domains, or under one. */
+function reservedHost(rules: CommunityRules, host: string): boolean {
+  return rules.reservedDomains.some((d) => host === d || host.endsWith('.' + d));
+}
+
+const RTC_NOT_AVAILABLE: RegisterResult ={ ok: false, code: 'rtc_not_available', message: 'only a server with a DNS name, by wss on port 443, for now: run the installer with --public-host <name>' };
 
 function cleanName(s: unknown, fallback: string): string {
   if (typeof s !== 'string') return fallback;
@@ -418,6 +467,20 @@ export class Registry {
       ...(pin.roles && pin.roles.length > 0 ? { roles: [...pin.roles] } : {}),
     };
     this.tokens.set(rec.hash, rec);
+    this.opts.store?.tokens([rec]);
+    this.pruneTokens(now);
+    // Its node will be trusted: it verifies ranked matches, its own included. A token nobody on the
+    // team asked for means the project account is in someone else's hands.
+    if (this.trusted.has(op.id)) this.log(`ALERT registration token created for trusted operator ${op.name} (${op.id}), region ${region}${rec.publicHost ? ` for ${rec.publicHost}` : ''}`);
+    return { token, expiresAt: rec.expiresAt };
+  }
+
+  /**
+   * The tokens past TOKEN_TTL_MS after they expired, used or not, out of the map and the store: at
+   * each new token, and on the NodeRegistryDO's cron (every 5 minutes), so none outlives that hour
+   * when nobody asks for another (the policy's "2 hours" for a code). Returns how many went.
+   */
+  pruneTokens(now: number): number {
     const pruned: string[] = [];
     for (const [h, t] of this.tokens) {
       if (t.expiresAt < now - TOKEN_TTL_MS) {
@@ -425,12 +488,8 @@ export class Registry {
         pruned.push(h);
       }
     }
-    this.opts.store?.tokens([rec]);
     if (pruned.length > 0) this.opts.store?.dropTokens(pruned);
-    // Its node will be trusted: it verifies ranked matches, its own included. A token nobody on the
-    // team asked for means the project account is in someone else's hands.
-    if (this.trusted.has(op.id)) this.log(`ALERT registration token created for trusted operator ${op.name} (${op.id}), region ${region}${rec.publicHost ? ` for ${rec.publicHost}` : ''}`);
-    return { token, expiresAt: rec.expiresAt };
+    return pruned.length;
   }
 
   /** Every token kept (unused, used, and expired ones until they are pruned). */
@@ -489,21 +548,52 @@ export class Registry {
    * number, `sa-node-3`. Never its operator's name, which the public list (publicList.ts) would show
    * beside the "Anfitrión <n>" that hides it, nor the start of the operator's id (the name a token
    * carries when the account's could not be read). The number counts the region's records, which
-   * are never deleted, and skips a name already taken, so two nodes never share one.
+   * are never deleted, and skips a name already taken whatever its case, so two nodes never share one.
    */
   private unnamedName(region: string): string {
-    const taken = new Set(this.list().map((n) => n.name));
+    const taken = new Set(this.list().map((n) => n.name.toLowerCase()));
     let k = this.list().filter((n) => n.region === region).length + 1;
     while (taken.has(`${region.toLowerCase()}-node-${k}`)) k++;
     return `${region.toLowerCase()}-node-${k}`;
   }
 
-  async register(req: RegisterRequest, now: number): Promise<RegisterResult> {
+  /**
+   * `name` is not free for a community node of `region` (A13): a node of that region that is not
+   * retired holds it, whatever the case, or a project node anywhere does (a community server must
+   * never pass for one of the project's). Project nodes are never asked: their names are the team's.
+   */
+  nameTaken(region: string, name: string): boolean {
+    const k = name.toLowerCase();
+    return this.list().some((n) => n.name.toLowerCase() === k && (n.trusted || (n.region === region && !isRetired(n))));
+  }
+
+  /** The CommunityRules refusal of a host's registration, or null (`host`: its wss host; its transports are wss alone, checked before). */
+  private communityRefusal(rules: CommunityRules, tok: TokenRecord, req: RegisterRequest, host: string | null, seen: { continent?: string | null }): RegisterResult | null {
+    if (host === null) return RTC_NOT_AVAILABLE;
+    const reserved = reservedHost(rules, host);
+    if (new URL(req.publicUrl as string).port !== '' || reserved) {
+      return { ok: false, code: 'bad_public_url', message: reserved ? `a community server's name is never under ${rules.reservedDomains.join(', ')}` : 'wss://<name> on port 443, no other port' };
+    }
+    if (rules.regionCheck && (seen.continent ?? '') !== tok.region) {
+      return { ok: false, code: 'region_mismatch', message: `this machine is seen from ${seen.continent ? seen.continent : 'no known continent'}, and the token is for ${tok.region}: ask for a token of the region it is in` };
+    }
+    const explicit = typeof req.name === 'string' ? req.name : tok.name;
+    const name = explicit ? cleanName(explicit, '') : '';
+    if (name !== '' && this.nameTaken(tok.region, name)) return { ok: false, code: 'name_taken', message: `a server of the region is already called ${name}: choose another --name` };
+    return null;
+  }
+
+  /**
+   * `seen`: what the Worker saw of the caller (Cloudflare's continent), kept on the node
+   * (seenContinent) and, for a community node, checked against its token (CommunityRules).
+   */
+  async register(req: RegisterRequest, now: number, seen: { continent?: string | null } = {}): Promise<RegisterResult> {
     if (!req || typeof req.token !== 'string' || !req.token.startsWith(TOKEN_PREFIX) || req.token.length > 80) return { ok: false, code: 'bad_token' };
     const tok = this.tokens.get(await sha256Hex(req.token));
     if (!tok || tok.usedBy !== null) return { ok: false, code: 'bad_token', message: 'unknown or already used' };
     if (tok.revokedAt !== undefined && tok.revokedAt !== null) return { ok: false, code: 'token_revoked', message: 'a maintainer revoked this token: ask for a new one' };
     if (tok.expiresAt < now) return { ok: false, code: 'token_expired' };
+    if (!this.trusted.has(tok.operatorId) && this.opts.operatorBlocked?.(tok.operatorId)) return { ok: false, code: 'operator_blocked', message: 'this account may not host servers' };
     if (this.atCap(tok)) return { ok: false, code: 'too_many_nodes' };
     if (!(await isValidPublicKey(req.publicKey))) return { ok: false, code: 'bad_public_key' };
     for (const n of this.nodes.values()) if (n.publicKey === req.publicKey) return { ok: false, code: 'key_in_use' };
@@ -521,6 +611,9 @@ export class Registry {
       const asked = Array.isArray(req.transports) ? req.transports : req.publicUrl ? ['wss'] : ['rtc'];
       transports = [...new Set(asked)].filter((t): t is NodeTransport => t === 'wss' || t === 'rtc');
       if (transports.length === 0) return { ok: false, code: 'bad_transports' };
+      // A community node is a VPS by wss for now (no TURN): said before anything about its address.
+      const community = this.opts.community !== undefined && !this.trusted.has(tok.operatorId);
+      if (community && (transports.includes('rtc') || !transports.includes('wss'))) return RTC_NOT_AVAILABLE;
       if (transports.includes('wss') && !validPublicUrl(req.publicUrl, insecure)) return { ok: false, code: 'bad_public_url', message: insecure ? 'ws(s)://host[:port]' : 'wss://host[:port]' };
     }
     // Before the token is spent: an installer run on the wrong machine or name can be run again.
@@ -528,6 +621,10 @@ export class Registry {
     if (tok.publicHost && host !== tok.publicHost) return { ok: false, code: 'public_host_mismatch', message: `this token is for wss://${tok.publicHost}: run the installer with --public-host ${tok.publicHost}` };
     if (host !== null && this.opts.refuseIpUrls === true && isIpHost(host)) {
       return { ok: false, code: 'ip_not_supported', message: 'a wss node needs a DNS name (--public-host <name>): the control plane cannot probe an IP address' };
+    }
+    if (this.opts.community && !this.trusted.has(tok.operatorId) && roles.includes('host')) {
+      const refused = this.communityRefusal(this.opts.community, tok, req, host, seen);
+      if (refused) return refused;
     }
     const b = req.build;
     if (!b || typeof b.version !== 'string' || typeof b.protocol !== 'number' || !/^[0-9a-f]{64}$/.test(String(b.wasmSha256))) return { ok: false, code: 'bad_build' };
@@ -564,7 +661,7 @@ export class Registry {
       tickLagP99Ms: 0,
       egressGB: 0,
       cpuLoad: 0,
-      counters: { assigned: 0, verified: 0, rankedVerified: 0, failedVerification: 0, lost: 0, strikes: 0, probationVerified: 0 },
+      counters: { assigned: 0, verified: 0, rankedVerified: 0, failedVerification: 0, lost: 0, strikes: 0, probationVerified: 0, refused: 0 },
       strikeTimes: [],
       pauseTimes: [],
       suspendedUntil: null,
@@ -574,6 +671,7 @@ export class Registry {
       retiredReason: null,
       trustRemovedAt: null,
       seenAt: null,
+      seenContinent: seen.continent ?? null,
     };
     // A verify-only node needs no reachability: it only dials out.
     if (!roles.includes('host')) {
@@ -587,6 +685,7 @@ export class Registry {
     if (tok.revokedAt !== undefined && tok.revokedAt !== null) return { ok: false, code: 'token_revoked', message: 'a maintainer revoked this token: ask for a new one' };
     if (this.atCap(tok)) return { ok: false, code: 'too_many_nodes' };
     for (const n of this.nodes.values()) if (n.publicKey === req.publicKey) return { ok: false, code: 'key_in_use' };
+    if (this.opts.community && !node.trusted && roles.includes('host') && this.nameTaken(tok.region, node.name)) return { ok: false, code: 'name_taken', message: `a server of the region is already called ${node.name}: choose another --name` };
     tok.usedBy = nodeId;
     this.nodes.set(nodeId, node);
     this.opts.store?.register(tok, node);
@@ -692,13 +791,26 @@ export class Registry {
 
   /**
    * A publicUrl `n` may move to: on its pinned host when it has one (publicHost: registration and
-   * every hello), and never on an IP address where those are refused (refuseIpUrls).
+   * every hello), never on an IP address where those are refused (refuseIpUrls), and a community
+   * node under the CommunityRules (A5) by wss on port 443 only, never under a reserved domain, as at
+   * its registration.
    */
-  addressAllowed(n: Pick<NodeRecord, 'publicHost'>, url: string): boolean {
+  addressAllowed(n: Pick<NodeRecord, 'publicHost' | 'trusted'>, url: string): boolean {
+    return this.addressRefusal(n, url) === null;
+  }
+
+  /** Why `n` may not move to `url` (addressAllowed), in a few words for the log, or null when it may. */
+  addressRefusal(n: Pick<NodeRecord, 'publicHost' | 'trusted'>, url: string): string | null {
     const host = hostOf(url);
-    if (host === null) return false;
-    if (n.publicHost && host !== n.publicHost) return false;
-    return !(this.opts.refuseIpUrls === true && isIpHost(host));
+    if (host === null) return 'not an address';
+    if (n.publicHost && host !== n.publicHost) return `its token pinned ${n.publicHost}`;
+    if (this.opts.refuseIpUrls === true && isIpHost(host)) return 'an IP address';
+    const rules = this.opts.community;
+    if (rules && !n.trusted) {
+      if (new URL(url).port !== '') return 'a community server is on port 443 only';
+      if (reservedHost(rules, host)) return `a community server is never under ${rules.reservedDomains.join(', ')}`;
+    }
+    return null;
   }
 
   /**
@@ -786,6 +898,14 @@ export class Registry {
     const n = this.nodes.get(id);
     if (!n) return;
     n.counters.assigned++;
+    this.save(n);
+  }
+
+  /** An assignment the node refused with no excuse (ControlPlane's refusal rule): counted, written. */
+  onRefused(id: string): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    n.counters.refused = (n.counters.refused ?? 0) + 1;
     this.save(n);
   }
 

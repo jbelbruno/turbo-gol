@@ -128,6 +128,9 @@
     // notice); a new value asks every player to accept again. To try another one
     // locally, set TERMS_VERSION in your own .dev.vars (or wrangler dev --var TERMS_VERSION:test-1).
     "TERMS_VERSION": "2026-11-05",
+    // NODE_HOSTING_TERMS (env.ts hostingTermsInForce): the first TERMS_VERSION whose texts let anyone
+    // outside the project host a server. Not set here until the change that puts those texts in force:
+    // while it is unset, hosting stays closed whatever the KV key node_operators says.
     // Sign-in PR 9 (§3.10): the day the username-only sign-in closes, an ISO date (accountStore.ts
     // legacyDateOf reads it as that day at 12:00 UTC, 09:00 in Argentina). The cutoff is the later of this
     // date and 30 days after the Worker first sees the var, so a late deploy moves it by itself. Absent =
