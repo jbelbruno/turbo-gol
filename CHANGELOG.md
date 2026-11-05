@@ -665,6 +665,12 @@ All notable changes to Turbogol are documented here. The format follows
   region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
   of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
   A node match's release goes to the one queue, and a ranked result always names the host region.
+- The community servers' public list (`/nodes/status`) shows only the servers in service (on
+  probation or active), never one pending, suspended, banned or retired, and names who runs each one
+  only for the project's servers: any other host is "Anfitrión" and a number, in the list and in the
+  points ranking, never its username or the start of its account id. A server registered without a
+  name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
+  the legal texts that describe it.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,

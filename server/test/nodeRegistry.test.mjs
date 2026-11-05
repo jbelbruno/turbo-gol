@@ -1435,7 +1435,7 @@ test('the ledger survives a deploy: the leaderboard, the totals, /nodes/mine rew
   assert.equal(L.verifiedMatches(STRANGER), 2);
   assert.deepEqual(L.leaderboard(clock), [{ operatorId: STRANGER, points: e1.points }], 'the window only');
   const status = await call(h, 'GET', '/nodes/status');
-  assert.deepEqual(status.json.hosts, [{ name: STRANGER.slice(0, 6), points: e1.points }]);
+  assert.deepEqual(status.json.hosts, [{ name: 'Anfitrión 1', points: e1.points }], 'a community operator by a number, never the start of its id');
   const mine = await call(h, 'GET', '/nodes/mine', { headers: { 'x-operator-id': STRANGER } });
   assert.deepEqual([mine.json.rewards.operatorId, mine.json.rewards.points30d, mine.json.rewards.matches30d, mine.json.rewards.earned], [STRANGER, e1.points, 1, L.earned(STRANGER)]);
   // The same group again within 24 h: the entry and the note before the deploy both count.
@@ -1446,6 +1446,58 @@ test('the ledger survives a deploy: the leaderboard, the totals, /nodes/mine rew
   assert.equal(scoreOn(h, '12'.repeat(32)).repeat, 1);
   h = await boot(env, new FakeCtx(h.ctx.db));
   assert.equal(rows(h, 'ledger_notes').length, 0);
+});
+
+test('the public list: only the nodes in service (probation, active, never retired); the project by its name, any other operator as "Anfitrión <n>" in the nodes and in the hosts, never its name, its id or the start of it', async () => {
+  const env = makeEnv({ NODE_TRUSTED_OPERATORS: `${PROJECT},${STRANGER}`, NODE_TRUSTED_MAX_NODES: '4' });
+  const h = await boot(env);
+  const { ws } = await liveNode(h);
+  const nodeNamed = async (name, ip, { op = PROJECT, roles = ['verify'], publicUrl = null } = {}) => {
+    const who = { 'x-operator-id': op, 'x-operator-name': encodeURIComponent(op === PROJECT ? 'Proyecto Señor' : 'Vecino Real') };
+    const t = await call(h, 'POST', '/nodes/tokens', { body: { region: 'SA', name }, headers: who });
+    assert.equal(t.status, 200, JSON.stringify(t.json));
+    const keys = await generateEd25519();
+    const body = { token: t.json.token, publicKey: keys.publicKey, roles, ...(publicUrl ? { transports: ['wss'], publicUrl } : {}), build: NODE_BUILD, specs: SPECS, capacity: CAP };
+    const r = await call(h, 'POST', '/nodes/register', { body, headers: { 'x-client-ip': ip } });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    return r.json.nodeId;
+  };
+  const maint = { 'x-operator-id': PROJECT, 'x-operator-name': encodeURIComponent('Proyecto Señor') };
+  const admin = async (what, body) => assert.equal((await call(h, 'POST', '/nodes/admin/' + what, { body, headers: maint })).status, 200, what);
+  await nodeNamed('pendiente', '203.0.113.31', { roles: ['host'], publicUrl: 'wss://sp2.turbo-gol.test' }); // never proven reachable
+  await admin('status', { nodeId: await nodeNamed('baneado', '203.0.113.32'), status: 'banned', reason: 'test' });
+  await admin('retire', { nodeId: await nodeNamed('retirado', '203.0.113.33'), reason: 'test' });
+  await admin('status', { nodeId: await nodeNamed('suspendido', '203.0.113.34'), status: 'suspended', reason: 'test' });
+  clock += 1000;
+  await nodeNamed('vecino-1', '203.0.113.35', { op: STRANGER });
+  // A deploy with STRANGER out of NODE_TRUSTED_OPERATORS: its node is a community one in probation.
+  ws.close(1012, 'deploy');
+  await h.ctx.settle();
+  const h2 = await boot({ ...env, NODE_TRUSTED_OPERATORS: PROJECT }, new FakeCtx(h.ctx.db));
+  const e = scoreOn(h2, 'ab'.repeat(32));
+  const s = await call(h2, 'GET', '/nodes/status');
+  assert.equal(s.status, 200);
+  assert.deepEqual(
+    s.json.nodes.map((n) => [n.name, n.status, n.operator, n.trusted]).sort(),
+    [
+      ['sao-paulo-1', 'active', 'Proyecto Señor', true],
+      ['vecino-1', 'probation', 'Anfitrión 1', false],
+    ],
+  );
+  assert.deepEqual(s.json.hosts, [{ name: 'Anfitrión 1', points: e.points }], 'the same number as in the nodes');
+  const text = JSON.stringify(s.json);
+  for (const id of [PROJECT, STRANGER]) assert.ok(!text.includes(id.slice(0, 6)), 'no operator id, not even its start');
+  assert.ok(!text.includes('Vecino Real'), "a community operator's name is never shown");
+  // The panel still sees every node, and each operator its own: only the public list is filtered.
+  assert.equal((await call(h2, 'GET', '/nodes/admin/nodes', { headers: maint })).json.nodes.length, 6);
+  assert.equal((await call(h2, 'GET', '/nodes/mine', { headers: { 'x-operator-id': PROJECT } })).json.nodes.length, 4, 'every node but the retired one');
+});
+
+test('the public list is a 200 with { build, nodes, hosts } when it is empty too: the deploy check asks for one (scripts/deploy-check.mjs)', async () => {
+  const h = await boot(makeEnv());
+  const s = await call(h, 'GET', '/nodes/status');
+  assert.equal(s.status, 200);
+  assert.deepEqual(s.json, { build: CLIENT_BUILD, nodes: [], hosts: [] });
 });
 
 test("the maintainers' inventory routes: grant, revoke and unfreeze go to AccountsDO as they are answered, each an ALERT naming the account; a trusted account only", async () => {
@@ -1634,8 +1686,8 @@ test('status guards: active for a node that is not trusted needs { force: true, 
   assert.deepEqual([forced.status, forced.json.status], [200, 'active']);
   assert.equal((await run({ status: 'banned', reason: 'cheating' })).json.status, 'banned');
   await h.ctx.settle();
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
-  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-juan-1 (${juan.nodeId}) active -> banned: cheating\``));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) probation -> active (forced, its verified matches skipped): verified by hand\``), posted().join('\n'));
+  assert.ok(posted().includes(`**ALERT** \`${ACTOR}: node sa-node-1 (${juan.nodeId}) active -> banned: cheating\``));
   // A trusted operator's banned node takes no slot: out of its ban it takes one again, so at the cap
   // (2 here) it stays banned, with an ALERT, as a token is refused there. Else ban, register, unban
   // would add a trusted node past the cap with every token.

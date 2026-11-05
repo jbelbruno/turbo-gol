@@ -11,7 +11,7 @@
  *   GET  /nodes/releases/channel         { stable, minimum }
  *   GET  /nodes/releases/<v>/<file>      release files (launcher, installers)
  *   GET  /nodes/whoami                   { ip } as seen by the server (the installer's public IP)
- *   GET  /nodes/status                   public list of nodes (the "Anfitriones" page)
+ *   GET  /nodes/status                   public list of nodes (the "Anfitriones" page, publicList.ts)
  * Player API for WebRTC nodes (production: same paths on the game's domain)
  *   POST /nodes/rtc/<node>/<match>/ice   { ticket } -> { iceServers }
  *   POST /nodes/rtc/<node>/<match>/offer { ticket, sdp } -> { sdp }
@@ -49,6 +49,7 @@ import { ControlPlane, NodeRefused } from './controlPlane';
 import type { MatchOutcome, PlaceRequest } from './controlPlane';
 import { Ledger } from './ledger';
 import { MemoryStore } from './persist';
+import { publicStatus } from './publicList';
 import { Registry, TOKEN_TTL_MS } from './registry';
 import { Shop } from './shop';
 
@@ -241,28 +242,7 @@ export async function startControlPlane(opts: DevServerOptions = {}): Promise<De
     }
     if (method === 'GET' && path === '/nodes/releases/channel') return json(res, 200, channel);
     if (method === 'GET' && path.startsWith('/nodes/releases/') && opts.releasesDir) return serveFile(res, opts.releasesDir, path.slice('/nodes/releases/'.length));
-    if (method === 'GET' && path === '/nodes/status') {
-      const now = Date.now();
-      return json(res, 200, {
-        build,
-        nodes: registry.list().map((n) => ({
-          name: n.name,
-          operator: n.operatorName,
-          region: n.region,
-          status: n.status,
-          online: n.online,
-          roles: n.roles,
-          transports: n.transports,
-          active: n.active,
-          capacity: n.capacity.matches,
-          tickLagP99Ms: n.tickLagP99Ms,
-          version: n.build.version,
-          compatible: cp.sameBuildAs(n.build),
-          trusted: n.trusted,
-        })),
-        hosts: ledger.leaderboard(now).map((e) => ({ ...e, name: operators.get(e.operatorId) ?? e.operatorId.slice(0, 6) })),
-      });
-    }
+    if (method === 'GET' && path === '/nodes/status') return json(res, 200, publicStatus(cp, Date.now()));
 
     // ---- WebRTC signaling for players ----
     const rtc = RTC_ROUTE.exec(path);
