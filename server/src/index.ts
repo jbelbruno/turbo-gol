@@ -62,6 +62,8 @@
  *                        (no auth; the client fetches it once per page load before its first POST /api/guest)
  *   GET  /terminos, /privacidad, /terms, /privacy  the terms and the privacy policy (legalPages.ts), only
  *                       while TERMS_VERSION is set; 404 not_found before (wrangler.jsonc routes them here first)
+ *   GET  /about, /acerca  what Turbogol is, its sign-in with Google and who offers it (legalPages.ts, the
+ *                       OAuth consent screen's home page), as static HTML; gated and routed as the four above
  *   POST /api/dev/signin, GET /api/dev/mail  the dev-only sign-in and the stub mailer's outbox (accountRoutes.ts
  *                       devRoute): only with DEV_AUTH=1 on a loopback host, else 404 as any unknown route
  *   GET  /api/health, GET /api/time
@@ -897,8 +899,8 @@ export default {
         waitUntil: ctx ? (p) => ctx.waitUntil(p) : undefined,
       });
     }
-    // ---- the terms and the privacy policy (legalPages.ts): only while TERMS_VERSION is set, else 404 ----
-    if (path === '/terminos' || path === '/privacidad' || path === '/terms' || path === '/privacy') return (await import('./legalPages')).legalPage(request, env);
+    // ---- the terms, the privacy policy and the about page (legalPages.ts): only while TERMS_VERSION is set, else 404 ----
+    if (path === '/terminos' || path === '/privacidad' || path === '/terms' || path === '/privacy' || path === '/about' || path === '/acerca') return (await import('./legalPages')).legalPage(request, env);
     // ---- the game (Workers Assets): everything outside /api, /ws, /room, /lobby and /nodes ----
     if (!path.startsWith('/api/')) return serveAsset(request, env);
     const cors = corsHeaders(request, env);

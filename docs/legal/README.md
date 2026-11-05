@@ -9,6 +9,14 @@ The terms of service and the privacy policy of turbo-gol.com, as the game serves
 | `terms.en.md` | `/terms` | The terms' informative English translation |
 | `privacy.en.md` | `/privacy` | The privacy policy's informative English translation |
 
+Next to them, in the same shell and under the same switch, the Worker serves `/about` and `/acerca`
+(`docs/about/about.en.md` and `docs/about/about.es.md`, outside this folder because they are not
+legal texts): what Turbogol is, what its sign-in with Google asks for and why, and who offers it.
+`/about` is the home page of Google's OAuth consent screen, so it must stay readable without a
+script and link to `https://turbo-gol.com/privacy`. When the policy changes what it says about
+Google sign-in, they change in the same deploy (`server/test/about-page.test.mjs` checks the
+scopes).
+
 **Version `2026-11-05`, in force from 5 November 2026, the day of its deploy,** approved by the
 owner before its merge. The Spanish texts are the official ones; the English ones are informative
 translations. Version `2026-11-05` was checked, sentence by sentence, against the code of the
@@ -72,11 +80,12 @@ On the day the notice is posted (7 days ahead, or the deploy day when a change s
 
 The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-11-05`):
 
-- **Empty or unset:** `/terminos`, `/privacidad`, `/terms` and `/privacy` answer 404, as an unknown
-  route. `GET /api/config` says `legal.terms: null`, and the game shows no notice, no link and no
-  acceptance. A sign-up records no terms.
+- **Empty or unset:** `/terminos`, `/privacidad`, `/terms` and `/privacy` (and `/about` and
+  `/acerca`) answer 404, as an unknown route. `GET /api/config` says `legal.terms: null`, and the
+  game shows no notice, no link and no acceptance. A sign-up records no terms.
 - **Set** (lower-case letters, digits, `.`, `_` and `-`, at most 32, e.g. `2026-12-01`):
-  - the four pages are served (`server/src/legalPages.ts`), with the version under the text;
+  - the four pages are served (`server/src/legalPages.ts`), with the version under the text, and
+    so is the about page, without it;
   - the About sheet (every screen's footer) and PERFIL's ACERCA DE link to them;
   - a short notice with both links sits right above the buttons that accept: JUGAR COMO INVITADO,
     CREAR CUENTA, and the OAuth confirm step's NO, CREAR MI CUENTA;

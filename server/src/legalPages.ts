@@ -37,13 +37,28 @@
  * The Markdown files are bundled with the Worker (wrangler.jsonc rules: Text), so a page changes
  * with a deploy only; index.ts loads this module only for these paths (node tests that import
  * index.ts never read a .md file).
+ *
+ * Beside them, in the same shell, style, script, policy and headers, the page that says what
+ * Turbogol is (the home page of Google's OAuth consent screen: what Google reads there must be in
+ * the HTML, without a script, which the game's index.html is not):
+ *
+ *   /about        docs/about/about.en.md       what Turbogol is, its sign-in with Google, who offers it
+ *   /acerca       docs/about/about.es.md       the same, in Spanish
+ *
+ * routed and gated as the four (the texts it links to are there only while TERMS_VERSION is set),
+ * with no contents, no version and no link to the other legal text: its bar goes to the game and to
+ * the other language. Its head adds a description (the text's first paragraph) and its canonical
+ * address; no page here asks search engines to skip it.
  */
 import type { Env } from './env';
 import { error, termsVersion } from './env';
+import { SITE_URL } from '../../src/brand';
 import terminosEs from '../../docs/legal/terminos.es.md';
 import privacidadEs from '../../docs/legal/privacidad.es.md';
 import termsEn from '../../docs/legal/terms.en.md';
 import privacyEn from '../../docs/legal/privacy.en.md';
+import aboutEn from '../../docs/about/about.en.md';
+import aboutEs from '../../docs/about/about.es.md';
 
 type Lang = 'es' | 'en';
 type Doc = 'terms' | 'privacy';
@@ -91,6 +106,26 @@ const CHROME: Readonly<Record<Lang, { back: string; contents: string; terms: str
     version: 'Version of the texts: {v}',
     official: 'This English text is an informative translation: the Spanish one is the official text.',
   },
+};
+
+interface AboutPage {
+  path: string;
+  lang: Lang;
+  source: string;
+}
+
+/** The about page in each language, by path. */
+export const ABOUT_PAGES: Readonly<Record<string, AboutPage>> = {
+  '/about': { path: '/about', lang: 'en', source: aboutEn },
+  '/acerca': { path: '/acerca', lang: 'es', source: aboutEs },
+};
+
+const ABOUT_PATHS: Readonly<Record<Lang, string>> = { es: '/acerca', en: '/about' };
+
+/** The about page's own words around its text. */
+const ABOUT_CHROME: Readonly<Record<Lang, { play: string; name: string; other: string; otherLang: Lang }>> = {
+  es: { play: 'Jugar', name: 'Acerca de Turbogol', other: 'English', otherLang: 'en' },
+  en: { play: 'Play', name: 'About Turbogol', other: 'Español', otherLang: 'es' },
 };
 
 // ---- Markdown, the subset the texts use ------------------------------------------------------------
@@ -387,9 +422,11 @@ interface Rendered {
   html: string;
   title: string;
   toc: Array<{ id: string; text: string }>;
+  /** The first paragraph outside a list or a quote, as plain words on one line (the about page's description). */
+  lead: string;
 }
 
-/** Markdown as HTML (the subset above), its first heading as the title and every second-level one in the contents. */
+/** Markdown as HTML (the subset above), its first heading as the title, every second-level one in the contents and its first paragraph as the lead. */
 export function renderMarkdown(md: string): Rendered {
   const blocks = parseBlocks(md.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n'));
   const ids = new Set<string>();
@@ -436,7 +473,9 @@ export function renderMarkdown(md: string): Rendered {
       })
       .join('\n');
   const html = render(blocks);
-  return { html, title, toc };
+  const first = blocks.find((b) => b.t === 'p');
+  const lead = first === undefined ? '' : plain(first.text).replace(/\s+/g, ' ');
+  return { html, title, toc, lead };
 }
 
 // ---- the page --------------------------------------------------------------------------------------
@@ -580,6 +619,43 @@ ${body}
 `;
 }
 
+/**
+ * The whole document of an about page: the legal pages' shell with the way to the game and the
+ * other language in its bar, no contents and no version; its description and its canonical address
+ * (and the other language's) in its head, for the readers that index it.
+ */
+export function aboutDocument(page: AboutPage): string {
+  const w = ABOUT_CHROME[page.lang];
+  const other = ABOUT_CHROME[w.otherLang];
+  const r = renderMarkdown(page.source);
+  const title = r.title !== '' ? r.title : w.name;
+  const otherPath = ABOUT_PATHS[w.otherLang];
+  return `<!doctype html>
+<html lang="${page.lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e1117">
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(r.lead)}">
+<link rel="canonical" href="${SITE_URL}${page.path}">
+<link rel="alternate" hreflang="${page.lang}" href="${SITE_URL}${page.path}">
+<link rel="alternate" hreflang="${w.otherLang}" href="${SITE_URL}${otherPath}">
+<style>${LEGAL_CSS}</style>
+</head>
+<body>
+<header class="bar"><a href="/">${escapeHtml(w.play)}</a><nav aria-label="${escapeHtml(w.name)}"><a href="${otherPath}" hreflang="${w.otherLang}" lang="${w.otherLang}">${escapeHtml(w.other)}</a></nav></header>
+<main id="texto">
+${r.html}
+</main>
+<footer><p><a href="${otherPath}" hreflang="${w.otherLang}" lang="${w.otherLang}">${escapeHtml(other.name)} (${escapeHtml(w.other)})</a></p></footer>
+<script>${LEGAL_JS}</script>
+</body>
+</html>
+`;
+}
+
 /** The headers public/_headers gives the game's pages, and this page's own policy. */
 function pageHeaders(csp: string, extra: Record<string, string>): Headers {
   return new Headers({
@@ -603,13 +679,13 @@ export function isLegalPath(path: string): boolean {
 }
 
 /**
- * GET or HEAD of a legal page: the page while TERMS_VERSION is set, else 404 not_found (no-store, so
- * the owner's publish shows at once); any other method 404 as well. Cached 5 minutes by browsers,
- * revalidated by its ETag (the version and the text's hash).
+ * GET or HEAD of a legal page or an about page: the page while TERMS_VERSION is set, else 404
+ * not_found (no-store, so the owner's publish shows at once); any other method 404 as well. Cached
+ * 5 minutes by browsers, revalidated by its ETag (the version and the text's hash).
  */
 export async function legalPage(request: Request, env: Pick<Env, 'TERMS_VERSION'>): Promise<Response> {
   const path = new URL(request.url).pathname;
-  const page = LEGAL_PAGES[path];
+  const page: LegalPage | AboutPage | undefined = LEGAL_PAGES[path] ?? ABOUT_PAGES[path];
   const version = termsVersion(env);
   const head = request.method === 'HEAD';
   if (page === undefined || version === null || (request.method !== 'GET' && !head)) {
@@ -620,7 +696,7 @@ export async function legalPage(request: Request, env: Pick<Env, 'TERMS_VERSION'
   const key = path + '\n' + version;
   let hit = cache.get(key);
   if (hit === undefined) {
-    const html = legalDocument(page, version);
+    const html = 'doc' in page ? legalDocument(page, version) : aboutDocument(page);
     hit = { html, csp: await legalCsp(), etag: `"${(await sha256Base64(html)).slice(0, 27)}"` };
     cache.set(key, hit);
   }
