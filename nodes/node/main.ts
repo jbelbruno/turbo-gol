@@ -1,9 +1,10 @@
 /**
  * turbogol-node: the community node program.
  *
- *   register --control <url> --token <tgn1_...> [--transport wss|rtc] [--public-url wss://<ip>]
- *            [--roles host,verify]   'wss' = public IP with ports 80/443 (a VPS); 'rtc' = a home PC
- *            behind NAT, nothing to open (WebRTC). Default: wss when --public-url is given, else rtc.
+ *   register --control <url> --token <tgn1_...> [--transport wss|rtc] [--public-url wss://<name>]
+ *            [--roles host,verify]   'wss' = a DNS name for this machine, ports 80/443 (a VPS; the
+ *            project's control plane refuses an IP address); 'rtc' = a home PC behind NAT, nothing
+ *            to open (WebRTC). Default: wss when --public-url is given, else rtc.
  *            [--name <name>] [--uplink-mbps <n>] [--matches <n>] [--data <dir>]
  *        One time. Generates this machine's Ed25519 key (it never leaves <data>/node.json), runs the
  *        capacity benchmark (or takes the declared --matches), trades the one-time token for a node
