@@ -339,13 +339,13 @@ del PR [7]: los jugadores con un lock de partida de nodo quedarían atascados ha
   y anota en el log cuántos segundos estuvo callado: desde ahí le quedan de 25 a 30 s para
   reconectarse. Los 60 s se cuentan por partida y en total, así que un corte anterior en la misma
   partida se descuenta. El nodo suma un strike, pero un nodo del proyecto no se pausa.
-- Las ranked de Sudamérica vuelven a `MatchDO`, como hoy, mientras no haya otro verificador: una
-  ranked solo va a un nodo si alguien puede re-simularla (`control-plane/controlPlane.ts:637`).
+- Desde noviembre de 2026 también verifican los servidores del proyecto en Alemania y Malasia
+  (`VPS-PROYECTO.md`): mientras uno de los dos esté en línea con la versión del nodo, las ranked
+  siguen yendo a nodos. Una ranked solo va a un nodo si alguien puede re-simularla
+  (`control-plane/controlPlane.ts:1201`); si no queda ningún verificador, vuelve a `MatchDO`.
 - Las partidas terminadas esperan su verificación hasta 6 horas
-  (`control-plane/controlPlane.ts:81`) y después se anulan sin penalizar a nadie. Eso vale solo
-  cuando el plano de control guarde su estado (PR [1]): hoy un deploy del Worker las borraría.
-- Más adelante conviene un segundo verificador de confianza. `docs/online/DECISIONS.md` lo pone
-  en Hetzner, Ashburn o Falkenstein.
+  (`control-plane/controlPlane.ts:111`) y después se anulan sin penalizar a nadie. La cola vive en
+  el SQLite del `NodeRegistryDO` (PR [1] y [6]), así que un deploy del Worker no la borra.
 
 ## Probarlo con jugadores
 
