@@ -394,6 +394,8 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- Firefox: a stadium baked while the grass and cloud shaders failed to compile (before the Firefox fix) is discarded: the world cache version is raised, so the sky and the skyline are baked again on the next visit (the first load after this takes a moment longer).
+- Firefox (WebGPU): the Ultra grass and the sky's clouds no longer fail to compile. Two shader expressions called a math function with only literal numbers (a smoothstep and a mix), which Firefox's validator rejects ("Abstract types may only appear in constant expressions"); the game fell back to a lower tier and the sky and background looked wrong. Both are evaluated in JavaScript or written differently now; every shader the game compiles passes Firefox 159's validator.
 - Replays: "My replays" also finds the matches listed before the seats were kept (the first days: they have no seat, so they are found by the account's username).
 - You can choose the stadium again. In MODES › VS AI, Stadium opened an empty GARAGE; now it opens
   the list of stadiums (Night harbour, Red canyon, Alpine valley) with yours marked. Pick one with

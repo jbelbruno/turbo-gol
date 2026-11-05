@@ -191,6 +191,19 @@ export function floorMapUv(p: Vec2Node, rect: FloorMapRect): Vec2Node {
 }
 
 /**
+ * How much of the bare soil shows at height `h`: 0.35 at and above 0.35, up to 0.95 near the ground
+ * (smoothstep(0.35, 0.05, h) * 0.6 + 0.35). The blades pass a plain number, which is evaluated here:
+ * a smoothstep whose arguments are all literals reaches the shader as an abstract-typed expression,
+ * and Firefox's WebGPU validator (Naga) refuses it: "Abstract types may only appear in constant
+ * expressions" (the whole Ultra tier's grass failed to compile there). The floor's `h` is a node.
+ */
+function soilShare(h: FloatNode | number): FloatNode {
+  if (typeof h !== 'number') return smoothstep(0.35, 0.05, h).mul(0.6).add(0.35);
+  const t = Math.min(1, Math.max(0, (h - 0.35) / (0.05 - 0.35)));
+  return float(t * t * (3 - 2 * t) * 0.6 + 0.35);
+}
+
+/**
  * Grass colour from the blade height `shadeH` (0 thatch .. 1 tip), the per-blade / clump tints
  * (0..1), the large-scale hue (0..1), wear (trample 0..1, bare 0..1), the clump value, the blade
  * height `h` and the theme (dry, tint). The floor and the blades both use it, so the blades fade
@@ -204,7 +217,7 @@ export function grassAlbedo(
   trample: FloatNode,
   bare: FloatNode,
   clumpS: FloatNode,
-  h: FloatNode,
+  h: FloatNode | number,
   U: TurfUniforms,
 ): Vec3Node {
   let a: Vec3Node = mix(v3(GRASS_DARK), v3(GRASS_MID), smoothstep(0.04, 0.45, shadeH));
@@ -219,7 +232,7 @@ export function grassAlbedo(
   a = mix(v3(THATCH), a, smoothstep(0.015, 0.14, shadeH));
   // Wear: paler, yellower trampled grass, then bare soil.
   a = mix(a, v3(WORN).mul(mix(float(0.8), float(1.2), bladeTint)), trample.mul(0.55));
-  a = mix(a, v3(SOIL).mul(mix(float(0.8), float(1.15), clumpS)), bare.mul(smoothstep(0.35, 0.05, h).mul(0.6).add(0.35)));
+  a = mix(a, v3(SOIL).mul(mix(float(0.8), float(1.15), clumpS)), bare.mul(soilShare(h)));
   return a;
 }
 
