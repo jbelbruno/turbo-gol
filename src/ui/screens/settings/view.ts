@@ -11,7 +11,8 @@
  *   stick, deadzone and vibration (settings.touch; vibration only where the browser can).
  * - CÁMARA: the presets by name (the default marked), then the sliders with the default's mark.
  * - JUEGO: the rest of the old Gameplay rows, then INTERFAZ: the language (the menus only: a picker
- *   sheet, a reload), the interface size (the sizes the layout class lists) and reduced motion
+ *   sheet, a reload), the interface size (the sizes the layout class lists), full screen when
+ *   playing (where the device can: src/ui/fullscreenModel.ts fullscreenOffered) and reduced motion
  *   (settings.ui, src/ui/device.ts); its reset. AUDIO: the master volume and its reset.
  * - GRÁFICOS: Performance, High and Ultra as cards (quality.ts CARD_QUALITIES); the running one
  *   always lit (ACTUAL); ◀ ▶ only move the focus, A applies; the old tier comes back by itself 10 s
@@ -57,6 +58,8 @@ import { glyph } from '../../components/glyphs';
 import { seg, type Seg } from '../../components/seg';
 import { setRow, slider, toggleSwitch, type Slider, type Switch } from '../../components/rows';
 import { finePointer, interfaceSize, interfaceSizes, layoutClass, type InputKind, type LayoutClass } from '../../device';
+import { fullscreenEnv } from '../../fullscreen';
+import { fullscreenOffered, fullscreenPath } from '../../fullscreenModel';
 import { experimentalKit, pageItemOf } from './expKit';
 import {
   SETTINGS_TABS,
@@ -685,6 +688,25 @@ export class SettingsView {
     this.refreshers.push(sizes.refresh);
     this.uiSizeRow = setRow(sizeText, sizes.el);
     page.append(this.uiSizeRow);
+    // Full screen when playing: a computer's entry to the pitch or Android's tap; not listed on an
+    // iPhone, an iPad, a TV or a page launched from the home screen (src/ui/fullscreenModel.ts).
+    const fsEnv = fullscreenEnv();
+    if (fullscreenOffered(fsEnv)) {
+      const text = t('settings.fullscreen');
+      const sw = toggleSwitch(
+        'set-fullscreen',
+        text,
+        () => this.live?.ui.fullscreen ?? DEFAULT_UI.fullscreen,
+        (v) => {
+          const st = this.live;
+          if (st === null) return;
+          st.ui.fullscreen = v;
+          this.changed();
+        },
+      );
+      this.refreshers.push(sw.refresh);
+      page.append(setRow(text, sw.el, t(fullscreenPath(fsEnv) === 'tap' ? 'settings.fullscreenHelpTap' : 'settings.fullscreenHelp')));
+    }
     const motionText = t('settings.reducedMotion');
     const motion = seg<MotionPref>(
       'set-motion',

@@ -6,7 +6,7 @@
  * keeps the object alive for the length of the match.
  *
  * Lifecycle
- *   create      roster + createdAt in storage, wasm instantiated (pre-warmed), 'unused room' alarm (90 s)
+ *   create      roster + createdAt (+ the bots' level) in storage, wasm instantiated (pre-warmed), 'unused room' alarm (90 s)
  *   upgrade     internal header + claim headers, slot check, host ready, single-use jti (storage),
  *               accept, Welcome (a new socket for a slot replaces the old one: close 4000 'replaced')
  *   start       when every human (not left) has sent Ready or 5 s after the first socket ('started' persisted)
@@ -49,8 +49,9 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, error, json, readJson } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, error, isBotLevel, json, readJson } from './env';
 import type { GameModeId } from './env';
+import type { Difficulty } from '../../src/ai/Bot';
 import { INTERNAL_HEADER, checkInternal, internalSecret } from './auth';
 import { RoomHost } from './roomHost';
 import type { RosterEntry } from './roomHost';
@@ -145,13 +146,24 @@ function traceColo(): Promise<string> {
 export interface MatchRecord {
   matchId: string;
   mode: GameModeId;
+  /** The matchmaker that formed it (the queue hub): its release goes back there ('mm:' + region). */
   region: string;
+  /**
+   * The host region (MatchmakerDO hostRegion), what a ranked result or cancel names
+   * (ranked_matches.region). Absent in a record from before it: `region` stands in.
+   */
+  host?: string;
   /** Each seat with its car (src/net/cosmetics.ts: absent = the default car); RoomHost reads only the RosterEntry fields. */
   roster: Array<RosterEntry & SeatCar>;
   matchLengthSeconds: number;
   createdAt: number;
   /** Ranked (accounts only): no start without every player, forfeit when a team is gone, the result goes to AccountsDO. */
   ranked?: boolean;
+  /**
+   * The bots' level (the matchmaker's: Casual's KV flag bot_level). Absent: ranked, or a record of
+   * an older build, and RoomHost's default (medium) drives the bots.
+   */
+  botDifficulty?: Difficulty;
 }
 
 /** What POST /internal/leave answers the matchmaker (MatchDO.leave). */
@@ -297,6 +309,7 @@ export class MatchDO extends DurableObject<Env> {
     }
     // A server match runs the standard physics only, whoever asks (experimental rules are P2P only).
     if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules never run on a server match');
+    if (body.botDifficulty !== undefined && !isBotLevel(body.botDifficulty)) return error(400, 'bad_request', "botDifficulty must be 'easy' | 'medium' | 'hard'");
     for (let i = 0; i < body.roster.length; i++) {
       const e = body.roster[i];
       if (!e || e.slot !== i || (e.team !== 0 && e.team !== 1) || (e.kind !== 'player' && e.kind !== 'bot') || typeof e.name !== 'string') {
@@ -308,6 +321,7 @@ export class MatchDO extends DurableObject<Env> {
       matchId: body.matchId,
       mode: body.mode ?? '1v1',
       region: typeof body.region === 'string' ? body.region : '?',
+      ...(typeof body.host === 'string' ? { host: body.host } : {}),
       // Field by field: a car the catalog does not know is dropped (the seat drives the default), never refused.
       roster: body.roster.map((e) => {
         const car = seatCar(e.car);
@@ -316,6 +330,7 @@ export class MatchDO extends DurableObject<Env> {
       matchLengthSeconds: typeof body.matchLengthSeconds === 'number' ? body.matchLengthSeconds : DEFAULT_MATCH_SECONDS,
       createdAt: typeof body.createdAt === 'number' ? body.createdAt : Date.now(),
       ranked: body.ranked === true,
+      ...(body.botDifficulty !== undefined ? { botDifficulty: body.botDifficulty } : {}),
     };
     this.record = rec;
     await this.ctx.storage.put('record', rec);
@@ -418,6 +433,8 @@ export class MatchDO extends DurableObject<Env> {
       matchId: this.record?.matchId ?? null,
       mode: this.record?.mode ?? null,
       roster: this.record?.roster ?? [],
+      // The bots' level the record asks for (null: RoomHost's default, medium).
+      botDifficulty: this.record?.botDifficulty ?? null,
       started: h?.isStarted ?? false,
       tick: h?.currentTick ?? 0,
       phase: h?.phase ?? 'none',
@@ -687,6 +704,8 @@ export class MatchDO extends DurableObject<Env> {
           inputBufferMax: 8,
           matchLengthSeconds: rec.matchLengthSeconds,
           kickoffSeed: KICKOFF_SEED,
+          // Absent (ranked, an older record): RoomHost's default, medium.
+          botDifficulty: rec.botDifficulty,
         });
         // A leave that came while the arena was being built (or before an eviction, from storage).
         for (let s = 0; s < rec.roster.length; s++) if (this.leftSlots[s] === 1) host.convertToBot(s);
@@ -936,7 +955,7 @@ export class MatchDO extends DurableObject<Env> {
     const players = rec.roster
       .filter((e) => e.kind === 'player' && e.playerId)
       .map((e) => ({ id: e.playerId as string, team: e.team, left: this.leftSlots[e.slot] === 1 || this.clients[e.slot] === null }));
-    this.ctx.waitUntil(this.accountsPost('/ranked-result', { matchId: rec.matchId, playlist: rec.mode, region: rec.region, winner, blue: s.blue, red: s.red, players }));
+    this.ctx.waitUntil(this.accountsPost('/ranked-result', { matchId: rec.matchId, playlist: rec.mode, region: rec.host ?? rec.region, winner, blue: s.blue, red: s.red, players }));
   }
 
   /**
@@ -951,7 +970,7 @@ export class MatchDO extends DurableObject<Env> {
     const players = rec.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => e.playerId as string);
     // Nobody connected at all looks like our failure more than theirs: no abandon for anyone then.
     const absent = noShows ?? (this.liveSockets === 0 ? [] : rec.roster.filter((e) => e.kind === 'player' && e.playerId && !this.clients[e.slot]?.ready).map((e) => e.playerId as string));
-    this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: rec.matchId, playlist: rec.mode, region: rec.region, players, noShows: absent, reason }));
+    this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: rec.matchId, playlist: rec.mode, region: rec.host ?? rec.region, players, noShows: absent, reason }));
     this.broadcast(encodeJson(MsgType.Event, { type: 'cancelled', reason } satisfies MatchEvent), null);
     await this.shutdown('cancelled');
   }
@@ -964,7 +983,7 @@ export class MatchDO extends DurableObject<Env> {
       // Lost to a restart / error / an empty room: nobody is rated or penalised, the locks go.
       this.rankedReported = true;
       const players = r.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => e.playerId as string);
-      this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: r.matchId, playlist: r.mode, region: r.region, players, noShows: [], reason }));
+      this.ctx.waitUntil(this.accountsPost('/ranked-cancel', { matchId: r.matchId, playlist: r.mode, region: r.host ?? r.region, players, noShows: [], reason }));
     }
     if (this.interval) clearInterval(this.interval);
     if (this.startTimer) clearTimeout(this.startTimer);

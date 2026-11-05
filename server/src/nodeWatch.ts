@@ -9,8 +9,8 @@
  *   offline   a trusted node in service (probation or active) without a heartbeat for
  *             OFFLINE_ALERT_MS. Until its ALERT goes out the object's alarm keeps running, or
  *             nothing would notice the time pass; its return comes on its socket, which runs the
- *             alarm again. A node out of service (suspended, banned) is not watched:
- *             /nodes/admin/status takes one out.
+ *             alarm again. A node out of service (suspended, banned, retired) is not watched:
+ *             /nodes/admin/status and /nodes/admin/retire take one out.
  *   egress    a node's traffic this month at EGRESS_ALERT_SHARE of its cap (at the cap it takes no
  *             more matches)
  *   lag       a node's tickLagP99Ms over LAG_ALERT_MS in LAG_ALERT_BEATS heartbeats in a row
@@ -28,6 +28,7 @@
  * a line, and the webhook puts the whole line in a code span.
  */
 import type { MatchEntry } from '../../nodes/control-plane/controlPlane';
+import { isRetired } from '../../nodes/control-plane/registry';
 import type { NodeRecord } from '../../nodes/control-plane/registry';
 import { compareVersions, reachMessage } from '../../nodes/shared/controlProtocol';
 import { randomB64, verifyWith } from '../../nodes/shared/edcrypto';
@@ -165,7 +166,8 @@ export function httpsOf(publicUrl: string): string {
   return publicUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
 }
 
-const inService = (n: NodeRecord) => n.status === 'probation' || n.status === 'active';
+/** A node the watch and the cron look after: in probation or active, and not retired (one retired and switched off must not alarm). */
+const inService = (n: NodeRecord) => (n.status === 'probation' || n.status === 'active') && !isRetired(n);
 const minutes = (ms: number) => Math.floor(ms / 60_000);
 
 /**
@@ -185,6 +187,7 @@ export function healthzTargets(nodes: readonly NodeRecord[], now: number): NodeR
       n.publicUrl !== null &&
       n.status !== 'banned' &&
       n.status !== 'suspended' &&
+      !isRetired(n) &&
       (n.online || (inService(n) && n.lastSeen > 0 && now - n.lastSeen <= HEALTHZ_RECENT_MS)),
   );
 }

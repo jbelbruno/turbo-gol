@@ -28,6 +28,7 @@ function reservedV4(ip) {
 test('the docs are found', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.ok(docs.includes('nodes/docs/VPS-SAO-PAULO.md'));
+  assert.ok(docs.includes('nodes/docs/VPS-PROYECTO.md'));
 });
 
 test('no doc names a routable IP address (examples use the documentation ranges)', () => {
@@ -48,7 +49,7 @@ test('no doc names a routable IP address (examples use the documentation ranges)
 
 test("the trusted node's manual and plan give placeholders, not its provider, keys or budgets", () => {
   const hits = [];
-  for (const f of ['nodes/docs/VPS-SAO-PAULO.md', 'nodes/docs/PRODUCCION.md']) {
+  for (const f of ['nodes/docs/VPS-SAO-PAULO.md', 'nodes/docs/VPS-PROYECTO.md', 'nodes/docs/PRODUCCION.md']) {
     const text = read(f);
     for (const [what, re] of [
       ['the provider', /hostinger/i],

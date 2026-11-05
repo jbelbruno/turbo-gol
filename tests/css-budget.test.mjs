@@ -268,9 +268,16 @@ test('the focus ring is outline + pseudo-element + a spread-only ring that super
 // a finger's pause without the strip and with room for QUIT's three lines, a TV's wait choices and
 // CREATE PRIVATE LOBBY in the type scale (wait.css), and a computer's toasts in the hint bar's band
 // (components.css): 168,281 B (before 167,626 B), the cap that plus about 0.6 KB.
+// The nodes' control panel (prompt 1, PR 2, the owner's decision 8) adds PERFIL's CONTROL DE NODOS
+// (styles/screens/nodes.css: the KPIs, the node rows and the columns a phone drops, the tags by
+// state, mn-cmd, the wizard's checklist and follow-up, the queue days, menu.css' shared controls at
+// the class's type roles as on PERFIL) and deletes menu.css' dead .mn-codes (233 B), and its
+// review's fixes (the read-only blocks as stops of the arrows with their ring inside them, a
+// tablet's node rows as a phone's, a frozen wallet's reason on a line of its own): 171,840 B (main
+// 168,525 B; 171,406 B before the fixes), the cap that plus about 0.6 KB.
 // It steps down to 70 KB once PR 15 deletes menu.css. Raising it is the owner's call, recorded in
 // the PR.
-const CSS_BUDGET = 168_881;
+const CSS_BUDGET = 172_440;
 
 test(`the CSS stays within ${(CSS_BUDGET / 1024).toFixed(1)} KB minified`, () => {
   let total = 0;

@@ -101,7 +101,7 @@ import type { Env } from './env';
 import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, error, flag, hasClientApi, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
-import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
+import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
 import type { LimitName } from './limits';
 import type { RankedCheck } from './accountStore';
 import { normalizeCode } from './LobbyDirectoryDO';
@@ -616,7 +616,7 @@ async function peekLobby(request: Request, env: Env, url: URL): Promise<Response
 }
 
 /**
- * POST /api/lobbies { name, password?, mode, visibility, net, matchLengthSeconds, physics?, region? }:
+ * POST /api/lobbies { name, password?, mode, visibility, net, matchLengthSeconds, physics?, bots?, region? }:
  * a new lobby hosted by the caller (guests too, but never with experimental rules: `physics` needs
  * an account session, 403 account_required; LobbyDO checks the rules themselves).
  */
@@ -625,7 +625,7 @@ async function createLobby(request: Request, env: Env): Promise<Response> {
   if (!session) return error(401, 'unauthorized');
   const limited = await overLimits(request, env, session, ['lobbyCreate', 'lobbyCreateNet'], 'Creaste demasiadas salas, espera un minuto');
   if (limited) return limited;
-  const b = await readJson<{ api?: unknown; name?: unknown; password?: unknown; mode?: unknown; visibility?: unknown; net?: unknown; matchLengthSeconds?: unknown; physics?: unknown; region?: unknown }>(request);
+  const b = await readJson<{ api?: unknown; name?: unknown; password?: unknown; mode?: unknown; visibility?: unknown; net?: unknown; matchLengthSeconds?: unknown; physics?: unknown; bots?: unknown; region?: unknown }>(request);
   // A page cached from before the modes redesign (no `api`): it reloads (and accepts the new terms) first.
   if (!hasClientApi(b, QUEUE_API)) return reloadRequired();
   if (!b) return error(400, 'bad_request');
@@ -655,7 +655,8 @@ async function createLobby(request: Request, env: Env): Promise<Response> {
       region,
       socketBase: (u.protocol === 'https:' ? 'wss://' : 'ws://') + u.host,
       // net: lobbies are P2P only (LobbyDO reads a 'server' as 'p2p'; junk is still 400 bad_net there).
-      settings: { ...(name !== undefined ? { name } : {}), mode: b.mode, visibility: b.visibility, net: b.net, matchLengthSeconds: b.matchLengthSeconds, physics: b.physics },
+      // bots: the bots' level (absent: LOBBY_BOTS_DEFAULT; junk is 400 bad_bots there).
+      settings: { ...(name !== undefined ? { name } : {}), mode: b.mode, visibility: b.visibility, net: b.net, matchLengthSeconds: b.matchLengthSeconds, physics: b.physics, ...(b.bots !== undefined ? { bots: b.bots } : {}) },
       password: typeof b.password === 'string' && b.password.length > 0 ? b.password : null,
       host: { playerId: session.sub, name: session.name, guest: session.acct !== 1, ...(session.car !== undefined ? { car: session.car } : {}) },
     }),
@@ -881,6 +882,7 @@ export default {
         ip: clientIp(request),
         session: () => (env.JWT_SECRET ? bearerSession(request, env) : Promise.resolve(null)),
         limited: (key, max, windowMs) => isolateLimited(key, max, Date.now(), windowMs),
+        spent: (key, max) => isolateSpent(key, max, Date.now()),
         limit: limiter(env),
         cors: corsHeaders(request, env),
         // Absent where the caller passes no context (the tests): nothing then outlives the answer.

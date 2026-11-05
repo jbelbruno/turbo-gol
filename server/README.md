@@ -117,11 +117,12 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `MATCH_LENGTH_SECONDS` | var | regulation length (180) |
 | `REGION_OVERRIDE` | var | force one matchmaking region for everything: the queue hub, every player's home and every lobby's matchmaker (empty = the hub is `SA`, a player's region is the menu's pick, else `request.cf.continent`, `dev` locally) |
 | `TURN_KEY_ID`, `TURN_KEY_TOKEN` | secrets, optional (both or none) | a Cloudflare Realtime TURN key: the room welcome then appends 10-minute TURN credentials minted per request (`POST .../turn/keys/{id}/credentials/generate-ice-servers`, `{ ttl: 600 }`); unset = STUN only (`stun.cloudflare.com:3478`) |
-| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, hosted in SA whatever their region: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches") |
+| `FLAGS` | KV | `matchmaking_off`, `do_disabled` (`1`/`true`/`on`) -> 503 (with the nodes on for a player, its Casual and ranked matches wait for a node instead, one of their host region first and then one of SA: see "Kill switches"); `nodes_on`: absent or `0` off, `1` everyone, or a comma-separated list of account ids (a canary) whose matches may go to a community node; `vm_disabled` (`1`/`true`/`on`) turns the nodes off whatever `nodes_on` says (see "Community nodes"); `nodes_off` stops the node control plane's routes (see "Kill switches"); `bot_level` (`easy`/`medium`/`hard`, anything else or unset = `hard`) is the level of Casual's bots (see "Kill switches") |
 | `NODES`, `NODE_REPLAYS`, `NODE_RELEASES` | Durable Object, R2, R2 | community nodes: the NodeRegistryDO, the replays the nodes upload, the signed releases and `channel.json` (see "Community nodes") |
 | `NODE_CONTROL_PRIVATE_KEY` | secret, optional | the Ed25519 key (PKCS#8, `npm run keys` in `nodes/`) that signs the players' node tickets; without it no match goes to a node |
 | `NODE_CONTROL_PUBLIC_KEY` | var | its public half, handed to every node at registration; a pair that does not match places nothing (ALERT) |
-| `NODE_TRUSTED_OPERATORS` | secret, optional | the project's account ids, comma-separated: their nodes are trusted (at most 2 each) and only they create node tokens |
+| `NODE_TRUSTED_OPERATORS` | secret, optional | the project's account ids, comma-separated: their nodes are trusted (at most `NODE_TRUSTED_MAX_NODES` each) and only they create node tokens. An account taken off the list: at the object's next start each of its nodes goes back to `probation` (0 of 20 verified, reason `trust_removed`) with an `ALERT` |
+| `NODE_TRUSTED_MAX_NODES` | var | how many nodes each `NODE_TRUSTED_OPERATORS` account may have, each fully trusted (`wrangler.jsonc`: 6); bounded in code to 2..8, 2 when unset. A retired node takes no slot, nor does a banned one of a trusted account |
 | `NODES_PUBLIC_BASE` | var | the origin the nodes and their installers reach `/nodes/*` at (`https://turbo-gol.com`) |
 | `CF_ZONE_ID`, `CF_PURGE_TOKEN` | var and secret, optional | the zone id and an API token with only Zone > Cache Purge: a replay delist (`POST /nodes/admin/delist`) then purges the view in every Cloudflare location, not only the maintainer's (`docs/replays.md`) |
 | `NODE_ALERT_WEBHOOK` | secret, optional | the webhook URL of a staff-only Discord channel: every `ALERT` line of the node control plane is posted there too (see "Community nodes"), and so is every sign-in and level-2 re-authentication of a `NODE_TRUSTED_OPERATORS` account (the method and the country, never an IP or an email); unset = only the logs |
@@ -146,13 +147,13 @@ boots and plays online against the same origin without Vite, which is exactly wh
 | `GET /nodes/whoami` | | `{ ip }`: the address a node installer is seen from (`CF-Connecting-IP`) |
 | `GET /nodes/releases/channel`, `GET /nodes/releases/<key>` | | the node releases in R2 `NODE_RELEASES`: the channel (`{ stable, minimum }` when both read `X.Y.Z`, 404 while there is none, else 503; `no-store`), `<version>/<file>` (immutable) and the root files such as `launcher.mjs` and `install.sh` (`no-cache`, ETag); never a listing, never a key outside `src/nodeRoutes.ts`'s pattern |
 | `POST /nodes/register`, `GET /nodes/connect`, `PUT` / `GET /nodes/replays/<id>` | what a node sends | to the NodeRegistryDO: registration (4 KB, 5 per address per hour), the control WebSocket, the signed replay upload (16 MiB) and its download by the verifier; every one limited per address, an IPv6 address counted by its /64 |
-| `POST /nodes/tokens` | `{ region, name? }`, Bearer account session of a `NODE_TRUSTED_OPERATORS` account | a one-time node token (1 h) and its Linux install line; 401, 403 `account_required` for a guest, 403 `not_trusted` for any other account; 10 per account per day |
+| `POST /nodes/tokens` | `{ region, name?, publicHost?, roles?, matches?, egressCapGB? }`, Bearer account session of a `NODE_TRUSTED_OPERATORS` account (the maintainer gate: its own session, not a TV's, at level 2 within 15 minutes) | a one-time node token (1 h) and its Linux install line, composed by the object with every value checked (`--name`, `--roles`, `--transport wss --public-host`, `--matches`, `--egress-cap-gb`; nothing a shell would read as more than words); `publicHost` (a public DNS name, never an IP address) pins the node: its registration on another host is refused (`public_host_mismatch`) before the token is spent, and so is a hello that moves it; any wss registration on an IP address is `ip_not_supported`. 400 `bad_public_host` / `bad_roles` / `bad_matches` / `bad_egress_cap` / `bad_name`, 409 `too_many_nodes` (no token made) at the cap; 401, 403 `account_required` for a guest, 403 `not_trusted` for any other account; 10 tokens minted per account per day (a refusal, a typo or the cap, makes none and counts only against 30 tries a minute) |
 | `GET /nodes/mine` | Bearer account session | the caller's own nodes (30 per account per minute) |
 | `GET /nodes/status` | | the public list of nodes (no addresses), cached 10 s |
 | `GET /nodes/replays[?before=<cursor>]` | | the public replay list (`src/net/replays.ts`, `docs/replays.md`): the matches the community nodes played and the control plane settled without voiding them, released by settle hour (every match of hour H together at H + 2 h, one to two hours after each ended, and gone together at H + 30 days: polling shows no settle time), by the hour (rounded, never the minute) and then the match id, 30 a page; names from the control plane (`Jugador N` for an account that hides its name), no account or node ids; `next` is a cursor the Worker signed (anything else is the first page); the first page cached 30 s per isolate, a later one 5 minutes at the edge; `X-Robots-Tag: noindex`; 120 object calls per network and 600 per IPv6 /48 a minute (`src/limits.ts`) |
 | `GET /nodes/replays/top`, `GET /nodes/replays/mine`, `GET /nodes/replays/stars`, `POST /nodes/replays/<id>/star` | the first public; the rest Bearer account session (a guest: 403) | the stars (`NodeStore replay_stars`, one per account and match, 500 per account): `top` the most starred served matches (30 s per isolate), `mine` the account's own matches (by its seat: `replay_players`, never served as ids), `stars` the ids it starred, `star { on }` sets one and answers `{ stars, starred }`; 404 for a match that is not served, 409 `stars_full`; the count is public, who starred is never served; 30 per account per minute |
 | `GET /nodes/replays/<id>/view` | | one served match's replay for the browser viewer (`replay.html`): the node's upload, its SHA-256 checked against the index, the header rebuilt from the control plane's record (`src/replayIndex.ts`: no account or node id, no start time, hidden names); `x-replay-verified: 1` when a verifier checked it, else `0`; 404 `no_replay` for a void, unlisted, too recent (its hour not released yet), expired, delisted or oversized one (kept 5 minutes at the edge; a day, with an `ALERT` log line, for a listed one that fails the checks); edge- and browser-cached 3 hours; `X-Robots-Tag: noindex`; 120 object calls per network and 600 per IPv6 /48 a minute |
-| `GET /nodes/admin/nodes`, `POST /nodes/admin/status`, `/drain`, `/update`, `/reprobe`, `/grant`, `/revoke`, `/unfreeze`, `/delist` | Bearer account session of a `NODE_TRUSTED_OPERATORS` account; `{ nodeId, status, reason? }`, `{ nodeId, reason? }`, no body, `{ nodeId }`, `{ account, item }`, `{ account, item }`, `{ account }`, `{ matchId, reason? }` | the maintainers' routes (see "Community nodes"): 401, 403 `account_required` for a guest, 403 `not_trusted` for any other account; 30 per account per minute; every call is an `ALERT` naming the account. `grant` / `revoke` / `unfreeze` act on an account's items and wallet in AccountsDO (`account`: its 16-hex id; `item`: a catalog id of `nodes/control-plane/shop.ts`, 400 `unknown_item` otherwise): a grant is a claim that costs nothing, whatever the item's status; a revoke gives a claim's cost back (and the account drives the default car if it was that one); an unfreeze lets a frozen wallet claim again. `delist` takes a match out of the public replays (its index row and R2 object; the view's edge copy purged here, and in every location with `CF_ZONE_ID` and `CF_PURGE_TOKEN`; `docs/replays.md`) |
+| `GET /nodes/admin/nodes`, `/overview`, `/wallet?account=`, `/frozen`; `POST /nodes/admin/status`, `/drain`, `/update`, `/reprobe`, `/retire`, `/tokens/revoke`, `/grant`, `/revoke`, `/unfreeze`, `/delist` | Bearer account session of a `NODE_TRUSTED_OPERATORS` account, through the maintainer gate (in order: 413 over 4 KB, 401, 403 `account_required`, 403 `tv_session`, 403 `not_trusted`, 403 `reauth_required { level: 2 }` unless a password was typed within 15 minutes, then the limit); `{ nodeId, status, reason?, force? }`, `{ nodeId, reason? }`, no body, `{ nodeId }`, `{ nodeId, reason }`, `{ id }`, `{ account, item, reason? }`, `{ account, item, reason? }`, `{ account, reason? }`, `{ matchId, reason? }` | the maintainers' routes (see "Community nodes"): 30 per account per minute, `no-store`, no CORS. Every action is an `ALERT` naming the account, every time; every read (the GETs, `account-stats` and `queue-stats` included) is a log line, and an `ALERT` once per account per 30 minutes. `overview` is what the maintainers' panel refreshes: every node in full (specs, last probe, link cuts, pinned host, retirement, lost trust), the caller's trusted slots, the tokens (a short id, never the token), each region's hosts, slots, demand, factor and ranked readiness, the verifiers and their queue, the outbox, the points, the eight KV flags with what they mean, and its warnings. `wallet` and `frozen` read AccountsDO (an account's wallet, freeze and items; the frozen wallets with reason and time). `status` refuses a retired node (409 `retired`), probation or active for a host out of service whose probe never passed, a pending one or one banned or suspended before that (409 `not_reachable`), active for a node that is not trusted without `{ force: true, reason }` (409 `force_required`), a ban without a reason (400 `reason_required`), and a trusted account's banned node out of its ban while the account has its `NODE_TRUSTED_MAX_NODES` nodes (409 `too_many_nodes`, an `ALERT`: the ban freed its slot). `retire` takes a node off the books when it is offline, or drained with no open match (409 `not_retirable`): its socket closes 4403, every login is refused, it frees its slot, leaves `/nodes/mine` and the operator counts, and the cron forgets it; `tokens/revoke` stops an unused token (404 `no_token`, 409 `token_used`). `grant` / `revoke` / `unfreeze` act on an account's items and wallet in AccountsDO (`account`: its 16-hex id; `item`: a catalog id of `nodes/control-plane/shop.ts`, 400 `unknown_item` otherwise): a grant is a claim that costs nothing, whatever the item's status; a revoke gives a claim's cost back (and the account drives the default car if it was that one); an unfreeze lets a frozen wallet claim again. `delist` takes a match out of the public replays (its index row and R2 object; the view's edge copy purged here, and in every location with `CF_ZONE_ID` and `CF_PURGE_TOKEN`; `docs/replays.md`) |
 | `GET /nodes/admin/queue-stats?days=N` | Bearer account session of a `NODE_TRUSTED_OPERATORS` account: its own session (not a TV's), at level 2 within 15 minutes | the public queues' anonymous daily counters from the hub (`{ days: QueueDay[] }`, `src/queueStats.ts`: totals only, no id, name, address or region), newest first, today's in-memory counts included, `days` 1 to 90 (default 30); 401, 403 `not_trusted` for any other account; 10 per account per minute (one count with `account-stats`); `no-store`, no CORS; answered with or without the node settings and with `nodes_off` set. From the game's console: `await __game.accounts.queueStats(30)` |
 | `GET /nodes/shop`, `POST /nodes/shop/claim` | Bearer account session; `{ item }` (or `itemId`) | aliases of `GET /api/me/shop` and `POST /api/me/shop/claim` (the hosts' shop lives in AccountsDO): answered with or without the node settings; 401, 403 `account_required` for a guest |
 | anything else | `GET` | the game (Workers Assets from `../dist`; unknown paths get `index.html`) |
@@ -172,10 +173,12 @@ Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms kee
   waited 60 s (the oldest waiter is served first). Alone after 5 min with the tab visible: a match
   with bots in its preferred format.
 * Ranked: accounts, humans only, MMR windows as before, own region first, every region after 120 s.
-* The host region is the majority's (a tie: the longest wait's). SA with the nodes on: a community
-  node first, else a MatchDO; every MatchDO is created with its host region's location hint
-  (SA 'sam', NA 'enam', EU 'weur', AS 'apac', OC 'oc', AF 'afr'). A home that is not one of the
-  six regions counts as SA.
+* The host region is the majority's (a tie: the longest wait's). With the nodes on: a community
+  node of the host region first (never one of another region), else a MatchDO; every MatchDO is
+  created with its host region's location hint (SA 'sam', NA 'enam', EU 'weur', AS 'apac', OC
+  'oc', AF 'afr'). A home that is not one of the six regions counts as SA. The host region is
+  also what a ranked match reports (`ranked_matches.region`), on a MatchDO or a node; a MatchDO's
+  release still goes to the hub.
 * Capacity, global in the hub: 20 MatchDO in total (5 kept for ranked; at most 5 solo bots
   matches); at a cap the group waits (`wait.busy`), no 503. Node matches do not count.
 * Waiting answers carry `wait` (src/net/queueWait.ts): searching counts, the estimate, the 5:00
@@ -210,9 +213,11 @@ Matchmaking (one hub for every public queue: the `mm:SA` MatchmakerDO; rooms kee
   day. Production's idle eviction (70-140 s) comes after the alarm, which is at most 60 s after the
   last write.
 * `do_disabled` with the nodes on for a player: the hub never answers 503 and never creates a
-  MatchDO; every group the nodes are on for is hosted SA, node only, and waits busy until a node
-  takes it (also through the minute of no-hosts back-off). A group whose nodes were turned off while
-  it waited waits busy too, until the Worker's 503 ends each search at its next POST.
+  MatchDO; every group the nodes are on for goes to a node only: one of its host region first, then
+  one of SA (straight to SA while its region is in its minute of no-hosts back-off; the match is then
+  hosted SA, `host: 'SA'`), and with neither it waits busy until a node takes it. A group whose nodes
+  were turned off while it waited waits busy too, until the Worker's 503 ends each search at its
+  next POST.
 * Lobbies: always P2P (a `'server'` setting is read as P2P), at least 2 members to start; create
   and join without `api: 2` get 426 `reload_required` (a page from before 2026-11-04 shows it as its
   new-version sheet with RELOAD, in the server's Spanish text: it has no key of its own for it).
@@ -227,7 +232,8 @@ P2P room lifecycle (RoomDO, Hibernation API: no timers, the object sleeps betwee
 roster + random uint32 `seed` registered by the matchmaker -> each peer opens `/room/<id>` with
 its ticket (single-use `jti`; a second socket for the same slot replaces the first, close 4000) and
 gets `RoomWelcome` (seed, slots with `connected` flags and `peerId`s, `iceServers`, inputDelay 3,
-window 16, hashEvery 30, tickRate 120, `now`); the others get `peerJoined`. `signal` is relayed to
+window 16, hashEvery 30, tickRate 120, `now`, `physics`, and `botDifficulty`: the lobby host's
+bots level, hard by default, which every peer runs; protocol 6); the others get `peerJoined`. `signal` is relayed to
 the target slot (dropped when it has no socket). When every connected peer sent `ready` and at
 least two are connected: `start { startAt: now + 1500, now }` to all, then `drop { slot, atTick: 0 }`
 for every peer slot without a socket (its car is the team AI from tick 0 on every peer).
@@ -366,13 +372,38 @@ without `NODE_TRUSTED_OPERATORS` nobody can create a node token (403 `not_truste
 routes under `wrangler dev`, put a development pair in `.dev.vars` (both halves: a `.dev.vars`
 value overrides the committed var).
 
+A new development pair, never `npm run keys` in `nodes/` (it writes `nodes/.keys/`, where the real
+key may be), written straight into your own `.dev.vars` from `server/`; it prints nothing:
+
+```sh
+node -e "const c=require('crypto'),{publicKey:p,privateKey:k}=c.generateKeyPairSync('ed25519'),s=p.export({format:'der',type:'spki'});require('fs').appendFileSync('.dev.vars','\nNODE_CONTROL_PRIVATE_KEY='+k.export({format:'der',type:'pkcs8'}).toString('base64url')+'\nNODE_CONTROL_PUBLIC_KEY='+s.subarray(s.length-32).toString('base64url')+'\n')"
+```
+
+Then PERFIL's CONTROL DE NODOS (the maintainers' panel) runs against it:
+
+1. In `.dev.vars`: `DEV_AUTH=1`, and `NODES_PUBLIC_BASE=http://127.0.0.1:8787` (your Worker's port):
+   it overrides the committed var, the install lines and tickets name this Worker, and a loopback
+   base lets the object probe and register nodes on this machine (`loopbackOk`).
+2. Start the Worker and Vite, sign in with ENTRAR (DEV) in PERFIL, and read that account's id
+   (`__game.accounts.account.playerId` in the browser's console).
+3. Put it in `.dev.vars` as `NODE_TRUSTED_OPERATORS=<id>`, restart the Worker, and sign in with
+   ENTRAR (DEV) again: CUENTA DEL PROYECTO now shows CONTROL DE NODOS.
+4. A dev sign-in is level 2 without a password, for 15 minutes: after them the panel pauses on
+   `reauth_required`; sign in with ENTRAR (DEV) again (the password sheet is for an account with a
+   password, the project's).
+
 Matches reach the nodes through the matchmaker, behind the KV flag `nodes_on` (absent: off). When
-the nodes are on for every human of a Casual or ranked match whose host region is SA, the match is
-offered to a node first; when none takes it, or the control plane fails or
-does not answer within 8 s, the match goes to a MatchDO as before (after a failure, or when the
-region has no host online, the matchmaker stops asking for a minute, and meanwhile the region
-counts as without the nodes: at the cap the group waits (`wait.busy`) and, with `do_disabled`,
-it waits busy for a node, never a 503 from the hub). Lobby matches (P2P) never go to a node.
+the nodes are on for every human of a Casual or ranked match, the match is offered first to a node
+of its host region (the control plane picks among that region's nodes only, never another
+region's: the latency); when none takes it, or the control plane fails or
+does not answer within 8 s, the match goes to a MatchDO near that region as before (after a
+failure, or when the region has no host online, the matchmaker stops asking that region for a
+minute, and meanwhile the region counts as without the nodes: at the cap the group waits
+(`wait.busy`) and, with `do_disabled`, it asks SA's nodes, or waits busy for a node, never a 503
+from the hub). A region without nodes (NA, OC and AF today) costs one placement asked a minute,
+answered `hosts: 0`. A node match's `/release` always goes to the queue hub (`mm:SA`, or
+`REGION_OVERRIDE` locally), which formed it and holds its locks; its ranked result names its host
+region (`ranked_matches.region`). Lobby matches (P2P) never go to a node.
 `nodes_on` and `vm_disabled` are read through KV's 60 s edge cache, so a change takes up to about
 two minutes to reach every matchmaker:
 
@@ -453,14 +484,17 @@ the only cron is the health check above.
 
 Each is a KV `FLAGS` key set to `1` (or `true` / `on`) by hand, with no deploy:
 `npx wrangler kv key put <flag> 1 --binding FLAGS --remote`, and `kv key delete` to undo it. A change
-lands within a minute or two.
+lands within a minute or two. `bot_level` is a setting, not an on/off switch: it takes a level
+(`npx wrangler kv key put bot_level medium --binding FLAGS --remote`), and deleting it goes back to
+the code's default, `hard`.
 
 | Flag | What it stops | What goes on |
 |---|---|---|
 | `matchmaking_off` | `POST /api/queue` and `POST /api/lobbies`: 503 `matchmaking_off` (no new match, room or lobby) | matches and lobbies already open, sign-in, the menus |
-| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group is hosted SA (node only) whatever its majority's region, and waits busy until a node takes it | node matches; sockets already open |
+| `do_disabled` | every new socket to a MatchDO, RoomDO or LobbyDO (`/ws`, `/room`, `/lobby`: 503) and every new MatchDO match; `POST /api/queue` answers 503 `do_disabled` to a player the nodes are off for. With the nodes on for a player, its Casual and ranked searches wait for a node instead: every such group asks a node of its host region, then one of SA (node only), and waits busy until a node takes it | node matches; sockets already open |
 | `vm_disabled` | no new match goes to a community node, whatever `nodes_on` says | the control plane and the nodes' sockets; matches already on a node |
 | `replays_off` | the public replays only: `GET /nodes/replays` and `GET /nodes/replays/<id>/view` answer 404, their edge-cached copies too (read once per isolate every 30 s), the object never asked | the nodes, the verifiers' signed replay routes, everything else |
+| `bot_level` | nothing: it sets the level of the bots in every new Casual match, `easy`, `medium` or `hard` (case and spaces ignored; unset, unreadable or anything else = `hard`), read once per formation: the bots in the free seats and the 5:00 solo match, on a MatchDO and on a community node (the hub sends it in the placement; node 0.3.0 reads it, no node release) | matches already formed keep their level; ranked sends no level (the car of a player who leaves stays `medium`, whatever the flag says); a lobby's P2P room plays the level its host picked (default `hard`) |
 | `nodes_off` | every `/nodes/*` route that would reach the NodeRegistryDO: registration, the control socket's upgrade, replay uploads and downloads, tokens, `/nodes/mine`, `/nodes/status`, the replay list and view, the maintainers' routes (503 `nodes_off`, the object never asked), and the cron's health check. Set `vm_disabled` with it: sockets already open stay, and the matchmaker still reaches the object directly | the node releases and the installers (edge-cached), the shop aliases (AccountsDO) |
 
 What no flag stops, and what bounds it instead: guest sessions (Turnstile and the per-network

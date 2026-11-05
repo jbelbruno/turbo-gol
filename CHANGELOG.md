@@ -7,12 +7,29 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Full screen on the pitch: on a computer the game fills the screen when a match or a training
+  starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
+  tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
+  Esc is still the pause (from the pause it resumes when you let it go) and holding Esc leaves full
+  screen without resuming the match or going back a screen in the menus; a player who leaves is not
+  taken back until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
+  screen when playing" (on by default), turns it off, and Android's tap to full screen with it; the
+  row is not listed on an iPhone, an iPad or a TV. The replay viewer has a Full screen button and
+  the F key.
 - The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
   /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
   notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
   pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
   version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
   the maintainer can delete one on request with a certificate (docs/legal/README.md).
+- PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS, the maintainers' panel of the community nodes
+  (never on a TV): a summary (nodes online by region, matches, the verification queue, the outbox,
+  the trusted slots, the channel, the warnings and the KV switches, read only), every node with its
+  detail and actions behind a confirmation (status, drain, probe again, retire), the tokens, the
+  regions, the releases, the server points (a wallet by account id, the frozen ones, grant, take back,
+  unfreeze) and the account and queue counts. It refreshes every 15 s and asks for the password once
+  when the server wants it again. ADD A PROJECT SERVER asks the machine's data, a checklist and the
+  password, then shows the install line the server composed (COPY) and follows the node to active.
 - Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
   without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
   link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
@@ -488,6 +505,12 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- Casual: the bots that fill the free seats, and the 5:00 match against bots, now play hard (they
+  played normal), on the project's servers and on community nodes alike; the owner can change their
+  level without a deploy (KV `bot_level`, server/README.md). A Competitive match keeps normal bots
+  for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
+  default) and every player's game runs it; the lobby's line shows it, the public list does not. The
+  P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
 - The terms of use and the privacy policy are at version 2026-11-05, in force on its deploy day: the
   project's servers in Brazil, Germany and Malaysia (Hostinger) and, for now, South Africa,
   Australia and the United States (Google Cloud), each taking its region's Casual and Competitive
@@ -646,6 +669,11 @@ All notable changes to Turbogol are documented here. The format follows
   solid tiles over it; every other menu keeps the solid page.
 - Language moved to PROFILE (until Settings has it), and says before you pick that the game
   reloads for a few seconds.
+- Regional placement: a Casual or Competitive match asks first for a community node of its host
+  region (its players' majority), never one of another region, and goes to a server near that
+  region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
+  of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
+  A node match's release goes to the one queue, and a ranked result always names the host region.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,

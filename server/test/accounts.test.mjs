@@ -431,7 +431,7 @@ test('lobby helpers: names, codes, team for a newcomer, refit on a playlist chan
   assert.deepEqual([...two.entries()], [['m1', 0], ['m2', 1]], 'the newest moves');
   const s = L.parseLobbySettings({ mode: '3v3', matchLengthSeconds: 0, net: 'server' }, L.defaultLobbySettings('Sala'));
   // Lobbies are P2P only (the modes redesign): an older page's 'server' is read as 'p2p', junk is still refused.
-  assert.deepEqual(s, { name: 'Sala', mode: '3v3', visibility: 'public', net: 'p2p', matchLengthSeconds: 0, physics: null });
+  assert.deepEqual(s, { name: 'Sala', mode: '3v3', visibility: 'public', net: 'p2p', matchLengthSeconds: 0, physics: null, bots: 'hard' });
   assert.equal(L.parseLobbySettings({ net: 'mesh' }, s), 'bad_net');
   assert.deepEqual(L.parseLobbySettings({}, { ...s, net: 'server' }), s, 'a stored server lobby is played as P2P');
   assert.equal(L.parseLobbySettings({ matchLengthSeconds: 7 }, s), 'bad_length');

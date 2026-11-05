@@ -14,6 +14,7 @@
 
 import type { RulesSnapshot, StoredPreset } from '../game/physicsRules';
 import type { CarId } from '../game/cosmetics';
+import type { Difficulty } from '../ai/Bot';
 
 export const CLIENT_KDF_ITERATIONS = 200_000;
 const CLIENT_KDF_SALT_PREFIX = 'turbogol/account/v1/';
@@ -714,6 +715,14 @@ export type LobbyVisibility = 'public' | 'private';
 /** Match length options of a custom lobby (seconds; 0 = unlimited). */
 export const LOBBY_LENGTHS: readonly number[] = [180, 300, 600, 0];
 
+/** The bots' level of a lobby whose host picked none (a new lobby, a record of before the setting). */
+export const LOBBY_BOTS_DEFAULT: Difficulty = 'hard';
+
+/** A lobby's bots level as its settings say (absent: a record or a Worker of before the setting). */
+export function lobbyBots(s: Pick<LobbySettings, 'bots'>): Difficulty {
+  return s.bots ?? LOBBY_BOTS_DEFAULT;
+}
+
 export interface LobbySettings {
   name: string;
   mode: Playlist;
@@ -730,6 +739,12 @@ export interface LobbySettings {
    * no records, no no-show strikes, never on a community node. The server always sends it (null).
    */
   physics?: RulesSnapshot | null;
+  /**
+   * The bots' level of the lobby's matches, the host's pick (LOBBY_BOTS_DEFAULT when none): every
+   * peer runs it (RoomWelcome.botDifficulty). Shown to the members only, never in the public list
+   * (LobbySummary is built field by field). The server always sends it; absent = lobbyBots's default.
+   */
+  bots?: Difficulty;
 }
 
 /** A row of the public lobby list (GET /api/lobbies). */

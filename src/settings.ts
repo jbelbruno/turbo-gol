@@ -79,6 +79,8 @@ export interface UiSettings {
   size: number;
   /** Reduced motion: 'system' follows prefers-reduced-motion, 'on' always, 'off' never. */
   motion: MotionPref;
+  /** Full screen when playing (src/ui/fullscreen.ts): on entering the pitch on a computer, Android's tap; off: neither. */
+  fullscreen: boolean;
 }
 
 export type MotionPref = 'system' | 'on' | 'off';
@@ -126,7 +128,7 @@ export const DEFAULT_TOUCH: Readonly<TouchSettings> = {
 export const TOUCH_OPACITY_RANGE: readonly [number, number, number] = [30, 100, 5];
 export const TOUCH_DEADZONE_RANGE: readonly [number, number, number] = [0.05, 0.3, 0.01];
 
-export const DEFAULT_UI: Readonly<UiSettings> = { size: 0, motion: 'system' };
+export const DEFAULT_UI: Readonly<UiSettings> = { size: 0, motion: 'system', fullscreen: true };
 
 /** The interface sizes a save may hold (%; 0: the device's own). */
 export const UI_SIZES: readonly number[] = [0, 100, 115, 125, 130, 150];
@@ -261,6 +263,7 @@ export function mergeSettings(raw: unknown): Settings {
   const ui = typeof r.ui === 'object' && r.ui !== null ? r.ui : {};
   if (typeof ui.size === 'number' && UI_SIZES.includes(ui.size)) s.ui.size = ui.size;
   if (ui.motion === 'on' || ui.motion === 'off' || ui.motion === 'system') s.ui.motion = ui.motion;
+  if (typeof ui.fullscreen === 'boolean') s.ui.fullscreen = ui.fullscreen;
   const b = r.bindings ?? {};
   for (const device of ['kbm', 'pad'] as const) {
     const prof = b[device];

@@ -29,7 +29,12 @@
  * The HTTP implementation is injectable for node tests (tests/account-client.test.mjs).
  */
 import { legacyPasswordKey, normalizeEmail, passwordIssue, passwordKey, usernameIssue } from './account';
-import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, MyNode, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
+import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
+import { mineAnswerOf, overviewOf as nodeOverviewOf } from './nodes';
+import type { AdminWallet, FrozenList, MineAnswer, Overview, TokenAnswer, TokenAsk } from './nodes';
+
+/** The maintainers' POST /nodes/admin/* actions (server/src/nodeRoutes.ts ADMIN_ROUTES). */
+export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist';
 import { DEAD_LINK_CODES, keepAttempt, keepLastSignIn, keepLink, localResendAt, pageStore, readAttempt, readLastSignIn, readLink } from './emailAuth';
 import type { AccountLink, LastSignIn, LegacyPhase, StoredAttempt } from './emailAuth';
 import type { FetchLike, ResponseLike, StorageLike } from './NetClient';
@@ -1011,17 +1016,19 @@ export class AccountClient {
 
   /**
    * The signed-in account's community nodes (GET /nodes/mine, the operator route the node pages
-   * use): [] for an account without one, and where the Worker has no nodes (a fork, local dev: 404,
-   * or an answer that is not the route's JSON). Rejects for a guest or on a network / server error.
+   * use): the operator as the control plane sees it (trusted or not: the server's word), its nodes
+   * (never a retired one) and its rewards; empty for an account without one, and where the Worker
+   * has no nodes (a fork, local dev: 404, or an answer that is not the route's JSON). On ownCall:
+   * once more after a 401, nothing for a session that turned into another account. Rejects for a
+   * guest or on a network / server error (503 nodes_off too: the panel says the nodes are paused).
    */
-  async myNodes(): Promise<MyNode[]> {
-    const res = await this.call('/nodes/mine', undefined, await this.bearer());
-    if (res.status === 404) return [];
-    const b = await this.jsonOrFail<{ nodes?: unknown }>(res).catch((e: unknown): { nodes?: unknown } => {
-      if (e instanceof AccountError) throw e;
-      return {}; // not JSON: the dev server's page
-    });
-    return Array.isArray(b.nodes) ? (b.nodes as MyNode[]) : [];
+  async nodesMine(): Promise<MineAnswer> {
+    try {
+      return mineAnswerOf(await this.ownCall('/nodes/mine'));
+    } catch (e) {
+      if (e instanceof AccountError && e.status !== 404) throw e;
+      return { operator: null, nodes: [], rewards: null }; // 404, or not JSON: the dev server's page
+    }
   }
 
   async rankedResult(matchId: string): Promise<RankedResultAnswer> {
@@ -1430,6 +1437,48 @@ export class AccountClient {
     const r = (await this.ownCall('/nodes/admin/queue-stats?days=' + n)) as { days?: unknown } | null;
     if (!Array.isArray(r?.days)) throw new AccountError(t('error.server'), 200, 'protocol');
     return r.days;
+  }
+
+  // ---- the maintainers' node panel (PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS) ----------------
+  // Every one goes through the Worker's maintainer gate (server/src/nodeRoutes.ts): a session that is
+  // not a TV's, of a NODE_TRUSTED_OPERATORS account, with its password typed in the last 15 minutes
+  // (403 reauth_required { level: 2 } otherwise: the panel asks for it and goes on), 30 a minute.
+  // The refusals reject with their code (src/net/nodes.ts nodeErrorKey says them).
+
+  /** GET /nodes/admin/overview: what the panel refreshes every 15 s (the nodes, tokens, regions, flags, warnings). */
+  async nodesOverview(): Promise<Overview> {
+    return nodeOverviewOf(await this.ownCall('/nodes/admin/overview'));
+  }
+
+  /** GET /nodes/admin/wallet?account=: an account's wallet, its freeze and its items (`account` 16 hex). */
+  async nodesWallet(account: string): Promise<AdminWallet> {
+    const r = (await this.ownCall('/nodes/admin/wallet?account=' + encodeURIComponent(account))) as Partial<AdminWallet> | null;
+    return { account: typeof r?.account === 'string' ? r.account : account, wallet: r?.wallet ?? null, items: Array.isArray(r?.items) ? r.items : [], car: typeof r?.car === 'string' ? r.car : null };
+  }
+
+  /** GET /nodes/admin/frozen: the wallets frozen now, newest first. */
+  async nodesFrozen(): Promise<FrozenList> {
+    const r = (await this.ownCall('/nodes/admin/frozen')) as Partial<FrozenList> | null;
+    return { frozen: Array.isArray(r?.frozen) ? r.frozen : [], more: r?.more === true };
+  }
+
+  /** POST /nodes/admin/<action>: a node's status (with its guards), drain, re-probe, retire; the channel announced again; a token revoked; points granted, revoked or unfrozen. */
+  async nodesAction(action: NodeAction, body: Record<string, unknown>): Promise<unknown> {
+    return this.ownCall('/nodes/admin/' + action, body);
+  }
+
+  /** POST /nodes/tokens: a one-time token of this account and its install line, composed by the server (409 too_many_nodes before any token at the cap). */
+  async nodesToken(ask: TokenAsk): Promise<TokenAnswer> {
+    const r = (await this.ownCall('/nodes/tokens', ask)) as Partial<TokenAnswer> | null;
+    if (typeof r?.token !== 'string' || typeof r.install?.linux !== 'string') throw new AccountError(t('error.server'), 200, 'protocol');
+    return { token: r.token, expiresAt: typeof r.expiresAt === 'number' ? r.expiresAt : this.now() + 3_600_000, ttlMinutes: typeof r.ttlMinutes === 'number' ? r.ttlMinutes : 60, install: { linux: r.install.linux } };
+  }
+
+  /** GET /nodes/admin/account-stats: the accounts' anonymous counts (numbers only). Shares 10 a minute with queueStats and the deletions on request. */
+  async accountStats(): Promise<Record<string, unknown>> {
+    const r = await this.ownCall('/nodes/admin/account-stats');
+    if (typeof r !== 'object' || r === null) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r as Record<string, unknown>;
   }
 
   /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */

@@ -3,7 +3,7 @@
 // experimental counts for nothing". Covered here:
 //   - LobbyDO: the rules in the settings (strict, P2P only), every guest gate (create, admit, the
 //     socket upgrade, settings, start), the summary's EXP flag, the /custom body (and, beside the
-//     rules, the cosmetic car each member's seat keeps);
+//     rules, the cosmetic car each member's seat keeps, and the bots' level the host picks);
 //   - the Worker: a guest's lobby with rules (403 account_required), the casual and ranked queues
 //     never take rules (400 experimental_lobby_only);
 //   - the standard-physics-only paths refuse rules whoever sends them: MatchDO /internal/create,
@@ -377,6 +377,51 @@ test('LobbyDO (cosmetic cars): a start waits at most EQUIPPED_TIMEOUT_MS for Acc
   assert.deepEqual(h.mm.calls.find((c) => c.path === '/custom').body.members.map((m) => m.car ?? null), ['tero', null]);
 });
 
+// ---- LobbyDO: the bots' level (not rules: any lobby, guests too) ------------------------------------
+
+/** The LobbySummary keys (the public list, privacy row 282): never the bots' level. */
+const SUMMARY_KEYS = ['code', 'experimental', 'host', 'inGame', 'locked', 'max', 'mode', 'name', 'net', 'physics', 'players', 'region'];
+
+test("LobbyDO (the bots' level): hard by default; the host picks another (junk: bad_bots, a member: not_host); absent keeps it; every member sees it, the public list and the join link's peek never; the start hands it to /custom", async () => {
+  assert.equal(L.defaultLobbySettings('Sala').bots, 'hard');
+  assert.equal(L.parseLobbySettings({ bots: 'insane' }, L.defaultLobbySettings('Sala')), 'bad_bots');
+  assert.equal(L.parseLobbySettings({ bots: 'easy' }, L.defaultLobbySettings('Sala')).bots, 'easy');
+  assert.equal(L.parseLobbySettings({ mode: '1v1' }, { ...L.defaultLobbySettings('Sala'), bots: undefined }).bots, 'hard', 'a record of before the setting: hard');
+  const h = await makeLobby({ name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Invitado', guest: true });
+  const host = (await h.upgrade('host1')).ws;
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'hard', 'a new lobby (a guest host too)');
+  await h.send(host, { t: 'settings', settings: { bots: 'easy' } });
+  assert.deepEqual(host.of('error'), []);
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'easy');
+  for (const bad of ['insane', 'Hard', 2, null]) await h.send(host, { t: 'settings', settings: { bots: bad } });
+  assert.deepEqual(host.of('error').map((e) => e.code), ['bad_bots', 'bad_bots', 'bad_bots', 'bad_bots']);
+  await h.send(host, { t: 'settings', settings: { mode: '3v3' } });
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'easy', 'absent: kept');
+  await h.admit('acct2', false);
+  const m = (await h.upgrade('acct2')).ws;
+  assert.equal(m.of('state').at(-1).lobby.settings.bots, 'easy', 'every member sees it');
+  await h.send(m, { t: 'settings', settings: { bots: 'hard' } });
+  assert.deepEqual(m.of('error').map((e) => e.code), ['not_host']);
+  // The public list's row and the join link's peek are built field by field: no level there.
+  assert.deepEqual(Object.keys(h.summary()).sort(), SUMMARY_KEYS);
+  const peek = await h.lobby.fetch(new Request('https://lobby/internal/peek', { headers: { [INTERNAL_HEADER]: await internalSecret(SECRET) } }));
+  assert.deepEqual(Object.keys(await peek.json()).sort(), SUMMARY_KEYS);
+  await h.send(host, { t: 'start' });
+  assert.equal(h.mm.calls.find((c) => c.path === '/custom').body.bots, 'easy', "the room's level");
+  // A lobby stored before the setting: hard, in the state and at the start.
+  const old = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 });
+  delete old.lobby.rec.settings.bots;
+  const oh = (await old.upgrade('host1')).ws;
+  assert.equal(oh.of('state').at(-1).lobby.settings.bots, 'hard');
+  await old.admit('acct2', false);
+  await old.upgrade('acct2');
+  await old.send(oh, { t: 'start' });
+  assert.equal(old.mm.calls.find((c) => c.path === '/custom').body.bots, 'hard');
+  // A create may carry one (POST /api/lobbies passes it on); junk is refused.
+  assert.equal((await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, bots: 'medium' })).lobby.rec.settings.bots, 'medium');
+  assert.equal((await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, bots: 'x' })).created.json.error, 'bad_bots');
+});
+
 // ---- the Worker -----------------------------------------------------------------------------------
 
 function workerEnv() {
@@ -415,6 +460,11 @@ test('Worker: POST /api/lobbies with rules: a guest gets 403 account_required (n
   const create = w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1);
   assert.deepEqual(create.body.settings.physics, RULES);
   assert.equal(create.body.host.guest, false);
+  // The bots' level goes on as sent (LobbyDO checks it); none sent, none passed (LobbyDO's default).
+  await call(w.env, 'POST', '/api/lobbies', { token: await guestToken(), body: { ...lobbyBody, physics: null, bots: 'easy' } });
+  assert.equal(w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1).body.settings.bots, 'easy');
+  await call(w.env, 'POST', '/api/lobbies', { token: await guestToken(), body: { ...lobbyBody, physics: null } });
+  assert.equal('bots' in w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1).body.settings, false);
 });
 
 test('Worker: POST /api/queue never takes rules: 400 experimental_lobby_only for casual and ranked, before the matchmaker is asked', async () => {
@@ -470,6 +520,13 @@ test('a community node placement with rules is refused (NodeRegistryDO parsePlac
   for (const o of [rated, voided]) {
     for (const c of outcomeCalls(o, assign, ['p1', 'p2'])) assert.equal(JSON.parse(c.body).physics, undefined, `${c.path}: built field by field, never passed through`);
   }
+});
+
+test("NodeRegistryDO parsePlace (not rules): the hub's bots level reaches the control plane as sent; junk refuses the placement", () => {
+  const place = { mode: '1v1', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: 'a'.repeat(16), name: 'Ana' }] };
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(parsePlace({ ...place, botDifficulty: level }).botDifficulty, level);
+  assert.equal(parsePlace(place).botDifficulty, undefined, "absent: the control plane's default (medium), what ranked sends");
+  assert.equal(parsePlace({ ...place, botDifficulty: 'insane' }), null);
 });
 
 function sqlOn(db) {
