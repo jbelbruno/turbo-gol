@@ -4,9 +4,21 @@ Servidores de partida que pone la comunidad, sea un VPS alquilado o una PC hogar
 de control propio que los registra, les asigna partidas, **verifica los resultados
 re-simulándolos** (todas las ranked, las casuales por muestreo) y recompensa a quien los pone con
 puntos para canjear cosas nuevas del juego.
-Hoy es un prototipo en `nodes/`: el plano de control ya está en el Worker (`server/`), pero el
-matchmaker todavía no le manda partidas. Qué falta para usarlo con jugadores reales está en
-[docs/PRODUCCION.md](docs/PRODUCCION.md).
+
+Desde el 21/10/2026 el matchmaker manda partidas a los nodos, por ahora solo a los servidores del
+proyecto. El plano de control corre en el Worker (`server/`). Cada partida de CASUAL o COMPETITIVO
+pide primero un servidor de su región anfitriona (la de la mayoría de sus jugadores), nunca uno de
+otra región salvo en una emergencia, y si ninguno puede tomarla se juega en servidores de
+Cloudflare: le pedimos a Cloudflare que la ponga cerca de esa región. Hoy el proyecto tiene un
+servidor por región: São Paulo (Sudamérica), Alemania (Europa) y Malasia (Asia) alojan y verifican
+y, por ahora, también hay en Sudáfrica (África), Australia (Oceanía) y Estados Unidos
+(Norteamérica), que solo alojan. Los que están en servicio aparecen en
+[turbo-gol.com/nodes/status](https://turbo-gol.com/nodes/status).
+
+**El alta de la comunidad todavía no está abierta:** solo el proyecto puede registrar servidores,
+así que hoy no puedes registrar uno. Los puntos de servidor se guardan en la cuenta y se canjean por
+autos en GARAJE, pero solo los gana un servidor de la comunidad (los del proyecto no ganan): hoy
+nadie los gana. Qué falta para abrirla está en [docs/PRODUCCION.md](docs/PRODUCCION.md).
 
 **Qué se verifica:** todas las partidas ranked, porque proteger el ranking es el objetivo. Las
 casuales, por muestreo: todas mientras un servidor está a prueba, una parte cuando ya es activo, y
@@ -17,9 +29,10 @@ ninguna en los servidores del proyecto.
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Las piezas, los flujos, el modelo de confianza y los costos medidos |
 | [docs/DECISIONES.md](docs/DECISIONES.md) | Lo que decidió el mantenedor, lo decidido por defecto y lo que queda abierto |
 | [docs/RECOMPENSAS.md](docs/RECOMPENSAS.md) | Puntos, tienda de anfitriones y defensas contra el farmeo |
-| [docs/VPS-SAO-PAULO.md](docs/VPS-SAO-PAULO.md) | Cómo levantar el verificador de confianza, que también es el primer servidor ranked |
-| [docs/INTEGRACION.md](docs/INTEGRACION.md) | Los cambios exactos en el Worker y en el cliente para activarlo, aplicados en parte: el plano de control ([6], #28); falta el gancho del matchmaker ([7]) |
-| [docs/PRODUCCION.md](docs/PRODUCCION.md) | Todo lo que falta para usarlo con jugadores reales, por etapas, y el costo de forzar TURN |
+| [docs/VPS-SAO-PAULO.md](docs/VPS-SAO-PAULO.md) | Cómo se levantó São Paulo, el primer servidor del proyecto, que aloja y verifica |
+| [docs/VPS-PROYECTO.md](docs/VPS-PROYECTO.md) | Cómo se carga otra máquina del proyecto desde el panel de control de nodos |
+| [docs/INTEGRACION.md](docs/INTEGRACION.md) | Los cambios exactos en el Worker y en el cliente para activarlo. Los de la etapa 1 ya están aplicados ([3] #25, [6] #28, [7] #29 y [8] #30); falta lo de la etapa 2, como el adaptador WebRTC del cliente |
+| [docs/PRODUCCION.md](docs/PRODUCCION.md) | Todo lo que falta para abrirlo a la comunidad, por etapas, y el costo de forzar TURN |
 | [docs/BOT.md](docs/BOT.md) | Propuestas, votos y el bot que las implementa |
 
 ## Correrlo
