@@ -430,8 +430,8 @@ art. 33 IX).
 | Registros técnicos de Cloudflare | 7 días |
 | Registro de envíos de correo de Cloudflare (a quién, cuándo y si llegó) | Hasta 30 días, también después de borrar la cuenta |
 | Registros de la máquina de São Paulo (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
-| Registros de las máquinas de Alemania y Malasia, en Hostinger (pueden tener direcciones IP) | [[RETENCION_HOSTINGER_DE_MY]] |
-| Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP) | [[RETENCION_GOOGLE_CLOUD]] |
+| Registros de las máquinas de Alemania y Malasia, en Hostinger (pueden tener direcciones IP) | 7 días. Las copias de seguridad semanales de Hostinger: hasta unos 14 días (guarda las 2 últimas) |
+| Registros de las máquinas de Sudáfrica, Australia y Estados Unidos, en Google Cloud (pueden tener direcciones IP) | 7 días. Esas máquinas no tienen copias de seguridad |
 | Señales de Turnstile que Cloudflare usa por su cuenta | Las fija Cloudflare. Su anexo no da un plazo |
 | Reportes de errores de red y Cloudflare Web Analytics | Los fija Cloudflare |
 | Avisos técnicos al equipo en Discord | 90 días |

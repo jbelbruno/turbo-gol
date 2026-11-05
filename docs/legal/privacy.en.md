@@ -425,8 +425,8 @@ art. 33 IX).
 | Cloudflare's technical logs | 7 days |
 | Cloudflare's email sending log (to whom, when and whether it arrived) | Up to 30 days, also after the account is deleted |
 | Logs of the São Paulo machine (they may contain IP addresses) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
-| Logs of the machines in Germany and Malaysia, at Hostinger (they may contain IP addresses) | [[RETENCION_HOSTINGER_DE_MY]] |
-| Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses) | [[RETENCION_GOOGLE_CLOUD]] |
+| Logs of the machines in Germany and Malaysia, at Hostinger (they may contain IP addresses) | 7 days. Hostinger's weekly backups: up to about 14 days (it keeps the last 2) |
+| Logs of the machines in South Africa, Australia and the United States, at Google Cloud (they may contain IP addresses) | 7 days. Those machines have no backups |
 | Turnstile signals that Cloudflare uses on its own account | Set by Cloudflare. Its addendum gives no period |
 | Network error reports and Cloudflare Web Analytics | Set by Cloudflare |
 | Technical alerts to the team on Discord | 90 days |
