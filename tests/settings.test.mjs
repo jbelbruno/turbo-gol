@@ -132,14 +132,14 @@ test('PR 11 groups are additive: a save from before them loads unchanged, its ne
   assert.deepEqual(s.bindings.kbm.boost, { kind: 'key', code: 'KeyF' });
   assert.deepEqual(s.touch, DEFAULT_TOUCH);
   assert.deepEqual(s.ui, DEFAULT_UI);
-  assert.deepEqual(DEFAULT_UI, { size: 0, motion: 'system' }, "the interface size: the device's own");
+  assert.deepEqual(DEFAULT_UI, { size: 0, motion: 'system', fullscreen: true }, "the interface size: the device's own; full screen when playing on");
   assert.deepEqual(defaultSettings().touch, { size: 'M', opacity: 100, lefty: false, stick: 'floating', deadzone: 0.12, vibration: true }, "today's controls");
 });
 
 test('touch and interface settings: valid values kept, a missing key reads its default, garbage falls back field by field', () => {
   const s = mergeSettings({ touch: { size: 'L', opacity: 55, lefty: true, stick: 'fixed', deadzone: 0.2, vibration: false }, ui: { size: 150, motion: 'on' } });
   assert.deepEqual(s.touch, { size: 'L', opacity: 55, lefty: true, stick: 'fixed', deadzone: 0.2, vibration: false });
-  assert.deepEqual(s.ui, { size: 150, motion: 'on' });
+  assert.deepEqual(s.ui, { size: 150, motion: 'on', fullscreen: true });
   const partial = mergeSettings({ touch: { lefty: true }, ui: { motion: 'off' } });
   assert.deepEqual(partial.touch, { ...DEFAULT_TOUCH, lefty: true });
   assert.deepEqual(partial.ui, { ...DEFAULT_UI, motion: 'off' });
@@ -147,6 +147,16 @@ test('touch and interface settings: valid values kept, a missing key reads its d
   assert.deepEqual(bad.touch, { ...DEFAULT_TOUCH, opacity: TOUCH_OPACITY_RANGE[0], deadzone: TOUCH_DEADZONE_RANGE[1] });
   assert.deepEqual(bad.ui, DEFAULT_UI);
   assert.deepEqual(mergeSettings({ touch: null, ui: 'big' }).touch, DEFAULT_TOUCH);
+});
+
+test('full screen when playing: on by default, a saved false kept, anything but a boolean reads on', () => {
+  assert.equal(defaultSettings().ui.fullscreen, true);
+  assert.equal(mergeSettings({ ui: { fullscreen: false } }).ui.fullscreen, false);
+  assert.equal(mergeSettings({ ui: { fullscreen: true } }).ui.fullscreen, true);
+  for (const bad of ['no', 0, null, 'false']) assert.equal(mergeSettings({ ui: { fullscreen: bad } }).ui.fullscreen, true, String(bad));
+  assert.deepEqual(mergeSettings({ ui: { size: 130, motion: 'off', fullscreen: false } }).ui, { size: 130, motion: 'off', fullscreen: false }, 'beside the other interface settings');
+  const off = mergeSettings({ ui: { fullscreen: false } });
+  assert.deepEqual(mergeSettings(JSON.parse(JSON.stringify(off))).ui.fullscreen, false, 'a round trip through storage keeps it');
 });
 
 test('the music volume sits beside PR 11 groups: a save from before either loads unchanged, the rest at defaults', () => {
@@ -161,7 +171,7 @@ test('the music volume sits beside PR 11 groups: a save from before either loads
   const noMusic = mergeSettings({ audio: { volume: 40 }, touch: { size: 'L', lefty: true }, ui: { size: 115, motion: 'on' }, rev: 2 });
   assert.deepEqual(noMusic.audio, { volume: 40, music: DEFAULT_AUDIO.music });
   assert.deepEqual(noMusic.touch, { ...DEFAULT_TOUCH, size: 'L', lefty: true });
-  assert.deepEqual(noMusic.ui, { size: 115, motion: 'on' });
+  assert.deepEqual(noMusic.ui, { size: 115, motion: 'on', fullscreen: true }, 'a save from before the full screen switch: on');
   // Before PR 11: the music saved, no touch or ui group.
   const noPr11 = mergeSettings({ audio: { volume: 40, music: 15 }, rev: 2 });
   assert.deepEqual(noPr11.audio, { volume: 40, music: 15 });

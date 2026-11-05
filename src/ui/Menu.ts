@@ -128,6 +128,8 @@ import { waitSheetStep } from './screens/searchModel';
 import type { QueueTimes } from './screens/searchModel';
 import { openWaitSheet } from './screens/waitSheet';
 import { openTvSignIn } from './screens/tvSignIn';
+import { escLocked } from './fullscreen';
+import { escArmStep, escBackAction } from '../game/pauseKeys';
 
 export type SearchKind = 'casual' | 'ranked';
 
@@ -467,6 +469,8 @@ export class Menu {
    * repeat after a hand-off (Input.resetMenuRepeat).
    */
   private readonly keysDown = new Set<string>();
+  /** The Esc press whose release makes the Back (performance.now; -1 none): full screen with Esc locked (onKey). */
+  private escArmedAt = -1;
   private timer = 0;
   private popAt = 0;
   /** The last population poll failed (the region pill offers to retry). */
@@ -562,7 +566,7 @@ export class Menu {
     this.root.addEventListener('keydown', (e) => this.onFieldKey(e), true);
     this.installTapGuard();
     window.addEventListener('keydown', (e) => this.onKey(e));
-    window.addEventListener('keyup', (e) => this.keysDown.delete(e.code));
+    window.addEventListener('keyup', (e) => this.onKeyUp(e));
     this.coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
     window.addEventListener('resize', () => {
       this.queueFit();
@@ -756,6 +760,7 @@ export class Menu {
     this.visibleNow = false;
     resetPageZoom(); // a pinch in the menus does not carry into the match (its controls would sit off screen)
     this.keysDown.clear(); // a key held into the match and out again is no menu key
+    this.escArmedAt = -1;
     this.dropKeypad();
     this.closeModal();
     this.reportCover();
@@ -1324,10 +1329,15 @@ export class Menu {
       case 'ArrowRight':
         if (!editing) dir = 'right';
         break;
-      case 'Escape':
+      case 'Escape': {
         e.preventDefault();
-        if (!e.repeat) this.backOrLeave();
+        // In the game's full screen with Esc locked a held Esc is the browser's way out: the Back
+        // waits for a short release (src/game/pauseKeys.ts), so the hold goes back no screen.
+        const act = escBackAction(e.repeat, escLocked());
+        if (act === 'back') this.backOrLeave();
+        else if (act === 'arm') this.escArmedAt = performance.now();
         return;
+      }
       case 'Backspace':
         if (!field) {
           e.preventDefault();
@@ -1358,6 +1368,15 @@ export class Menu {
       e.preventDefault();
       if (!heldOver(e, this.keysDown)) this.nav.move(dir, e.repeat);
     }
+  }
+
+  /** A key let go: the menus forget it; the Esc that armed a Back (onKey) makes it if it was short and full screen is still on. */
+  private onKeyUp(e: KeyboardEvent): void {
+    this.keysDown.delete(e.code);
+    if (e.code !== 'Escape' || this.escArmedAt < 0) return;
+    const held = performance.now() - this.escArmedAt;
+    this.escArmedAt = -1;
+    if (escArmStep(held, escLocked(), this.visibleNow && !this.root.hidden) === 'resume') this.backOrLeave();
   }
 
   /** Keyboard Q / E: the screen's own tabs when it has them, else the sections (pad: LT / RT and LB / RB apart). */
