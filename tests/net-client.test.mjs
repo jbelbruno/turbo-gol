@@ -321,6 +321,10 @@ test('config: GET /api/config is fetched once per client and cached; a failure i
   // The server queue's bot fill (MODOS' countdown): a positive number of ms, else none.
   assert.equal(parseServerConfig({ botFillMs: 10_000 }).botFillMs, 10_000);
   for (const bad of [0, -1, '10000', Infinity, null]) assert.equal(parseServerConfig({ botFillMs: bad }).botFillMs, null, String(bad));
+  // The queue's times (the modes redesign): only with the object; a bad time takes the hub's.
+  assert.equal(parseServerConfig({}).queue, undefined);
+  assert.deepEqual(parseServerConfig({ queue: { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true } }).queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 } });
+  assert.deepEqual(parseServerConfig({ queue: { soloAfterMs: -1, widenMs: 'x' } }).queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 } });
   assert.deepEqual(parseServerConfig({ autoRegion: 'SA', oauth: ['google', 3] }).oauth, ['google'], 'accounts: providers kept, junk dropped');
   assert.equal(parseServerConfig(null), null);
   // A server without the route (404) means no Turnstile; the answer is cached like any other.
@@ -686,7 +690,8 @@ test('queue: a P2P queue refused by our SERVER match (409 kind server) never rej
   assert.equal(h.client.leaves, 1);
   const order = h.calls.map((c) => c.url).filter((u) => u !== '/api/config' && u !== '/api/guest');
   assert.deepEqual(order, ['/api/queue', '/api/leave', '/api/queue'], 'leave between the two queue calls, no rejoin');
-  assert.deepEqual(h.calls.filter((c) => c.url === '/api/queue').map((c) => c.body.kind), ['p2p', 'p2p'], 'the retry is still a P2P queue');
+  // The P2P queue is gone (the modes redesign): the wire never says 'p2p', the server reads a server queue.
+  assert.deepEqual(h.calls.filter((c) => c.url === '/api/queue').map((c) => c.body.kind), ['server', 'server'], 'never p2p on the wire');
 
   // An old server that keeps the lock: the second 409 fails with the reason, retried once only.
   const stuck = makeClient({
@@ -861,15 +866,16 @@ test('NetError carries the server code (serverCode) and retryAfterMs; recovery b
     '/api/queue': () => jsonResponse(429, { error: 'no_show', message: '3 room tickets taken without opening the room socket', retryAfterMs: 299_400.5 }),
   });
   await assert.rejects(ns.client.queue('1v1', 'p2p'), (err) => err instanceof NetError && err.status === 429 && err.serverCode === 'no_show' && err.retryAfterMs === 299_401 && /429 no_show: 3 room tickets/.test(err.message));
-  // A p2p queue states this page's P2P protocol; a server queue does not.
+  // No P2P protocol any more: every queue states the client-version marker (QUEUE_API) instead, and never 'p2p'.
   const body = ns.calls.find((c) => c.url === '/api/queue').body;
-  assert.deepEqual(body, { mode: '1v1', kind: 'p2p', p2pProtocol: P2.P2P_PROTOCOL_VERSION });
+  assert.equal(P2.P2P_PROTOCOL_VERSION > 0, true);
+  assert.deepEqual(body, { api: 2, mode: '1v1', kind: 'server', visible: true, first: true });
   const sv = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => jsonResponse(426, { error: 'reload_required', message: 'reload the page' }) });
   await assert.rejects(sv.client.queue('1v1', 'server'), (err) => err instanceof NetError && err.serverCode === 'reload_required' && err.retryAfterMs === 0);
-  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { mode: '1v1', kind: 'server' });
-  // A body without a code (or not JSON): serverCode ''.
-  const plain = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => ({ ok: false, status: 502, json: async () => { throw new Error('html'); } }) });
-  await assert.rejects(plain.client.queue('1v1'), (err) => err instanceof NetError && err.status === 502 && err.serverCode === '' && err.message === 'queue failed (502)');
+  assert.deepEqual(sv.calls.find((c) => c.url === '/api/queue').body, { api: 2, mode: '1v1', kind: 'server', visible: true, first: true });
+  // A body without a code (or not JSON): serverCode '' (a 4xx ends the search; a 502 is tried again: net-hardening).
+  const plain = makeClient({ '/api/guest': () => jsonResponse(200, GUEST), '/api/queue': () => ({ ok: false, status: 400, json: async () => { throw new Error('html'); } }) });
+  await assert.rejects(plain.client.queue('1v1'), (err) => err instanceof NetError && err.status === 400 && err.serverCode === '' && err.message === 'queue failed (400)');
   // 410 whose MESSAGE mentions p2p_room but whose code is another: no /api/leave (the old regex would have left).
   let q = 0;
   const h = makeClient({
@@ -1254,7 +1260,7 @@ test('a page from before the cars: a Welcome whose roster carries `car` (src/net
   client.connect('ws://h/ws/m', 'T');
   const ws = sockets[0];
   ws.open();
-  const roster = [{ carId: 1, slot: 0, team: 0, name: 'A', kind: 'player', car: 'tero' }, { carId: 2, slot: 1, team: 1, name: 'Bot', kind: 'bot' }];
+  const roster = [{ carId: 1, slot: 0, team: 0, name: 'A', kind: 'player', car: 'magma' }, { carId: 2, slot: 1, team: 1, name: 'Bot', kind: 'bot' }];
   const welcome = { protocol: P.PROTOCOL_VERSION, matchId: 'm', mode: '1v1', tickRate: 120, carId: 1, slot: 0, roster, tick: 0, matchLengthSeconds: 300 };
   ws.deliver(encodeJson(MsgType.Welcome, welcome));
   assert.deepEqual(got.welcome, welcome);
@@ -1264,19 +1270,19 @@ test('a page from before the cars: a Welcome whose roster carries `car` (src/net
 
 test('a community node match: its cars by slot ride on the queue result and the rejoin answer (MatchAssignment.cars, matchCars); a field of another shape is dropped', async () => {
   const answers = [
-    { status: 'matched', matchId: 'n1', ticket: 'T1', wsUrl: 'wss://node/ws/n1', node: true, cars: ['tero', null, null, 'pampero'] },
+    { status: 'matched', matchId: 'n1', ticket: 'T1', wsUrl: 'wss://node/ws/n1', node: true, cars: ['magma', null, null, 'cyclone'] },
     { status: 'matched', matchId: 'm2', ticket: 'T2', wsUrl: '/ws/m2' },
-    { status: 'matched', matchId: 'n3', ticket: 'T3', wsUrl: 'wss://node/ws/n3', node: true, cars: ['tero', 'batmobile'] },
+    { status: 'matched', matchId: 'n3', ticket: 'T3', wsUrl: 'wss://node/ws/n3', node: true, cars: ['magma', 'batmobile'] },
   ];
   let i = 0;
   const h = makeClient({
     '/api/guest': () => jsonResponse(200, GUEST),
     '/api/queue': () => jsonResponse(200, answers[i++]),
-    '/api/rejoin': () => jsonResponse(200, { status: 'matched', matchId: 'n1', ticket: 'T9', wsUrl: 'wss://node/ws/n1', node: true, cars: ['tero', null, null, 'pampero'] }),
+    '/api/rejoin': () => jsonResponse(200, { status: 'matched', matchId: 'n1', ticket: 'T9', wsUrl: 'wss://node/ws/n1', node: true, cars: ['magma', null, null, 'cyclone'] }),
   });
   const a = await h.client.queue('2v2', 'server');
-  assert.deepEqual(a, { kind: 'server', matchId: 'n1', ticket: 'T1', wsUrl: 'wss://node/ws/n1', cars: ['tero', null, null, 'pampero'] });
-  assert.deepEqual(h.client.matchCars, ['tero', null, null, 'pampero'], 'what the Welcome is read with (OnlineSession)');
+  assert.deepEqual(a, { kind: 'server', matchId: 'n1', ticket: 'T1', wsUrl: 'wss://node/ws/n1', cars: ['magma', null, null, 'cyclone'] });
+  assert.deepEqual(h.client.matchCars, ['magma', null, null, 'cyclone'], 'what the Welcome is read with (OnlineSession)');
   const plain = await h.client.queue('1v1');
   assert.deepEqual(plain, { matchId: 'm2', ticket: 'T2', wsUrl: '/ws/m2' }, 'a MatchDO match: no cars field (its Welcome has them)');
   assert.equal(h.client.matchCars, null, 'a new queue forgets the last match cars');
@@ -1285,19 +1291,19 @@ test('a community node match: its cars by slot ride on the queue result and the 
   assert.deepEqual(h.client.matchCars, []);
   // The rejoin answer of a node match carries them again (the socket came back, or a reloaded page).
   const r = await h.client.rejoin('n1');
-  assert.deepEqual(r, { matchId: 'n1', ticket: 'T9', wsUrl: 'wss://node/ws/n1', cars: ['tero', null, null, 'pampero'] });
-  assert.deepEqual(h.client.matchCars, ['tero', null, null, 'pampero']);
+  assert.deepEqual(r, { matchId: 'n1', ticket: 'T9', wsUrl: 'wss://node/ws/n1', cars: ['magma', null, null, 'cyclone'] });
+  assert.deepEqual(h.client.matchCars, ['magma', null, null, 'cyclone']);
 });
 
 test('queue: 409 active_match of a node match rejoins it with its cars on the assignment', async () => {
   const { client } = makeClient({
     '/api/guest': () => jsonResponse(200, GUEST),
     '/api/queue': () => jsonResponse(409, { error: 'active_match', matchId: 'n7' }),
-    '/api/rejoin': () => jsonResponse(200, { status: 'matched', matchId: 'n7', ticket: 'T7', wsUrl: 'wss://node/ws/n7', node: true, cars: [null, 'condor'] }),
+    '/api/rejoin': () => jsonResponse(200, { status: 'matched', matchId: 'n7', ticket: 'T7', wsUrl: 'wss://node/ws/n7', node: true, cars: [null, 'sirocco'] }),
   });
   const a = await client.queue('1v1', 'server');
-  assert.deepEqual(a, { kind: 'server', matchId: 'n7', ticket: 'T7', wsUrl: 'wss://node/ws/n7', cars: [null, 'condor'] });
-  assert.deepEqual(client.matchCars, [null, 'condor']);
+  assert.deepEqual(a, { kind: 'server', matchId: 'n7', ticket: 'T7', wsUrl: 'wss://node/ws/n7', cars: [null, 'sirocco'] });
+  assert.deepEqual(client.matchCars, [null, 'sirocco']);
 });
 
 test('a community node match where every seat drives the default car (no `cars` field) still reads only the Worker\'s list: matchCars [], not null', async () => {

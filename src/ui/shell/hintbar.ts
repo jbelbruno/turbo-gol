@@ -6,20 +6,26 @@
  * line, the third-party licenses and Discord). A TV keeps its pills here (Menu.placePills: its top
  * bar has no room at 3 m). On an upright phone it is the
  * 32 px link line above the tabs; a phone held sideways has the rail's foot instead.
+ * Once GET /api/config names a terms version (the owner published them: Menu.loadConfig), Inicio's
+ * bar links the terms and the privacy policy after About too (legal: the legal draft's P12, links
+ * on the home page; shell.css shows them on Inicio only, where every screen's About lists them).
  * Built on call, nothing at import.
  */
 import { h } from '../dom';
-import { t } from '../../i18n';
+import { language, t } from '../../i18n';
 import { glyph } from '../components/glyphs';
 import type { HintItem } from './hints';
 import { LICENSE_NAME, SOURCE_URL } from '../../brand';
+import { legalPaths } from '../../net/terms';
 
 export class HintBar {
   readonly el: HTMLElement;
   /** Between the hints and the links: the pills on a TV. */
   readonly mid: HTMLElement;
   private readonly hints: HTMLElement;
+  private readonly links: HTMLElement;
   private key = '';
+  private legalShown = false;
 
   constructor(about: () => void) {
     this.hints = h('div.mn-hints');
@@ -34,7 +40,7 @@ export class HintBar {
       { 'data-fit': '14' },
       this.hints,
       this.mid,
-      h(
+      (this.links = h(
         'div.mn-links',
         null,
         h(
@@ -44,7 +50,7 @@ export class HintBar {
         ),
         h('span.mn-link-sep', { 'aria-hidden': 'true' }, '·'),
         h('button.mn-link.mn-link-about', { type: 'button', 'data-nav': true, 'data-key': 'about', onclick: about }, t('nav.about')),
-      ),
+      )),
     );
   }
 
@@ -55,6 +61,27 @@ export class HintBar {
     this.key = key;
     this.hints.textContent = '';
     for (const it of items) this.hints.appendChild(h('span.mn-hint-item', { 'data-fit-give': it.give !== undefined ? String(it.give) : undefined }, ...it.glyphs.map(glyph), h('span.mn-hint-verb', null, t(it.verb))));
+    return true;
+  }
+
+  /**
+   * Terms · Privacy after About (`mn-links-legal`), in the player's language, once `version` (GET
+   * /api/config legal.terms) is in force; nothing while it is null (unpublished), and once only.
+   * The short names, the full ones as titles; a new tab, but on a TV (where Back returns to the
+   * game). Inicio's bar only (shell.css), on its own second line on an upright phone, whose one line
+   * has no room for four links in Spanish (`mn-hint-legal`). A crowded bar fits as before (a TV's
+   * with a controller: the source link's short form, then ≡ Settings gives way). True when added.
+   */
+  legal(version: string | null): boolean {
+    if (version === null || this.legalShown) return false;
+    this.legalShown = true;
+    const paths = legalPaths(language());
+    const tv = document.documentElement.classList.contains('tg-tv');
+    const sep = (): HTMLElement => h('span.mn-link-sep', { 'aria-hidden': 'true' }, '·');
+    const link = (kind: 'terms' | 'privacy', text: string, title: string): HTMLElement =>
+      h('a.mn-link', { href: paths[kind], target: tv ? undefined : '_blank', rel: 'noopener', title, 'data-nav': true, 'data-key': 'legal-' + kind }, text);
+    this.links.appendChild(h('span.mn-links-legal', null, sep(), link('terms', t('legal.termsLink'), t('legal.terms')), sep(), link('privacy', t('legal.privacyShort'), t('legal.privacy'))));
+    this.el.classList.add('mn-hint-legal');
     return true;
   }
 }

@@ -1,5 +1,11 @@
 # Fase 2: P2P con rollback determinista en malla (casual)
 
+> **Histórico.** Es el plan de la fase 2 tal como se escribió, y no se actualiza. El juego de hoy
+> es otro: desde el 2026-11-04 no hay cola P2P. Casual y Competitivo necesitan una cuenta y se
+> juegan siempre en servidor; el P2P con rollback de este plan queda solo para las salas,
+> públicas y privadas, que necesitan 2 personas para empezar y nunca pasan a un servidor. Lo
+> vigente está en [`server/README.md`](../../server/README.md) y en [`DECISIONS.md`](DECISIONS.md).
+
 Objetivo: partidos casuales entre 2–6 navegadores **sin servidor de simulación**. Cada par corre la
 misma física (RocketSim WASM), los mismos bots (sembrados) y el mismo flujo de partido; sólo se
 intercambian inputs. Cloudflare sólo señaliza (RoomDO con WebSockets hibernables) y da STUN
@@ -429,3 +435,23 @@ Tests: `server/test/room.test.mjs` (the room and the matchmaker), `server/test/n
 `server/test/experimental-lobby.test.mjs` (LobbyDO, the Worker, every standard-physics-only path),
 `tests/p2p-session.test.mjs` (the client, and two sessions on the real engine + wasm + bots under a
 preset), `server/test/smoke-accounts.mjs` (an experimental lobby against wrangler dev).
+
+## The bots' level (protocol 6, 2026-11-04)
+
+A lobby's host picks the bots' level of its matches (SETTINGS, "Bot difficulty": Easy, Normal or
+Hard; Hard by default, also for a lobby stored before the setting). Before, every peer ran a
+constant medium (`P2P_BOT_DIFFICULTY`).
+
+- **Protocol 6** (`P2P_PROTOCOL_VERSION`, `ROOM_PROTOCOL`): `RoomWelcome.botDifficulty`, always
+  present. The level is part of the shared simulation, so a page of protocol 5 (a constant medium)
+  is refused at the welcome with `reload_required` and reloads instead of desyncing, and RoomClient
+  refuses a protocol-6 welcome without a level it knows the same way.
+- **It travels once**, checked at every step: `LobbySettings.bots` (LobbyDO `parseSettings`,
+  `bad_bots`), the start's `/custom { bots }` (400 `bad_bots`; absent = hard), RoomDO
+  `/internal/create { botDifficulty }` (400 `bad_bots`; a record without it plays medium), every
+  welcome and `/internal/status`. `P2PSession` builds both BotTeams with it (`window.__game.p2p.botLevel`).
+- **Members only**: the lobby state carries it and the Sala's line shows it ("2v2 · 5 min · Bots:
+  Hard · Private"); the public list's row and the join link's peek are built field by field without
+  it (the privacy policy lists what the public list shows).
+- Casual's own bots (MatchDO and nodes) follow the KV flag `bot_level` instead (server/README.md);
+  ranked never sends a level.

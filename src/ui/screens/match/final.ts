@@ -5,16 +5,23 @@
  * the score with a notch under your team, the players by team (TÚ, MVP, goals: the client's own
  * last-touch attribution, finalModel.ts goalScorer), for a ranked match the rank card (the
  * rating change the old result dialog showed: RankedResults hands it over here while the FINAL is
- * up), and a community node's line. Under it the dock: JUGAR OTRA VEZ (focused: the same queue,
- * a new match against the AI, or back to the lobby), CAMBIAR MODO, MENÚ. The shell's top bar,
+ * up), and the server's line (its name; SERVIDOR DE LA COMUNIDAD only for a community server's mark,
+ * the Worker's, and then REPORTAR SERVIDOR: Prompt 2, A15 and A16). Under it
+ * the dock: JUGAR OTRA VEZ (focused: the same queue, a new match against the AI, or back to the
+ * lobby), CAMBIAR MODO, MENÚ. The shell's top bar,
  * rail and tab bar step aside (final.css); the hint bar, FocusNav, the tap guard and Back (= MENÚ:
  * the stack pops to Inicio) are the shell's.
  *
  * In development (or a VITE_UI_FIT=1 build) window.__final(kind | null) shows sample data for the
  * layout check (scripts/ui-fit.mjs).
  */
-import { h, setChildren, clock } from '../../dom';
+import { h, setChildren, clock, navButton } from '../../dom';
 import { t } from '../../../i18n';
+import type { Key } from '../../../i18n';
+import { AccountError } from '../../../net/AccountClient';
+import { REPORT_REASONS, nodeErrorKey } from '../../../net/nodes';
+import type { ReportReason } from '../../../net/nodes';
+import { reportNumbers, reportOffered } from '../serversModel';
 import type { RankedResultAnswer, RegionId } from '../../../net/account';
 import type { GameMode } from '../../../sim/constants';
 import type { Menu, Screen } from '../../Menu';
@@ -24,7 +31,7 @@ import { rankBadge, tierById } from '../../badges';
 import { difficultyName, playerName, regionName, tierName } from '../../names';
 import { cancelledKey } from '../leaderboard';
 import { HERO_SEP } from '../homeModel';
-import { againAction, changeTab, finalOutcome, finalRows, pickMvp, rankCard } from './finalModel';
+import { againAction, changeTab, finalOutcome, finalRows, finalServerLine, pickMvp, rankCard } from './finalModel';
 import type { FinalKind, FinalPlayer, FinalView } from './finalModel';
 
 const UI_FIT = import.meta.env.DEV || import.meta.env.VITE_UI_FIT === '1';
@@ -64,6 +71,8 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
   const home = h('button.mn-final-alt', { type: 'button', 'data-nav': true, 'data-key': 'final-menu', onclick: () => menu.back() });
   const el = h('div.mn-final', { 'data-tablero': true }, card, h('div.mn-final-dock', { 'data-nav-row': true }, again, change, home));
   const rankBox = h('div.mn-final-rank');
+  /** The matches reported from this page (REPORTAR SERVIDOR once per match: its button goes). */
+  const reported = new Set<string>();
   let view: FinalView | null = null;
   /** The ranked result in the card and the match it belongs to. */
   let rankFor: string | null = null;
@@ -92,15 +101,57 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
       return;
     }
     // The search runs from Inicio, whose hero shows it (and cancels it): the FINAL goes first.
+    // "While you search" opens on its first answer (screens/waitSheet.ts).
     menu.beforeMatch(() => {
       menu.back();
-      menu.startSearch(a.queue);
+      menu.startSearch(a.queue, { sheet: true });
     });
   };
 
   const changeMode = (): void => {
     const v = view;
     menu.replace('modes', v !== null ? changeTab(v.kind) : 'casual');
+  };
+
+  /**
+   * REPORTAR SERVIDOR (Prompt 2, A16): the reasons in a sheet, one press sends the report with this
+   * client's ping and position corrections (informative), once per match (the server refuses a
+   * second: already_reported). The team reads it, never the host; a report alone sanctions nothing.
+   */
+  const openReport = (v: FinalView, name: string): void => {
+    const matchId = v.matchId ?? null;
+    if (matchId === null) return;
+    const err = h('p.mn-field-error', { hidden: true, 'aria-live': 'polite' });
+    const send = (reason: ReportReason): void => {
+      if (sampleKind !== null) {
+        reported.add(matchId);
+        close();
+        menu.toast(t('final.reported'), 'ok');
+        render(v);
+        return;
+      }
+      void menu.host.accounts.nodesReport({ matchId, reason, ...reportNumbers(v.net?.ping ?? 0, v.net?.corrections ?? -1) }).then(
+        () => {
+          reported.add(matchId);
+          close();
+          menu.toast(t('final.reported'), 'ok');
+          if (view === v) render(v);
+          menu.refocus();
+        },
+        (e: unknown) => {
+          const code = e instanceof AccountError ? e.code : 'network';
+          if (code === 'already_reported') reported.add(matchId);
+          err.textContent = t(nodeErrorKey(code === 'http' ? 'internal' : code));
+          err.hidden = false;
+          if (view === v) render(v);
+        },
+      );
+    };
+    const close = menu.modal({
+      title: t('final.reportTitle', { name }),
+      body: [h('p.mn-note', null, t('final.reportNote')), h('div.mn-na-items', null, ...REPORT_REASONS.map((r) => navButton('mn-btn', t(`final.reason.${r}` as Key), () => send(r), { 'data-key': 'final-reason-' + r }))), err],
+      actions: [{ label: t('profile.cancel'), onClick: () => true }],
+    });
   };
 
   const regionText = (r: RegionId | null): string | null => {
@@ -113,7 +164,8 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
     if (v.kind === 'ai') return [t('final.vsAi'), v.mode, difficultyName(menu.host.difficulty)].join(HERO_SEP);
     // Out of the Sala meanwhile (it closed, a kick, a reload past its return): the button opens the list.
     if (v.kind === 'lobby') return t(menu.host.lobby.inLobby || sampleKind !== null ? 'final.backToLobby' : 'custom.notInLobby');
-    const modes = v.kind === 'ranked' ? menu.prefs.rankedModes : menu.prefs.casualModes;
+    // Casual pools every format: its name and the region only.
+    const modes = v.kind === 'ranked' ? menu.prefs.rankedModes : [];
     const region = regionText(menu.prefs.region);
     return [t(KIND_NAME[v.kind]), ...modes, region].filter((x) => x !== null).join(HERO_SEP);
   };
@@ -216,9 +268,22 @@ export function finalScreen(menu: Menu, source: FinalSource): FinalScreen {
         ? h('div.mn-final-mvpcard', null, icon('trophy'), h('span', null, h('span.mn-final-label', null, t('final.mvpLabel')), h('span', null, h('b', null, mvpPlayer.name), HERO_SEP, t('final.goals', { count: mvpPlayer.goals }))))
         : null,
     );
+    // The server's line (Prompt 2, decision 6): SERVIDOR DE LA COMUNIDAD only for a community server's
+    // mark (a project server is never marked), and then REPORTAR SERVIDOR (A16); by the Worker's mark
+    // alone, never GET /api/config (Terms 7.6 and 12.6.2 hold while community servers host).
+    const line = finalServerLine(v);
+    const canReport = reportOffered({ server: v.server, signedIn: sampleKind !== null || menu.host.accounts.signedIn, matchId: v.matchId ?? null, reported: v.matchId !== undefined && v.matchId !== null && reported.has(v.matchId) });
     const node =
-      v.node !== null
-        ? h('div.mn-final-node', null, icon('server'), h('span', null, t('final.server', { name: v.node })), slot(t('final.community')), h('span.mn-final-rules', null, t(v.kind === 'ranked' ? 'final.rulesRanked' : 'final.rules')))
+      line !== null
+        ? h(
+            'div.mn-final-node',
+            null,
+            icon('server'),
+            h('span', null, t('final.server', { name: line.name })),
+            line.community ? slot(t('final.community')) : null,
+            h('span.mn-final-rules', null, t(v.kind === 'ranked' ? 'final.rulesRanked' : 'final.rules')),
+            canReport ? h('button.mn-btn.mn-final-report', { type: 'button', 'data-nav': true, 'data-key': 'final-report', onclick: () => openReport(v, line.name) }, t('final.report')) : null,
+          )
         : null;
     setChildren(
       card,
@@ -327,7 +392,11 @@ function sampleView(kind: FinalKind): FinalView {
     mode,
     region: 'SA',
     players,
-    node: kind === 'ranked' ? 'sao-paulo-1' : null,
+    node: kind === 'ranked' ? 'sao-paulo-1' : kind === 'casual' ? 'casa-de-ana-muy-largo' : null,
     rankedMatchId: kind === 'ranked' ? 'f'.repeat(64) : null,
+    // A project server (never marked) for ranked; a community one for casual, its mark and REPORTAR SERVIDOR.
+    server: kind === 'ranked' ? { name: 'sao-paulo-1', community: false } : kind === 'casual' ? { name: 'casa-de-ana-muy-largo', community: true } : null,
+    matchId: kind === 'ranked' ? 'f'.repeat(64) : kind === 'casual' ? 'e'.repeat(64) : null,
+    net: kind === 'casual' ? { ping: 84, corrections: 12 } : null,
   };
 }

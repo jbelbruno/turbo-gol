@@ -472,7 +472,8 @@ function goldenLine(snap) {
  * scriptedRun('never') of each variant, recorded with the Input.ts that predates touch support
  * (main at a3ce864, before setTouchSource existed), so the no-touch path is checked against the
  * old behaviour and not only against itself. If Input changes on purpose, re-record it from the
- * assertion diff (re-recorded once for the menu edges: RT is also menuTabNext, Y also menuCancel).
+ * assertion diff (re-recorded for the menu edges: RT is also menuTabNext, Y also menuCancel; and
+ * for a.escape, the Esc key's own press, on the Esc tap).
  */
 const GOLDEN = {
   defaults: [
@@ -485,7 +486,7 @@ const GOLDEN = {
     'throttle=1 steer=1 pitch=-1 roll=1 jump boost handbrake a.toggleBallCam look.x=0.3766666666666667 look.y=-0.12333333333333334 lookSource=mouse',
     'throttle=1 steer=1 pitch=-1 roll=1 jump boost handbrake a.toggleBallCam a.menuCancel pa.toggleBallCam pa.menuCancel look.x=0.3766666666666667 look.y=-0.12333333333333334 lookSource=mouse',
     'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 jump boost a.menuDown look.x=0.3766666666666667 look.y=-0.12333333333333334 lookSource=mouse',
-    'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 jump boost a.pause a.back look.x=0.3643180645148889 look.y=-0.11928998572611406 lookSource=mouse',
+    'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 jump boost a.pause a.back a.escape look.x=0.3643180645148889 look.y=-0.11928998572611406 lookSource=mouse',
     'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 boost look.x=0.3523742976952427 look.y=-0.11537919482056619 lookSource=mouse',
     'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 boost a.accept pa.accept look.x=0.34082209412687814 look.y=-0.11159661489110168 lookSource=mouse',
     'throttle=-0.65 steer=1 pitch=0.716357066166662 yaw=1 boost look.x=0.318841449708798 look.y=-0.10439941273650906 lookSource=mouse',
@@ -543,7 +544,7 @@ const GOLDEN = {
     'throttle=1 steer=1 pitch=1 roll=1 jump boost handbrake a.toggleBallCam',
     'throttle=1 steer=1 pitch=1 roll=1 jump boost handbrake a.toggleBallCam a.menuCancel pa.toggleBallCam pa.menuCancel',
     'throttle=-0.65 steer=1 pitch=-0.5930237328333287 yaw=1 jump boost a.menuDown',
-    'throttle=-0.65 steer=1 pitch=-0.6090170166472104 yaw=1 jump boost a.pause a.back',
+    'throttle=-0.65 steer=1 pitch=-0.6090170166472104 yaw=1 jump boost a.pause a.back a.escape',
     'throttle=-0.65 steer=1 pitch=-0.6229363669977027 yaw=1 boost',
     'throttle=-0.65 steer=1 pitch=-0.6350507217752739 yaw=1 boost a.accept pa.accept',
     'throttle=-0.65 steer=1 pitch=-0.6547703455727512 yaw=1 boost',

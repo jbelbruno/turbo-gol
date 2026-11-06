@@ -11,7 +11,7 @@ import type { RankedResultAnswer, RegionId } from '../../../net/account';
 import { TIERS, tierOf, tierProgress } from '../../../net/rating';
 import type { MenuPrefs } from '../../prefs';
 import type { QueuePick } from '../homeModel';
-import { queueNet, type ModeTab } from '../modesModel';
+import type { ModeTab } from '../modesModel';
 
 /** Which kind of match ended: what JUGAR OTRA VEZ repeats. */
 export type FinalKind = 'casual' | 'ranked' | 'ai' | 'lobby';
@@ -43,6 +43,29 @@ export interface FinalView {
   readonly node: string | null;
   /** The ranked match's id: its rating change is waited for (RankedResults), null otherwise. */
   readonly rankedMatchId: string | null;
+  /**
+   * The server it was played on as the Worker marks it (Prompt 2, A15: the matched answer's or a
+   * rejoin's `server`, never the node's Welcome), null without one (a MatchDO, a project server before
+   * the terms in force describe hosting, a match off the servers). Optional: the FINAL's line reads `node` then.
+   */
+  readonly server?: { readonly name: string; readonly community: boolean } | null;
+  /** A server match's id (REPORTAR SERVIDOR's, A16), null off the servers. */
+  readonly matchId?: string | null;
+  /** This client's numbers of the match for a report: its last ping (ms) and its position corrections. */
+  readonly net?: { readonly ping: number; readonly corrections: number } | null;
+}
+
+/**
+ * The FINAL's server line (Prompt 2, decision 6): the server's name (the Worker's mark first, else
+ * the Welcome's `node:<name>`), its SERVIDOR DE LA COMUNIDAD slot only for a community server's mark
+ * (serversModel.ts communityMarked: never by GET /api/config; a project server is never marked:
+ * before, every node was), null for a match that ran on no node.
+ */
+export function finalServerLine(v: Pick<FinalView, 'node' | 'server'>): { name: string; community: boolean } | null {
+  const server = v.server ?? null;
+  const name = server?.name ?? v.node;
+  if (name === null || name === '') return null;
+  return { name, community: server?.community === true };
 }
 
 export type FinalOutcome = 'win' | 'loss' | 'draw';
@@ -105,8 +128,9 @@ export function againAction(kind: FinalKind, prefs: MenuPrefs, reloadWaits = fal
   if (reloadWaits) return kind === 'lobby' ? { kind: 'lobby' } : { kind: 'home' };
   if (kind === 'ai') return { kind: 'restart' };
   if (kind === 'lobby') return { kind: 'lobby' };
-  if (kind === 'ranked') return { kind: 'search', queue: { kind: 'ranked', modes: prefs.rankedModes, region: prefs.region, net: 'server' } };
-  return { kind: 'search', queue: { kind: 'casual', modes: prefs.casualModes, region: prefs.region, net: queueNet(prefs.net) } };
+  if (kind === 'ranked') return { kind: 'search', queue: { kind: 'ranked', modes: prefs.rankedModes, region: prefs.region } };
+  // Casual: its preferred format (the pool takes every format), always on a server.
+  return { kind: 'search', queue: { kind: 'casual', modes: [prefs.casualPrefer], region: prefs.region } };
 }
 
 /** CAMBIAR MODO: MODOS' tab where this kind's format is picked. */

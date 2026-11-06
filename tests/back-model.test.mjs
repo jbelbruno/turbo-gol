@@ -140,6 +140,43 @@ test('sections: five, JUGAR first, each with its root; the stacked screens belon
   assert.equal(S.sectionOf('leaderboard'), 'leaderboard');
 });
 
+test("PERFIL's CONTROL DE NODOS (SCREEN_SECTION): opened from PERFIL it stacks on PERFIL, and Back comes back there, not to Inicio", () => {
+  assert.deepEqual(S.SCREEN_SECTION, { 'nodes-admin': 'profile' });
+  assert.equal(S.rootSection('nodes-admin'), null);
+  assert.equal(S.sectionOf('nodes-admin'), 'profile');
+  assert.equal(S.sectionOf('toString'), 'play', 'only its own keys, never an inherited one');
+  const st = B.stackAfterOpen({ section: 'profile', stack: ['profile'] }, 'nodes-admin');
+  assert.deepEqual(st, { section: 'profile', stack: ['profile', 'nodes-admin'] }, 'PERFIL stays the section');
+  assert.equal(B.menuBack(menu({ section: st.section, depth: st.stack.length })), 'pop', 'Back pops the panel');
+  assert.deepEqual(st.stack.slice(0, -1), ['profile'], 'to PERFIL');
+  // Its own Back (a node's detail, the wizard) closes the sub-view first.
+  assert.equal(B.menuBack(menu({ section: 'profile', depth: 2, screenBack: true })), 'screen');
+  // From anywhere else (a reload with #ui=, a reset) it lands on PERFIL's root too.
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home'] }, 'nodes-admin', true), { section: 'profile', stack: ['profile', 'nodes-admin'] });
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home', 'play'] }, 'nodes-admin'), { section: 'profile', stack: ['profile', 'nodes-admin'] });
+});
+
+test('"Mis servidores" (Prompt 2, B1, option (b): EVERY_SECTION): stacked on the section shown, Back returns there; a guest\'s SIGN IN is a detour Back (or the sign-in) comes back from', () => {
+  assert.deepEqual(S.EVERY_SECTION, ['settings', 'servers']);
+  assert.equal(S.rootSection('servers'), null);
+  // From GARAJE (its card, its compact button, a paused car's press): GARAJE's, and Back is GARAJE.
+  const garage = B.stackAfterOpen({ section: 'garage', stack: ['garage'] }, 'servers');
+  assert.deepEqual(garage, { section: 'garage', stack: ['garage', 'servers'] });
+  assert.equal(B.menuBack(menu({ section: garage.section, depth: garage.stack.length })), 'pop');
+  // From PERFIL (MI SERVIDOR, COMUNIDAD): PERFIL's.
+  assert.deepEqual(B.stackAfterOpen({ section: 'profile', stack: ['profile'] }, 'servers'), { section: 'profile', stack: ['profile', 'servers'] });
+  // #servers on a load (Inicio up): Inicio's, Back goes there and never leaves the site.
+  assert.deepEqual(B.stackAfterOpen({ section: 'play', stack: ['home'] }, 'servers'), { section: 'play', stack: ['home', 'servers'] });
+  // A guest's INICIAR SESIÓN from GARAJE's "Mis servidores": PERFIL stacked on it, Back pops back to it.
+  const detour = B.stackAfterOpen(garage, 'profile', false, true);
+  assert.deepEqual(detour, { section: 'garage', stack: ['garage', 'servers', 'profile'] });
+  assert.equal(B.menuBack(menu({ section: detour.section, depth: detour.stack.length })), 'pop');
+  // Opened again while it is up (a second #servers): brought to the top, nothing stacked twice.
+  assert.deepEqual(B.stackAfterOpen(detour, 'servers'), { section: 'garage', stack: ['garage', 'servers'] });
+  // Its own Back (the checklist back to the form) closes the step first.
+  assert.equal(B.menuBack(menu({ section: 'garage', depth: 2, screenBack: true })), 'screen');
+});
+
 test('sections: LB / RB and Q / E step one, no wrap', () => {
   assert.equal(S.stepSection('play', 1), 'training');
   assert.equal(S.stepSection('training', -1), 'play');

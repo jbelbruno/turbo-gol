@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -46,8 +47,8 @@ globalThis.fetch = async (url, init) => {
     posts.push(JSON.parse(String(init?.body ?? '{}')));
     return new Response(null, { status: 204 });
   }
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return tokenStatus.code === 200 ? ok({ access_token: 'fake-access' }) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  if (u === 'https://oauth2.googleapis.com/token') return tokenStatus.code === 200 ? ok(googleTokenAnswer(identity.google)) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
+  if (u === 'https://discord.com/api/v10/oauth2/token') return tokenStatus.code === 200 ? ok({ access_token: 'fake-access' }) : new Response('{"error":"invalid_grant"}', { status: tokenStatus.code });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -61,7 +62,7 @@ const A = await import('../src/accountRoutes.ts');
 const S = await import('../src/accountStore.ts');
 const AUTH = await import('../src/auth.ts');
 const ACC = await import('../../src/net/account.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'privacy-fixes-test-secret';
 const ORIGIN = 'https://turbo-gol.com';
@@ -293,6 +294,36 @@ test('the purge keeps a proof of every consent and withdrawal (kind, version, gr
   // A purge again (idempotent) writes nothing more.
   assert.equal(obj.store.purgeAccount(id, new Map(), at + DAY).result, 'gone');
   assert.equal(sql(obj, 'SELECT COUNT(*) AS n FROM consent_proofs')[0].n, 0);
+});
+
+test("the proof of the rules for hosts (kind 'host': Terms 12 and Annex B, with the 18-or-older declaration) stays 3 years from the purge, the others 2 (Privacy §6, §11 and §12.3 of (b))", async () => {
+  const { env, obj } = makeEnv();
+  const ip = ips();
+  const id = await account(obj, 'Hugo', { email: 'hugo@example.com' });
+  const t0 = Date.now() - 3 * 60_000;
+  assert.deepEqual(obj.store.setNews(id, true, t0), { news: true, terms: null });
+  // The rows AccountsDO's /host-consent (acceptHost) and the terms' acceptance write.
+  sql(obj, "INSERT INTO consents (user_id, kind, version, granted, source, at) VALUES (?, 'terms', '2026-11-13', 1, 'perfil', ?)", id, t0 + 1000);
+  sql(obj, "INSERT INTO consents (user_id, kind, version, granted, source, at) VALUES (?, 'host', '2026-11-13', 1, 'node_token', ?)", id, t0 + 2000);
+  const s = await signin(env, 'hugo@example.com', ip(0));
+  assert.equal(s.status, 200, JSON.stringify(s.json));
+  const d = await post(env, '/api/me/delete', { ip: ip(0), bearer: s.json.session, body: { confirm: 'Hugo', lang: 'es' } });
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  const at = d.json.purgeAt + 1;
+  assert.deepEqual(await obj.purgeDue(at), { purged: [id], more: false });
+  assert.equal(S.HOST_CONSENT_PROOF_KEEP_MS, 3 * 365 * DAY, 'the draft: "3 años, si eran las reglas para anfitriones"');
+  assert.equal(S.CONSENT_PROOF_KEEP_MS, 2 * 365 * DAY);
+  const until = Object.fromEntries(sql(obj, 'SELECT kind, until FROM consent_proofs WHERE deleted_id = ?', id).map((r) => [r.kind, r.until]));
+  assert.deepEqual(until, { news: at + S.CONSENT_PROOF_KEEP_MS, terms: at + S.CONSENT_PROOF_KEEP_MS, host: at + S.HOST_CONSENT_PROOF_KEEP_MS });
+  assert.equal(sql(obj, "SELECT COUNT(*) AS n FROM consent_proofs WHERE deleted_id = ? AND kind = 'news'", id)[0].n, 2, "the grant and the deletion's withdrawal, each 2 years");
+  // Past 2 years, only the host's proof is left; past 3, nothing.
+  obj.store.prune(at + S.CONSENT_PROOF_KEEP_MS);
+  assert.deepEqual(obj.store.consentProofs(id).map((p) => [p.kind, p.version, p.granted]), [['host', '2026-11-13', true]]);
+  obj.store.prune(at + S.HOST_CONSENT_PROOF_KEEP_MS - DAY);
+  assert.equal(obj.store.consentProofs(id).length, 1);
+  obj.store.prune(at + S.HOST_CONSENT_PROOF_KEEP_MS);
+  assert.deepEqual(obj.store.consentProofs(id), []);
+  assert.equal(obj.store.isDeleted(id), true);
 });
 
 // ---- the review of sign-in PR 10: a TV's /api/me carries no maintainer checklist -------------------

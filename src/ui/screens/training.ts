@@ -16,7 +16,9 @@
  *   sheet of their presets: a press plays experimental free play with that one, the store's lastUsed;
  *   EDIT PRESETS opens the settings on its Experimental tab), and HOW TO PLAY moves to a row under
  *   the tiles. Guests and players with the switch off never see it; packs always run standard
- *   physics, and experimental free play records nothing (today's rules).
+ *   physics, and experimental free play records nothing (today's rules). While a search runs, LAB
+ *   is locked ("Not available while you search": queue matches are stock physics); the hero, the
+ *   tiles and the packs keep the search (the Game's wait play).
  * The subtitle names the live reset keys of the device in use (trainDevice: a TV remote's player
  * holds a controller), written again when the input changes (the Menu's tick).
  */
@@ -144,6 +146,17 @@ export function trainingScreen(menu: Menu): Screen {
     if (had) menu.refocus();
   };
 
+  /** LAB while a search runs: locked, its tag says why (the tiles and packs keep the search: wait play). */
+  let labLocked: boolean | null = null;
+  const drawLabLock = (): void => {
+    const locked = host.searchView().active;
+    if (locked === labLocked) return;
+    labLocked = locked;
+    lab.setSlot(locked ? slot(t('training.labWhileSearching'), { icon: 'lock', body: true, drop: true }) : null);
+    lab.el.setAttribute('aria-disabled', String(locked));
+    if (el.isConnected) menu.refit();
+  };
+
   let device: TrainDevice | null = null;
   const drawDevice = (): void => {
     const d = trainDevice(lastInput());
@@ -207,8 +220,12 @@ export function trainingScreen(menu: Menu): Screen {
     });
   };
 
-  /** LAB: the player's presets (each plays experimental free play with it) and EDIT PRESETS. */
+  /** LAB: the player's presets (each plays experimental free play with it) and EDIT PRESETS. Not while a search runs (its matches are stock physics). */
   const openLab = (): void => {
+    if (host.searchView().active) {
+      menu.toast(t('training.labWhileSearching'), 'info');
+      return;
+    }
     const store = exp().store;
     const current = store.lastUsed();
     let close = (): void => undefined;
@@ -247,6 +264,7 @@ export function trainingScreen(menu: Menu): Screen {
   const render = (): void => {
     drawDevice();
     drawLab();
+    drawLabLock();
     drawMarks();
     void host.training
       .sync()
@@ -265,6 +283,7 @@ export function trainingScreen(menu: Menu): Screen {
     tick: () => {
       drawDevice();
       drawLab();
+      drawLabLock();
     },
   };
 }

@@ -3,7 +3,7 @@
 // experimental counts for nothing". Covered here:
 //   - LobbyDO: the rules in the settings (strict, P2P only), every guest gate (create, admit, the
 //     socket upgrade, settings, start), the summary's EXP flag, the /custom body (and, beside the
-//     rules, the cosmetic car each member's seat keeps);
+//     rules, the cosmetic car each member's seat keeps, and the bots' level the host picks);
 //   - the Worker: a guest's lobby with rules (403 account_required), the casual and ranked queues
 //     never take rules (400 experimental_lobby_only);
 //   - the standard-physics-only paths refuse rules whoever sends them: MatchDO /internal/create,
@@ -64,7 +64,7 @@ test('carriesPhysics: rules are a `physics` that is neither absent nor null', ()
 
 // ---- LobbyDO: the settings ------------------------------------------------------------------------
 
-test('parseLobbySettings: rules are strict snapshots, P2P only; absent keeps them, null clears them, one that changes nothing is standard', () => {
+test('parseLobbySettings: rules are strict snapshots; absent keeps them, null clears them, one that changes nothing is standard; a lobby is always P2P', () => {
   const base = L.defaultLobbySettings('Sala');
   assert.equal(base.physics, null, 'a new lobby plays the standard physics');
   const exp = L.parseLobbySettings({ physics: RULES }, base);
@@ -75,9 +75,10 @@ test('parseLobbySettings: rules are strict snapshots, P2P only; absent keeps the
   for (const bad of [{ ...RULES, values: { gameSpeed: 50 } }, { ...RULES, values: { gravity: 55 } }, { ...RULES, name: 'x' }, { ...RULES, v: 0 }, 'Low gravity', 7, []]) {
     assert.equal(L.parseLobbySettings({ physics: bad }, base), 'bad_physics', JSON.stringify(bad));
   }
-  assert.equal(L.parseLobbySettings({ physics: RULES, net: 'server' }, base), 'experimental_p2p_only');
-  assert.equal(L.parseLobbySettings({ net: 'server' }, exp), 'experimental_p2p_only', 'switching to a server match keeps no rules: they must be cleared');
-  assert.equal(L.parseLobbySettings({ net: 'server', physics: null }, exp).net, 'server');
+  // Lobbies are P2P only (the modes redesign): an older page's 'server' is read as 'p2p', so its rules stay.
+  assert.deepEqual(L.parseLobbySettings({ physics: RULES, net: 'server' }, base), { ...exp, net: 'p2p' });
+  assert.deepEqual(L.parseLobbySettings({ net: 'server' }, exp).physics, RULES, 'a server pick is P2P: the rules stay');
+  assert.equal(L.parseLobbySettings({ net: 'server', physics: null }, exp).net, 'p2p');
   assert.equal(L.lobbyPhysics({ ...base, physics: undefined }), null, 'a record from before the field');
 });
 
@@ -222,13 +223,14 @@ async function makeLobby(settings, host = { playerId: 'host1', name: 'Ana', gues
   return h;
 }
 
-test('LobbyDO: create with rules: P2P only (400 experimental_p2p_only), a guest host is refused (403 account_required), a bad snapshot 400 bad_physics', async () => {
+test('LobbyDO: create with rules: always P2P (a server pick is read as P2P), a guest host is refused (403 account_required), a bad snapshot 400 bad_physics', async () => {
   const base = { name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
   assert.equal((await makeLobby({ ...base, physics: RULES }, { playerId: 'g1', name: 'Invitado', guest: true })).created.status, 403);
   assert.equal((await makeLobby({ ...base, physics: RULES }, { playerId: 'g1', name: 'Invitado', guest: true })).created.json.error, 'account_required');
   const server = await makeLobby({ ...base, net: 'server', physics: RULES });
-  assert.equal(server.created.status, 400);
-  assert.equal(server.created.json.error, 'experimental_p2p_only');
+  assert.equal(server.created.status, 200, 'an older page\'s server pick: a P2P lobby with its rules');
+  assert.equal(server.summary().net, 'p2p');
+  assert.deepEqual(server.summary().physics, RULES);
   assert.equal((await makeLobby({ ...base, physics: { ...RULES, values: { gameSpeed: 50 } } })).created.json.error, 'bad_physics');
   const ok = await makeLobby({ ...base, physics: RULES });
   assert.equal(ok.created.status, 200);
@@ -272,16 +274,16 @@ test('LobbyDO: rules set while a guest is a member: guests_present; a guest admi
   await h.send(host, { t: 'settings', settings: { physics: RULES } });
   assert.deepEqual(host.of('error').map((e) => e.code), ['guests_present']);
   assert.equal(host.of('state').at(-1).lobby.settings.physics, null, 'unchanged');
-  // A server match with rules: refused; standard rules with a server match: fine.
+  // A server pick is P2P now: the rules are still refused for the guest member.
   await h.send(host, { t: 'settings', settings: { net: 'server', physics: RULES } });
-  assert.deepEqual(host.of('error').map((e) => e.code), ['guests_present', 'experimental_p2p_only']);
+  assert.deepEqual(host.of('error').map((e) => e.code), ['guests_present', 'guests_present']);
 });
 
-test('LobbyDO: the start hands the rules to the matchmaker (/custom physics); with one member it is refused (experimental_p2p_only); a standard start sends null', async () => {
+test('LobbyDO: the start hands the rules to the matchmaker (/custom physics); with one member it is refused (need_players); a standard start sends null', async () => {
   const h = await makeLobby({ name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, physics: RULES });
   const host = (await h.upgrade('host1')).ws;
   await h.send(host, { t: 'start' });
-  assert.deepEqual(host.of('error').map((e) => e.code), ['experimental_p2p_only'], 'a lone member never gets a server match with bots');
+  assert.deepEqual(host.of('error').map((e) => e.code), ['need_players'], 'a lone member never gets a server match with bots');
   assert.equal(h.mm.calls.length, 0);
   await h.admit('acct2', false);
   const m = (await h.upgrade('acct2')).ws;
@@ -300,50 +302,50 @@ test('LobbyDO: the start hands the rules to the matchmaker (/custom physics); wi
 });
 
 test("LobbyDO (cosmetic cars, not rules): each member's seat keeps the car its admit brought; the state shows it, the start hands it to /custom, a fresh admit takes the new one", async () => {
-  const h = await makeLobby({ name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Ana', guest: false, car: 'tero' });
+  const h = await makeLobby({ name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Ana', guest: false, car: 'magma' });
   const host = (await h.upgrade('host1')).ws;
-  assert.equal((await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'pampero' })).status, 200);
+  assert.equal((await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'cyclone' })).status, 200);
   const b = (await h.upgrade('acct2')).ws;
   assert.equal((await h.post('/internal/admit', { playerId: 'guest3', name: 'Caro', guest: true, car: 'ferrari' })).status, 200);
   await h.upgrade('guest3');
   const members = () => host.of('state').at(-1).lobby.members.map((m) => [m.name, m.car ?? null]);
-  assert.deepEqual(members(), [['Ana', 'tero'], ['Beto', 'pampero'], ['Caro', null]], 'a junk car is dropped');
+  assert.deepEqual(members(), [['Ana', 'magma'], ['Beto', 'cyclone'], ['Caro', null]], 'a junk car is dropped');
   // Beto picked another car and came back through a fresh admit (another tab).
-  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'condor' });
+  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'sirocco' });
   await h.upgrade('acct2');
-  assert.deepEqual(members()[1], ['Beto', 'condor']);
+  assert.deepEqual(members()[1], ['Beto', 'sirocco']);
   await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false });
   await h.upgrade('acct2');
   assert.deepEqual(members()[1], ['Beto', null], 'back on the default car');
   await h.send(host, { t: 'start' });
   const custom = h.mm.calls.find((c) => c.path === '/custom');
-  assert.deepEqual(custom.body.members.map((m) => [m.playerId, m.car ?? null]), [['host1', 'tero'], ['acct2', null], ['guest3', null]]);
+  assert.deepEqual(custom.body.members.map((m) => [m.playerId, m.car ?? null]), [['host1', 'magma'], ['acct2', null], ['guest3', null]]);
   assert.equal(b.of('match').length, 0, 'the replaced socket gets nothing');
 });
 
 test('LobbyDO (cosmetic cars): each start reads the signed-in members\' cars again from AccountsDO (a pick or a revoke since the admit applies); no answer in time keeps the admits\' cars', async () => {
   const SETTINGS = { name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
-  let answer = { cars: { host1: 'dune', acct2: 'condor', guest3: 'tero' } };
+  let answer = { cars: { host1: 'dune', acct2: 'sirocco', guest3: 'magma' } };
   const accounts = fakeNs((path) => (typeof answer === 'function' ? answer(path) : answer));
-  const h = await makeLobby(SETTINGS, { playerId: 'host1', name: 'Ana', guest: false, car: 'tero' }, { ACCOUNTS: accounts.ns });
+  const h = await makeLobby(SETTINGS, { playerId: 'host1', name: 'Ana', guest: false, car: 'magma' }, { ACCOUNTS: accounts.ns });
   const host = (await h.upgrade('host1')).ws;
-  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'pampero' });
+  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'cyclone' });
   await h.upgrade('acct2');
   await h.post('/internal/admit', { playerId: 'guest3', name: 'Caro', guest: true });
   await h.upgrade('guest3');
-  await h.post('/internal/admit', { playerId: 'acct4', name: 'Dani', guest: false, car: 'carpincho' });
+  await h.post('/internal/admit', { playerId: 'acct4', name: 'Dani', guest: false, car: 'vortex' });
   await h.upgrade('acct4');
   await h.send(host, { t: 'start' });
-  // Ana's tero was revoked (dune now), Beto equipped condor in the garage, Dani's account is gone
+  // Ana's magma was revoked (dune now), Beto equipped sirocco in the garage, Dani's account is gone
   // (left out: the default car); a guest is never asked for, whatever an answer says of it.
   assert.deepEqual(accounts.calls.map((c) => [c.path, c.body.userIds]), [['/equipped', ['host1', 'acct2', 'acct4']]]);
   const custom = (n) => h.mm.calls.filter((c) => c.path === '/custom')[n].body.members.map((m) => [m.playerId, m.car ?? null]);
-  assert.deepEqual(custom(0), [['host1', null], ['acct2', 'condor'], ['guest3', null], ['acct4', null]]);
-  assert.deepEqual(host.of('state').at(-1).lobby.members.map((m) => [m.name, m.car ?? null]), [['Ana', null], ['Beto', 'condor'], ['Caro', null], ['Dani', null]], 'the state shows them too');
+  assert.deepEqual(custom(0), [['host1', null], ['acct2', 'sirocco'], ['guest3', null], ['acct4', null]]);
+  assert.deepEqual(host.of('state').at(-1).lobby.members.map((m) => [m.name, m.car ?? null]), [['Ana', null], ['Beto', 'sirocco'], ['Caro', null], ['Dani', null]], 'the state shows them too');
   // Next match: AccountsDO is down (a 500, then a hang): the cars stay as the last start left them.
   for (const ws of h.ctx.getWebSockets()) await h.send(ws, { t: 'back' });
   answer = () => new RealResponse('{}', { status: 500 });
-  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'pampero' });
+  await h.post('/internal/admit', { playerId: 'acct2', name: 'Beto', guest: false, car: 'cyclone' });
   await h.upgrade('acct2');
   // The next match starts at least START_AGAIN_MS after the last one (LobbyDO's start throttle).
   const realNow = Date.now;
@@ -353,14 +355,17 @@ test('LobbyDO (cosmetic cars): each start reads the signed-in members\' cars aga
   } finally {
     Date.now = realNow;
   }
-  assert.deepEqual(custom(1), [['host1', null], ['acct2', 'pampero'], ['guest3', null], ['acct4', null]], 'a 500: the admits\' cars');
+  assert.deepEqual(custom(1), [['host1', null], ['acct2', 'cyclone'], ['guest3', null], ['acct4', null]], 'a 500: the admits\' cars');
 });
 
 test('LobbyDO (cosmetic cars): a start waits at most EQUIPPED_TIMEOUT_MS for AccountsDO, then seats the admits\' cars', async (t) => {
   let asked = false;
   const hang = { idFromName: (n) => n, get: () => ({ fetch: () => ((asked = true), new Promise(() => {})) }) };
-  const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Ana', guest: false, car: 'tero' }, { ACCOUNTS: hang });
+  const h = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Ana', guest: false, car: 'magma' }, { ACCOUNTS: hang });
   const host = (await h.upgrade('host1')).ws;
+  // A start needs two members (need_players): a guest, whose car is never asked for.
+  await h.post('/internal/admit', { playerId: 'guest2', name: 'Beto', guest: true });
+  await h.upgrade('guest2');
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const started = h.send(host, { t: 'start' });
   // The wait is armed before AccountsDO is asked (which never answers here).
@@ -369,7 +374,52 @@ test('LobbyDO (cosmetic cars): a start waits at most EQUIPPED_TIMEOUT_MS for Acc
   assert.equal(h.mm.calls.filter((c) => c.path === '/custom').length, 0, 'still waiting');
   t.mock.timers.tick(1500);
   await started;
-  assert.deepEqual(h.mm.calls.find((c) => c.path === '/custom').body.members.map((m) => m.car ?? null), ['tero']);
+  assert.deepEqual(h.mm.calls.find((c) => c.path === '/custom').body.members.map((m) => m.car ?? null), ['magma', null]);
+});
+
+// ---- LobbyDO: the bots' level (not rules: any lobby, guests too) ------------------------------------
+
+/** The LobbySummary keys (the public list, privacy row 282): never the bots' level. */
+const SUMMARY_KEYS = ['code', 'experimental', 'host', 'inGame', 'locked', 'max', 'mode', 'name', 'net', 'physics', 'players', 'region'];
+
+test("LobbyDO (the bots' level): hard by default; the host picks another (junk: bad_bots, a member: not_host); absent keeps it; every member sees it, the public list and the join link's peek never; the start hands it to /custom", async () => {
+  assert.equal(L.defaultLobbySettings('Sala').bots, 'hard');
+  assert.equal(L.parseLobbySettings({ bots: 'insane' }, L.defaultLobbySettings('Sala')), 'bad_bots');
+  assert.equal(L.parseLobbySettings({ bots: 'easy' }, L.defaultLobbySettings('Sala')).bots, 'easy');
+  assert.equal(L.parseLobbySettings({ mode: '1v1' }, { ...L.defaultLobbySettings('Sala'), bots: undefined }).bots, 'hard', 'a record of before the setting: hard');
+  const h = await makeLobby({ name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 }, { playerId: 'host1', name: 'Invitado', guest: true });
+  const host = (await h.upgrade('host1')).ws;
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'hard', 'a new lobby (a guest host too)');
+  await h.send(host, { t: 'settings', settings: { bots: 'easy' } });
+  assert.deepEqual(host.of('error'), []);
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'easy');
+  for (const bad of ['insane', 'Hard', 2, null]) await h.send(host, { t: 'settings', settings: { bots: bad } });
+  assert.deepEqual(host.of('error').map((e) => e.code), ['bad_bots', 'bad_bots', 'bad_bots', 'bad_bots']);
+  await h.send(host, { t: 'settings', settings: { mode: '3v3' } });
+  assert.equal(host.of('state').at(-1).lobby.settings.bots, 'easy', 'absent: kept');
+  await h.admit('acct2', false);
+  const m = (await h.upgrade('acct2')).ws;
+  assert.equal(m.of('state').at(-1).lobby.settings.bots, 'easy', 'every member sees it');
+  await h.send(m, { t: 'settings', settings: { bots: 'hard' } });
+  assert.deepEqual(m.of('error').map((e) => e.code), ['not_host']);
+  // The public list's row and the join link's peek are built field by field: no level there.
+  assert.deepEqual(Object.keys(h.summary()).sort(), SUMMARY_KEYS);
+  const peek = await h.lobby.fetch(new Request('https://lobby/internal/peek', { headers: { [INTERNAL_HEADER]: await internalSecret(SECRET) } }));
+  assert.deepEqual(Object.keys(await peek.json()).sort(), SUMMARY_KEYS);
+  await h.send(host, { t: 'start' });
+  assert.equal(h.mm.calls.find((c) => c.path === '/custom').body.bots, 'easy', "the room's level");
+  // A lobby stored before the setting: hard, in the state and at the start.
+  const old = await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 });
+  delete old.lobby.rec.settings.bots;
+  const oh = (await old.upgrade('host1')).ws;
+  assert.equal(oh.of('state').at(-1).lobby.settings.bots, 'hard');
+  await old.admit('acct2', false);
+  await old.upgrade('acct2');
+  await old.send(oh, { t: 'start' });
+  assert.equal(old.mm.calls.find((c) => c.path === '/custom').body.bots, 'hard');
+  // A create may carry one (POST /api/lobbies passes it on); junk is refused.
+  assert.equal((await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, bots: 'medium' })).lobby.rec.settings.bots, 'medium');
+  assert.equal((await makeLobby({ name: 'Sala', mode: '1v1', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, bots: 'x' })).created.json.error, 'bad_bots');
 });
 
 // ---- the Worker -----------------------------------------------------------------------------------
@@ -398,7 +448,7 @@ const guestToken = async () => (await createSession(SECRET, '0123456789abcdef', 
 
 test('Worker: POST /api/lobbies with rules: a guest gets 403 account_required (nothing created), an account hands them to LobbyDO', async () => {
   const w = workerEnv();
-  const lobbyBody = { name: 'Sala exp', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, physics: RULES };
+  const lobbyBody = { api: 2, name: 'Sala exp', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300, physics: RULES };
   const g = await call(w.env, 'POST', '/api/lobbies', { token: await guestToken(), body: lobbyBody });
   assert.equal(g.status, 403);
   assert.equal(g.json.error, 'account_required');
@@ -410,6 +460,11 @@ test('Worker: POST /api/lobbies with rules: a guest gets 403 account_required (n
   const create = w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1);
   assert.deepEqual(create.body.settings.physics, RULES);
   assert.equal(create.body.host.guest, false);
+  // The bots' level goes on as sent (LobbyDO checks it); none sent, none passed (LobbyDO's default).
+  await call(w.env, 'POST', '/api/lobbies', { token: await guestToken(), body: { ...lobbyBody, physics: null, bots: 'easy' } });
+  assert.equal(w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1).body.settings.bots, 'easy');
+  await call(w.env, 'POST', '/api/lobbies', { token: await guestToken(), body: { ...lobbyBody, physics: null } });
+  assert.equal('bots' in w.lobby.calls.filter((c) => c.path === '/internal/create').at(-1).body.settings, false);
 });
 
 test('Worker: POST /api/queue never takes rules: 400 experimental_lobby_only for casual and ranked, before the matchmaker is asked', async () => {
@@ -417,17 +472,20 @@ test('Worker: POST /api/queue never takes rules: 400 experimental_lobby_only for
   const guest = await guestToken();
   const acct = await accountToken('a1b2c3d4e5f60718');
   for (const [token, body] of [
-    [guest, { mode: '1v1', kind: 'p2p', p2pProtocol: 5, physics: RULES }],
-    [guest, { mode: '1v1', kind: 'server', physics: RULES }],
-    [acct, { mode: '1v1', kind: 'ranked', physics: RULES }],
-    [guest, { mode: '1v1', physics: { v: 1, name: 'x', values: {} } }],
+    [acct, { api: 2, mode: '1v1', kind: 'p2p', p2pProtocol: 5, physics: RULES }],
+    [acct, { api: 2, mode: '1v1', kind: 'server', physics: RULES }],
+    [acct, { api: 2, mode: '1v1', kind: 'ranked', physics: RULES }],
+    [acct, { api: 2, mode: '1v1', physics: { v: 1, name: 'x', values: {} } }],
   ]) {
     const r = await call(w.env, 'POST', '/api/queue', { token, body });
     assert.equal(r.status, 400, JSON.stringify(body));
     assert.equal(r.json.error, 'experimental_lobby_only');
   }
+  // A guest never gets that far: the queues are for accounts (403 first, whatever the body).
+  const g = await call(w.env, 'POST', '/api/queue', { token: guest, body: { api: 2, mode: '1v1', kind: 'server', physics: RULES } });
+  assert.deepEqual([g.status, g.json.error], [403, 'account_required']);
   assert.equal(w.mm.calls.length + w.accounts.calls.length, 0, 'neither the matchmaker nor AccountsDO was asked');
-  const r = await call(w.env, 'POST', '/api/queue', { token: guest, body: { mode: '1v1', kind: 'server', physics: null } });
+  const r = await call(w.env, 'POST', '/api/queue', { token: acct, body: { api: 2, mode: '1v1', kind: 'server', physics: null } });
   assert.equal(r.status, 503, 'null is the standard physics: on to the matchmaker');
   assert.equal(w.mm.calls.length, 1);
 });
@@ -462,6 +520,13 @@ test('a community node placement with rules is refused (NodeRegistryDO parsePlac
   for (const o of [rated, voided]) {
     for (const c of outcomeCalls(o, assign, ['p1', 'p2'])) assert.equal(JSON.parse(c.body).physics, undefined, `${c.path}: built field by field, never passed through`);
   }
+});
+
+test("NodeRegistryDO parsePlace (not rules): the hub's bots level reaches the control plane as sent; junk refuses the placement", () => {
+  const place = { mode: '1v1', region: 'SA', ranked: false, matchLengthSeconds: 300, humans: [{ playerId: 'a'.repeat(16), name: 'Ana' }] };
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(parsePlace({ ...place, botDifficulty: level }).botDifficulty, level);
+  assert.equal(parsePlace(place).botDifficulty, undefined, "absent: the control plane's default (medium), what ranked sends");
+  assert.equal(parsePlace({ ...place, botDifficulty: 'insane' }), null);
 });
 
 function sqlOn(db) {

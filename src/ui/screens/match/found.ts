@@ -6,7 +6,9 @@
  * The roster is not known yet (it comes with the match's Welcome, after the band), so it is left
  * out. It never takes the focus or the input: the match comes by itself.
  *
- * One entry point: Game.matchFound() (PR 6's free practice hands off to a found match through it).
+ * Two entry points (the modes redesign): Game.foundNotify(), from the queue's answer
+ * (OnlineSession.onFound, a hidden tab too), plays the cue and sets the tab's title (tab()); the
+ * band itself comes from the frame (Game.matchFound()), so it shows once the tab is visible again.
  */
 import { h } from '../../dom';
 import { t } from '../../../i18n';
@@ -32,17 +34,26 @@ export class MatchFound {
     document.addEventListener('visibilitychange', this.onVisible);
   }
 
-  /** Show the band for FOUND_MS with `line` (the queue: "Casual · 2v2 · Sudamérica"). */
+  /** Show the band for FOUND_MS with `line` (the queue: "Casual · 2v2 · Sudamérica"), the tab's title too. */
   show(line: string): void {
     this.line.textContent = line;
     this.el.hidden = false;
     this.el.classList.remove('mn-found-in');
     void this.el.offsetWidth;
     this.el.classList.add('mn-found-in');
-    if (this.title === null) this.title = document.title;
-    document.title = t('found.tab');
+    this.tab();
     window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => this.hide(), FOUND_MS);
+  }
+
+  /**
+   * The browser tab's title says it ("Match found! · Turbogol"), kept until the tab is seen again:
+   * the queue's answer calls this at once (OnlineSession.onFound), a hidden tab too, whose frames
+   * (and so the band) wait for it to show.
+   */
+  tab(): void {
+    if (this.title === null) this.title = document.title;
+    document.title = t('found.tab');
   }
 
   get visible(): boolean {

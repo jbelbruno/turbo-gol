@@ -28,20 +28,21 @@ const B = await import('../src/input/bindings.ts');
 const en = (await import('../src/locales/en.ts')).default;
 const es = (await import('../src/locales/es.ts')).default;
 
-const QUEUE = { kind: 'casual', modes: ['2v2'], region: null, net: 'p2p' };
+const QUEUE = { kind: 'casual', modes: ['2v2'], region: null };
 const SEARCH = { kind: 'ranked', modes: ['1v1', '3v3'], region: 'EU', since: 1234 };
 const LOBBY = { code: 'ABC234', count: 2, max: 4 };
 const REJOIN = { kind: 'casual', modes: ['2v2'], leftMs: 192_000 };
 
-test('the hero: new version > back to your match > back to the lobby > searching > offline > play, for all 32 combinations', () => {
-  const order = ['update', 'rejoin', 'lobby', 'search', 'offline'];
-  for (let bits = 0; bits < 32; bits++) {
+test("the hero: new version > back to your match > back to the lobby > searching > offline > a guest's bots > play, for all 64 combinations", () => {
+  const order = ['update', 'rejoin', 'lobby', 'search', 'offline', 'bots'];
+  for (let bits = 0; bits < 64; bits++) {
     const on = (i) => (bits & (1 << i)) !== 0;
-    const input = { updateNeeded: on(0), rejoin: on(1) ? REJOIN : null, lobby: on(2) ? LOBBY : null, search: on(3) ? SEARCH : null, offline: on(4), queue: QUEUE };
+    const input = { updateNeeded: on(0), rejoin: on(1) ? REJOIN : null, lobby: on(2) ? LOBBY : null, search: on(3) ? SEARCH : null, offline: on(4), guest: on(5), queue: QUEUE };
     const want = order.find((_, i) => on(i)) ?? 'play';
-    assert.equal(M.heroState(input).kind, want, `bits ${bits.toString(2).padStart(5, '0')}`);
+    assert.equal(M.heroState(input).kind, want, `bits ${bits.toString(2).padStart(6, '0')}`);
   }
-  const base = { updateNeeded: false, rejoin: null, lobby: null, search: null, offline: false, queue: QUEUE };
+  const base = { updateNeeded: false, rejoin: null, lobby: null, search: null, offline: false, guest: false, queue: QUEUE };
+  assert.deepEqual(M.heroState({ ...base, guest: true }), { kind: 'bots' }, "a guest's JUGAR AHORA plays the bots offline (Casual needs an account)");
   const s = M.heroState({ ...base, search: SEARCH });
   assert.equal(s.search.since, 1234);
   assert.deepEqual(s.search.modes, ['1v1', '3v3']);
@@ -53,34 +54,157 @@ test('the hero: new version > back to your match > back to the lobby > searching
   assert.equal(M.heroState({ ...base, rejoin: REJOIN }).rejoin.leftMs, 192_000);
 });
 
-test('heroQueue: Casual 2v2 automatic P2P the first time; Competitive only signed in and not banned', () => {
+test("heroQueue: Casual's preferred format (2v2 the first time), always on a server; Competitive only signed in and not banned", () => {
   const d = P.parsePrefs(null);
-  assert.deepEqual(M.heroQueue(d, false, false), { kind: 'casual', modes: ['2v2'], region: null, net: 'p2p' });
+  assert.deepEqual(M.heroQueue(d, false, false), { kind: 'casual', modes: ['2v2'], region: null });
   const ranked = { ...d, lastQueue: 'ranked', rankedModes: ['3v3'], region: 'SA' };
-  assert.deepEqual(M.heroQueue(ranked, true, false), { kind: 'ranked', modes: ['3v3'], region: 'SA', net: 'server' });
+  assert.deepEqual(M.heroQueue(ranked, true, false), { kind: 'ranked', modes: ['3v3'], region: 'SA' });
   assert.equal(M.heroQueue(ranked, false, false).kind, 'casual', 'a guest');
   assert.equal(M.heroQueue(ranked, true, true).kind, 'casual', 'banned for abandons');
-  const casual = { ...d, casualModes: ['1v1', '3v3'], net: 'server' };
-  assert.deepEqual(M.heroQueue(casual, true, false), { kind: 'casual', modes: ['1v1', '3v3'], region: null, net: 'server' });
+  const casual = { ...d, casualPrefer: '3v3' };
+  assert.deepEqual(M.heroQueue(casual, true, false), { kind: 'casual', modes: ['3v3'], region: null });
+  assert.equal('net' in M.heroQueue(casual, true, false), false, 'no connection any more');
 });
 
-test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked, an old v1 object keeps the rest', () => {
+test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked; an old object drops its connection and keeps a single Casual pick as casualPrefer', () => {
   for (const raw of [null, '', '{', '[]', 'null', '42']) {
     const p = P.parsePrefs(raw);
     assert.equal(p.lastQueue, 'casual', String(raw));
-    assert.deepEqual(p.casualModes, ['2v2']);
+    assert.equal(p.casualPrefer, '2v2');
     assert.equal(p.region, null);
-    assert.equal(p.net, 'auto');
+    assert.equal(p.waitChoice, 'bots');
+    assert.equal('net' in p, false);
+    assert.equal('casualModes' in p, false);
   }
-  assert.equal(P.parsePrefs(JSON.stringify({ net: 'p2p' })).net, 'p2p', 'a P2P pick stays');
   assert.equal(P.parsePrefs(JSON.stringify({ lastQueue: 'x' })).lastQueue, 'casual');
   assert.equal(P.parsePrefs(JSON.stringify({ lastQueue: 'ranked' })).lastQueue, 'ranked');
-  const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1', '2v2'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
-  assert.deepEqual(old, { region: 'EU', casualModes: ['1v1', '2v2'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null });
+  // casualPrefer: a stored one, else an older page's single casualModes, else 2v2 (ANY of old: the default).
+  assert.equal(P.parsePrefs(JSON.stringify({ casualModes: ['3v3'] })).casualPrefer, '3v3', 'migrated from a single pick');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualModes: ['1v1', '2v2', '3v3'] })).casualPrefer, '2v2', 'an old ANY');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualPrefer: '1v1', casualModes: ['3v3'] })).casualPrefer, '1v1', 'its own pick wins');
+  assert.equal(P.parsePrefs(JSON.stringify({ casualPrefer: 'any' })).casualPrefer, '2v2');
+  // waitChoice: the last pick of "While you search".
+  for (const c of ['bots', 'training', 'menu']) assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: c })).waitChoice, c);
+  assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: 'x' })).waitChoice, 'bots');
+  const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
+  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', casualBots: null, rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots', projectOnly: false });
   assert.equal(P.PREFS_KEY, 'turbogol.menu.v1', 'the same key: no migration');
+  // "Solo servidores del proyecto" (Prompt 2, A15): off until the player turns it on, and only a true is kept.
+  assert.equal(P.DEFAULT_PREFS.projectOnly, false);
+  assert.equal(P.parsePrefs(JSON.stringify({ projectOnly: true })).projectOnly, true);
+  for (const v of ['true', 1, null]) assert.equal(P.parsePrefs(JSON.stringify({ projectOnly: v })).projectOnly, false, JSON.stringify(v));
   // Each parse is a fresh object: a change to one never reaches the defaults.
-  P.parsePrefs(null).casualModes.push('3v3');
-  assert.deepEqual(P.parsePrefs(null).casualModes, ['2v2']);
+  P.parsePrefs(null).rankedModes.push('3v3');
+  assert.deepEqual(P.parsePrefs(null).rankedModes, ['2v2']);
+});
+
+test("parsePrefs: Casual's solo bots level is unset (null) until the player picks one; one of the three levels kept, anything else unset", () => {
+  // Review: a default of 'hard' went out with every search, so the KV flag bot_level never reached a solo match.
+  assert.equal(P.DEFAULT_PREFS.casualBots, null);
+  assert.equal(P.parsePrefs(null).casualBots, null, 'a first visit');
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: level })).casualBots, level);
+  for (const junk of ['Hard', 'expert', 2, null, {}]) assert.equal(P.parsePrefs(JSON.stringify({ casualBots: junk })).casualBots, null, JSON.stringify(junk));
+});
+
+test("a never-picked Casual search sends no `bots` (the KV flag bot_level plays its solo match); MODOS shows the server's level picked until the player picks; ranked never sends one", async () => {
+  const MM = await import('../src/ui/screens/modesModel.ts');
+  assert.equal(MM.searchBots('casual', null), null, 'never picked: no field');
+  assert.equal(MM.searchBots('casual', P.parsePrefs(null).casualBots), null, 'a first visit sends none');
+  for (const level of ['easy', 'medium', 'hard']) {
+    assert.equal(MM.searchBots('casual', level), level, 'a pick goes out');
+    assert.equal(MM.searchBots('ranked', level), null, 'Competitive never');
+  }
+  // The seg's value and the 5:00 box: the pick, else the config's queue.botLevel, else hard (the Worker's default).
+  assert.equal(MM.SERVER_BOTS_DEFAULT, 'hard');
+  assert.equal(MM.shownBots(null, 'easy'), 'easy', "the server's level (bot_level=easy)");
+  assert.equal(MM.shownBots(null, undefined), 'hard', 'no config yet, or an older Worker');
+  assert.equal(MM.shownBots('medium', 'easy'), 'medium', "the player's pick over the server's");
+  // The wiring: Menu.startSearch through searchBots (MODOS, Inicio's hero, PLAY AGAIN, the requeue), MODOS through shownBots.
+  const menu = await readFile(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /const \{ bots: _old, \.\.\.base \} = req;\s*const bots = searchBots\(req\.kind, this\.prefs\.casualBots\);\s*this\.host\.search\(bots !== null \? \{ \.\.\.base, bots \} : base\);/);
+  assert.doesNotMatch(menu, /bots: this\.prefs\.casualBots/, 'never the raw pref');
+  const modes = await readFile(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /const botsLevel = \(\): Difficulty => shownBots\(menu\.prefs\.casualBots, menu\.cfg\?\.queue\?\.botLevel\);/);
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\), DIFFICULTIES\.map\(\(d\) => \(\{ value: d, label: difficultyName\(d\) \}\)\), \(\) => botsLevel\(\), \(v\) => pickBots\(v\)\);/);
+  assert.match(modes, /t\('search\.botsLevel', \{ level: difficultyName\(botsLevel\(\)\) \}\)/);
+  // A pick of the level shown (the server's) is a pick: stored, and the search carries it from then on.
+  assert.match(modes, /if \(menu\.prefs\.casualBots !== level\) \{\s*menu\.prefs\.casualBots = level;\s*menu\.savePrefs\(\);/);
+  // GET /api/config's queue.botLevel, read only as one of the three levels.
+  const { parseServerConfig } = await import('../src/net/NetClient.ts');
+  const q = (botLevel) => parseServerConfig({ queue: { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, botLevel } }).queue;
+  for (const level of ['easy', 'medium', 'hard']) assert.equal(q(level).botLevel, level);
+  for (const junk of ['Hard', 'expert', 2, null, undefined]) assert.equal('botLevel' in q(junk), false, JSON.stringify(junk));
+});
+
+test("MODOS › CASUAL: DIFFICULTY IF YOU PLAY BOTS under the format grid (es / en), a pick changes a running Casual search in place; every Casual search carries the pick once made, ranked none", async () => {
+  const en = (await import('../src/locales/en.ts')).default;
+  const es = (await import('../src/locales/es.ts')).default;
+  assert.deepEqual([en['modes.botsPrefer'], es['modes.botsPrefer']], ['DIFFICULTY IF YOU PLAY BOTS', 'DIFICULTAD SI JUEGAS CON BOTS']);
+  for (const msgs of [en, es]) {
+    assert.match(msgs['search.botsLevel'], /\{level\}/, "the 5:00 box names the level");
+    assert.equal('search.bots' in msgs, false, 'the box without the level is gone');
+  }
+  assert.match(es['modes.formatPreferNote'], /la dificultad la elige el servidor/);
+  const { readFileSync } = await import('node:fs');
+  const modes = readFileSync(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /seg<Difficulty>\('casual-bots', t\('modes\.botsPrefer'\)/);
+  assert.match(modes, /host\.setQueueBots\(level\)/);
+  const menu = readFileSync(new URL('../src/ui/Menu.ts', import.meta.url), 'utf8');
+  assert.match(menu, /this\.host\.search\(bots !== null \? \{ \.\.\.base, bots \} : base\)/);
+  const game = readFileSync(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
+  assert.match(game, /client\.queueBots = req\.kind === 'casual' \? \(req\.bots \?\? null\) : null;/);
+});
+
+test('Inicio by role and device: a guest VS AI and LOBBIES first, a TV guest the phone sign-in and no Competitive, an account as before', () => {
+  assert.deepEqual(M.tileOrder({ guest: false, tv: false }), ['casual', 'friends', 'ai', 'ranked']);
+  assert.deepEqual(M.tileOrder({ guest: false, tv: true }), ['casual', 'friends', 'ai', 'ranked'], 'an account, any device');
+  assert.deepEqual(M.tileOrder({ guest: true, tv: false }), ['ai', 'friends', 'casual', 'ranked']);
+  assert.deepEqual(M.tileOrder({ guest: true, tv: true }), ['ai', 'tvsign', 'friends', 'casual']);
+  // A TV guest's rooms wait for a quiet anti-bot check; everyone else's are open.
+  assert.equal(M.roomsLocked({ tv: true, guest: true, antiBotReady: false }), true);
+  assert.equal(M.roomsLocked({ tv: true, guest: true, antiBotReady: true }), false, 'a session or a warm token');
+  assert.equal(M.roomsLocked({ tv: true, guest: false, antiBotReady: false }), false, 'an account');
+  assert.equal(M.roomsLocked({ tv: false, guest: true, antiBotReady: false }), false, 'a PC or a phone guest');
+});
+
+test("the 'next' card: a guest after an offline match's FINAL, once per page; SEE LOBBIES unless a TV's rooms are locked, CREATE ACCOUNT or the TV's phone sign-in", () => {
+  const i = { guest: true, aiMatchEnded: true, dismissed: false, tv: false, roomsOpen: true };
+  assert.deepEqual(M.nextCard(i), { rooms: true, account: 'create' });
+  assert.equal(M.nextCard({ ...i, guest: false }), null, 'an account');
+  assert.equal(M.nextCard({ ...i, aiMatchEnded: false }), null, 'no match against the AI ended yet');
+  assert.equal(M.nextCard({ ...i, dismissed: true }), null, 'closed or used: once per page');
+  assert.deepEqual(M.nextCard({ ...i, tv: true }), { rooms: true, account: 'tvSignIn' });
+  assert.deepEqual(M.nextCard({ ...i, tv: true, roomsOpen: false }), { rooms: false, account: 'tvSignIn' });
+});
+
+test("final review: a TV guest whose rooms are locked reads the phone's sign-in, never 'Join a public lobby' over a card without SEE LOBBIES", async () => {
+  const i = { guest: true, aiMatchEnded: true, dismissed: false, tv: true, roomsOpen: false };
+  assert.equal(M.nextLineKey(M.nextCard(i)), 'home.nextLineTv');
+  assert.equal(M.nextLineKey(M.nextCard({ ...i, roomsOpen: true })), 'home.nextLine', 'SEE LOBBIES is there');
+  assert.equal(M.nextLineKey(M.nextCard({ ...i, tv: false, roomsOpen: true })), 'home.nextLine', 'a PC or a phone guest');
+  assert.equal(es['home.nextLineTv'], 'Inicia sesión con el teléfono para entrar a las salas y jugar Casual.');
+  assert.equal(en['home.nextLineTv'], 'Sign in with your phone to join lobbies and play Casual.');
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /h\('span', null, t\(nextLineKey\(card\)\)\)/, "the card's line is the model's");
+  assert.doesNotMatch(home, /t\('home\.nextLine'\)/);
+});
+
+test("the hero's copy by role (home.ts): SIEMPRE HAY PARTIDO for Casual only, Casual's subtitle without formats, a guest's AL INSTANTE", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /tag = needPad \? padSlot : s\.queue\.kind === 'casual' \? \{ text: t\('home\.alwaysMatch'\) \} : null;/, 'no tag for a ranked play hero');
+  assert.match(home, /queueParts\(kind, kind === 'ranked' \? modes : \[\], regionOf\(region\), names\)/, 'the Casual sub drops the formats');
+  assert.match(home, /tag = needPad \? padSlot : \{ text: t\('home\.instant'\) \};/);
+  assert.match(home, /case 'bots':\s*menu\.beforeMatch\(\(\) => host\.playFriendly\(host\.mode, host\.difficulty\)\);/);
+  const names = { casual: es['play.casualTitle'], ranked: es['play.rankedTitle'] };
+  assert.deepEqual(M.queueParts('casual', [], 'Sudamérica', names), { queue: 'Casual', region: 'Sudamérica' }, 'Casual · Sudamérica');
+  assert.equal(es['home.instant'], 'AL INSTANTE');
+  assert.equal(es['home.lobbiesSlot'], 'PÚBLICAS');
+  assert.equal(es['modes.friends'], 'SALAS');
+  const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
+  assert.match(css, /\.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero ai friends' 'hero casual ranked';/);
+  assert.match(css, /html\[data-shell='rail'\] \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'ai friends hero' 'casual ranked hero';/);
+  assert.match(css, /html\[data-layout='portrait'\] \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero hero' 'ai friends' 'casual ranked';/);
+  assert.match(css, /html\.tg-tv \.mn-tiles\[data-role='guest'\] \{\s*grid-template-areas: 'hero ai tvsign' 'hero friends casual';/);
 });
 
 test('isOffline: still connecting is not; one failed population poll is not; two are, and so is no Worker', () => {
@@ -162,6 +286,7 @@ const NEW_KEYS = [
   'modes.casual', 'modes.casualSub', 'modes.casualSubShort', 'modes.friends', 'modes.friendsSub', 'modes.friendsSubShort', 'modes.friendsSubTv', 'modes.lobbies',
   'modes.vsAi', 'modes.vsAiSub', 'modes.vsAiSubShort', 'modes.vsAiSlot', 'modes.ranked', 'modes.rankedSub', 'modes.rankedSubShort',
   'modes.signInShort', 'tv.needPad', 'tv.needPadText', 'tv.needPadGo', 'howPlay.title', 'howPlay.kbm', 'howPlay.keyboard', 'howPlay.pad', 'lang.reloadNote',
+  'home.instant', 'home.nextTitle', 'home.nextLine', 'home.nextRooms', 'home.nextAccount', 'home.nextClose', 'home.lobbiesSlot', 'modes.lobbiesTvLocked',
 ];
 
 test("the owner's copy: JUGAR AHORA / JUGAR, Iniciar sesión, partidas de ubicación, the reload note; no reassurance lines", () => {
@@ -193,4 +318,49 @@ test("a TV's subtitle never goes under the floor: its region steps aside, the fo
   assert.match(tile, /h\('span\.mn-hero-room', lastGive\)/);
   const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
   assert.match(css, /\.mn-hero-split\[data-fit-gone\] \+ \.mn-hero-formats \{\s*display: block;/);
+});
+
+test('the DOM in the drawn order: the hero first on a PC, a TV and upright, last on a phone held sideways (drawn at the right), the tiles around it in the role\'s order', async () => {
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: false, heroLast: false }), ['hero', 'ai', 'friends', 'casual', 'ranked']);
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: false, heroLast: true }), ['ai', 'friends', 'casual', 'ranked', 'hero'], "sideways: 'ai friends hero' / 'casual ranked hero'");
+  assert.deepEqual(M.homeDomOrder({ guest: false, tv: false, heroLast: true }), ['casual', 'friends', 'ai', 'ranked', 'hero']);
+  assert.deepEqual(M.homeDomOrder({ guest: true, tv: true, heroLast: false }), ['hero', 'ai', 'tvsign', 'friends', 'casual']);
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /const heroLast = html\.dataset\.shell === 'rail';/, 'the sideways shell, read on every render (the phone turns)');
+  assert.match(home, /tilesBox\.appendChild\(id === 'hero' \? hero\.el : tileEls\[id\]\);/);
+  assert.match(home, /const key = `\$\{g \? 'guest' : 'account'\}\|\$\{heroLast\}`;/);
+});
+
+test("searching, the hero's estimate ticks in place: only its kind is in the hero's key (no rebuild, the busy stripe sweeps on), its text through setEst", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /estKind = lines2\.override \?\? lines2\.estimate\.kind;/);
+  assert.match(home, /sub = \{ queue, dot, region: null \};\s*subText = queue;/, 'no ticking text in the subtitle the key reads');
+  assert.match(home, /key: \[kind, title, subText, estKind, tag\?\.text \?\? '', pad\]\.join\('\|'\)/);
+  assert.match(home, /if \(view\.est != null && view\.est !== estText\) \{[^}]*hero\.setEst\(view\.est\);/);
+  const tile = await readFile(new URL('../src/ui/components/tile.ts', import.meta.url), 'utf8');
+  assert.match(tile, /const setEst = \(text: string\): void => \{\s*if \(est !== null && est\.textContent !== text\) est\.textContent = text;/);
+  // No short form on it (a fit would cache its old text), and on a TV the queue gives way first, never the estimate.
+  assert.match(tile, /est = estimate !== null \? h\('span\.mn-hero-region\.mn-hero-est', null, estimate\) : null;/);
+  assert.match(tile, /const before = estimate !== null && o\.oneLine \? \{ 'data-fit-give': '1' \} : null;/);
+  const css = await readFile(new URL('../src/ui/styles/screens/home.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /html\[data-shell='tv'\] \.mn-hero-busy \.mn-hero-region/, "a TV's searching hero shows its estimate");
+  assert.match(css, /\.mn-hero-est \{\s*font-variant-numeric: tabular-nums;/);
+});
+
+test("a TV guest's locked SALAS: the lock in the slot and 'Inicia sesión con el teléfono' as its line; MODOS › SALAS says SIGN IN WITH YOUR PHONE once (its action)", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /friends\.setSlot\(rooms \? slot\('', \{ icon: 'lock' \}\) : slot\(t\('home\.lobbiesSlot'\), \{ drop: true \}\)\);/);
+  assert.match(home, /if \(rooms\) friends\.setSub\(t\('modes\.lobbiesTvLocked'\), t\('modes\.lobbiesTvLocked'\)\);\s*else friends\.setSub\(t\('modes\.friendsSub'\), t\(tv \? 'modes\.friendsSubTv' : 'modes\.friendsSubShort'\)\);/);
+  const custom = await readFile(new URL('../src/ui/screens/custom.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(custom, /t\('tvsign\.tile'\)/, 'neither the code tile nor the empty list repeats it');
+  assert.match(custom, /h\('b', null, t\('lobby\.joinCode'\)\)/);
+  assert.match(custom, /icon\(locked \? 'lock' : 'next'\)/);
+  const modes = await readFile(new URL('../src/ui/screens/modes.ts', import.meta.url), 'utf8');
+  assert.match(modes, /label = code !== null \? t\('lobby\.backTo', \{ code: spacedCode\(code\) \}\) : t\(tvLocked \? 'tvsign\.tile' : 'lobby\.createPublic'\);/, 'the one place');
+  assert.equal(es['modes.lobbiesTvLocked'], 'Inicia sesión con el teléfono');
+});
+
+test("▲ from the hero reaches the 'next' card drawn over the tiles (the spatial pick would pass it for the plate)", async () => {
+  const home = await readFile(new URL('../src/ui/screens/home.ts', import.meta.url), 'utf8');
+  assert.match(home, /onNavTo\(hero\.main, 'up', \(\) => \(nextBox\.hidden \? null : nextBox\.querySelector<HTMLElement>\('\[data-nav\]'\)\)\);/);
 });

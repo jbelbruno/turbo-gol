@@ -27,6 +27,13 @@
  *     match that started but has not ticked yet ends like one that never started: a cancel.
  *   - 'Disconnected at the whistle' does not make a player a leaver here: only explicit leaves do
  *     (a node could otherwise frame players). The control plane knows every explicit leave.
+ *   - A socket that sends no Input or Ping for silentMs (10 s; the client pings 4 times a second)
+ *     is closed (1008 'silent'), like any other kick: the slot is disconnected and gets zero
+ *     controls. Without it a player who dropped off without a close (a dead link, a frozen
+ *     machine) stayed connected until the 4 MB send queue overflowed, and their car kept their last
+ *     input, which the replay recorded as theirs. MatchDO has no such cut. Time the node itself
+ *     was stalled (GC, a busy PC) does not count as silence: frames that came meanwhile are still
+ *     waiting to be read.
  *
  * Driven by the node-wide Ticker (advance(now)); everything else is socket callbacks and timers.
  */
@@ -68,10 +75,13 @@ const SNAPSHOT_EVERY = 4;
 const CLOSE_REPLACED = 4000;
 /** A TTL that fires during regulation (goal pauses stop the regulation clock) looks again this often. */
 const TTL_RECHECK_MS = 1_000;
+/** The silent-socket sweep runs this often at most (a fifth of silentMs when that is shorter). */
+const SILENT_SWEEP_MS = 1_000;
 
 /**
- * MatchDO's wall-clock timings; tests and demos shorten them. The ranked disconnect forfeit is not
- * here: it is FORFEIT_DC_TICKS of simulation (shared/verify.ts), what the verifier checks.
+ * MatchDO's wall-clock timings, plus the node's own silentMs; tests and demos shorten them. The
+ * ranked disconnect forfeit is not here: it is FORFEIT_DC_TICKS of simulation (shared/verify.ts),
+ * what the verifier checks.
  */
 export interface RoomTimings {
   startGraceMs: number;
@@ -80,6 +90,8 @@ export interface RoomTimings {
   ttlAfterMatchMs: number;
   unusedMs: number;
   rankedJoinMs: number;
+  /** A socket with no Input or Ping for this long is closed (nodes only). */
+  silentMs: number;
 }
 
 export const DEFAULT_TIMINGS: RoomTimings = {
@@ -89,6 +101,7 @@ export const DEFAULT_TIMINGS: RoomTimings = {
   ttlAfterMatchMs: TTL_AFTER_MATCH_SECONDS * 1000,
   unusedMs: 90_000,
   rankedJoinMs: 45_000,
+  silentMs: 10_000,
 };
 
 export interface RoomHooks {
@@ -132,6 +145,8 @@ interface Client {
   tokensAt: number;
   inputTokens: number;
   inputTick: number;
+  /** performance.now() of its last Input or Ping (of the attach before the first). */
+  heardAt: number;
 }
 
 export class MatchRoom implements Tickable {
@@ -168,6 +183,10 @@ export class MatchRoom implements Tickable {
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   private earlyTimer: ReturnType<typeof setTimeout> | null = null;
   private ttlTimer: ReturnType<typeof setTimeout> | null = null;
+  private silentTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly sweepMs: number;
+  /** performance.now() of the last silent-socket sweep. */
+  private sweptAt = 0;
   private outBuf: Uint8Array;
   private readonly pongBuf = new Uint8Array(PONG_LEN);
   private readonly inputPkt: InputPacket = { firstTick: 0, count: 0, ackTick: 0, packed: new Int8Array(INPUT_MAX_BATCH * PACKED_INPUT_BYTES) };
@@ -181,6 +200,7 @@ export class MatchRoom implements Tickable {
     this.t = { ...DEFAULT_TIMINGS, ...(ctx.timings ?? {}) };
     if (assign.joinTimeoutMs !== undefined) this.t.rankedJoinMs = assign.joinTimeoutMs;
     this.emptyTicks = Math.max(EMPTY_PROOF_TICKS + 1, Math.ceil((this.t.emptyShutdownMs * TICK_RATE) / 1000));
+    this.sweepMs = Math.max(20, Math.min(SILENT_SWEEP_MS, Math.floor(this.t.silentMs / 5)));
     this.host = new RoomHost(arena.sim, assign.roster, {
       tickRate: TICK_RATE,
       snapshotEvery: SNAPSHOT_EVERY,
@@ -247,6 +267,33 @@ export class MatchRoom implements Tickable {
       this.ttlTimer = null;
       this.endByTtl();
     }, ms);
+  }
+
+  /** The silent-socket sweep, from the first attach until the room closes. */
+  private armSweep(): void {
+    this.sweptAt = performance.now();
+    const timer: unknown = setInterval(() => this.sweepSilent(), this.sweepMs);
+    // Never what keeps the process alive on its own (a test that leaves a room behind).
+    (timer as { unref?: () => void }).unref?.();
+    this.silentTimer = timer as ReturnType<typeof setInterval>;
+  }
+
+  /**
+   * Kick every socket silent for silentMs. A sweep that comes late is the node's own stall (timers
+   * run before the sockets are read, so the frames sent meanwhile are still waiting): that time is
+   * added to every socket's last frame instead of counting as its silence.
+   */
+  private sweepSilent(): void {
+    if (this.shutDown || this.ended) return;
+    const now = performance.now();
+    const stalled = now - this.sweptAt - this.sweepMs;
+    this.sweptAt = now;
+    for (let i = 0; i < MAX_CARS; i++) {
+      const c = this.clients[i];
+      if (!c) continue;
+      if (stalled > this.sweepMs) c.heardAt += stalled;
+      if (now - c.heardAt >= this.t.silentMs) this.kick(c, 1008, 'silent');
+    }
   }
 
   // ---- status -------------------------------------------------------------------------------
@@ -328,8 +375,10 @@ export class MatchRoom implements Tickable {
       tokensAt: now,
       inputTokens: INPUT_BURST,
       inputTick: this.host.currentTick,
+      heardAt: performance.now(),
     };
     this.clients[slot] = cl;
+    if (!this.silentTimer) this.armSweep();
     this.liveSockets++;
     this.emptySince = -1;
     this.emptyTick = -1;
@@ -379,6 +428,7 @@ export class MatchRoom implements Tickable {
     const host = this.host;
     switch (buf[0]) {
       case MsgType.Input: {
+        c.heardAt = performance.now(); // alive, also when its input is over the rate
         const t = host.currentTick;
         if (t !== c.inputTick) {
           let n = c.inputTokens + (t - c.inputTick);
@@ -395,6 +445,7 @@ export class MatchRoom implements Tickable {
       }
       case MsgType.Ping: {
         if (buf.length < PING_LEN) return this.kick(c, 1008, 'bad ping');
+        c.heardAt = performance.now();
         const len = encodePong(this.pongBuf, decodePing(buf), now, now, host.currentTick);
         this.safeSend(c, this.pongBuf.subarray(0, len));
         return;
@@ -790,6 +841,8 @@ export class MatchRoom implements Tickable {
     this.ctx.ticker.remove(this);
     for (const tm of [this.startTimer, this.endTimer, this.earlyTimer, this.ttlTimer]) if (tm) clearTimeout(tm);
     this.startTimer = this.endTimer = this.earlyTimer = this.ttlTimer = null;
+    if (this.silentTimer) clearInterval(this.silentTimer);
+    this.silentTimer = null;
     for (let i = 0; i < MAX_CARS; i++) {
       const c = this.clients[i];
       if (c) this.detach(c, 1000, reason);

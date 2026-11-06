@@ -28,6 +28,7 @@ function reservedV4(ip) {
 test('the docs are found', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.ok(docs.includes('nodes/docs/VPS-SAO-PAULO.md'));
+  assert.ok(docs.includes('nodes/docs/VPS-PROYECTO.md'));
 });
 
 test('no doc names a routable IP address (examples use the documentation ranges)', () => {
@@ -48,7 +49,7 @@ test('no doc names a routable IP address (examples use the documentation ranges)
 
 test("the trusted node's manual and plan give placeholders, not its provider, keys or budgets", () => {
   const hits = [];
-  for (const f of ['nodes/docs/VPS-SAO-PAULO.md', 'nodes/docs/PRODUCCION.md']) {
+  for (const f of ['nodes/docs/VPS-SAO-PAULO.md', 'nodes/docs/VPS-PROYECTO.md', 'nodes/docs/PRODUCCION.md']) {
     const text = read(f);
     for (const [what, re] of [
       ['the provider', /hostinger/i],
@@ -63,5 +64,35 @@ test("the trusted node's manual and plan give placeholders, not its provider, ke
       if (re.test(text)) hits.push(`${f}: ${what} (${re.exec(text)[0]})`);
   }
   for (const f of docs) if (/\bKVM ?2\b|campinas/i.test(read(f))) hits.push(`${f}: the node's plan or site`);
+  assert.deepEqual(hits, []);
+});
+
+test("the legal texts and their notices name the project's providers and countries, never a machine's plan, host name, cloud region or machine type, or a cap", () => {
+  // The privacy policy has to name each provider and country (docs/legal/README.md), so Hostinger
+  // and Google Cloud may appear there. What would point an abuser at a machine may not: a name under
+  // turbo-gol.com other than the site and its mailboxes, a cloud region or zone id, a machine type,
+  // a provider's plan, a declared capacity or a traffic cap. The about page (docs/about/), which the
+  // Worker serves next to them, follows the same rules.
+  const hits = [];
+  for (const f of docs.filter((d) => d.startsWith('docs/legal/') || d.startsWith('docs/about/'))) {
+    const text = read(f);
+    for (const [what, re] of [
+      ['a host name under turbo-gol.com', /(?<![@\w.-])(?:[a-z0-9-]+\.)+turbo-gol\.com\b/i],
+      ['a cloud region or zone', /\b(?:africa|asia|australia|europe|me|northamerica|southamerica|us)-(?:central|east|west|north|south|southeast|northeast)\d(?:-[a-c])?\b/i],
+      ['a machine type', /\b(?:e2|n1|n2|n2d|n4|c2|c2d|c3|c3d|c4|t2a|t2d)-(?:micro|small|medium|standard|highcpu|highmem)\b/i],
+      ['a plan', /\bKVM ?\d/i],
+      ['a declared capacity or a traffic cap', /--matches\b|--egress-cap-gb\b|egressCapGB/],
+    ])
+      if (re.test(text)) hits.push(`${f}: ${what} (${re.exec(text)[0]})`);
+  }
+  assert.deepEqual(hits, []);
+});
+
+test("a doc names only the project's public mailboxes (the legal texts' privacy address and the mail sender), never the maintainer account's own", () => {
+  // The maintainer account's sign-in address stays out of every public page: knowing it is half of
+  // a password-guessing or a phishing run against the account that registers trusted nodes.
+  const PUBLIC = new Set(['privacy', 'privacidad', 'no-reply']);
+  const hits = [];
+  for (const f of docs) for (const m of read(f).matchAll(/([A-Za-z0-9._%+-]+)@turbo-gol\.com\b/gi)) if (!PUBLIC.has(m[1].toLowerCase())) hits.push(`${f}: ${m[1]}@…`);
   assert.deepEqual(hits, []);
 });

@@ -4,24 +4,35 @@
  *   POST /api/guest   { turnstileToken? }               -> GuestSession (24 h HS256 session). The name is the
  *                       server's, 'Invitado 4821' from the player id (src/net/guestName.ts); a `name` sent is
  *                       ignored
- *   POST /api/queue   { mode, kind?, p2pProtocol? }  Bearer session
- *                    -> long-poll <= 25 s: QueueResultP2p (kind 'p2p', the default:
- *                       a RoomDO signaling room, wsUrl ws(s)://host/room/<roomId>) or the phase 1 QueueResult
- *                       (kind 'server', or the p2p fallback for a lone human: a MatchDO match, wsUrl /ws/<matchId>;
- *                       or, with the nodes on, a match on a community node: node: true, wsUrl the node's own wss://);
- *                       426 'reload_required' for kind 'p2p' without this server's P2P protocol in p2pProtocol (a stale
- *                       page); 429 'no_show' { retryAfterMs } from the matchmaker (room tickets left unused, p2p only);
+ *   POST /api/queue   { api: 2, mode | modes, kind?, prefer?, region?, local?, visible?, first?, projectOnly? }  Bearer session
+ *                    -> every public queue is in the queue hub (MatchmakerDO 'mm:SA', env.ts queueHubOf), the
+ *                       player's region kept as its `home`. kind: 'server' (Casual, the default; 'p2p' of an
+ *                       older caller is read as it) or 'ranked'. The first answer of a search comes at once
+ *                       ({ status: 'waiting', waiting, region, wait: QueueWait }, src/net/queueWait.ts): a new or
+ *                       restored search, or a POST with first: true (the client sends it on the first POST of
+ *                       each search loop: a page reloaded mid-search finds its waiter still queued); every
+ *                       later POST long-polls <= 25 s. Matched: the phase 1 QueueResult (a MatchDO match, wsUrl
+ *                       /ws/<matchId>; or, with the nodes on, a match on a community node: node: true, wsUrl the
+ *                       node's own wss://) plus mode, host, humans and region (the home), and on a node match its
+ *                       server's mark (`server`: a community server's always, a project server's once the terms in
+ *                       force describe hosting). projectOnly: true, taken once the terms in force describe hosting
+ *                       (env.ts hostingTermsInForce, no KV read: it never fails open; before, ignored and kept
+ *                       nowhere): its matches never go to a community server (MatchmakerDO). 403 'account_required' for
+ *                       a guest session, any kind (Casual and ranked are for accounts); 426 'reload_required' for an
+ *                       account's request without api >= 2 (a page cached from before the modes redesign);
  *                       400 'experimental_lobby_only' for a body that carries `physics`: experimental rules
  *                       exist only in custom P2P lobbies, never in the casual or ranked queues. The seat's
  *                       car comes from the session (an account's `car` claim, seatFields), never from the
  *                       body; a node match's result carries the match's `cars` by slot (src/net/cosmetics.ts)
  *   POST /api/rejoin  { matchId } Bearer session        -> QueueResult with a fresh ticket (MatchDO and node matches, a node
- *                       match's with its `cars`; a RoomDO room id answers 410 'p2p_room': a P2P room is never
+ *                       match's with its `cars` and its server's mark as the queue's; a RoomDO room id answers 410 'p2p_room': a P2P room is never
  *                       rejoined, POST /api/leave frees its lock;
  *                       a match the player quit with POST /api/leave { matchId } answers 410 'left', or 404 once
  *                       that quit was its last human's: the match ended). An id no MatchDO, RoomDO or node match
  *                       has: 404 and its lock freed; a node out of reach for now: 503 and the lock kept (nodeRejoin)
- *   POST /api/leave   { matchId?, connected? } Bearer   -> { ok, left, released }: drop the player from the queue (while still
+ *   POST /api/leave   { matchId?, connected?, region? } Bearer -> { ok, left, released }: to the queue hub, and to the region's
+ *                       matchmaker too when that is another one (a lobby's P2P room lock lives there; released: either
+ *                       released). Drop the player from the queue (while still
  *                       waiting) and free its P2P room lock (the room closes the player's socket: 'peerLeft' to the others);
  *                       with the matchId of its SERVER match (an explicit quit) that lock is freed too and the MatchDO
  *                       closes the player's socket, flags the slot left (no rejoin) and hands its car to the host's bots
@@ -29,13 +40,14 @@
  *                       Without a matchId a server lock stays (a reload / network drop rejoins on the next queue's 409).
  *                       A node match is quit the same way, the node first: its lock stays (released: false) when the
  *                       node did not take the leave. connected: false (never got in) is passed on to the node only
- *   POST /api/lobbies { name?, password?, mode, visibility, net, matchLengthSeconds, physics?, region? } Bearer
- *                    -> LobbyTicketAnswer (LobbyDO.ts); `physics` (experimental rules) from a guest session:
+ *   POST /api/lobbies { api: 2, name?, password?, mode, visibility, net, matchLengthSeconds, physics?, region? } Bearer
+ *                    -> LobbyTicketAnswer (LobbyDO.ts; net is always P2P, a 'server' is read as 'p2p'); without
+ *                       api >= 2: 426 'reload_required' (a page from before the modes redesign); `physics` (experimental rules) from a guest session:
  *                       403 'account_required' (a lobby with them takes signed-in players only). The title is
  *                       the host's name unless an account sends one: a guest's `name` is ignored, an account's
  *                       reserved one (src/net/account.ts lobbyNameIssue) answers 400 'name_reserved'
- *   POST /api/lobbies/join { code, password? } Bearer -> LobbyTicketAnswer; a guest into a lobby with
- *                       experimental rules: 403 'account_required' (LobbyDO)
+ *   POST /api/lobbies/join { api: 2, code, password? } Bearer -> LobbyTicketAnswer; without api >= 2: 426
+ *                       'reload_required'; a guest into a lobby with experimental rules: 403 'account_required' (LobbyDO)
  *   GET  /api/lobbies/peek?code= (no auth)            -> LobbySummary of the lobby with that code (a join
  *                       link's "Join lobby ABC234 · 2v2 · 2/4?"); 404 no_lobby, 410 closed
  *   GET  /ws/:matchId   Sec-WebSocket-Protocol: tg1, ticket.<jwt>  -> 101 (ticket verified here,
@@ -43,11 +55,22 @@
  *                       bad tickets never touch a DO)
  *   GET  /room/:roomId  same gate with a role 'peer' ticket whose mid is the room id -> RoomDO (phase 2 signaling)
  *   GET  /api/config  -> { turnstileSiteKey: TURNSTILE_SITEKEY | null, protocol, version, region: cf.colo | 'local',
- *                        autoRegion, regions, oauth, accounts, botFillMs: the server queue's bot fill (BOT_FILL_MS),
+ *                        autoRegion, regions, oauth, accounts, botFillMs: null (pages from before the modes redesign hide
+ *                        their server countdown), queue: { soloAfterMs, widenMs: { casual, ranked }, accountRequired,
+ *                        botLevel: the KV flag bot_level's level (env.ts casualBotLevel), the one a 5:00 solo match
+ *                        plays while its player picked none: MODOS shows it picked },
  *                        auth: { devSignIn: the dev-only sign-in is open (mail.ts isDevAuth), email: the
  *                        flows that send mail may show (mail.ts emailAvailable), legacy: { phase, until }:
- *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) } }
+ *                        the username sign-in's cutoff (accountRoutes.ts legacyConfig) },
+ *                        legal: { terms: TERMS_VERSION or null, deletion: DELETION_OPEN is '1', graceDays } (env.ts legalConfig),
+ *                        hosting: { open, stage: 'closed' | 'canary' | 'all' }: whether accounts outside the project
+ *                        may host a server (env.ts hostingMode: closed until the terms in force describe it and
+ *                        the KV flag node_operators opens it; always closed without the node settings) }
  *                        (no auth; the client fetches it once per page load before its first POST /api/guest)
+ *   GET  /terminos, /privacidad, /terms, /privacy  the terms and the privacy policy (legalPages.ts), only
+ *                       while TERMS_VERSION is set; 404 not_found before (wrangler.jsonc routes them here first)
+ *   GET  /about, /acerca  what Turbogol is, its sign-in with Google and who offers it (legalPages.ts, the
+ *                       OAuth consent screen's home page), as static HTML; gated and routed as the four above
  *   POST /api/dev/signin, GET /api/dev/mail  the dev-only sign-in and the stub mailer's outbox (accountRoutes.ts
  *                       devRoute): only with DEV_AUTH=1 on a loopback host, else 404 as any unknown route
  *   GET  /api/health, GET /api/time
@@ -77,19 +100,20 @@
  * upgrade whose Origin is outside the list is refused (403 'bad_origin'); a request without Origin
  * (non-browser client) is let through to the ticket check.
  * Flags (KV FLAGS): matchmaking_off, do_disabled -> 503. do_disabled also stops /api/queue, so no
- * new room is created while its sockets would be refused; for a player the nodes are on for, only
- * its p2p queue (server and ranked matches then wait for a node; where none can host now, the
- * matchmaker refuses them itself: doDisabled in its /join). nodes_on (absent: off; '1':
+ * new room is created while its sockets would be refused; for a player the nodes are on for, its
+ * Casual and ranked matches wait for a node instead (busy while none can take them, also in the
+ * hub's back-off after hosts 0: never a 503 for that player). nodes_on (absent: off; '1':
  * everyone; a list of account ids: a canary) lets matches go to community nodes, vm_disabled turns
  * them off again (env.ts nodesMode; the matchmaker decides per match, MatchmakerDO.ts). nodes_off
- * stops every /nodes/* route that would reach the NodeRegistryDO (503 before the object; the cron's
- * call too): the control plane's kill switch. server/README.md lists which flag stops what.
+ * stops every /nodes/* route that would reach the NodeRegistryDO (503 before the object; the cron
+ * only has it prune what is past 30 days): the control plane's kill switch. server/README.md lists
+ * which flag stops what.
  */
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, SERVER_VERSION, carriesPhysics, error, flag, isHex, isMode, isModeList, isQueueKind, json, nodesAllowed, nodesConfigured, nodesMode, readJson } from './env';
+import { BAD_KIND_TEXT, EXPERIMENTAL_REFUSED, RELOAD_TEXT, SERVER_VERSION, carriesPhysics, casualBotLevel, error, flag, hasClientApi, hostingMode, hostingStage, hostingTermsInForce, isBotLevel, isHex, isMode, isModeList, isQueueKind, json, legalConfig, nodesAllowed, nodesConfigured, nodesMode, publicQueueKind, queueHubOf, readJson } from './env';
 import type { GameModeId } from './env';
 import { accountRoute, accountsCall, enabledProviders, legacyConfig } from './accountRoutes';
-import { accountGate, clientIp, isolateLimited, limiter, overLimit, subjectsOf } from './limits';
+import { accountGate, clientIp, isolateLimited, isolateSpent, limiter, overLimit, subjectsOf } from './limits';
 import type { LimitName } from './limits';
 import type { RankedCheck } from './accountStore';
 import { normalizeCode } from './LobbyDirectoryDO';
@@ -99,9 +123,12 @@ import { guestNameOf } from '../../src/net/guestName';
 import type { LobbySummary, LobbyTicketAnswer, PopulationAnswer, RegionId } from '../../src/net/account';
 import { INTERNAL_HEADER, createSession, createTicket, internalSecret, randomHex, verifySession, verifyTicket } from './auth';
 import type { SessionClaims, TicketRole } from './auth';
-import { BOT_FILL_MS, isP2pResult } from './MatchmakerDO';
+import { isP2pResult, preferOf } from './MatchmakerDO';
 import type { AnyQueueResult } from './MatchmakerDO';
-import { RELOAD_REQUIRED, ROOM_PROTOCOL } from './RoomDO';
+import { RELOAD_REQUIRED } from './RoomDO';
+import { CASUAL_WIDEN_MS, RANKED_WIDEN_MS, SOLO_AFTER_MS, normalizeHome } from './queuePlan';
+import { QUEUE_API } from '../../src/net/queueWait';
+import type { QueueMatchedExtra } from '../../src/net/queueWait';
 import { nodeHealthCheck, nodeRoute } from './nodeRoutes';
 import { NODE_ROUTES, askNodes, rejoinTicketOf, replyCode } from './nodeApi';
 import type { NodesReply } from './nodeApi';
@@ -215,6 +242,22 @@ function matchmakerOf(request: Request, env: Env, chosen?: unknown): { stub: Dur
   return { stub: env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + region)), region };
 }
 
+/** The queue hub (every public queue: 'mm:' + queueHubOf) and its region, for the x-region header. */
+function queueHub(env: Env): { stub: DurableObjectStub; region: string } {
+  const region = queueHubOf(env);
+  return { stub: env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + region)), region };
+}
+
+/** A waiter's region in the hub: the player's pick or the continent (regionOf), one of the six ids (else QUEUE_HUB). */
+function homeOf(request: Request, env: Env, chosen?: unknown): RegionId {
+  return normalizeHome(regionOf(request, env, chosen));
+}
+
+/** 426 reload_required: a page cached from before the modes redesign (no `api` marker in its body). */
+function reloadRequired(): Response {
+  return json({ error: RELOAD_REQUIRED, message: RELOAD_TEXT }, 426);
+}
+
 async function internalHeaders(env: Env, region?: string): Promise<Record<string, string>> {
   const h: Record<string, string> = { [INTERNAL_HEADER]: await internalSecret(env.JWT_SECRET), 'content-type': 'application/json' };
   if (region !== undefined) h['x-region'] = region;
@@ -225,7 +268,19 @@ async function internalHeaders(env: Env, region?: string): Promise<Record<string
 function serverConfig(
   request: Request,
   env: Env,
-): { turnstileSiteKey: string | null; protocol: number; version: string; region: string; autoRegion: string; regions: typeof REGIONS; oauth: string[]; accounts: boolean; botFillMs: number; auth: { devSignIn: boolean } } {
+): {
+  turnstileSiteKey: string | null;
+  protocol: number;
+  version: string;
+  region: string;
+  autoRegion: string;
+  regions: typeof REGIONS;
+  oauth: string[];
+  accounts: boolean;
+  botFillMs: null;
+  queue: { soloAfterMs: number; widenMs: { casual: number; ranked: number }; accountRequired: true };
+  auth: { devSignIn: boolean };
+} {
   const cf = request.cf;
   const colo = cf && typeof cf.colo === 'string' ? cf.colo : '';
   return {
@@ -237,8 +292,11 @@ function serverConfig(
     regions: REGIONS,
     oauth: enabledProviders(env),
     accounts: true,
-    // When a server queue fills with bots: the menus count it down (MODOS' searching panel).
-    botFillMs: BOT_FILL_MS,
+    // null: a page from before the modes redesign hides its server bots countdown (no such fill any more).
+    botFillMs: null,
+    // The public queues' clocks (§2.3): the 5:00 solo match and the widening, for the searching panel
+    // before the first answer; Casual and ranked are for accounts.
+    queue: { soloAfterMs: SOLO_AFTER_MS, widenMs: { casual: CASUAL_WIDEN_MS, ranked: RANKED_WIDEN_MS }, accountRequired: true },
     // The sign-in design's §2.1: devSignIn = the dev-only sign-in's gate passes (mail.ts isDevAuth), PERFIL's ENTRAR (DEV).
     auth: { devSignIn: isDevAuth(request, env) },
   };
@@ -330,15 +388,23 @@ async function verifyTurnstile(secret: string, token: unknown, ip: string | null
  * shut down, reset after a redeploy, or never existed). Best effort: the lock also expires by itself.
  */
 async function releaseLock(request: Request, env: Env, playerId: string, matchId: string, chosenRegion?: unknown): Promise<void> {
-  try {
-    const { stub, region } = matchmakerOf(request, env, chosenRegion);
-    await stub.fetch('https://matchmaker/release', {
-      method: 'POST',
-      headers: await internalHeaders(env, region),
-      body: JSON.stringify({ matchId, playerIds: [playerId] }),
-    });
-  } catch (e) {
-    console.error('release failed', e);
+  // The queue hub holds every queue match's lock; the region's matchmaker a lobby's room lock and
+  // the locks of matches formed there before the modes redesign.
+  const hub = queueHub(env);
+  const targets = [hub];
+  const own = matchmakerOf(request, env, chosenRegion);
+  if (own.region !== hub.region) targets.push(own);
+  for (const { stub, region } of targets) {
+    try {
+      const res = await stub.fetch('https://matchmaker/release', {
+        method: 'POST',
+        headers: await internalHeaders(env, region),
+        body: JSON.stringify({ matchId, playerIds: [playerId] }),
+      });
+      await res.body?.cancel();
+    } catch (e) {
+      console.error('release failed', e);
+    }
   }
 }
 
@@ -375,62 +441,119 @@ async function guest(request: Request, env: Env): Promise<Response> {
   return json(out);
 }
 
+/** What POST /api/queue reads of its body (QueueBody's wire fields; anything else is ignored). */
+interface QueueBody {
+  api?: unknown;
+  mode?: unknown;
+  modes?: unknown;
+  kind?: unknown;
+  prefer?: unknown;
+  region?: unknown;
+  local?: unknown;
+  visible?: unknown;
+  /** true on the FIRST POST of a client's search loop (a new search, or the one a reloaded page starts again); a boolean, anything else is ignored. */
+  first?: unknown;
+  physics?: unknown;
+  /** Casual: the bots' level of the player's solo match (easy | medium | hard); anything else, or ranked, is not passed on. */
+  bots?: unknown;
+  /**
+   * true: "Solo servidores del proyecto" (Ajustes › JUEGO, Prompt 2 A15): the player's matches never
+   * go to a community server. Passed on once the terms in force describe hosting (env.ts
+   * hostingTermsInForce: no KV read, so neither a failed read nor the flag closed again drops it while
+   * community servers still host); before, ignored and kept nowhere. The game shows the switch only
+   * once GET /api/config says hosting is open (the privacy policy's "desde la apertura"), and before
+   * the opening no community server exists. Anything but true is no choice.
+   */
+  projectOnly?: unknown;
+}
+
+/**
+ * POST /api/queue (the build spec's §2.1): session (401), its limit, then the account gate (403
+ * for a guest, any kind, any page version: decision 2), the client version (426 for an account's
+ * page from before the deploy), the KV flags, the body, the ranked check, and the hub's /join with
+ * the player's `home`, `prefer`, `local`, `visible` and Casual's `bots` (its solo match's bots level,
+ * only one of the three levels). A join that made or restored a search
+ * (`fresh`), or one whose body says `first: true` (a boolean; anything else is ignored), is
+ * answered at once; any other waiting join long-polls as before.
+ */
 async function queue(request: Request, env: Env): Promise<Response> {
   const session = await bearerSession(request, env);
   if (!session) return error(401, 'unauthorized');
   // Before the KV flags: a request over its limit costs no KV read.
   const limited = await overLimits(request, env, session, ['queue']);
   if (limited) return limited;
+  const body = await readJson<QueueBody>(request);
+  // Casual and ranked are for accounts (decision 2): a guest gets this whatever its page sends,
+  // before any KV or Durable Object call. Old cached guest pages show their own text for it.
+  if (session.acct !== 1) return error(403, 'account_required', body?.kind === 'ranked' ? 'Inicia sesión para jugar Competitivo' : 'Inicia sesión para jugar Casual');
+  // A page cached from before the modes redesign: it reloads into the new rules (and their re-accept sheet).
+  if (!hasClientApi(body, QUEUE_API)) return reloadRequired();
   if (await flag(env, 'matchmaking_off')) return error(503, 'matchmaking_off');
-  // No new rooms while their sockets would be refused. With the nodes on for this player (D9) a
-  // server or ranked queue goes on: its match waits for a node, and no MatchDO is created for it.
-  const doDisabled = await flag(env, 'do_disabled');
-  if (doDisabled && !(nodesConfigured(env) && nodesAllowed(await nodesMode(env), [session.sub]))) return error(503, 'do_disabled');
-  const body = await readJson<{ mode?: unknown; modes?: unknown; kind?: unknown; p2pProtocol?: unknown; region?: unknown; physics?: unknown }>(request);
-  // The owner's rule: every ranked or counted match, P2P included, runs the standard physics.
-  // Experimental rules exist only in custom P2P lobbies; a queue never accepts or carries them.
+  // No new rooms while their sockets would be refused. With the nodes on for this player (D9) the
+  // queue goes on: its match waits for a node, and no MatchDO is created for it. 503 only here.
+  if ((await flag(env, 'do_disabled')) && !(nodesConfigured(env) && nodesAllowed(await nodesMode(env), [session.sub]))) return error(503, 'do_disabled');
+  // The owner's rule: every ranked or counted match runs the standard physics. Experimental rules
+  // exist only in custom P2P lobbies; a queue never accepts or carries them.
   if (carriesPhysics(body)) return error(400, EXPERIMENTAL_REFUSED, 'experimental rules exist only in custom P2P lobbies, never in the casual or ranked queues');
   const modes: GameModeId[] | null = body && isModeList(body.modes) ? body.modes : body && isMode(body.mode) ? [body.mode] : null;
   if (!body || modes === null) return error(400, 'bad_mode', "mode must be '1v1' | '2v2' | '3v3' (or modes: a list of them)");
-  if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', "kind must be 'p2p' | 'server' | 'ranked'");
-  const kind = body.kind ?? 'p2p';
-  if (doDisabled && kind === 'p2p') return error(503, 'do_disabled'); // a P2P room is a RoomDO: never on a node
+  if (body.kind !== undefined && !isQueueKind(body.kind)) return error(400, 'bad_kind', BAD_KIND_TEXT);
+  // 'p2p' (an older caller) is Casual: there is no P2P queue any more, so its p2pProtocol does not matter.
+  const kind = publicQueueKind(body.kind);
   if (body.region !== undefined && !isRegion(body.region)) return error(400, 'bad_region');
-  // A P2P client states its P2P protocol; a page cached from before a deploy (version 1 sends
-  // kind 'p2p' without it) would fail on the room's welcome after taking a seat (its partner then
-  // waits for a no-show): refuse it here with a code that reads as the fix. Callers without a kind
-  // (scripts, the phase 1 default) are not affected.
-  if ((body.kind === 'p2p' || body.p2pProtocol !== undefined) && body.p2pProtocol !== ROOM_PROTOCOL) {
-    return json({ error: RELOAD_REQUIRED, message: `this page speaks P2P protocol ${typeof body.p2pProtocol === 'number' ? body.p2pProtocol : 1}, the server ${ROOM_PROTOCOL}: reload the page`, p2pProtocol: ROOM_PROTOCOL }, 426);
-  }
   const now = Date.now();
-  const { stub, region } = matchmakerOf(request, env, body.region);
+  const hub = queueHub(env);
+  const home = homeOf(request, env, body.region);
   let ratings: RankedCheck['ratings'] | undefined;
   if (kind === 'ranked') {
-    // Ranked: accounts only; the ban, the one-ranked-match-at-a-time lock (every region) and the
-    // ratings the matchmaker pairs by come from AccountsDO, never from the client.
-    if (session.acct !== 1) return error(403, 'account_required', 'Inicia sesión para jugar Competitivo');
+    // Ranked: the ban, the one-ranked-match-at-a-time lock (every region) and the ratings the
+    // matchmaker pairs by come from AccountsDO, never from the client.
     const chk = await accountsCall(env, '/ranked-check', { userId: session.sub, playlists: modes });
     if (!chk.ok) return new Response(chk.body, chk);
     const c = (await chk.json()) as RankedCheck;
     if (c.banUntil > now) return json({ error: 'ranked_ban', message: 'Competitivo bloqueado por abandonar partidas', retryAfterMs: c.banUntil - now }, 429);
-    if (c.active && c.active.region !== region) {
+    // Every new ranked lock carries the hub's region: a lock taken in the hub goes on to the hub's
+    // join (which answers its own 409); one left in a regional matchmaker before the deploy gets this.
+    if (c.active && c.active.region !== hub.region) {
       return json({ error: 'active_match', matchId: c.active.matchId, kind: 'server', region: c.active.region, message: 'you still have a ranked match in another region: rejoin it (POST /api/rejoin)' }, 409);
     }
     ratings = c.ratings;
   }
-  const headers = await internalHeaders(env, region);
-  let res = await stub.fetch('https://matchmaker/join', {
+  // "Solo servidores del proyecto" (A15): kept nowhere before the terms describe hosting (dark), and
+  // from then on always taken: never the KV flag, whose failed read (null: closed) or a close after
+  // the opening, while community servers still host, would drop it and fail open.
+  const projectOnly = body.projectOnly === true && nodesConfigured(env) && hostingTermsInForce(env);
+  const headers = await internalHeaders(env, hub.region);
+  let res = await hub.stub.fetch('https://matchmaker/join', {
     method: 'POST',
     headers,
-    // doDisabled: where no node can host now, the matchmaker refuses this queue as above (503).
-    // guest / ip: the matchmaker's guest caps (one MatchDO match per guest session across the regions, per IPv6 /64).
-    body: JSON.stringify({ playerId: session.sub, name: session.name, modes, kind, ratings, doDisabled: doDisabled ? true : undefined, ...seatFields(session, now), ...(session.acct !== 1 ? { guest: true, ip: clientIp(request) } : {}) }),
+    // home / prefer / local / visible: the waiter's region, its solo format, its local play, its tab.
+    // With do_disabled set this player's match waits for a node in the hub (busy while none can take it).
+    body: JSON.stringify({
+      playerId: session.sub,
+      name: session.name,
+      modes,
+      kind,
+      ratings,
+      home,
+      prefer: preferOf(body.prefer, modes),
+      local: body.local === 'bots' || body.local === 'training' ? body.local : undefined,
+      visible: body.visible !== false,
+      // Casual's solo bots level, the player's pick (privacy policy, the search's row).
+      bots: kind !== 'ranked' && isBotLevel(body.bots) ? body.bots : undefined,
+      ...(projectOnly ? { projectOnly: true } : {}),
+      ...seatFields(session, now),
+    }),
   });
   if (!res.ok) return new Response(res.body, res);
   let result = (await res.json()) as AnyQueueResult;
-  if (result.status === 'waiting') {
-    res = await stub.fetch('https://matchmaker/poll?playerId=' + session.sub, { headers });
+  // The first answer of a search comes at once (the sheet "Mientras buscas" opens on it): a join
+  // that made or restored the waiter (`fresh`), or the first POST of the client's loop (`first`:
+  // a page reloaded mid-search finds its old waiter still queued, not fresh, and would wait 25 s).
+  // Every later POST long-polls up to POLL_TIMEOUT_MS.
+  const first = body.first === true;
+  if (result.status === 'waiting' && !('fresh' in result && result.fresh === true) && !first) {
+    res = await hub.stub.fetch('https://matchmaker/poll?playerId=' + session.sub, { headers });
     if (!res.ok) return new Response(res.body, res);
     result = (await res.json()) as AnyQueueResult;
   }
@@ -438,7 +561,8 @@ async function queue(request: Request, env: Env): Promise<Response> {
     if (isP2pResult(result)) result.wsUrl = socketUrl(request, '/room/' + result.roomId);
     else if (result.matchId && result.node !== true) result.wsUrl = socketUrl(request, '/ws/' + result.matchId); // a node match keeps the node's own wss:// URL
   }
-  return json({ ...result, region });
+  const { fresh: _fresh, ...out } = result as AnyQueueResult & { fresh?: unknown };
+  return json({ ...out, region: home });
 }
 
 // ---- population / lobbies ------------------------------------------------------------------------
@@ -446,7 +570,11 @@ async function queue(request: Request, env: Env): Promise<Response> {
 const populationCache = new Map<string, { at: number; data: PopulationAnswer }>();
 const POPULATION_TTL_MS = 5_000;
 
-/** GET /api/population?region=: queue sizes of that region's matchmaker plus its public lobbies (cached 5 s per region per isolate). */
+/**
+ * GET /api/population?region=: the queue hub's numbers for that region (its waiters: Casual by
+ * preferred format, ranked by playlist; `searching` across every region) plus its public lobbies
+ * (cached 5 s per region per isolate).
+ */
 async function population(request: Request, env: Env, url: URL): Promise<Response> {
   const limited = await overLimits(request, env, null, ['population']);
   if (limited) return limited;
@@ -454,14 +582,15 @@ async function population(request: Request, env: Env, url: URL): Promise<Respons
   const now = Date.now();
   let c = populationCache.get(region);
   if (!c || now - c.at > POPULATION_TTL_MS) {
+    const hub = queueHub(env);
     const [mm, dir] = await Promise.all([
-      env.MATCHMAKER.get(env.MATCHMAKER.idFromName('mm:' + region)).fetch('https://matchmaker/population', { headers: await internalHeaders(env, region) }),
+      hub.stub.fetch('https://matchmaker/population?home=' + encodeURIComponent(normalizeHome(region)), { headers: await internalHeaders(env, hub.region) }),
       lobbyDir(env).fetch('https://lobbies/count?region=' + encodeURIComponent(region), { headers: await internalHeaders(env) }),
     ]);
     if (!mm.ok) return new Response(mm.body, mm);
     const m = (await mm.json()) as Omit<PopulationAnswer, 'lobbies' | 'region'>;
     const d = dir.ok ? ((await dir.json()) as { count: number }) : { count: 0 };
-    c = { at: now, data: { region, casual: m.casual, ranked: m.ranked, playing: m.playing, lobbies: d.count } };
+    c = { at: now, data: { region, casual: m.casual, ranked: m.ranked, playing: m.playing, lobbies: d.count, ...(m.searching ? { searching: m.searching } : {}) } };
     populationCache.set(region, c);
   }
   return json(c.data, 200, { 'cache-control': 'no-store' });
@@ -519,7 +648,7 @@ async function peekLobby(request: Request, env: Env, url: URL): Promise<Response
 }
 
 /**
- * POST /api/lobbies { name, password?, mode, visibility, net, matchLengthSeconds, physics?, region? }:
+ * POST /api/lobbies { name, password?, mode, visibility, net, matchLengthSeconds, physics?, bots?, region? }:
  * a new lobby hosted by the caller (guests too, but never with experimental rules: `physics` needs
  * an account session, 403 account_required; LobbyDO checks the rules themselves).
  */
@@ -528,9 +657,11 @@ async function createLobby(request: Request, env: Env): Promise<Response> {
   if (!session) return error(401, 'unauthorized');
   const limited = await overLimits(request, env, session, ['lobbyCreate', 'lobbyCreateNet'], 'Creaste demasiadas salas, espera un minuto');
   if (limited) return limited;
-  if (await flag(env, 'matchmaking_off')) return error(503, 'matchmaking_off');
-  const b = await readJson<{ name?: unknown; password?: unknown; mode?: unknown; visibility?: unknown; net?: unknown; matchLengthSeconds?: unknown; physics?: unknown; region?: unknown }>(request);
+  const b = await readJson<{ api?: unknown; name?: unknown; password?: unknown; mode?: unknown; visibility?: unknown; net?: unknown; matchLengthSeconds?: unknown; physics?: unknown; bots?: unknown; region?: unknown }>(request);
+  // A page cached from before the modes redesign (no `api`): it reloads (and accepts the new terms) first.
+  if (!hasClientApi(b, QUEUE_API)) return reloadRequired();
   if (!b) return error(400, 'bad_request');
+  if (await flag(env, 'matchmaking_off')) return error(503, 'matchmaking_off');
   if (b.region !== undefined && !isRegion(b.region)) return error(400, 'bad_region');
   // Experimental rules are for signed-in players only (null = standard physics, anyone).
   if (carriesPhysics(b) && session.acct !== 1) return error(403, 'account_required', 'Inicia sesión para crear una sala experimental');
@@ -555,7 +686,9 @@ async function createLobby(request: Request, env: Env): Promise<Response> {
       code,
       region,
       socketBase: (u.protocol === 'https:' ? 'wss://' : 'ws://') + u.host,
-      settings: { ...(name !== undefined ? { name } : {}), mode: b.mode, visibility: b.visibility, net: b.net, matchLengthSeconds: b.matchLengthSeconds, physics: b.physics },
+      // net: lobbies are P2P only (LobbyDO reads a 'server' as 'p2p'; junk is still 400 bad_net there).
+      // bots: the bots' level (absent: LOBBY_BOTS_DEFAULT; junk is 400 bad_bots there).
+      settings: { ...(name !== undefined ? { name } : {}), mode: b.mode, visibility: b.visibility, net: b.net, matchLengthSeconds: b.matchLengthSeconds, physics: b.physics, ...(b.bots !== undefined ? { bots: b.bots } : {}) },
       password: typeof b.password === 'string' && b.password.length > 0 ? b.password : null,
       host: { playerId: session.sub, name: session.name, guest: session.acct !== 1, ...(session.car !== undefined ? { car: session.car } : {}) },
     }),
@@ -570,7 +703,9 @@ async function joinLobby(request: Request, env: Env): Promise<Response> {
   if (!session) return error(401, 'unauthorized');
   const limited = await overLimits(request, env, session, ['lobbyJoin', 'lobbyJoinNet'], 'Demasiados intentos, espera un minuto');
   if (limited) return limited;
-  const b = await readJson<{ code?: unknown; password?: unknown }>(request);
+  const b = await readJson<{ api?: unknown; code?: unknown; password?: unknown }>(request);
+  // A page cached from before the modes redesign (no `api`): it reloads (and accepts the new terms) first.
+  if (!hasClientApi(b, QUEUE_API)) return reloadRequired();
   const code = normalizeCode(b?.code);
   if (!b || code === null) return error(400, 'bad_code', 'El código tiene 6 letras o números');
   const r = await lobbyDir(env).fetch('https://lobbies/resolve?code=' + code, { headers: await internalHeaders(env) });
@@ -655,8 +790,9 @@ async function nodeRejoin(request: Request, env: Env, playerId: string, matchId:
       console.error('node rejoin: the 200 is not a ticket');
       return error(503, 'offline', 'the node match cannot be reached right now: try again in a moment');
     }
-    // The match's cars (src/net/cosmetics.ts): a node's own welcome never carries them.
-    const out: CosmeticQueueResult = { status: 'matched', matchId, ticket: t.ticket, wsUrl: t.wsUrl, node: true, ...(t.cars ? { cars: t.cars } : {}) };
+    // The match's cars (src/net/cosmetics.ts): a node's own welcome never carries them. Its server's
+    // mark (A15) as the placement's: the object's word, absent for a project server before the terms describe hosting.
+    const out: CosmeticQueueResult & Pick<QueueMatchedExtra, 'server'> = { status: 'matched', matchId, ticket: t.ticket, wsUrl: t.wsUrl, node: true, ...(t.cars ? { cars: t.cars } : {}), ...(t.server ? { server: t.server } : {}) };
     return json(out);
   }
   if (r.status === 404 || (r.status === 410 && replyCode(r.body) !== 'left')) await releaseLock(request, env, playerId, matchId, region);
@@ -691,14 +827,27 @@ async function leave(request: Request, env: Env): Promise<Response> {
   const limited = await overLimits(request, env, session, ['leave', 'leaveNet']);
   if (limited) return limited;
   const body = (await readJson<{ matchId?: unknown; region?: unknown; connected?: unknown }>(request)) ?? {};
-  const { stub, region } = matchmakerOf(request, env, body.region);
-  const res = await stub.fetch('https://matchmaker/leave', {
-    method: 'POST',
-    headers: await internalHeaders(env, region),
-    // connected: false (the client never got into the match) only matters to a node match.
-    body: JSON.stringify({ playerId: session.sub, matchId: isHex(body.matchId, 64) ? body.matchId : undefined, connected: body.connected === false ? false : undefined }),
-  });
-  return new Response(res.body, res);
+  // connected: false (the client never got into the match) only matters to a node match.
+  const payload = JSON.stringify({ playerId: session.sub, matchId: isHex(body.matchId, 64) ? body.matchId : undefined, connected: body.connected === false ? false : undefined });
+  // The queue hub first (every queue and its matches' locks), then the region's matchmaker when it
+  // is another one (a lobby's P2P room lock lives there): released when either released. This
+  // fan-out is what covers the cross-instance blind spot (MatchmakerDO.ts header): the two
+  // instances never tell each other about a waiter or a room lock.
+  const hub = queueHub(env);
+  const res = await hub.stub.fetch('https://matchmaker/leave', { method: 'POST', headers: await internalHeaders(env, hub.region), body: payload });
+  const own = matchmakerOf(request, env, body.region);
+  if (own.region === hub.region) return new Response(res.body, res);
+  let other: { released?: unknown } | null = null;
+  try {
+    const r2 = await own.stub.fetch('https://matchmaker/leave', { method: 'POST', headers: await internalHeaders(env, own.region), body: payload });
+    other = r2.ok ? ((await r2.json()) as { released?: unknown }) : null;
+    if (!r2.ok) await r2.body?.cancel();
+  } catch (e) {
+    console.error('leave: region matchmaker failed', e);
+  }
+  if (!res.ok) return new Response(res.body, res);
+  const mine = (await res.json()) as { ok?: unknown; left?: unknown; released?: unknown };
+  return json({ ...mine, released: mine.released === true || other?.released === true });
 }
 
 /**
@@ -766,12 +915,15 @@ export default {
         ip: clientIp(request),
         session: () => (env.JWT_SECRET ? bearerSession(request, env) : Promise.resolve(null)),
         limited: (key, max, windowMs) => isolateLimited(key, max, Date.now(), windowMs),
+        spent: (key, max) => isolateSpent(key, max, Date.now()),
         limit: limiter(env),
         cors: corsHeaders(request, env),
         // Absent where the caller passes no context (the tests): nothing then outlives the answer.
         waitUntil: ctx ? (p) => ctx.waitUntil(p) : undefined,
       });
     }
+    // ---- the terms, the privacy policy and the about page (legalPages.ts): only while TERMS_VERSION is set, else 404 ----
+    if (path === '/terminos' || path === '/privacidad' || path === '/terms' || path === '/privacy' || path === '/about' || path === '/acerca') return (await import('./legalPages')).legalPage(request, env);
     // ---- the game (Workers Assets): everything outside /api, /ws, /room, /lobby and /nodes ----
     if (!path.startsWith('/api/')) return serveAsset(request, env);
     const cors = corsHeaders(request, env);
@@ -784,7 +936,14 @@ export default {
       const cfg: Record<string, unknown> = serverConfig(request, env);
       // auth.legacy (sign-in PR 9, §3.10): the username sign-in's phase and cutoff, 'none' while LEGACY_PASSWORD_UNTIL is unset.
       const auth = { ...(cfg.auth as Record<string, unknown> | undefined), email: await emailAvailable(request, env), legacy: await legacyConfig(env) };
-      return withCors(json({ ...cfg, auth }, 200, { 'cache-control': 'no-store' }), cors);
+      // queue.botLevel: the KV flag bot_level's level (edge-cached 60 s), what a 5:00 solo match plays while
+      // its player picked none (the queue's `bots`); MODOS › CASUAL shows it picked until they pick.
+      const queue = { ...(cfg.queue as Record<string, unknown>), botLevel: await casualBotLevel(env) };
+      // legal (env.ts legalConfig): the terms version in force (null until the owner publishes) and DELETION_OPEN.
+      // hosting (env.ts hostingMode): whether anyone outside the project may host a server yet; the game
+      // shows its hosting screens, the community server's mark and its report only once it is.
+      const stage = nodesConfigured(env) ? hostingStage(await hostingMode(env)) : 'closed';
+      return withCors(json({ ...cfg, queue, auth, legal: legalConfig(env), hosting: { open: stage !== 'closed', stage } }, 200, { 'cache-control': 'no-store' }), cors);
     }
     // ---- /api/where (edge colo / country / masked ip; no secret needed) ----
     if (path === '/api/where') return withCors(where(request), cors);
@@ -793,7 +952,8 @@ export default {
     try {
       // /api/news/unsubscribe (sign-in PR 13): an account route outside /api/auth/, so the login-CSRF
       // gate leaves its one-click form (RFC 8058: no Origin) through; its JSON form asks for it itself.
-      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe';
+      // /api/admin/account-delete (the legal draft's P4): a maintainer's deletion on request, an account route too.
+      const acct = path.startsWith('/api/auth/') || path === '/api/me' || path.startsWith('/api/me/') || path === '/api/leaderboard' || path === '/api/ranked/result' || path === '/api/news/unsubscribe' || path === '/api/admin/account-delete';
       // The dev-only routes (accountRoutes.ts devRoute) exist only behind their gate: closed, they are
       // an unknown route (404), never counted by a limit and never near the AccountsDO.
       const dev = path.startsWith('/api/dev/') && isDevAuth(request, env);

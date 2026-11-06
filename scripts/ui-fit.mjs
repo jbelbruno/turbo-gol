@@ -28,8 +28,10 @@
 // event or tick.
 //
 // The FINAL (plan PR 7) runs each kind's sample (window.__final: ranked with its rank card and a
-// community node's line, casual, against the AI with a full 3v3, a lobby) and fails PLAY AGAIN without
-// the focus (but on a touch screen).
+// project server's line, casual with a community server's and REPORTAR SERVIDOR, against the AI with
+// a full 3v3, a lobby) and fails PLAY AGAIN without the focus (but on a touch screen); then, with the
+// device's own input, REPORTAR SERVIDOR's sheet (Prompt 2, P2-3). Ajustes' states run with JUEGO's
+// "Solo servidores del proyecto" shown (it is on in memory for them).
 //
 // GARAJE (plan PR 8) runs as the page's guest (the live screen, each input), then its samples
 // (window.__garage): an account at 0 points, with enough to redeem, with a car owned, the stadiums'
@@ -39,7 +41,13 @@
 // account with Settings › Experimental on ('training:lab': the LAB tile, HOW TO PLAY as a row), the
 // board with 100 sample rows and yours among them or under them, then as a guest (window.__board),
 // the profile as a guest, an account, a community node operator and a password of before with no
-// email (its banner, sign-in PR 9) (window.__profile). 'summary': a
+// email (its banner, sign-in PR 9) (window.__profile); PERFIL's CONTROL DE NODOS (prompt 1, PR 2) runs
+// its samples (window.__nodesAdmin: each tab, a node's detail, the manual review, the wizard's three
+// steps, and the history's PARTIDAS with a match's detail, HISTORIAL and ALERTAS, PR 4, and OPERADORES, Prompt 2;
+// on a TV only its note); "Mis servidores" (Prompt 2, P2-3: window.__servers) runs the account outside a canary
+// ('closed'), what it lacks ('requirements'), the acceptance above PEDIR CÓDIGO ('terms'), the rules for
+// hosts of a new terms version to accept again ('again'), a host with three
+// servers ('operator'), a code's install line and follow-up ('token') and a TV's QR ('tv'). 'summary': a
 // pack's summary over the training HUD (TrainingHud.showSummary, sample results), which fails it
 // off screen, text out of its box or under 14 px on a phone (12 elsewhere), a button something
 // covers (the touch controls) or under 44 px for a finger, and AGAIN without the focus (but on a
@@ -135,7 +143,7 @@ const SIZES = [
   { name: '820x1180', w: 820, h: 1180, mobile: true, layout: 'tablet' },
 ].filter((s) => typeof args.sizes !== 'string' || args.sizes.split(',').some((x) => s.name.startsWith(x)));
 // MODOS by its tabs: 'modes:<tab>' opens it on that tab (Menu.open's tab).
-const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'final', 'touch', 'sala', 'tv'];
+const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'nodes-admin', 'nodes-admin:nodes', 'nodes-admin:tokens', 'nodes-admin:regions', 'nodes-admin:release', 'nodes-admin:points', 'nodes-admin:stats', 'nodes-admin:detail', 'nodes-admin:review', 'nodes-admin:wizard', 'nodes-admin:checklist', 'nodes-admin:token', 'nodes-admin:matches', 'nodes-admin:match', 'nodes-admin:lone', 'nodes-admin:history', 'nodes-admin:alerts', 'nodes-admin:operators', 'servers:closed', 'servers:requirements', 'servers:terms', 'servers:again', 'servers:operator', 'servers:token', 'servers:tv', 'final', 'touch', 'sala', 'tv'];
 // The Salas' samples (window.__sala, plan PR 12): [kind, members]; 'qr' on a TV only.
 const SALA_KINDS = [['members', 1], ['members', 2], ['members', 3], ['members', 4], ['members', 5], ['members', 6], ['reconnecting', 4], ['qr', 4], ['codecells', 0], ['join', 4], ['pill', 4], ['lost', 0]];
 // PR 14's samples (window.__tvSignIn): the keypad's where no fine pointer, 'tv*' on a TV, the rest everywhere.
@@ -333,9 +341,9 @@ const UI_SIZE = args['no-ui-size'] !== true;
 const FACE = typeof args.face === 'string' ? args.face.replace(/['"\\]/g, '') : null;
 // The pointer the browser starts with (Blink's PointerType / HoverType: 4 fine, 1 none; 2 hover, 1 none).
 const POINTER = args['no-pointer'] === true ? 'primaryPointerType=1,availablePointerTypes=1,primaryHoverType=1,availableHoverTypes=1' : 'primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2';
-// Ajustes (plan PR 10): each of its six tabs with the device's own input, before the touch match;
-// CONTROLES with every other input's hints too (its own tabs: L / R, Q / E).
-if (typeof args.screens !== 'string') SCREENS.splice(SCREENS.includes('touch') ? SCREENS.indexOf('touch') : SCREENS.length, 0, ...['controls', 'camera', 'game', 'audio', 'graphics', 'experimental'].map((t) => 'settings:' + t));
+// Ajustes (plan PR 10): each of its seven tabs (HUD since 2026-11-05) with the device's own input,
+// before the touch match; CONTROLES with every other input's hints too (its own tabs: L / R, Q / E).
+if (typeof args.screens !== 'string') SCREENS.splice(SCREENS.includes('touch') ? SCREENS.indexOf('touch') : SCREENS.length, 0, ...['controls', 'camera', 'game', 'hud', 'audio', 'graphics', 'experimental'].map((t) => 'settings:' + t));
 if (SCREENS.includes('settings:controls')) INPUT_SCREENS.push('settings:controls');
 
 let preview = null;
@@ -386,7 +394,8 @@ try {
     // A server already on that port answers too: vite preview must be the one that is up.
     if (!(await waitHttp(base, 30_000)) || exited) throw new Error(`vite preview did not start on ${port} (build first: VITE_UI_FIT=1 npm run build:client; is the port taken?)`);
   }
-  const cdpPort = await freePort();
+  // --cdp-port N: the browser's DevTools port (a session that keeps to its own ports), else a free one.
+  const cdpPort = typeof args['cdp-port'] === 'string' ? Number(args['cdp-port']) : await freePort();
   browser = spawn(findBrowser(args.browser), ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, `--blink-settings=${POINTER}`, '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', 'about:blank'], { stdio: 'ignore' });
   if (!(await waitHttp(`http://127.0.0.1:${cdpPort}/json/version`, 30_000))) throw new Error('the browser did not start');
   /** A fresh tab: its own emulation, nothing carried from the size before. */
@@ -494,6 +503,19 @@ try {
           await page.until("document.activeElement?.dataset?.key === 'final-again' || document.documentElement.classList.contains('tg-touch')", 2_000, 50);
           await check(input, screen, at(kind), await page.eval("document.activeElement?.dataset?.key === 'final-again' || document.documentElement.classList.contains('tg-touch') ? [] : ['PLAY AGAIN is not focused: ' + (document.activeElement?.className ?? null)]"));
         }
+        // REPORTAR SERVIDOR's sheet (Prompt 2, P2-3: the casual sample's community server) with the
+        // device's own input: its four reasons, then CANCEL.
+        if (input === own) {
+          await page.eval(`(window.__final('casual'), true)`);
+          await sleep(400);
+          await page.eval(`(() => { const b = document.querySelector('[data-key="final-report"]'); b?.focus({ preventScroll: true }); b?.click(); return true; })()`);
+          const up = await page.until(`document.querySelector('.mn-sheet') !== null`, 3_000, 50);
+          await sleep(200);
+          await page.eval(`((document.querySelector('.mn-sheet')?.getAnimations({ subtree: true }) ?? []).forEach((a) => a.finish()), true)`);
+          await check(input, screen, at('report'), up ? await page.eval(`document.querySelectorAll('.mn-sheet [data-key^="final-reason-"]').length === 4 ? [] : ['the report sheet lacks its four reasons']`) : ['REPORTAR SERVIDOR opened no sheet']);
+          await page.eval(`([...document.querySelectorAll('.mn-sheet .mn-sheet-actions button')].at(-1)?.click(), true)`);
+          await sleep(300);
+        }
         await page.eval('(window.__final(null), true)');
         return;
       }
@@ -560,15 +582,21 @@ try {
       }
       const [id, tab] = screen.split(':');
       // PR 13's states are samples on the screen itself (the tab is a sample's kind there, not Menu.open's).
-      const sampled = id === 'training' || id === 'leaderboard' || id === 'profile' || id === 'garage';
+      const sampled = id === 'training' || id === 'leaderboard' || id === 'profile' || id === 'garage' || id === 'nodes-admin' || id === 'servers';
       // GARAJE's samples (plan PR 8, window.__garage): put away before another screen (its sheet too).
       if (id !== 'garage') await page.eval('(window.__garage?.(null), true)');
+      // JUEGO's "Solo servidores del proyecto" (Prompt 2, P2-3): shown once hosting is open or while it
+      // is on, so on for Ajustes' states (in memory, never saved; read again by the open view) and off again after.
+      await page.eval(`(__game.menu.prefs.projectOnly = ${id === 'settings'}, __game.refreshSettings(), true)`);
       // An account with Settings › Experimental on (training:lab): its view's switch, set on the page.
       if (id === 'training') await page.eval(`(() => { const x = __game.menu.host.experimental; window.__uiFitLab ??= Object.getOwnPropertyDescriptor(x, 'unlocked') ?? { value: x.unlocked }; Object.defineProperty(x, 'unlocked', ${tab === 'lab' ? '{ get: () => true, configurable: true }' : 'window.__uiFitLab'}); return true; })()`);
       await page.eval(`(__game.menu.open(${JSON.stringify(id)}, true${tab !== undefined && !sampled ? ', ' + JSON.stringify(tab) : ''}), true)`);
       if (id === 'leaderboard') await page.eval(`(window.__board(${JSON.stringify(tab ?? null)}), true)`);
       if (id === 'profile') await page.eval(`(window.__profile(${JSON.stringify(tab ?? null)}), true)`);
       if (id === 'garage') await page.eval(`(window.__garage(${JSON.stringify(tab ?? null)}), true)`);
+      if (id === 'nodes-admin') await page.eval(`(window.__nodesAdmin(${JSON.stringify(tab ?? 'summary')}), true)`);
+      // "Mis servidores" (Prompt 2, P2-3): its samples (window.__servers), dark or not (a sample draws whatever the config says).
+      if (id === 'servers') await page.eval(`(window.__servers(${JSON.stringify(tab ?? 'operator')}), true)`);
       await sleep(input === own ? 400 : 200); // a mount and a screen's own first render (__uiFit runs the fit it queued)
       if (id === 'modes' && input === own && (tab === 'casual' || tab === 'ranked')) {
         // Idle with FIND MATCH (or SIGN IN) focused, then searching every format (the longest

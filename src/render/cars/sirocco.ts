@@ -1,25 +1,25 @@
 /**
- * The Cóndor ('condor'): an aero jet racer after the Andean condor gliding. A low lofted fuselage
- * ending in a sharp white beak hooked down to a point (the ruff's white), a cab-forward bubble
- * canopy, a proud white ruff behind the glass and a low spine running back to a tall swept dorsal
+ * The Sirocco ('sirocco'): an aero jet racer, the unreachable: a gust of wind that nobody catches. A low lofted fuselage
+ * ending in a sharp white nose tip hooked down to a point (the collar's white), a cab-forward bubble
+ * canopy, a proud white collar behind the glass and a low spine running back to a tall swept dorsal
  * fin (an ice-white leading edge) with a T-tail; the fuselage ends in a dark engine bay, twin
  * near-black satin petal afterburners standing out of it (a team glow rim, a near-black bore, a
  * team glowing core inside). One side body per side faired over both wheels: a front fender and a
  * raised rear haunch, each with a real wheel opening over its tyre (a carbon liner under it),
- * joined low by a rocker sill; above the sill a dihedral delta wing (white secondary-feather band
+ * joined low by a rocker sill; above the sill a dihedral delta wing (white trailing-edge band
  * on top, carbon below) runs from the fuselage to the haunch. Each haunch ends in a painted bevel
  * round a dark tail-lamp housing with a red slit across its top: the tail lights sit outboard,
  * over the rear tyres, and the carbon valance between the tyres stays unlit. Team glow lamp lines:
- * along the nose's ridge from the canopy down to the beak, along each fender's crest, from each
+ * along the nose's ridge from the canopy down to the nose tip, along each fender's crest, from each
  * wing's root along its leading edge and on along the haunch's shoulder to the tail bevel, along
- * the spine from the ruff to the fin and across the T-tail's trailing edge. Swept slash headlights
+ * the spine from the collar to the fin and across the T-tail's trailing edge. Swept slash headlights
  * on the fenders' inboard crests. Paint is team colour above a low two-tone line (gloss carbon
  * below it, along the sills) with an ice-white pinstripe, two panel grooves and no chevrons.
  * Wheels: slick tyres on dark aero disc covers with five light turbine vanes, a light ring, six
  * bolts (high) and a team hub; the rear ones a little bigger.
  *
  * Designed on the default hitbox in the build frame (kit.hl / hh / hw 58.75 / 17.83 / 41.85):
- * beak 58.6, nozzle exit -58, T-tail top 16.7, body floor -17.6, haunches out to |z| 41.7. The
+ * nose tip 58.6, nozzle exit -58, T-tail top 16.7, body floor -17.6, haunches out to |z| 41.7. The
  * wheel openings follow the body's own wheels (k.wheels), 2.5 uu over the front tyres (steering)
  * and 1.9 over the rear ones. Within the dune runner's triangles on both details (docs/cars.md
  * Budgets): its geometry is not pinned, but the part order is the vertex order, so keep it. On low
@@ -95,7 +95,7 @@ function faceted(g: THREE.BufferGeometry): THREE.BufferGeometry {
 // Every table is in the build frame (hitbox-centred uu, +x forward, +y up, +z right).
 /** The body's floor (the hitbox floor is -17.83). */
 const FLOOR = -17.6;
-// Fuselage, beak to tail: x, half width, y0, y1, superellipse exponent (under 2 at the beak: a
+// Fuselage, nose tip to tail: x, half width, y0, y1, superellipse exponent (under 2 at the tip: a
 // ridge on top). The tip hooks down; the tail is a wide dark engine bay the afterburners leave.
 const FUSE: readonly (readonly [number, number, number, number, number])[] = [
   [58.6, 0.5, -17.3, -16.5, 1.8],
@@ -111,10 +111,10 @@ const FUSE: readonly (readonly [number, number, number, number, number])[] = [
   [-46, 15.0, -17.0, 3.2, 3.2],
   [-54, 14.6, -16.2, 3.4, 3.4],
 ];
-/** The white beak runs forward of this x (a FUSE ring); the engine bay is the fuselage's tail face. */
-const BEAK_X = 55.2;
+/** The white nose tip runs forward of this x (a FUSE ring); the engine bay is the fuselage's tail face. */
+const NOSE_TIP_X = 55.2;
 const TAIL_X = -54;
-// Canopy and ruff: x, half width, equator y (sunk CAB_FLOOR into the fuselage), top y. The ruff
+// Canopy and collar: x, half width, equator y (sunk CAB_FLOOR into the fuselage), top y. The collar
 // stands proud of the glass and of the spine.
 const CAB: readonly (readonly [number, number, number, number])[] = [
   [47, 2.4, -3.4, -1.4],
@@ -128,7 +128,7 @@ const CAB: readonly (readonly [number, number, number, number])[] = [
   [-1.6, 10.4, 0.4, 10.6],
   [-3.4, 7.4, 0.5, 7.6],
 ];
-// The spine, from inside the ruff to the tail, kept low so the fin stands tall.
+// The spine, from inside the collar to the tail, kept low so the fin stands tall.
 const SPINE: readonly (readonly [number, number, number, number])[] = [
   [-2.6, 6.0, 0.6, 6.6],
   [-10, 5.4, 0.8, 5.8],
@@ -223,7 +223,7 @@ const LIP_R = 4.9;
 const CORE_R = 2.4;
 const PETAL = 0.3;
 
-/** The ruff, the fin's leading edge and the wings' secondary-feather bands: white satin trim (no livery). */
+/** The collar, the fin's leading edge and the wings' trailing-edge bands: white satin trim (no livery). */
 const WHITE_TRIM: Surface = { color: 0xe6eaf0, metal: 0.1, rough: 0.4, emissive: 0, kind: CAR_KIND.TRIM };
 /** The afterburner petals: near-black satin gunmetal, rough enough that no facet glints (the heat tint stays at the lip). */
 const PETALS: Surface = { ...EXHAUST, color: 0x181b20, metal: 0.55, rough: 0.62 };
@@ -289,14 +289,14 @@ function build(k: BodyKit): void {
   const tail: Surface = hi ? { ...TAILLIGHT, emissive: 1.5 } : { ...TAILLIGHT, color: 0xff0d16, emissive: 0.4 };
   const core: Surface = { ...k.strip, emissive: hi ? 0.6 : 0.3 };
 
-  // Fuselage: the beak (a white hooked tip) to the engine bay (its dark tail face).
+  // Fuselage: the nose tip (a white hooked point) to the engine bay (its dark tail face).
   const fuseSeg = hi ? 20 : 10;
   k.pushBy(
     loft(FUSE.map(([x, w, y0, y1, n]) => sec(x, w, y0, y1, 0, n)), fuseSeg, 3),
-    (x, _y, _z, nx) => (x > BEAK_X ? WHITE_TRIM : x < TAIL_X + 0.5 && nx < -0.9 ? TRIM : paint),
+    (x, _y, _z, nx) => (x > NOSE_TIP_X ? WHITE_TRIM : x < TAIL_X + 0.5 && nx < -0.9 ? TRIM : paint),
   );
 
-  // Canopy with the white ruff behind the glass, then the low spine.
+  // Canopy with the white collar behind the glass, then the low spine.
   const cabRing = ([x, w, yEq, yTop]: readonly [number, number, number, number]): Ring => ({ o: [x, yEq, 0], u: [0, 0, 1], v: [0, 1, 0], hu: w, hv: yTop - yEq, hvNeg: CAB_FLOOR });
   k.pushBy(loft(CAB.map(cabRing), hi ? 18 : 10, CAB_N), (x) => (x > GLASS_END ? glass : WHITE_TRIM));
   k.push(loft(SPINE.map(cabRing), hi ? 8 : 6, CAB_N), paint);
@@ -451,7 +451,7 @@ function build(k: BodyKit): void {
     const haunch = rings.filter(([x]) => x < SIDE_SILL[SIDE_SILL.length - 1] && x > SIDE_TAIL);
     lamp([...wingLe, ...haunch.map(([x, zc, w, y0, y1]) => onRing(x, w, y0, y1, side * zc, SIDE_N, sideSeg, mirror(shoulderA), off))], wide, flat);
   }
-  // Along the spine from the ruff to the fin, and across the T-tail's trailing edge.
+  // Along the spine from the collar to the fin, and across the T-tail's trailing edge.
   lamp(
     [
       [-3.6, 6.55 + off, 0],
@@ -462,7 +462,7 @@ function build(k: BodyKit): void {
     hi ? 0.45 : 0.9,
     flat,
   );
-  // Along the nose's ridge from the canopy down to the beak (the culmen).
+  // Along the nose's ridge from the canopy down to the nose tip.
   const ridge = (x: number): V3 => {
     let i = 0;
     while (i < FUSE.length - 2 && FUSE[i + 1][0] > x) i++;
@@ -502,8 +502,8 @@ function build(k: BodyKit): void {
  * Slick tyres on aero disc covers: a dark disc flush with the tyre faces (dish 1), five light
  * turbine vanes standing proud of it, a light ring round it, six bolts on high and a team-paint hub.
  */
-export const CONDOR_AERO: WheelStyle = {
-  id: 'condor-aero',
+export const SIROCCO_AERO: WheelStyle = {
+  id: 'sirocco-aero',
   tyre: 'slick',
   spokes: 5,
   spokeWidth: 0.16,
@@ -517,10 +517,10 @@ export const CONDOR_AERO: WheelStyle = {
   budget: { low: 340, high: 664 },
 };
 
-export const CONDOR: CarBodySpec = {
-  id: 'condor',
+export const SIROCCO: CarBodySpec = {
+  id: 'sirocco',
   build,
-  wheels: { style: CONDOR_AERO, visual: 1.04, outer: 38.5, rear: { visual: 1.08, outer: 40, width: 1 } },
+  wheels: { style: SIROCCO_AERO, visual: 1.04, outer: 38.5, rear: { visual: 1.08, outer: 40, width: 1 } },
   // Car-local uu (the build frame + (13.88, 20.76, 0)): the two-tone line low on the body at
   // build y -11.9 (carbon along the sills and under the fenders' ends), the grooves across the nose
   // deck (build x 45) and the rear deck (build x -30); the heat tint only on the last 2.5 uu.

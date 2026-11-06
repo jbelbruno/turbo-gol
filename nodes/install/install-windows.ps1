@@ -16,7 +16,7 @@
 #
 # What it does (and nothing else), for the current Windows user and without admin rights:
 #   1. checks the inputs, and that this file carries the release key (scripts/build-node.mjs fills it in)
-#   2. Node.js >= 24: the one on PATH, or the LTS from winget (Windows may ask for permission there)
+#   2. Node.js >= 26: the one on PATH, or the LTS from winget (Windows may ask for permission there)
 #   3. %LOCALAPPDATA%\TurbogolNode (launcher, helper) and %LOCALAPPDATA%\TurbogolNode\data (node key,
 #      releases, state, node.log)
 #   4. downloads the launcher and checks its Ed25519 signature with Node against the release key below
@@ -203,20 +203,20 @@ function Update-SessionPath {
   $env:Path = (@($machine, $user, $env:Path) | Where-Object { $_ }) -join ';'
 }
 
-# Returns @{ Exe; Major; Version; ExecPath } for a Node.js >= 24, installing the LTS when needed.
+# Returns @{ Exe; Major; Version; ExecPath } for a Node.js >= 26, installing the LTS when needed.
 function Install-NodeIfNeeded {
   $exe = Get-NodeExe
   $info = Get-NodeInfo $exe
-  if ($info -and $info.Major -ge 24) {
+  if ($info -and $info.Major -ge 26) {
     Say 'Node.js {0} ({1})' $info.Version, $exe
     $info.Exe = $exe
     return $info
   }
-  if ($info) { Say 'Tu Node.js es el {0} y hace falta el 24 o m\u00e1s nuevo: instalo la versi\u00f3n LTS con winget.' $info.Version }
+  if ($info) { Say 'Tu Node.js es el {0} y hace falta el 26 o m\u00e1s nuevo: instalo la versi\u00f3n LTS con winget.' $info.Version }
   else { Say 'No encontr\u00e9 Node.js: instalo la versi\u00f3n LTS con winget.' }
   $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $winget) {
-    Fail 'No encuentro winget para instalar Node.js. Instala Node.js 24 LTS o m\u00e1s nuevo desde https://nodejs.org, abre una terminal nueva y vuelve a ejecutar este comando.'
+    Fail 'No encuentro winget para instalar Node.js. Instala Node.js 26 LTS o m\u00e1s nuevo desde https://nodejs.org, abre una terminal nueva y vuelve a ejecutar este comando.'
   }
   Note 'Windows te puede pedir permiso para instalarlo: ac\u00e9ptalo.'
   $ErrorActionPreference = 'Continue'
@@ -227,14 +227,14 @@ function Install-NodeIfNeeded {
   Update-SessionPath
   $exe = Get-NodeExe
   $info = Get-NodeInfo $exe
-  if (-not $info -or $info.Major -lt 24) {
+  if (-not $info -or $info.Major -lt 26) {
     # An older node.exe earlier on PATH (another install method) can hide the new one.
     $std = Join-Path $env:ProgramFiles 'nodejs\node.exe'
     $stdInfo = Get-NodeInfo $std
-    if ($stdInfo -and $stdInfo.Major -ge 24) { $exe = $std; $info = $stdInfo }
+    if ($stdInfo -and $stdInfo.Major -ge 26) { $exe = $std; $info = $stdInfo }
   }
-  if (-not $info -or $info.Major -lt 24) {
-    Fail 'winget no dej\u00f3 instalado Node.js 24 o m\u00e1s nuevo (c\u00f3digo {0}). Instala la versi\u00f3n LTS desde https://nodejs.org, abre una terminal nueva y vuelve a ejecutar este comando.' $code
+  if (-not $info -or $info.Major -lt 26) {
+    Fail 'winget no dej\u00f3 instalado Node.js 26 o m\u00e1s nuevo (c\u00f3digo {0}). Instala la versi\u00f3n LTS desde https://nodejs.org, abre una terminal nueva y vuelve a ejecutar este comando.' $code
   }
   Say 'Node.js {0} instalado ({1})' $info.Version, $exe
   $info.Exe = $exe

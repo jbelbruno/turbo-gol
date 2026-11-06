@@ -1,6 +1,8 @@
 /**
  * Custom lobbies, browser side (server/src/LobbyDO.ts, LobbyDirectoryDO.ts): the public list
- * (GET /api/lobbies), create (POST /api/lobbies), join by code (POST /api/lobbies/join), then one
+ * (GET /api/lobbies), create (POST /api/lobbies), join by code (POST /api/lobbies/join; both carry
+ * the client-version marker `api` (src/net/queueWait.ts QUEUE_API): a page from before the modes
+ * redesign is refused with 426 reload_required), then one
  * lobby socket (/lobby/<id>, ['tg1', 'ticket.<jwt>'], JSON text frames) that carries the live state
  * (members, teams, host, settings) and, when the host starts, this player's own queue result: the
  * same QueueResult / QueueResultP2p POST /api/queue answers, handed to the Game as an assignment.
@@ -34,6 +36,7 @@ import type { QueueResultP2p } from './p2p/protocol';
 import type { LobbyClientMsg, LobbyServerMsg, LobbySettings, LobbyState, LobbySummary, LobbyTicketAnswer, RegionId } from './account';
 import { AccountError } from './AccountClient';
 import { resolveWsUrl } from './NetClient';
+import { QUEUE_API } from './queueWait';
 import type { FetchLike, ResponseLike, WebSocketFactory, WebSocketLike } from './NetClient';
 import { hasServerText, serverText, t } from '../i18n';
 
@@ -211,6 +214,8 @@ export class LobbyClient {
   async create(c: LobbyCreate): Promise<void> {
     this.leave();
     const answer = await this.call<LobbyTicketAnswer>('/api/lobbies', {
+      // The client-version marker: a page from before the modes redesign gets 426 reload_required.
+      api: QUEUE_API,
       name: c.settings.name,
       mode: c.settings.mode,
       visibility: c.settings.visibility,
@@ -227,7 +232,7 @@ export class LobbyClient {
 
   async join(code: string, password: string | null): Promise<void> {
     this.leave();
-    const answer = await this.call<LobbyTicketAnswer>('/api/lobbies/join', { code, password: password ?? undefined });
+    const answer = await this.call<LobbyTicketAnswer>('/api/lobbies/join', { api: QUEUE_API, code, password: password ?? undefined });
     this.password = password;
     this.open(answer);
   }
@@ -341,7 +346,7 @@ export class LobbyClient {
     let answer: LobbyTicketAnswer | null = null;
     let final: string | null = null;
     try {
-      answer = await this.call<LobbyTicketAnswer>('/api/lobbies/join', { code, password: this.password ?? undefined });
+      answer = await this.call<LobbyTicketAnswer>('/api/lobbies/join', { api: QUEUE_API, code, password: this.password ?? undefined });
     } catch (e) {
       final = e instanceof AccountError ? (JOIN_FINAL[e.code] ?? null) : null;
       console.warn(`lobby: reconnect try ${this.tries + 1} failed: ${e instanceof AccountError ? `${e.status} ${e.code}` : String(e)}`);

@@ -1,7 +1,8 @@
 // Unit tests for server/src/MatchDO.ts on fakes: the explicit leave of a server match (POST
 // /internal/leave from the matchmaker): the slot's socket is closed, the slot is flagged left (no
 // rejoin, no new socket), the host's bots drive the car, the others are told, and the last human's
-// leave ends the match at once (connected or not: locks and capacity released); plus the Worker's /api/rejoin and /api/leave
+// leave ends the match at once (connected or not: locks and capacity released); the region a ranked
+// report names (the host region) and where the release goes (the queue hub); plus the Worker's /api/rejoin and /api/leave
 // around it (server/src/index.ts). No workerd and no wasm: 'cloudflare:workers'
 // is stubbed and MatchDO's './wasm' (createHostArena) is replaced by a FakeSim arena through the
 // resolve hook (server/test/smoke.mjs drives the real object against wrangler dev). Run from server/:
@@ -197,20 +198,30 @@ class FakeStorage {
 
 const random32 = () => Array.from({ length: 32 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
 
-/** A created MatchDO for `roster` with helpers: internal calls, upgrades, the matchmaker's /release calls. */
-async function makeMatch(roster) {
+/** A created MatchDO for `roster` (`extra`: more create fields) with helpers: internal calls, upgrades, the matchmaker's /release calls. */
+async function makeMatch(roster, extra = {}) {
   const storage = new FakeStorage();
   await storage.put('hostColo', 'TST'); // no colo trace (network) in the tests
   const waits = [];
   const ctx = { storage, blockConcurrencyWhile: (fn) => fn(), waitUntil: (p) => waits.push(Promise.resolve(p).catch(() => undefined)) };
-  const releases = [];
+  const releases = []; // each with the matchmaker object it reached (`name`)
+  const accounts = []; // AccountsDO's calls (a ranked match's report)
   const env = {
     JWT_SECRET: SECRET,
     MATCHMAKER: {
       idFromName: (n) => n,
+      get: (name) => ({
+        fetch: async (url, init) => {
+          releases.push({ name, url, body: JSON.parse(init.body) });
+          return new RealResponse('{"ok":true}');
+        },
+      }),
+    },
+    ACCOUNTS: {
+      idFromName: (n) => n,
       get: () => ({
         fetch: async (url, init) => {
-          releases.push({ url, body: JSON.parse(init.body) });
+          accounts.push({ path: new URL(url).pathname, body: JSON.parse(init.body) });
           return new RealResponse('{"ok":true}');
         },
       }),
@@ -228,7 +239,7 @@ async function makeMatch(roster) {
     );
     return { status: res.status, json: await res.json() };
   };
-  const created = await internal('/internal/create', { matchId: MATCH_ID, mode: '1v1', region: 'test', roster, matchLengthSeconds: 300, createdAt: Date.now() });
+  const created = await internal('/internal/create', { matchId: MATCH_ID, mode: '1v1', region: 'test', roster, matchLengthSeconds: 300, createdAt: Date.now(), ...extra });
   assert.equal(created.status, 200, `create: ${JSON.stringify(created.json)}`);
   /** The Worker's forwarded upgrade for `slot` (a fresh ticket id): the raw Response. */
   const upgrade = (slot) => {
@@ -251,12 +262,39 @@ async function makeMatch(roster) {
     await mdo.shutdown('test');
     await Promise.all(waits);
   };
-  return { mdo, storage, internal, upgrade, join, releases, shutdown, sim: () => sims.at(-1) };
+  return { mdo, storage, internal, upgrade, join, releases, accounts, shutdown, sim: () => sims.at(-1) };
 }
 
 const A = { slot: 0, team: 0, kind: 'player', name: 'A', playerId: 'pa' };
 const B = { slot: 1, team: 1, kind: 'player', name: 'B', playerId: 'pb' };
 const BOT = { slot: 1, team: 1, kind: 'bot', name: 'Bot 1' };
+
+test("MatchDO /internal/create: the bots' level is stored with the record and drives the host's BotTeams; absent (ranked, an older matchmaker) RoomHost's medium; junk is 400", async () => {
+  const hard = await makeMatch([A, BOT], { botDifficulty: 'hard' });
+  try {
+    assert.equal(hard.storage.map.get('record').botDifficulty, 'hard', 'stored');
+    assert.equal(hard.mdo.host.botDifficulty, 'hard', 'the host runs it');
+    assert.equal(hard.mdo.host.teams.length, 1, 'the red bot');
+    for (const team of hard.mdo.host.teams) assert.equal(team.difficulty, 'hard');
+    assert.equal((await hard.internal('/internal/status')).json.botDifficulty, 'hard');
+  } finally {
+    await hard.shutdown();
+  }
+  const plain = await makeMatch([A, BOT]);
+  try {
+    assert.equal('botDifficulty' in plain.storage.map.get('record'), false, 'no field');
+    assert.equal(plain.mdo.host.botDifficulty, 'medium', "RoomHost's default");
+    assert.equal((await plain.internal('/internal/status')).json.botDifficulty, null);
+  } finally {
+    await plain.shutdown();
+  }
+  for (const bad of ['x', 'Hard', 2, null]) {
+    const mdo = new MatchDO({ storage: new FakeStorage(), blockConcurrencyWhile: (fn) => fn(), waitUntil: () => undefined }, { JWT_SECRET: SECRET });
+    const res = await mdo.fetch(new Request('https://match/internal/create', { method: 'POST', headers: { [INTERNAL_HEADER]: await internalSecret(SECRET), 'content-type': 'application/json' }, body: JSON.stringify({ matchId: MATCH_ID, mode: '1v1', region: 'test', roster: [A, BOT], matchLengthSeconds: 300, botDifficulty: bad }) }));
+    assert.deepEqual([res.status, (await res.json()).error], [400, 'bad_request'], JSON.stringify(bad));
+    assert.equal(mdo.record, null, 'nothing stored');
+  }
+});
 
 test('MatchDO /internal/leave: socket closed 1000 left, slot flagged (rejoin + upgrade 410 left, persisted, status), bots drive the car, the others get botTakeover; idempotent', async () => {
   const h = await makeMatch([A, B]);
@@ -325,19 +363,19 @@ test('MatchDO /internal/leave: socket closed 1000 left, slot flagged (rejoin + u
 });
 
 test("MatchDO: the welcome's roster carries each seat's car (src/net/cosmetics.ts), a rejoin's too; a car the catalog does not know is dropped; a left seat's bot keeps the car", async () => {
-  const h = await makeMatch([{ ...A, car: 'tero' }, { ...B, car: 'bugatti' }]);
+  const h = await makeMatch([{ ...A, car: 'magma' }, { ...B, car: 'bugatti' }]);
   try {
-    assert.deepEqual(h.mdo.record.roster.map((e) => e.car ?? null), ['tero', null], 'stored field by field');
+    assert.deepEqual(h.mdo.record.roster.map((e) => e.car ?? null), ['magma', null], 'stored field by field');
     assert.equal('car' in h.mdo.record.roster[1], false);
     const wsA = await h.join(0);
     const w = wsA.json(P.MsgType.Welcome)[0];
-    assert.deepEqual(w.roster.map((e) => e.car ?? null), ['tero', null]);
+    assert.deepEqual(w.roster.map((e) => e.car ?? null), ['magma', null]);
     assert.equal('playerId' in w.roster[0], false, 'still no playerId');
     await h.join(1);
     assert.equal((await h.internal('/internal/leave', { playerId: 'pa' })).status, 200);
     const wsB2 = await h.join(1);
     const again = wsB2.json(P.MsgType.Welcome)[0];
-    assert.deepEqual(again.roster.map((e) => [e.kind, e.car ?? null]), [['bot', 'tero'], ['player', null]], 'the bot drives the same body');
+    assert.deepEqual(again.roster.map((e) => [e.kind, e.car ?? null]), [['bot', 'magma'], ['player', null]], 'the bot drives the same body');
   } finally {
     await h.shutdown();
   }
@@ -464,6 +502,36 @@ test('MatchDO: a dropped socket (no leave) keeps the match for a rejoin; the emp
   }
 });
 
+test('MatchDO: a ranked match names its host region in /ranked-result and /ranked-cancel (ranked_matches.region), a record from before it its region; its release always goes to its region, the queue hub', async () => {
+  const hostedEu = { ranked: true, region: 'SA', host: 'EU' };
+  const regionOf = (h, path) => h.accounts.filter((c) => c.path === path).map((c) => c.body.region);
+  const releasedTo = (h) => h.releases.filter((x) => x.url === 'https://matchmaker/release').map((x) => x.name);
+  // Rated.
+  let h = await makeMatch([A, B], hostedEu);
+  try {
+    assert.deepEqual([h.mdo.record.region, h.mdo.record.host, (await h.storage.get('record')).host], ['SA', 'EU', 'EU'], 'kept in the record');
+    h.mdo.reportRanked(0);
+  } finally {
+    await h.shutdown();
+  }
+  assert.deepEqual(regionOf(h, '/ranked-result'), ['EU']);
+  assert.deepEqual(regionOf(h, '/ranked-cancel'), [], 'reported once');
+  assert.deepEqual(releasedTo(h), ['mm:SA']);
+  // Cancelled (a no-show), and lost to a shutdown before anyone played.
+  h = await makeMatch([A, B], hostedEu);
+  await h.mdo.cancelRanked('no_show', ['pb']);
+  await h.shutdown();
+  assert.deepEqual([regionOf(h, '/ranked-cancel'), releasedTo(h)], [['EU'], ['mm:SA']]);
+  h = await makeMatch([A, B], hostedEu);
+  await h.shutdown();
+  assert.deepEqual([regionOf(h, '/ranked-cancel'), releasedTo(h)], [['EU'], ['mm:SA']]);
+  // A record from before `host` (created by an older matchmaker): its region stands in.
+  h = await makeMatch([A, B], { ranked: true, region: 'SA' });
+  assert.equal(h.mdo.record.host, undefined);
+  await h.shutdown();
+  assert.deepEqual([regionOf(h, '/ranked-cancel'), releasedTo(h)], [['SA'], ['mm:SA']]);
+});
+
 // ---- Worker routes around the explicit leave (server/src/index.ts) ---------------------------------
 
 const worker = (await import('../src/index.ts')).default;
@@ -538,12 +606,33 @@ test('Worker /api/leave forwards { playerId, matchId } to the matchmaker (matchI
   assert.ok(h.mmCalls.every((c) => c.path === '/leave'));
 });
 
-test("Worker /api/config hands the client the server queue's bot fill (MatchmakerDO BOT_FILL_MS: the menus' bots countdown)", async () => {
-  const { BOT_FILL_MS } = await import('../src/MatchmakerDO.ts');
+test("Worker /api/config: botFillMs null (older pages hide their server countdown) and the queues' clocks (the 5:00 solo match, the widening; accounts only)", async () => {
+  const Q = await import('../src/queuePlan.ts');
   const { env } = workerEnv({ status: 200, body: {} });
   const res = await worker.fetch(new Request('http://127.0.0.1:8787/api/config'), env);
   assert.equal(res.status, 200);
   const cfg = await res.json();
-  assert.equal(cfg.botFillMs, BOT_FILL_MS);
-  assert.equal(cfg.botFillMs, 10_000, 'the constant the server queue fills with');
+  assert.equal(cfg.botFillMs, null);
+  assert.deepEqual(cfg.queue, { soloAfterMs: Q.SOLO_AFTER_MS, widenMs: { casual: Q.CASUAL_WIDEN_MS, ranked: Q.RANKED_WIDEN_MS }, accountRequired: true, botLevel: 'hard' });
+  assert.deepEqual(cfg.queue, { soloAfterMs: 300_000, widenMs: { casual: 60_000, ranked: 120_000 }, accountRequired: true, botLevel: 'hard' });
+});
+
+test("Worker /api/config: queue.botLevel is the KV flag bot_level's level (what a 5:00 solo match plays while its player picked none: MODOS shows it picked); unset, junk or an unreadable KV is hard", async () => {
+  for (const [stored, want] of [[null, 'hard'], ['easy', 'easy'], [' MEDIUM ', 'medium'], ['hard', 'hard'], ['expert', 'hard'], ['', 'hard'], ['throw', 'hard']]) {
+    const { env } = workerEnv({ status: 200, body: {} });
+    const reads = [];
+    env.FLAGS = {
+      get: async (name, opts) => {
+        reads.push([name, opts?.cacheTtl]);
+        if (stored === 'throw') throw new Error('kv down');
+        return name === 'bot_level' ? stored : null;
+      },
+    };
+    const res = await worker.fetch(new Request('http://127.0.0.1:8787/api/config'), env);
+    assert.equal(res.status, 200, String(stored));
+    const cfg = await res.json();
+    assert.equal(cfg.queue.botLevel, want, JSON.stringify(stored));
+    assert.equal(cfg.queue.soloAfterMs, 300_000, 'the clocks stay');
+    assert.deepEqual(reads.find(([n]) => n === 'bot_level'), ['bot_level', 60], 'edge-cached as every flag');
+  }
 });

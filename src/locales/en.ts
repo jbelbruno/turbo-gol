@@ -49,18 +49,22 @@ export default {
   'theme.canyon-sunset': 'Red canyon',
   'theme.alpine-day': 'Alpine valley',
   // Cosmetic cars (src/game/cosmetics.ts): the garage and the shop. The names are invented proper
-  // names, Spanish words kept as they are (the pampas wind, the capybara, the condor, the southern
-  // lapwing); each *Desc is the car's one line under its name
+  // names, the same in every language (wild nature: wind, snow, fire); each *Desc is the car's one line under its name
   'car.dune': 'Dune',
-  'car.duneDesc': 'Bubble canopy, roll hoop and knobby tyres: the all-rounder',
-  'car.pampero': 'Pampero',
-  'car.pamperoDesc': 'Low and sharp, like the cold wind of the pampas',
-  'car.carpincho': 'Carpincho',
-  'car.carpinchoDesc': 'Round, sturdy and unflappable, like the capybara',
-  'car.condor': 'Cóndor',
-  'car.condorDesc': 'Long and wide, built to glide',
-  'car.tero': 'Tero',
-  'car.teroDesc': 'A compact rally hatch, loud and always on the alert',
+  'car.duneDesc': 'The beginning: bubble canopy, roll hoop and knobby tyres',
+  'car.duneStory': 'The Dune is everyone\'s first car, and the start of something big. Nobody sees at first how much power it hides; the ones who learn it never forget where it all began.',
+  'car.cyclone': 'Cyclone',
+  'car.cycloneDesc': 'The edge: it cuts the wind and leaves rivals behind',
+  'car.cycloneStory': 'Some cars race, others carve their own path. The Cyclone was born to cut through the wind and defy every limit. Behind its wheel, you don\'t chase your rivals: you leave them behind. Some get to see it pass. Few forget its silhouette.',
+  'car.vortex': 'Vortex',
+  'car.vortexDesc': 'The untamed: it breaks through whatever stands in its way',
+  'car.vortexStory': 'Not everyone is born to dodge obstacles. Some are born to break through them. The armoured Vortex is an unstoppable force, a promise that nothing ends until you decide it does. When everyone backs down, you keep rolling.',
+  'car.sirocco': 'Sirocco',
+  'car.siroccoDesc': 'The unreachable: a gust of wind nobody catches',
+  'car.siroccoStory': 'Some leave tracks. Others leave only a gust of wind. The Sirocco, long and swept back like a jet, seems made of air. Just when your rivals think they\'ve caught you, you\'re already a fading memory. Not everyone can keep up.',
+  'car.magma': 'Magma',
+  'car.magmaDesc': 'The fire within: small, stubborn, impossible to stop',
+  'car.magmaStory': 'It was never about size, but how much fire burns inside you. The Magma turns every corner into an opportunity and every challenge into fuel. You may be the smallest on the field, but nobody wants to find out just how far you can go.',
   'tier.bronze': 'Bronze',
   'tier.silver': 'Silver',
   'tier.gold': 'Gold',
@@ -210,6 +214,17 @@ export default {
   // Screen-reader names of the plate's two buttons; {rank} is a rank ('Gold II · 2v2') or home.unranked
   'home.plateProfile': 'Profile: {name}, {rank}',
   'home.plateGarage': 'Garage: your car is {car}',
+  // A guest's hero tag: the offline match against the bots starts at once
+  'home.instant': 'RIGHT AWAY',
+  // The card over Inicio's tiles after a guest's offline match (VER SALAS, CREAR CUENTA, close)
+  'home.nextTitle': 'Now, with people?',
+  'home.nextLine': 'Join a public lobby, or make an account to play Casual.',
+  'home.nextLineTv': 'Sign in with your phone to join lobbies and play Casual.',
+  'home.nextRooms': 'SEE LOBBIES',
+  'home.nextAccount': 'CREATE ACCOUNT',
+  'home.nextClose': 'Close',
+  // The tag of the LOBBIES tile (its title is modes.friends)
+  'home.lobbiesSlot': 'PUBLIC',
 
   // GARAJE (src/ui/screens/garage.ts, plan §1.4.2): the cars and the stadiums. Server points are
   // earned only by hosting a community server (nodes/docs/RECOMPENSAS.md): never bought, won by
@@ -231,9 +246,9 @@ export default {
   'garage.paused': 'Redeeming paused · check My server in your profile',
   // The lime card: every car's price, then how points are earned; its short form on a phone
   'garage.eachCar': 'EACH CAR · {points} PTS',
-  'garage.earn': 'EARN POINTS BY HOSTING A COMMUNITY SERVER',
-  'garage.earnSub': 'On your PC or a VPS · see the guide',
-  'garage.earnShort': 'How to earn points',
+  'garage.earn': 'HOSTING A SERVER EARNS POINTS: NOT OPEN YET',
+  'garage.earnSub': 'How it works · see the guide',
+  'garage.earnShort': 'How they are earned',
   // A row's state
   'garage.stateEquipped': 'Equipped',
   'garage.stateEquippedFree': 'Equipped · Free',
@@ -271,9 +286,9 @@ export default {
   // Toast; {car} is the car's name
   'garage.equipped': '{car} equipped',
   'garage.loading': 'Loading your points…',
-  // How points are earned (GANA PUNTOS, a locked car's REDEEM): the guide and its QR
-  'garage.guideTitle': 'How to earn server points',
-  'garage.guideText': 'Host a community server on your PC or a VPS: every verified match it hosts adds points. Playing never earns them.',
+  // How points are earned (the earn card, garage.earn; a locked car's REDEEM): the guide and its QR
+  'garage.guideTitle': 'How server points are earned',
+  'garage.guideText': 'Earned only by hosting a community server, never by playing. Today only the project runs servers: you cannot register one yet.',
   'garage.guideScan': 'Scan it to open the guide on your phone.',
   'garage.guideOpen': 'OPEN THE GUIDE',
   // ESTADIOS
@@ -282,7 +297,7 @@ export default {
   'garage.stadiumNote': 'Used in your offline matches, in training and behind the menus',
   // Server points everywhere (PUNTOS DE SERVIDOR card, the bar's pill)
   'points.title': 'SERVER POINTS',
-  'points.only': 'Earned only by hosting a community server. Never sold.',
+  'points.only': 'Earned only by hosting a community server. Nobody earns them yet. Never sold.',
   // The bar's pill on GARAJE and PERFIL, after the number
   'points.words': 'server points',
 
@@ -290,12 +305,12 @@ export default {
   'modes.casual': 'CASUAL',
   'modes.casualSub': 'Quick matches, no rank',
   'modes.casualSubShort': 'Quick, no rank',
-  'modes.friends': 'WITH FRIENDS',
-  'modes.friendsSub': 'Make a lobby, share the link',
-  'modes.friendsSubShort': 'Private lobby, link',
+  'modes.friends': 'LOBBIES',
+  'modes.friendsSub': 'Public or private, with anyone',
+  'modes.friendsSubShort': 'Public or private',
   // The short form on a TV (no link to share there: a code)
-  'modes.friendsSubTv': 'Make a lobby with a code',
-  // The tag of WITH FRIENDS
+  'modes.friendsSubTv': 'Public or by code',
+  // MODES' lobbies tab and its action zone's summary
   'modes.lobbies': 'LOBBIES',
   // Against the bots, offline (also the offline hero's title)
   'modes.vsAi': 'VS AI',
@@ -310,25 +325,21 @@ export default {
 
   // MODES (src/ui/screens/modes.ts): its tabs (the titles above), the second line of two of them, and
   // a guest's on COMPETITIVE
-  'modes.tabLobbiesSub': 'With friends, by code',
+  'modes.tabLobbiesSub': 'Public or by code',
   'modes.tabAiSub': 'Friendly · offline',
   'modes.rankedLocked': 'Needs an account',
   'modes.rankedIntro': 'One rank per format. Leaving a match locks Competitive.',
   'modes.format': 'FORMAT',
-  // Region's row is common.region; this row opens the connection sheet
-  'modes.advanced': 'Advanced',
-  'modes.connection': 'Connection',
-  // The Advanced row's value; {net} is modes.netAuto / netP2p / netServer
-  'modes.connectionValue': 'Connection: {net}',
-  'modes.netAuto': 'Auto',
-  'modes.netP2p': 'P2P',
-  'modes.netServer': 'Server',
-  // Each choice's line in the connection sheet
-  'modes.netAutoHelp': 'The matchmaker picks: P2P with other players, a server if you play alone',
-  'modes.netP2pHelp': 'Cars sync directly between players; alone, a server with bots',
-  'modes.netServerHelp': 'A server in your region; bots join sooner',
-  // LOBBIES' action zone, over CREATE LOBBY
-  'modes.lobbiesAction': 'Make a lobby and share its code',
+  // Casual's format grid: the format of an online match against bots (the 5-minute one); with other
+  // people searching the format follows how many they are
+  'modes.formatPrefer': 'FORMAT IF YOU PLAY BOTS',
+  'modes.formatPreferNote': 'With more people searching, the format depends on how many there are and the server picks the difficulty.',
+  // Casual's level of the bots in that same match (Easy, Normal, Hard; the server's shows picked until the player picks one); with other people the server picks it
+  'modes.botsPrefer': 'DIFFICULTY IF YOU PLAY BOTS',
+  // LOBBIES' action zone, over CREATE PUBLIC LOBBY · CREATE PRIVATE LOBBY
+  'modes.lobbiesAction': 'Make a public lobby for anyone, or a private one for your friends',
+  // A TV guest whose anti-bot check is not ready: the line over the phone's sign-in (tvsign.tile)
+  'modes.lobbiesTvLocked': 'Sign in with your phone',
   // The formats: a playlist is its format (1v1, 2v2, 3v3); ANY is whichever fills first
   'format.any': 'ANY',
   'format.anySub': '1v1, 2v2 or 3v3',
@@ -340,11 +351,11 @@ export default {
   'search.rankedTag': 'RANKED',
   // {format} is '2v2' or format.anySub, {region} a region's name
   'search.where': 'Looking for {format} in {region}',
-  // Followed by the time left (m:ss)
-  'search.bots': 'Bots join in',
-  'search.always': "There's always a match: if nobody comes, you play bots.",
+  // Followed by the time left (m:ss); {level} is the level that match plays (Easy, Normal, Hard: the player's pick, else the server's)
+  'search.botsLevel': 'Bots ({level}) join in',
+  'search.always': 'If nobody comes within 5 minutes, you play bots online. Meanwhile, play here.',
   'search.cancel': 'CANCEL SEARCH',
-  // Followed by training.freePlay, underlined: free play with the search still on
+  // Followed by search.waitBots · search.waitTraining: local play with the search still on
   'search.whileWaiting': 'While you wait:',
   'search.formatRestarts': 'Changing the format restarts the search.',
   'search.needsAccount': 'Competitive needs an account',
@@ -353,9 +364,40 @@ export default {
   'search.banned': 'Competitive locked · {time}',
   'search.bannedLine': 'For leaving matches',
   'search.playCasual': 'PLAY CASUAL',
-  // Free play while searching found a match: the banner until the match is on screen
-  // Free play's line on the training HUD while the search goes on
-  'search.practiceLine': 'Finding a match…',
+  'search.casualNeedsAccount': 'Casual needs an account',
+  // Casual's searching panel: every format at once, so only the region; {region} a region's name
+  'search.whereCasual': 'Searching in {region}',
+  // "While you wait:" VS BOTS · TRAIN (the searching panel's chooser)
+  'search.waitBots': 'VS BOTS',
+  'search.waitTraining': 'TRAIN',
+  // The estimate; {time} is duration(): '2 min', '30 sec'
+  'search.estimate': 'Match in ~{time}',
+  // {time} as m:ss, counting down to the online bots match
+  'search.estimateBots': 'Bots in {time} at most',
+  'search.estimateNone': 'No estimate yet',
+  'search.searching': { one: '{count} person searching', other: '{count} people searching' },
+  'search.searchingAlone': 'Only you for now',
+  // After search.searching: how many of them in your region
+  'search.searchingHere': '{count} in {region}',
+  // {time} as m:ss
+  'search.widenIn': 'In {time} we also search other regions',
+  'search.widened': 'Searching every region',
+  'search.busy': 'Servers are full: you stay in the queue',
+  'search.retrying': 'Offline: the search goes on when the network is back',
+  // The HUD when the search ended while you played; {why} is the player's text of why (never a code)
+  'search.ended': 'The search ended: {why}',
+  // The HUD's strip while you play waiting; {kind} is CASUAL or COMPETITIVE, {time} m:ss
+  'search.hudLine': 'Finding {kind} · {time}',
+  'search.hudCancel': 'Pause: cancel',
+
+  // "While you search" (src/ui/screens/waitSheet.ts): what to do while a search runs
+  'wait.title': 'While you search',
+  'wait.bots': 'VS BOTS',
+  'wait.botsSub': 'No time limit. You join your match as soon as it is found',
+  'wait.training': 'TRAIN',
+  'wait.trainingSub': 'Free play. Shot packs are in TRAINING',
+  'wait.menu': 'STAY IN THE MENU',
+  'wait.menuSub': 'A sound tells you when your match is found',
 
   // A TV without a controller: the hero's tag, then a sheet at a match's start (it closes by itself
   // when a controller connects)
@@ -386,6 +428,8 @@ export default {
   // Under the stadium sheet's title (components/stadium.ts): the pick is not for this match only
   'friendly.themeNote': 'Used in all your matches and behind the menus',
   'friendly.intro': 'A 3-minute offline match against the AI. Your teammates, if any, are bots too.',
+  // The same tab while a search runs: its PLAY starts the unlimited match the search ends
+  'friendly.introWaiting': 'While you search: a match against the AI with no time limit. It ends when your match is found or when you quit.',
   // Starts the friendly match
   'friendly.play': 'PLAY',
 
@@ -394,10 +438,6 @@ export default {
   'custom.noLimit': 'No limit',
   // Match length in minutes (3, 5 or 10)
   'custom.minutes': { one: '{count} min', other: '{count} min' },
-  // Connection type: peer to peer
-  'custom.netP2p': 'P2P',
-  // Connection type: a server hosts the match
-  'custom.netServer': 'Server',
   'custom.wrongPassword': 'Wrong password',
   'custom.joinPassword': 'Lobby password',
   // Title of the password dialog; {code} is the 6-character join code
@@ -414,10 +454,10 @@ export default {
   'custom.rowFull': 'Full',
   // Lobby list, status column
   'custom.rowOpen': 'Open',
-  'custom.noLobbies': 'No public lobbies in {region}. Create one!',
+  'custom.noLobbies': 'No public lobbies right now. Make one!',
   // Under the lobby list: how many public lobbies, and the region
   'custom.lobbyCount': { one: '{count} lobby · {region}', other: '{count} lobbies · {region}' },
-  'custom.subtitle': 'Public lobbies in your region, or private ones by code. They never change your rank.',
+  'custom.subtitle': 'Public lobbies (your region first) or private ones by code. They are played P2P and never change your rank.',
   // Button on the lobby browser and heading of the create screen
   'custom.createLobby': 'CREATE LOBBY',
   'custom.refresh': 'REFRESH',
@@ -426,17 +466,16 @@ export default {
   'custom.colMode': 'Mode',
   'custom.colPlayers': 'Players',
   'custom.colHost': 'Host',
-  'custom.colNet': 'Network',
   'custom.colState': 'Status',
   'custom.loading': 'Loading lobbies…',
-  // Lobby settings labels (settingMode ... settingLength)
+  // Lobby settings labels (settingMode ... settingBots)
   'custom.settingMode': 'Mode',
   'custom.settingVisibility': 'Visibility',
   'custom.visibilityPublicListed': 'Public (listed)',
   'custom.visibilityPrivateCode': 'Private (code only)',
-  'custom.settingNet': 'Connection',
-  'custom.netP2pRecommended': 'P2P (recommended)',
   'custom.settingLength': 'Duration',
+  // The level of the bots in the lobby's empty slots (Easy, Normal, Hard); every player's game runs the same
+  'custom.settingBots': 'Bot difficulty',
   'custom.nameField': 'Lobby name',
   'custom.passwordOptional': 'Password (optional)',
   // Placeholder of the optional password field
@@ -462,8 +501,10 @@ export default {
   'custom.joining': 'Joining the lobby…',
   'custom.notInLobby': "You're not in a lobby",
   'custom.back': 'BACK',
-  // Lobby summary line, e.g. '2v2 · P2P · 5 min · Public'. {lock} is ' · 🔒' when the lobby has a password, else empty.
-  'custom.info': '{mode} · {net} · {length} · {visibility}{lock}',
+  // Lobby summary line, e.g. '2v2 · 5 min · Bots: Hard · Public' (lobbies are always P2P); {bots} is custom.infoBots. {lock} is ' · 🔒' when the lobby has a password, else empty.
+  'custom.info': '{mode} · {length} · {bots} · {visibility}{lock}',
+  // The bots' level in that line; {level} is Easy, Normal or Hard
+  'custom.infoBots': 'Bots: {level}',
   'custom.public': 'Public',
   'custom.private': 'Private',
   // Label next to the lobby's join code
@@ -504,17 +545,17 @@ export default {
   'custom.tagExperimental': 'EXP',
 
   // Salas and the lobby (plan PR 12: src/ui/screens/lobby.ts, custom.ts, components/codecells.ts)
-  // MODOS › SALAS' primary: a private lobby with the last format, then its screen
-  'lobby.createShare': 'CREATE LOBBY AND SHARE',
-  // The empty list's own button (the same private lobby)
+  // MODOS › SALAS' primary (and the empty list's button): a public lobby with the last format, then its screen
+  'lobby.createPublic': 'CREATE PUBLIC LOBBY',
+  // MODOS › SALAS' secondary: the same, private (by code)
   'lobby.createPrivate': 'CREATE PRIVATE LOBBY',
   // The primary while the player is in a lobby; {code} as 'ABC 234'
   'lobby.backTo': 'BACK TO LOBBY {code}',
   'lobby.joinCode': 'JOIN WITH CODE',
   'lobby.joinCodeSub': '6 letters or numbers',
   'lobby.public': 'PUBLIC LOBBIES',
-  // Empty list; {region} is the region's name
-  'lobby.empty': 'No public lobbies in {region}',
+  // Empty list (the public list spans every region, your own first)
+  'lobby.empty': 'No public lobbies right now',
   // A list row's state slot
   'lobby.rowOpen': 'OPEN',
   'lobby.rowInMatch': 'IN MATCH',
@@ -572,6 +613,14 @@ export default {
   // A restart (Super low) took longer than the server keeps a place in the lobby
   'lobby.stayLate': 'Lobby {code} went on without you: join it again with its code',
   'lobby.stayBack': 'Back in lobby {code}: you took a while, the host may have changed',
+  // A lone host plays while the lobby waits (the Sala, under its action bar; then search.waitBots · search.waitTraining)
+  'lobby.waitLine': 'While you wait for someone to join:',
+  // Toast when someone joined while the host played; {name} is the player
+  'lobby.joinedBack': '{name} joined your lobby',
+  // The HUD's strip while the host plays; {code} as 'ABC 234'
+  'lobby.hudWaiting': 'Lobby {code} · waiting for players',
+  // After lobby.hudWaiting on that strip: the pause menu's BACK TO THE LOBBY (on a phone, its pause button)
+  'lobby.hudBack': 'Pause: back to the lobby',
 
   // A lost server match (plan PR 12: src/ui/screens/match/lost.ts)
   'lost.title': 'Your connection dropped',
@@ -655,11 +704,11 @@ export default {
   'profile.hideReplayNameHelp': 'You show as "Player N" in the replay list and in the replays of your community-server matches, the ones already listed too. A copy someone opened before keeps your name for up to 3 hours.',
   // PROFILE's news consent switch, shown only with a verified email (off unless the player opted in)
   'profile.news': 'News by email',
-  'profile.newsHelp': 'Only Turbogol news, never third parties. Unsubscribe any time.',
+  'profile.newsHelp': 'Only Turbogol news, never third parties. For 16 or older. Unsubscribe any time.',
   'profile.community': 'COMMUNITY',
   // The Discord server speaks English
   'profile.discord': 'Discord (in English)',
-  'profile.hostServer': 'Host a server',
+  'profile.hostServer': 'Server guide',
   'profile.source': 'Source code',
   'profile.about': 'ABOUT',
   // {protocol}: the online protocol's number
@@ -700,6 +749,428 @@ export default {
   'profile.maintainerConfirmNote': 'Node tokens and the maintenance tools need your password from the last 15 minutes.',
   'profile.maintainerConfirm': 'CONFIRM WITH THE PASSWORD',
   'profile.maintainerConfirmed': 'Done: for 15 minutes you can create node tokens and use the maintenance tools',
+  // PERFIL › PROJECT ACCOUNT › NODE CONTROL (screens/nodesAdmin.ts): the maintainers' panel of the
+  // community nodes. The server's names, reasons and probe errors are shown beside these texts, never inside.
+  'nodesAdmin.entry': 'NODE CONTROL',
+  'nodesAdmin.entryNote': "The project's nodes: their state, tokens, regions and points.",
+  'nodesAdmin.title': 'NODE CONTROL',
+  // {name}: the account signed in
+  'nodesAdmin.as': 'Signed in as {name}',
+  'nodesAdmin.signIn': 'Sign in with the project account to see the nodes.',
+  'nodesAdmin.loading': 'Loading…',
+  // {time}: when the panel last read the nodes
+  'nodesAdmin.updatedAt': 'Updated at {time}',
+  'nodesAdmin.reauthHeld': 'Paused: confirm with your password to go on.',
+  // A development account has no password: it signs in again instead
+  'nodesAdmin.noPassword': 'This account has no password: sign in again to confirm.',
+  'nodesAdmin.pausedNote': 'The nodes are paused for now. The panel tries again every minute.',
+  'nodesAdmin.done': 'Done',
+  'nodesAdmin.refresh': 'REFRESH',
+  // {time}: a length of time ("5 min")
+  'nodesAdmin.ago': '{time} ago',
+  // The panel's tabs
+  'nodesAdmin.tab.summary': 'Summary',
+  'nodesAdmin.tab.nodes': 'Nodes',
+  'nodesAdmin.tab.tokens': 'Tokens',
+  'nodesAdmin.tab.regions': 'Regions',
+  'nodesAdmin.tab.release': 'Release',
+  'nodesAdmin.tab.points': 'Points',
+  'nodesAdmin.tab.stats': 'Accounts and queues',
+  // SUMMARY's figures
+  'nodesAdmin.kpi.online': 'Online',
+  'nodesAdmin.kpi.running': 'Matches now',
+  'nodesAdmin.kpi.queue': 'To verify',
+  'nodesAdmin.kpi.verifying': { one: '{count} verifying', other: '{count} verifying' },
+  'nodesAdmin.kpi.outbox': 'Outbox',
+  'nodesAdmin.kpi.slots': 'Trusted slots',
+  // {stable} and {minimum}: release versions
+  'nodesAdmin.channel': 'Channel: stable {stable} · minimum {minimum}',
+  'nodesAdmin.noChannel': 'No release channel yet',
+  'nodesAdmin.warnTitle': 'WARNINGS',
+  'nodesAdmin.noWarnings': 'No warnings',
+  // {version}: a release; {list}: node names with their Node.js version
+  'nodesAdmin.warn.verifierNode': 'Verifiers of release {version} run different Node.js versions ({list}): a risk for the replays.',
+  'nodesAdmin.warn.offChannel': '{name} runs {version}, not the stable {stable}: its ranked matches need a verifier of its own release.',
+  'nodesAdmin.warn.noWebhook': 'NODE_ALERT_WEBHOOK is missing: no audit line or alert leaves the logs.',
+  // {date}: when it lost its trust
+  'nodesAdmin.warn.trustRemoved': '{name} lost its trust on {date}: it is back on trial.',
+  'nodesAdmin.flagsTitle': 'SWITCHES',
+  'nodesAdmin.flagsNote': 'Read only here. A change takes a minute or two to arrive. They are set and cleared with wrangler:',
+  'nodesAdmin.flagOn': 'on',
+  'nodesAdmin.flagOff': 'off',
+  'nodesAdmin.flag.matchmaking_off': 'No new match, room or lobby.',
+  'nodesAdmin.flag.do_disabled': "No match on Cloudflare's servers: with the nodes on, searches wait for a node.",
+  'nodesAdmin.flag.nodes_on': "Whose matches may go to a node: 1 for every player, or a list of account ids for a test group.",
+  'nodesAdmin.flag.vm_disabled': 'No new match goes to a community node.',
+  'nodesAdmin.flag.nodes_off': "The control plane's routes answer that the nodes are paused.",
+  'nodesAdmin.flag.replays_off': 'The public replays are off.',
+  'nodesAdmin.flag.email_off': 'No email goes out.',
+  'nodesAdmin.flag.turn_cf_disabled': 'No TURN credentials: STUN only.',
+  // NODES
+  'nodesAdmin.noNodes': 'No nodes yet.',
+  'nodesAdmin.tagProject': 'PROJECT',
+  'nodesAdmin.tagCommunity': 'COMMUNITY',
+  'nodesAdmin.tagRetired': 'RETIRED',
+  'nodesAdmin.tagTrustLost': 'LOST ITS TRUST',
+  'nodesAdmin.tagDraining': 'DRAINING',
+  'nodesAdmin.compatible': 'compatible',
+  'nodesAdmin.update': 'update',
+  'nodesAdmin.seenNow': 'now',
+  'nodesAdmin.showAddresses': 'SHOW ADDRESSES',
+  'nodesAdmin.hideAddresses': 'HIDE ADDRESSES',
+  'nodesAdmin.retiredNote': 'A retired node keeps its record here and nothing else: no slot, no match, no sign-in.',
+  // A node's detail
+  'nodesAdmin.detail.region': 'Region',
+  'nodesAdmin.detail.operator': 'Operator',
+  'nodesAdmin.detail.roles': 'Roles',
+  'nodesAdmin.detail.address': 'Address',
+  'nodesAdmin.detail.pinned': 'Pinned host',
+  'nodesAdmin.detail.version': 'Version',
+  'nodesAdmin.detail.capacity': 'Matches',
+  // {active} running now, {now} the node's capacity, {max} the largest it declared
+  'nodesAdmin.detail.capacityOf': '{active} of {now} (at most {max})',
+  'nodesAdmin.detail.egress': 'Egress',
+  'nodesAdmin.detail.specs': 'Machine',
+  'nodesAdmin.detail.seen': 'Last seen',
+  'nodesAdmin.detail.probe': 'Last probe',
+  'nodesAdmin.detail.probeNone': 'not probed yet',
+  'nodesAdmin.detail.probeOk': 'passed',
+  'nodesAdmin.detail.probeFail': 'failed',
+  'nodesAdmin.detail.streak': 'Failed probes in a row',
+  'nodesAdmin.detail.strikes': 'Strikes',
+  'nodesAdmin.detail.pauses': 'Pauses',
+  'nodesAdmin.detail.linkCuts': 'Link cuts, last 24 h',
+  'nodesAdmin.detail.verified': 'Verified',
+  // {verified} matches, {ranked} of them ranked, {failed} verifications failed
+  'nodesAdmin.detail.verifiedOf': '{verified} · {ranked} ranked · {failed} failed',
+  'nodesAdmin.detail.reason': 'Why',
+  'nodesAdmin.detail.until': 'Paused until',
+  // The actions on a node
+  'nodesAdmin.act.probation': 'BACK ON TRIAL',
+  'nodesAdmin.act.active': 'SET ACTIVE',
+  'nodesAdmin.act.suspended': 'SUSPEND',
+  'nodesAdmin.act.banned': 'BAN',
+  'nodesAdmin.act.drain': 'DRAIN',
+  'nodesAdmin.act.reprobe': 'PROBE AGAIN',
+  'nodesAdmin.act.retire': 'RETIRE',
+  'nodesAdmin.act.revoke': 'REVOKE',
+  'nodesAdmin.act.update': 'ANNOUNCE THE CHANNEL AGAIN',
+  'nodesAdmin.drained': 'Drain sent: the node finishes its matches and takes no new one',
+  'nodesAdmin.reprobeOk': 'Probed: it answers',
+  'nodesAdmin.reprobeFail': 'Probed: it does not answer',
+  // A confirmation sheet; {action}: the button's words, {name}: the node or the account
+  'nodesAdmin.confirm.title': '{action}: {name}',
+  'nodesAdmin.confirm.note': 'The change is recorded in the team channel.',
+  'nodesAdmin.confirm.drainNote': 'A drain is one way: the node finishes its matches and takes no new one. It comes back with sudo systemctl restart turbogol-node on its machine.',
+  'nodesAdmin.confirm.retireNote': "It leaves the slots, the matches and the operator's list for good. Its record stays here.",
+  'nodesAdmin.confirm.banNote': 'A ban closes its link at once and refuses its sign-ins.',
+  'nodesAdmin.confirm.forceNote': 'It skips the 20 verified matches a community node needs.',
+  'nodesAdmin.confirm.updateNote': 'The channel is read again and the nodes below its minimum are told to update.',
+  'nodesAdmin.confirm.unfreezeNote': "The account's points can be redeemed again.",
+  'nodesAdmin.confirm.reason': 'Why',
+  'nodesAdmin.confirm.optional': 'Optional',
+  'nodesAdmin.confirm.hostSees': 'The host sees this reason: do not name or identify any player.',
+  'nodesAdmin.confirm.typeName': 'Type {name} to confirm',
+  'nodesAdmin.confirm.needReason': 'Write why.',
+  'nodesAdmin.confirm.badName': 'The name does not match.',
+  // A node suspended by a failed verification: the manual review
+  'nodesAdmin.review.title': 'MANUAL REVIEW',
+  'nodesAdmin.review.note': "A verification of one of its matches failed: its operator's points are frozen until you look. Put it back on trial or ban it, and unfreeze the points if it was not cheating.",
+  'nodesAdmin.review.frozen': 'Points frozen:',
+  'nodesAdmin.review.notFrozen': 'Points not frozen.',
+  'nodesAdmin.review.replay': 'SEE THE REPLAY (IF PUBLISHED)',
+  // TOKENS
+  'nodesAdmin.noTokens': 'No tokens',
+  'nodesAdmin.token.unused': 'unused',
+  'nodesAdmin.token.used': 'used',
+  'nodesAdmin.token.expired': 'expired',
+  'nodesAdmin.token.revoked': 'revoked',
+  // REGIONS
+  'nodesAdmin.region.empty': "No nodes: its matches go to Cloudflare's servers.",
+  'nodesAdmin.region.ranked': 'RANKED READY',
+  'nodesAdmin.region.noRanked': 'NO RANKED',
+  'nodesAdmin.region.hosts': 'Hosts online',
+  'nodesAdmin.region.slots': 'Matches running / slots',
+  'nodesAdmin.region.matches': 'Placed, not reported yet',
+  'nodesAdmin.region.unplaced': 'No node took them, last 15 min',
+  'nodesAdmin.region.factor': 'Region factor',
+  'nodesAdmin.region.verifiers': 'Verifiers online',
+  'nodesAdmin.verifiersTitle': 'VERIFIERS',
+  'nodesAdmin.noVerifiers': 'No trusted verifier',
+  // {depth} matches waiting, the oldest {time}
+  'nodesAdmin.queueLine': '{depth} waiting, the oldest {time}',
+  'nodesAdmin.queueEmpty': 'Nothing waiting for its verification',
+  // RELEASE
+  'nodesAdmin.release.stable': 'STABLE',
+  // {version}: the release this Worker's game code matches
+  'nodesAdmin.release.build': "this site's game code: {version}",
+  'nodesAdmin.release.updated': 'Channel announced again',
+  'nodesAdmin.release.cliTitle': 'MOVE THE CHANNEL',
+  'nodesAdmin.release.cliNote': 'Moving the channel stays on the command line, from a checkout of main:',
+  // POINTS (server points; never call it a store)
+  'nodesAdmin.points.lookup': 'Account id',
+  'nodesAdmin.points.find': 'LOOK UP',
+  'nodesAdmin.points.badId': 'The 16 characters of an account id (0-9, a-f).',
+  'nodesAdmin.points.balance': 'Server points',
+  'nodesAdmin.points.earned': 'Earned',
+  'nodesAdmin.points.spent': 'Redeemed',
+  'nodesAdmin.points.frozen': 'Frozen',
+  'nodesAdmin.points.notFrozen': 'no',
+  'nodesAdmin.points.items': 'Items',
+  'nodesAdmin.points.none': 'none',
+  'nodesAdmin.points.grant': 'GRANT AN ITEM',
+  'nodesAdmin.points.revoke': 'TAKE AN ITEM BACK',
+  'nodesAdmin.points.unfreeze': 'UNFREEZE',
+  'nodesAdmin.points.noItems': 'No item to pick',
+  'nodesAdmin.points.badgeNote': 'The Host badge can be granted, but nothing shows it in the game yet. Taking an item back returns the points it cost.',
+  'nodesAdmin.points.frozenTitle': 'FROZEN POINTS',
+  'nodesAdmin.points.frozenEmpty': 'No frozen points',
+  'nodesAdmin.points.more': 'There are more: the newest are listed.',
+  // ACCOUNTS AND QUEUES: anonymous counts
+  'nodesAdmin.stats.note': 'Anonymous counts, asked when the tab opens and with REFRESH: they share 10 a minute with the deletions on request.',
+  'nodesAdmin.stats.accounts': 'ACCOUNTS',
+  'nodesAdmin.stats.queues': 'QUEUES, LAST 30 DAYS',
+  'nodesAdmin.stats.none': 'Nothing to show',
+  'nodesAdmin.stats.day': 'Day',
+  'nodesAdmin.stats.searches': 'Searches',
+  'nodesAdmin.stats.formed': 'Matches',
+  'nodesAdmin.stats.onNode': 'On a node',
+  'nodesAdmin.stats.onCloud': 'On Cloudflare',
+  'nodesAdmin.stats.cancelled': 'Cancelled',
+  'nodesAdmin.stats.dropped': 'Left',
+  // The history's tabs (MATCHES, HISTORY, ALERTS): asked when the tab opens, with REFRESH and MORE
+  'nodesAdmin.tab.matches': 'Matches',
+  'nodesAdmin.tab.history': 'History',
+  'nodesAdmin.tab.alerts': 'Alerts',
+  // MORE: the next page of a list
+  'nodesAdmin.more': 'MORE',
+  'nodesAdmin.history.none': 'Nothing yet',
+  // MATCHES: the matches being played, reported or verified now, then the settled ones
+  'nodesAdmin.match.note': 'The matches on the nodes now, then the settled ones of the last 30 days. Asked when the tab opens and with REFRESH.',
+  'nodesAdmin.match.namesUnavailable': "The players' names could not be checked: none is shown.",
+  'nodesAdmin.match.voidsTitle': 'VOID IN THE LAST 24 H',
+  'nodesAdmin.match.noVoids': 'No void match',
+  // The lookup of one match: its 64-character id, or the link to its replay a player sent (replay.html?id=)
+  'nodesAdmin.match.lookup': 'A match: its id or its replay link',
+  'nodesAdmin.match.find': 'LOOK UP',
+  'nodesAdmin.match.badId': 'The 64 characters of a match id (0-9, a-f), or a replay link with its id.',
+  // A match looked up that the history does not keep: it may still be in the public replays
+  'nodesAdmin.match.noRow': 'The history keeps no row of this match: it settled before the history was kept, more than 30 days ago, or not on a node. If its replay is in the public list, it can still be delisted here.',
+  // After the mode ("2v2 · Ranked")
+  'nodesAdmin.match.ranked': 'Ranked',
+  // A match's state: being played, its report being read, waiting for its verification; then how it settled
+  'nodesAdmin.match.state.assigned': 'Playing',
+  'nodesAdmin.match.state.reporting': 'Reporting',
+  'nodesAdmin.match.state.verifying': 'Being verified',
+  'nodesAdmin.match.state.rated': 'Rated',
+  'nodesAdmin.match.state.unrated': 'Not rated',
+  'nodesAdmin.match.state.void': 'Void',
+  // A match's detail
+  'nodesAdmin.match.id': 'Match',
+  'nodesAdmin.match.node': 'Node',
+  'nodesAdmin.match.mode': 'Mode',
+  'nodesAdmin.match.placed': 'Placed',
+  'nodesAdmin.match.reported': 'Reported',
+  'nodesAdmin.match.settled': 'Settled',
+  'nodesAdmin.match.started': 'Started',
+  'nodesAdmin.match.queued': 'Waiting for its verification',
+  'nodesAdmin.match.verifier': 'Verifier',
+  'nodesAdmin.match.leaves': 'Leaves',
+  'nodesAdmin.match.score': 'Score',
+  'nodesAdmin.match.verified': 'Verified',
+  'nodesAdmin.match.verdict': 'Verdict',
+  // The node's fault the match was voided for
+  'nodesAdmin.match.strike': "The node's fault",
+  'nodesAdmin.match.adminReason': 'Voided by a maintainer',
+  'nodesAdmin.match.replay': 'Replay uploaded',
+  'nodesAdmin.match.public': 'Public replay',
+  'nodesAdmin.match.published': 'Published',
+  'nodesAdmin.match.listed': 'Listed: published 1 to 2 hours after the match',
+  'nodesAdmin.match.notListed': 'Not listed',
+  'nodesAdmin.match.delistedAt': 'Delisted',
+  'nodesAdmin.match.yes': 'Yes',
+  'nodesAdmin.match.no': 'No',
+  'nodesAdmin.match.seats': 'PLAYERS',
+  'nodesAdmin.match.blue': 'Blue',
+  'nodesAdmin.match.red': 'Red',
+  'nodesAdmin.match.bot': 'Bot',
+  // {n}: the seat's number, as the public replays name a player who hides their name
+  'nodesAdmin.match.hidden': 'Player {n}',
+  'nodesAdmin.match.gone': 'Deleted account',
+  // A match's actions
+  'nodesAdmin.match.viewer': 'SEE THE REPLAY',
+  'nodesAdmin.match.download': 'DOWNLOAD THE REPLAY',
+  'nodesAdmin.match.downloaded': 'Replay downloaded',
+  'nodesAdmin.match.noRaw': 'No replay of that match is kept any more: delisted, pruned or never uploaded.',
+  'nodesAdmin.match.delist': 'DELIST',
+  'nodesAdmin.match.delisted': 'Out of the public replays',
+  'nodesAdmin.match.void': 'VOID',
+  'nodesAdmin.match.voidStrike': 'VOID WITH A STRIKE',
+  'nodesAdmin.match.voided': 'Match voided',
+  'nodesAdmin.match.verify': 'VERIFY NOW',
+  'nodesAdmin.match.verifyAsked': 'Sent to a verifier',
+  'nodesAdmin.confirm.delistNote': 'The match leaves the public replays and its replay is deleted: it cannot be undone.',
+  'nodesAdmin.confirm.voidNote': 'The match counts for nothing and its players can search again. The node is not told: they play on. No strike for the node.',
+  'nodesAdmin.confirm.voidStrikeNote': 'The same, and the node gets a strike, as for a match it lost.',
+  'nodesAdmin.confirm.downloadNote': "Every download goes to the team's channel with your name: the replay holds every player's name and controls.",
+  // HISTORY: what happened to the nodes
+  'nodesAdmin.history.note': 'What happened to each node in the last 30 days, newest first.',
+  // Before the maintainer whose call it was ("by Proyecto (account id)")
+  'nodesAdmin.event.by': 'by',
+  // What happened to a node
+  'nodesAdmin.event.registered': 'Registered',
+  'nodesAdmin.event.token_used': 'Token used',
+  'nodesAdmin.event.status_change': 'State',
+  'nodesAdmin.event.strike': 'Strike',
+  'nodesAdmin.event.pause': 'Paused',
+  'nodesAdmin.event.verify_failed': 'Verification failed',
+  'nodesAdmin.event.probe_failed': 'Probe failed',
+  'nodesAdmin.event.unreachable': 'Unreachable',
+  'nodesAdmin.event.reachable': 'Reachable',
+  'nodesAdmin.event.offline': 'Offline',
+  'nodesAdmin.event.online': 'Online',
+  'nodesAdmin.event.drain': 'Drained',
+  'nodesAdmin.event.retire': 'Retired',
+  'nodesAdmin.event.trust_removed': 'Lost its trust',
+  'nodesAdmin.event.link_quiet': 'Link quiet',
+  'nodesAdmin.event.link_back': 'Link back',
+  'nodesAdmin.event.link_4408': 'Link closed',
+  'nodesAdmin.event.late_messages': 'Late messages',
+  'nodesAdmin.event.update_sent': 'Told to update',
+  // ALERTS: the lines of the team's channel
+  'nodesAdmin.alerts.note': "The ALERT lines of the team's channel in the last 30 days, 2,000 at most, newest first.",
+  'nodesAdmin.alerts.alert': 'Alert',
+  'nodesAdmin.alerts.audit': 'Action',
+  // The wizard: ADD A PROJECT SERVER
+  'nodesAdmin.wiz.open': 'ADD A PROJECT SERVER',
+  'nodesAdmin.wiz.warn': "Only for the project's machines: a token of this account gives full trust. Someone else's server goes through My servers, never here.",
+  'nodesAdmin.wiz.preset': 'Project machine',
+  'nodesAdmin.wiz.region': 'Region',
+  'nodesAdmin.wiz.name': 'Name',
+  'nodesAdmin.wiz.host': 'DNS name',
+  'nodesAdmin.wiz.hostHint': 'From your private notes: the name alone, no IP address, port or https://.',
+  'nodesAdmin.wiz.roles': 'Roles',
+  'nodesAdmin.wiz.rolesHostVerify': 'Host and verify',
+  'nodesAdmin.wiz.rolesHost': 'Host only',
+  'nodesAdmin.wiz.matches': 'Matches at once',
+  // {max}: the most a node may declare
+  'nodesAdmin.wiz.matchesHint': 'auto (its benchmark) or 1 to {max}',
+  'nodesAdmin.wiz.egress': 'Egress cap, GB a month',
+  'nodesAdmin.wiz.egressHint': 'Empty: no cap',
+  // {used} and {max}: the project account's trusted slots
+  'nodesAdmin.wiz.slots': 'Trusted slots: {used} of {max}',
+  'nodesAdmin.wiz.noSlot': 'No slot left: retire a node first.',
+  'nodesAdmin.wiz.next': 'CONTINUE',
+  'nodesAdmin.wiz.badRegion': 'Choose a region.',
+  'nodesAdmin.wiz.badName': '2 to 32 letters, digits, dots, dashes or underscores, starting with a letter or a digit.',
+  'nodesAdmin.wiz.badMatches': 'auto, or a whole number from 1 to {max}.',
+  'nodesAdmin.wiz.badEgress': 'A whole number of GB, at least 1, or nothing.',
+  // {name} and {region}: the machine being added
+  'nodesAdmin.wiz.checkNote': 'Before the token of {name} ({region}), check each line:',
+  'nodesAdmin.wiz.tickAll': 'Check every line first.',
+  'nodesAdmin.wiz.token': 'CONFIRM WITH THE PASSWORD AND CREATE THE TOKEN',
+  'nodesAdmin.wiz.edit': 'EDIT THE DATA',
+  'nodesAdmin.wiz.cmdTitle': 'Run it over SSH on the machine, as root, within the hour:',
+  'nodesAdmin.wiz.badLine': "The server's command does not match what you asked for: create a new token.",
+  'nodesAdmin.wiz.afterTitle': 'THEN',
+  'nodesAdmin.wiz.after': 'Back up /var/lib/turbogol-node/node.json in the password manager (never on this computer), run apt-mark hold nodejs caddy, and take a snapshot at the provider.',
+  'nodesAdmin.wiz.again': 'NEW TOKEN',
+  'nodesAdmin.wiz.done': 'DONE',
+  // The checklist before a token
+  'nodesAdmin.check.country': 'The machine is in a country the legal texts in force name.',
+  'nodesAdmin.check.dns': 'An A record, DNS only, points to this machine (an AAAA record only if it points to this same machine).',
+  'nodesAdmin.check.firewall': 'The firewall lets in 22, 80 and 443.',
+  'nodesAdmin.check.os': 'Debian 12 or later, or Ubuntu 22.04 or later, as root.',
+  'nodesAdmin.check.ntp': 'NTP is on.',
+  'nodesAdmin.check.node': 'Node.js is pinned to the version of São Paulo.',
+  'nodesAdmin.check.xmachine': 'The xmachine check passed against São Paulo.',
+  'nodesAdmin.check.release': 'It runs the release of the stable channel.',
+  'nodesAdmin.check.verifyWhy': "Only then does it verify the other trusted nodes' ranked matches, and they its.",
+  // The wizard's follow-up; {name}: the node
+  'nodesAdmin.follow.waiting': 'Waiting for the machine to register…',
+  'nodesAdmin.follow.pending': '{name} registered: waiting for its reachability probe.',
+  'nodesAdmin.follow.probation': '{name} is on trial.',
+  'nodesAdmin.follow.active': '{name} is active. Done.',
+  'nodesAdmin.follow.stopped': '{name} is out of service.',
+  'nodesAdmin.follow.expired': 'The token expired unused.',
+  'nodesAdmin.follow.revoked': 'The token was revoked.',
+  'nodesAdmin.follow.gone': 'The token is no longer listed.',
+  'nodesAdmin.follow.expiredHelp': 'The usual installer errors: the name does not point to the machine yet, port 80 or 443 closed, an earlier Caddyfile, a token used or expired. Create a new token.',
+  // Shared by the panel and the community's servers (prompt 2)
+  'nodesShared.tvNote': 'Do it on your phone or your PC.',
+  'nodesShared.paused': 'Nodes paused: the panel tries again every minute.',
+  'nodesShared.state.pending': 'Waiting for its probe',
+  'nodesShared.state.probation': 'On trial',
+  'nodesShared.state.active': 'Active',
+  'nodesShared.state.suspended': 'Suspended',
+  'nodesShared.state.banned': 'Banned',
+  'nodesShared.copy': 'COPY',
+  'nodesShared.copied': 'Copied',
+  'nodesShared.copyFailed': 'Could not copy: select the command and copy it.',
+  'nodesShared.oneUse': 'One use only: it registers a single node.',
+  // {minutes}: whole minutes
+  'nodesShared.expiresIn': 'Expires in {minutes} min',
+  // Why a typed host is refused
+  'nodesShared.host.empty': "Write the machine's DNS name.",
+  'nodesShared.host.scheme': 'The name alone, without https:// or a path.',
+  'nodesShared.host.port': 'The name alone, without a port.',
+  'nodesShared.host.ip': 'An IP address cannot be probed: use a DNS name.',
+  'nodesShared.host.bad': 'That is not a DNS name (letters, digits, hyphens and dots).',
+  // What a failed reachability probe most likely needs
+  'nodesShared.hint.dns': 'DNS: the name must point to this machine (an A record, DNS only).',
+  'nodesShared.hint.ports': 'Ports: open 80 and 443 in the firewall and at the provider.',
+  'nodesShared.hint.caddy': 'Something else answers on that name: an earlier Caddyfile, or another server.',
+  'nodesShared.hint.cert': 'Certificate: Caddy could not get one yet (DNS, port 80), or it was refused.',
+  'nodesShared.hint.unknown': 'Check the DNS record, ports 80 and 443, an earlier Caddyfile and the certificate.',
+  // The refusals of the node routes (by their code)
+  'nodesShared.err.not_trusted': 'Only the project account maintains the nodes.',
+  'nodesShared.err.account_required': 'Sign in with an account.',
+  'nodesShared.err.tv_session': 'Do it on your phone or your PC.',
+  'nodesShared.err.reauth_required': 'Confirm with your password first.',
+  'nodesShared.err.password_required': 'The project account confirms with its password.',
+  'nodesShared.err.unauthorized': 'Sign in again.',
+  'nodesShared.err.rate_limited': 'Too many requests: wait a minute.',
+  'nodesShared.err.nodes_off': 'The nodes are paused for now.',
+  'nodesShared.err.nodes_unavailable': 'The node control plane is not running: look at its alerts.',
+  'nodesShared.err.too_large': 'That request is too large.',
+  'nodesShared.err.bad_request': 'The server did not understand the request.',
+  'nodesShared.err.not_found': 'This server has no community nodes.',
+  'nodesShared.err.internal': 'Something failed on the server. Try again.',
+  'nodesShared.err.network': 'No connection. Try again.',
+  'nodesShared.err.bad_region': 'Choose one of the game regions.',
+  'nodesShared.err.bad_name': '2 to 32 letters, digits, dots, dashes or underscores.',
+  'nodesShared.err.bad_public_host': 'The host must be a public DNS name, without a port, a path or an IP address.',
+  'nodesShared.err.bad_roles': 'Roles: host, or host and verify.',
+  'nodesShared.err.bad_matches': 'Matches: auto, or a whole number in range.',
+  'nodesShared.err.bad_egress_cap': 'The egress cap must be a whole number of GB.',
+  'nodesShared.err.too_many_nodes': 'This account has all the nodes it may have: retire one first.',
+  'nodesShared.err.verify_reserved': 'Only the project nodes verify matches for now.',
+  'nodesShared.err.ip_not_supported': 'A node registers on a DNS name, never on an IP address.',
+  'nodesShared.err.public_host_mismatch': 'The node registered on another name than its token pinned.',
+  'nodesShared.err.bad_token_id': 'That token id is not valid.',
+  'nodesShared.err.no_token': 'That token is no longer kept.',
+  'nodesShared.err.token_used': 'That token was used: retire its node instead.',
+  'nodesShared.err.no_node': 'That node does not exist.',
+  'nodesShared.err.bad_node_id': 'That node id is not valid.',
+  'nodesShared.err.bad_status': 'That status is not one a maintainer sets.',
+  'nodesShared.err.not_reachable': 'The node has not passed its reachability probe yet.',
+  'nodesShared.err.force_required': 'A community node needs its verified matches: it is forced only with a reason.',
+  'nodesShared.err.reason_required': 'Write why.',
+  'nodesShared.err.retired': 'A retired node keeps its status.',
+  'nodesShared.err.already_retired': 'The node is retired already.',
+  'nodesShared.err.not_retirable': 'Only an offline node, or a drained one with no match, is retired: drain it first.',
+  'nodesShared.err.offline': 'The node is not connected: nothing was sent.',
+  'nodesShared.err.not_wss': 'Only a host on a public name has a probe.',
+  'nodesShared.err.bad_match_id': 'That match id is not valid.',
+  'nodesShared.err.no_replay': 'That match has no public replay.',
+  'nodesShared.err.no_match': 'The control plane no longer holds that match.',
+  'nodesShared.err.already_settled': 'That match is settled already.',
+  'nodesShared.err.not_verifying': 'That match is not waiting for its verification.',
+  'nodesShared.err.in_flight': 'A verifier has that match now.',
+  'nodesShared.err.bad_cursor': 'That page is no longer valid: refresh the list.',
+  'nodesShared.err.bad_account': 'The 16 characters of an account id (0-9, a-f).',
+  'nodesShared.err.unknown_item': 'That item does not exist.',
+  'nodesShared.err.no_user': 'No account has that id.',
   // "Confirm it's you" before a change to how the account signs in (linking, unlinking, a first password)
   'profile.reauthTitle': "Confirm it's you",
   'profile.reauthNote': 'To change how you sign in, sign in again with one of your methods.',
@@ -837,7 +1308,7 @@ export default {
   'auth.signupNameHint': "Everyone sees it. Don't use your real name.",
   // The first part of the name a new account is offered ('Player4821')
   'auth.signupNameWord': 'Player',
-  'auth.signupNews': 'Send me Turbogol news by email (optional)',
+  'auth.signupNews': 'Send me Turbogol news by email (optional, 16 or older)',
   // {name}: a free name the server suggests, put in the field
   'auth.signupNameTaken': 'That name is taken. Try {name}.',
   'auth.signupNameReserved': 'That name is reserved. Try {name}.',
@@ -988,7 +1459,7 @@ export default {
   // The suggested name: this word and four digits (Player4821)
   'auth.nameWord': 'Player',
   // The news switch, off by default
-  'auth.news': 'Send me Turbogol news by email (optional)',
+  'auth.news': 'Send me Turbogol news by email (optional, 16 or older)',
   // The answer "no" to the title's question: it creates the account
   'auth.create': 'NO, CREATE MY ACCOUNT',
   'auth.haveOne': 'YES, I HAVE ONE',
@@ -1174,9 +1645,10 @@ export default {
   'error.lobby.short_password': 'The password needs 4 to 32 characters',
   'error.lobby.password_locked': 'Too many password attempts on this lobby, wait a few minutes',
   'error.lobby.password_attempts': 'Someone is trying passwords on your lobby: joining with the password is paused for a few minutes',
+  'error.lobby.need_players': 'You need one more player to start',
   // Matchmaking: Casual and Competitive searches (POST /api/queue, /api/rejoin, the guest session)
   'error.queue.rate_limited': 'Too many attempts, wait a minute',
-  'error.queue.account_required': 'Sign in to play Competitive',
+  'error.queue.account_required': 'Sign in to play Casual and Competitive',
   // {time}: what is left of the lock, in the page language ('5 min', '24 hr')
   'error.queue.ranked_ban': 'Competitive locked for leaving matches: {time}',
   // The server still holds a match of this player that the game could not free
@@ -1420,6 +1892,13 @@ export default {
   'pause.dblHint': 'Double-click to leave',
   // Under QUIT in a Competitive match
   'pause.quitRanked': 'Counts as an abandon',
+  // The pause while you play waiting for a match: cancel the search, or search again once it ended
+  'pause.cancelSearch': 'CANCEL SEARCH',
+  'pause.searchAgain': 'SEARCH AGAIN',
+  // Under QUIT while waiting: back to the menus, still searching
+  'pause.quitWaiting': 'The search goes on',
+  // A lone host's pause while the lobby waits (same as QUIT there)
+  'pause.backToLobby': 'BACK TO THE LOBBY',
 
   // The final screen (src/ui/screens/match/final.ts), about 2 s after the whistle
   // Its slot's first word ("FINAL · COMPETITIVE · 2V2 · SOUTH AMERICA"), uppercase
@@ -1491,6 +1970,8 @@ export default {
   'settings.tabCamera': 'Camera',
   // Tab: sensitivities, deadzones and other control options
   'settings.tabGameplay': 'Gameplay',
+  // Tab: what the screen shows during a match (scorebug, names over the cars, notices, readouts)
+  'settings.tabHud': 'HUD',
   // Tab: sound volume
   'settings.tabAudio': 'Audio',
   // Tab: graphics quality
@@ -1646,10 +2127,71 @@ export default {
   'settings.groupInterface': 'Interface',
   // Game tab: the size of the menus' text and boxes (100 / 115 / 130 / 150 %)
   'settings.uiSize': 'Interface size',
+  // Game tab: the page goes full screen when a match or training starts (a computer), or at a tap
+  // (Android: the second help line); off, it never does. Not listed on an iPhone, an iPad or a TV
+  'settings.fullscreen': 'Full screen when playing',
+  'settings.fullscreenHelp': 'Entering the pitch fills the screen. To leave it, hold Esc.',
+  'settings.fullscreenHelpTap': 'A tap puts the game in full screen, in landscape.',
   'settings.reducedMotion': 'Reduced motion',
   'settings.reducedMotionHelp': 'Nothing slides or bounces in the menus.',
   // Reduced motion's first option: follow the system's setting
   'settings.motionSystem': 'SYSTEM',
+  // HUD tab (src/ui/screens/settings/view.ts buildHud): line over the rows; each switch shows or
+  // hides a part of the match screen for this player only (settings.on / settings.off)
+  'settings.hudNote': 'What you see during a match',
+  // HUD tab: the group of the match screen's parts, then the group of the connection and the readouts
+  'settings.groupMatch': 'In the match',
+  'settings.groupPerformance': 'Performance',
+  // The score and clock plate, top left. Its help says how to see them while it is hidden: hold the
+  // scoreboard's key or pad button (action.scoreboard); in touch mode (HelpTap), tap its corner
+  'settings.hudScorebug': 'Score and clock',
+  'settings.hudScorebugHelp': 'When it is hidden, hold the scoreboard key or button to see it.',
+  'settings.hudScorebugHelpTap': 'When it is hidden, tap the top left corner to see it.',
+  // Whose cars get their player's name over them; the four options, uppercase
+  'settings.hudNames': 'Names over the cars',
+  'settings.hudNamesHelp': 'Never over your own car.',
+  'settings.hudNamesAll': 'ALL',
+  'settings.hudNamesRivals': 'RIVALS',
+  'settings.hudNamesTeam': 'TEAM',
+  'settings.hudNamesNone': 'NONE',
+  // Listed while the names include your teammates: a bar of their boost under their names
+  'settings.hudTeamBoost': "Your team's boost",
+  'settings.hudTeamBoostHelp': "A bar under each teammate's name. A rival's boost never shows.",
+  // The boost plate, bottom left (not listed in touch mode: BOOST shows the amount there)
+  'settings.hudBoost': 'Boost meter',
+  'settings.hudBoostHelp': 'Your boost, bottom left.',
+  // The ball's glyph pinned to the screen's edge when the ball is out of sight
+  'settings.hudBallIndicator': 'Ball off screen',
+  'settings.hudBallIndicatorHelp': 'An arrow at the edge points to the ball, with its distance.',
+  // The ring drawn on the floor under the ball while it flies
+  'settings.hudBallMarker': 'Ring under the ball',
+  'settings.hudBallMarkerHelp': 'A ring on the floor under the ball in the air.',
+  // The BALL CAM / CAR CAM pill (not listed in touch mode: CAM lights up there)
+  'settings.hudCamera': 'Camera indicator',
+  'settings.hudCameraHelp': 'Says at the bottom whether the camera follows the ball.',
+  // The big banner after a goal, with the scorer
+  'settings.hudGoal': 'Goal banner',
+  'settings.hudGoalHelp': 'The banner and the scorer. A screen reader still announces each goal.',
+  // The notices at the top when a player joins or leaves, or a bot takes a seat over (online)
+  'settings.hudPlayers': 'Player notices',
+  'settings.hudPlayersHelp': 'Who joins, who leaves and when a bot takes over a car.',
+  // The DEMOLISHED notice at the top (hud.demolished)
+  'settings.hudDemos': 'Demolition notice',
+  'settings.hudDemosHelp': 'DEMOLISHED and your count, at the top.',
+  // The controls card, the "click to move the camera with the mouse" hint, training's key hints (not listed in touch mode)
+  'settings.hudControls': 'Control hints',
+  'settings.hudControlsHelp': 'The controls card, the mouse hint and the training keys.',
+  // The three network bars by the clock in an online match
+  'settings.hudNetBars': 'Connection signal',
+  'settings.hudNetBarsHelp': 'The bars by the clock online. A dropped connection is still announced.',
+  // Frames per second, top right ("FPS" stays as is)
+  'settings.hudFps': 'Show FPS',
+  'settings.hudFpsHelp': 'Frames per second, top right.',
+  // The car's speed in km/h
+  'settings.hudSpeed': 'Speedometer',
+  'settings.hudSpeedHelp': 'Your speed in km/h.',
+  // HUD's head button: every row back to its default, uppercase
+  'settings.resetHud': 'RESET HUD',
   // Controls > Touch rows: the buttons' size (S / M / L), their opacity, the mirrored layout,
   // where the stick starts (where the thumb lands / always in its place), its deadzone, vibration
   'settings.touchSize': 'Button size',
@@ -1843,6 +2385,8 @@ export default {
   'training.expFreePlayText': 'Free play with your own physics',
   // The LAB tile's line where the long one has no room (a larger interface size)
   'training.expFreePlayShort': 'Your own physics',
+  // The LAB tile while a search runs (search matches are stock physics)
+  'training.labWhileSearching': 'Not available while you search',
   'training.editPresets': 'Edit presets',
   // Pack category
   'training.catShooting': 'Shooting',
@@ -2136,5 +2680,352 @@ export default {
   'replay.nextGoal': 'Next goal',
   'replay.orbitHint': 'Drag: turn · Wheel: zoom · Right drag: move · Double click: follow the ball',
   'replay.chaseHint': 'Wheel: distance · B: ball or car cam · [ ]: goals',
-  'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu',
+  'replay.keys': 'Space: play or pause · ← →: 5 s · [ ]: goals · 0-{max}: camera · Esc: menu · F: full screen',
+  // The replay viewer's button (and its F key): full screen on, or off again
+  'replay.fullscreen': 'Full screen',
+  // The replay viewer's Clip sheet: a goal or any stretch recorded into a video (no sound) and a link to the moment
+  'replay.clip': 'Clip / Share',
+  'replay.moreControls': 'More controls',
+  'replay.clipTitle': 'Clip or share',
+  'replay.clipGoal': 'Goal {n}',
+  'replay.clipWatch': 'Watch',
+  'replay.clipLink': 'Copy link',
+  'replay.clipLinkDone': 'Link copied',
+  'replay.clipLinkFailed': 'The link could not be copied.',
+  'replay.clipNoLink': 'A link needs a match from the servers; this file only makes clips.',
+  'replay.clipFormat': 'Format',
+  'replay.soundOn': 'Sound on',
+  'replay.soundOff': 'Sound off',
+  'replay.clipSoundTitle': 'Sound',
+  'replay.clipSound': 'Include the game sound',
+  'replay.clipVolume': 'Volume',
+  'replay.clipMusic': 'Music',
+  'replay.clipWithSound': 'with sound',
+  'replay.clipNoSound': 'no sound',
+  'replay.editorTitle': 'Clip editor',
+  'replay.editorOptions': 'Options',
+  'replay.editorBack': 'Back',
+  'replay.editorExport': 'Export',
+  'replay.editorSetStart': 'Set start',
+  'replay.editorSetEnd': 'Set end',
+  'replay.editorPlayClip': 'Play clip',
+  'replay.editorFit': 'Fit',
+  'replay.editorZoom': 'Zoom',
+  'replay.editorNoGoals': 'This match has no goals: drag the ends of the range on the timeline.',
+  'replay.clipLength': 'Length {s} s · about {size}',
+  'replay.clipGoals': 'Goals',
+  'replay.clipUse': 'Use',
+  'replay.clipQuality': 'Quality',
+  'replay.clipQStandard': 'Standard · 720p',
+  'replay.clipQHigh': 'High · 1080p',
+  'replay.clipQMax': 'Max · 1080p 60 fps',
+  'replay.clipQualityHint': 'A higher quality makes a bigger, sharper file and asks more of your device while it records. If the clip stutters, use Standard.',
+  'replay.clipVertical': '9:16 · TikTok · Reels · Shorts',
+  'replay.clipNames': 'Show the scorer\'s name',
+  'replay.clipRecording': 'Recording',
+  'replay.clipCancel': 'Cancel',
+  'replay.clipReady': 'Your clip is ready',
+  'replay.clipMeta': '{s} s · {size} · {ext}, {sound}',
+  'replay.clipDownload': 'Download',
+  'replay.clipShare': 'Share',
+  'replay.clipClose': 'Close',
+  'replay.clipHint': 'Upload it to TikTok, Instagram Reels or YouTube Shorts: it is ready to post.',
+  'replay.clipFailed': 'The clip could not be recorded. Try again, or use a recent Chrome, Edge or Safari.',
+  'replay.clipUnsupported': 'This browser cannot record video. Use a recent Chrome, Edge or Safari to make clips; the links still work.',
+  // The terms of service and the privacy policy (src/ui/screens/terms.ts; the legal draft's P1, P2, P12, P33), shown only once the owner publishes them.
+  // The notice right above the button that accepts; {button} is that button's label as shown, {terms} and {privacy} become the two links (legal.termsLink, legal.privacyLink)
+  // Its consent covers what it names: storage in the United States, Brazil, Germany, Malaysia, South Africa and Australia (the Cloudflare and project servers' countries; the P2P IP is its own sentence). The privacy policy's section 5 must not say it consents to more (the lawyer's D7)
+  'legal.notice': 'By pressing "{button}" you accept the {terms} and consent to your data being kept outside Argentina, mainly in the United States, Brazil, Germany, Malaysia, South Africa and Australia. Turbogol is free and offered as is. We use your IP address and the match data, and in lobbies, which are played P2P, the other players can see your IP. Read the {privacy}.',
+  'legal.termsLink': 'Terms',
+  'legal.privacyLink': 'Privacy policy',
+  // The two pages' names (the About sheet, PROFILE's ABOUT)
+  'legal.terms': 'Terms of use',
+  'legal.privacy': 'Privacy policy',
+  // Inicio's footer, after About: legal.termsLink and this short name of the privacy policy (its full name, legal.privacy, as the link's title)
+  'legal.privacyShort': 'Privacy',
+  // A guest's sheet before its first online match: the button accepts the terms
+  'legal.playAsGuest': 'PLAY AS GUEST',
+  'legal.beforeTitle': 'Before you play',
+  'legal.guestNote': 'To play as a guest we ask you for no data.',
+  // An account's sheet after the terms changed (or for an account that never accepted them)
+  'legal.acceptAndPlay': 'ACCEPT AND PLAY',
+  'legal.changedTitle': 'The terms have changed',
+  'legal.changedNote': 'There is a new version of the Terms of use and the Privacy policy. To keep playing online with your account, accept the Terms of use.',
+  'legal.accountNote': 'To play online with your account, accept the Terms of use.',
+  'legal.orDelete': 'If you do not accept them, you can delete your account in PROFILE.',
+  // A lobby that did not open because the terms' sheet was closed
+  'legal.declined': 'To play online, accept the Terms of use.',
+
+  // Deleting the account (PROFILE > ACCOUNT AND SECURITY; the legal draft's P5), shown only while the server takes deletions
+  'delete.button': 'DELETE ACCOUNT',
+  'delete.title': 'Delete your account',
+  // {days} is the grace before the deletion (14)
+  'delete.note': 'Your account is deleted in {days} days, with its name, rating, points and items. Until then you can cancel: sign in again, or use the link in the email if you have one. Meanwhile your name stays in the public replays unless you hide it first in PROFILE > PRIVACY. You are signed out on every device, this one too.',
+  'delete.nameLabel': 'Your username',
+  // {name} is the account's username, which the player types to confirm
+  'delete.typeName': 'To confirm, type your username: {name}',
+  'delete.confirm': 'DELETE MY ACCOUNT',
+  'delete.badName': 'Type your username exactly as it is.',
+  // After the request: {name} the account, {date} the deletion day
+  'delete.doneTitle': 'Deletion requested',
+  'delete.done': 'The account {name} is deleted on {date}. Until then, sign in again to cancel it.',
+  'delete.doneMail': 'We sent you an email with a link to cancel it.',
+  // The receipt on screen (the legal draft's P5, for an account without an email too); {when} the request's date and time
+  'delete.receipt': 'Receipt: deletion of the account {name} requested on {when}. It is deleted on {date}.',
+  // A sign-in of an account whose deletion is pending; {date} the deletion day
+  'delete.pendingTitle': 'This account is being deleted',
+  'delete.pendingNote': 'You asked to delete this account. It is deleted on {date}. Do you want to keep it?',
+  // The same, back from Google or Discord (the day is not known there)
+  'delete.pendingNoteNoDate': 'You asked to delete this account. Do you want to keep it?',
+  'delete.keepBtn': 'KEEP MY ACCOUNT',
+  'delete.keptToast': 'Done: your account will not be deleted.',
+  // The cancel link of the deletion email (/account#keep=)
+  'delete.keepTitle': 'Keep your account?',
+  'delete.keepNote': 'This link cancels the deletion of your account. Nothing changes until you confirm.',
+  'delete.keptTitle': 'Your account stays',
+  'delete.kept': 'We cancelled the deletion. Sign in again to keep playing.',
+  // Hosting a community server (Prompt 2, P2-3): MY SERVERS (src/ui/screens/servers.ts), its entries
+  // on PROFILE and GARAGE, the community server's mark in MATCH FOUND and the FINAL, REPORT SERVER,
+  // "Project servers only" in Settings › Gameplay and the maintainers' panel. All of it is hidden until
+  // GET /api/config says hosting is open. The acceptance step's strings (servers.acceptSummary,
+  // servers.adult, servers.adultHint, servers.acceptLine, servers.acceptRules, servers.acceptAnnex,
+  // servers.getCode) are the owner's approved legal wording: translate them only as the legal team
+  // does. {rules}, {annex} and {privacy} become links; {button} is servers.getCode as shown.
+  'servers.title': 'MY SERVERS',
+  'servers.signIn': 'Sign in to add a community server and follow its state.',
+  // Hosting is open, but not for this account yet (invited people first): no date, no promise.
+  'servers.closedTitle': 'Not for your account yet',
+  'servers.closed': 'For now only people we invite can register a community server. Everyone else cannot yet.',
+  // The same view once every account is let in (the server's reads apart for a moment): no "only invited people", a retry
+  'servers.closedNow': 'Registering a server is not open for your account right now. Try again in a minute.',
+  'servers.what': 'A community server is the Turbogol program on a Linux machine with a DNS name. It gets CASUAL matches of its region, and whoever runs it collects server points, redeemed for cars in GARAGE.',
+  'servers.project': 'This is a project account: its servers are maintained in NODE CONTROL.',
+  'servers.frozenTitle': 'Your redemptions are paused',
+  'servers.frozenNote': 'A person on the team reviews it. You can ask for a review by email at privacy@turbo-gol.com, within 30 calendar days of finding out.',
+  'servers.reqTitle': 'Before asking for a code you still need:',
+  'servers.req.operator_blocked': 'Your account is blocked as a host: it cannot ask for codes and its servers do not connect. You can ask for a review by email at privacy@turbo-gol.com (Terms, section 9).',
+  'servers.req.email_required': 'A confirmed email on your account.',
+  'servers.req.deletion_pending': 'Your account has a deletion pending: cancel it first.',
+  'servers.req.account_too_new': { one: 'An account 7 days old or more: yours needs {count} more day.', other: 'An account 7 days old or more: yours needs {count} more days.' },
+  'servers.req.terms_required': 'To accept the version of the Terms in force.',
+  'servers.req.reaccept_required': 'To accept the rules for hosts again: the Terms have a new version.',
+  'servers.termsBtn': 'READ AND ACCEPT',
+  'servers.againTitle': 'The Terms have a new version',
+  'servers.againNote': 'Until you accept the rules for hosts again, your servers may get no new matches and you cannot ask for another code. Matches that already started finish.',
+  'servers.againBtn': 'ACCEPT AGAIN',
+  'servers.againDone': 'Done: your servers can get new matches again.',
+  'servers.rulesReq': 'To accept the rules for hosts.',
+  'servers.rulesTitle': 'Accept the rules for hosts',
+  'servers.rulesNote': 'Until you accept them, your servers may get no new matches and you cannot ask for another code. Matches that already started finish.',
+  'servers.rulesBtn': 'ACCEPT',
+  'servers.addTitle': 'ADD A SERVER',
+  'servers.addNote': 'Today you add a Linux VPS with a DNS name: the installer registers the machine with a one-time code you ask for here.',
+  'servers.add': 'ADD A SERVER',
+  'servers.formNote': 'A Linux VPS with a DNS name that points at it. WebRTC connections, to host without a DNS name, are not available yet.',
+  'servers.region': 'Region',
+  'servers.regionNote': "The region cannot be changed later. It must be the continent the machine is on: if it does not match, the registration is refused.",
+  'servers.name': 'Name (optional)',
+  'servers.nameHint': "Left empty, it is named by its region and a number (for example sa-node-3). It cannot be another server's name in its region, nor a project server's.",
+  'servers.host': 'DNS name',
+  'servers.hostHint': "An A record that points to your VPS, DNS only (without Cloudflare's proxy). No https://, port or path, and never under turbo-gol.com.",
+  'servers.matches': 'Matches at a time',
+  'servers.matchesHint': 'auto: the machine measures it. On probation it gets up to {probation} at a time; active, up to {active}.',
+  'servers.egress': 'Egress cap (GB a month, optional)',
+  'servers.egressHint': 'The outbound traffic your plan includes: near the cap, the server gets no new matches.',
+  'servers.fixed': 'Role: hosts matches only · Connection: wss, port 443',
+  'servers.limits': 'Codes today: {left} left · Unused: {outstanding} of {maxOutstanding} · Servers: {nodes} of {maxNodes}',
+  'servers.checkNote': 'Tick each point once it is ready on the machine: the installer checks them before it uses the code.',
+  'servers.check.os': 'Debian 12 or newer, or Ubuntu 22.04 or newer, and root access.',
+  'servers.check.ports': "Ports 80 and 443 free on the machine and open in the provider's firewall.",
+  'servers.check.dns': 'An A record of the name that points at this machine (and an AAAA only if it points at it too).',
+  'servers.check.ntp': "The machine's clock synchronised (NTP).",
+  'servers.acceptSummary': "To host a community server you accept the rules for hosts: use only the official program, look after the players' data (you get it on our behalf and do not keep it after the match, except your machine's technical logs with IP addresses, 7 days at most), do not tamper with matches and look after your machine. For now your server gets no COMPETITIVE matches, and server points have a cap per day.",
+  'servers.adult': 'I am 18 or older',
+  'servers.adultHint': 'You declare it: we do not check it.',
+  'servers.acceptLine': 'By pressing "{button}" you accept the {rules} (section 12 of the Terms) and {annex}, and declare that you are 18 or older. We keep that you accepted, with the version and the date. Also read the {privacy}.',
+  'servers.acceptRules': 'rules for hosts',
+  'servers.acceptAnnex': 'Annex B',
+  'servers.getCode': 'GET CODE',
+  'servers.cmdTitle': 'Run this command as root on your VPS. The code is inside it: do not share it.',
+  'servers.again': 'ANOTHER CODE',
+  'servers.done': 'DONE',
+  'servers.tvScan': 'Scan it to open MY SERVERS on your phone.',
+  // A code's follow-up: {name} is the server's name, {count} of {total} its verified matches on probation
+  'servers.follow.waiting': 'Waiting for the install…',
+  'servers.follow.expired': 'The code expired unused.',
+  'servers.follow.revoked': 'You revoked this code.',
+  'servers.follow.pending': 'Registered: testing the access to {name}…',
+  'servers.follow.probation': '{name} is on probation: {count} of {total} matches verified.',
+  'servers.follow.active': '{name} is active.',
+  'servers.follow.stopped': '{name} is out of service.',
+  'servers.follow.gone': 'That code is no longer kept.',
+  'servers.expiredHelp': 'Ask for another code. If the installer stopped, these are the most common errors and their fix:',
+  'servers.fix.region_mismatch': 'Ask for the code with the region of the continent the machine is on.',
+  'servers.fix.rtc_not_available': 'Install with --transport wss: WebRTC is not available yet.',
+  'servers.fix.ip_not_supported': 'Use a DNS name with its A record, never the IP.',
+  'servers.fix.public_host_mismatch': 'Install with the same DNS name you gave when asking for the code.',
+  'servers.fix.behind_proxy': "Set the DNS record to 'DNS only': a community server never uses Cloudflare's proxy.",
+  'servers.mineTitle': 'YOUR SERVERS',
+  'servers.noNodes': 'You have no servers yet.',
+  'servers.probation': '{count} of {total} verified',
+  'servers.fact.load': 'Matches',
+  'servers.fact.lag': 'Lag p99',
+  'servers.fact.egress': 'Egress',
+  'servers.fact.version': 'Version',
+  'servers.fact.seen': 'Seen',
+  'servers.fact.strikes': 'Strikes',
+  'servers.fact.refused': 'Refusals',
+  'servers.fact.points': 'Points (30 days)',
+  'servers.compatible': 'compatible',
+  'servers.update': 'update pending',
+  'servers.strikes': '{count} of {max} in {days} days',
+  'servers.strikesNext': 'the oldest expires on {time}',
+  'servers.measure.verification': 'Suspended by the system: one of its matches failed verification. It stays so until a person on the team reviews it, and your redemptions are paused.',
+  'servers.measure.strikes': 'Suspended by the system for lost matches, until {time}.',
+  'servers.measure.strikesAgain': 'It is not its first pause in {days} days: when it ends, it goes back to probation and its verified matches start over.',
+  'servers.measure.refusals': 'Out of placement until {time}: it refused with no reason too many of the latest matches we assigned it.',
+  'servers.outUntil': 'out of placement until {time}',
+  'servers.pointsOf': '{points} · matches: {matches}',
+  'servers.drain': 'DRAIN',
+  'servers.rename': 'RENAME',
+  'servers.retire': 'RETIRE',
+  'servers.drainTitle': 'Drain {name}',
+  'servers.drainNote': 'It takes no new matches and stops when the ones it has end. It cannot be undone from here: to bring it back, run on the machine:',
+  'servers.drained': 'Draining: it ends its matches and stops.',
+  'servers.renameTitle': 'Rename {name}',
+  'servers.newName': 'New name',
+  'servers.renameNote': "2 to 32 letters, digits, dots, dashes or underscores. It cannot be another server's name in its region, nor a project server's.",
+  'servers.renamed': 'Done: it is now called {name}.',
+  'servers.retireTitle': 'Retire {name}',
+  'servers.retireNote': 'It leaves the public list and frees its slot. It cannot be undone: to come back, you register a machine with a new code. It is retired offline, or drained with no match running.',
+  'servers.retiredTitle': '{name} is retired',
+  'servers.retired': 'To take the program off the machine, run:',
+  'servers.codesTitle': 'YOUR CODES',
+  'servers.noCodes': 'You have no codes from the last hours.',
+  'servers.revoked': 'Code revoked.',
+  'servers.pointsTitle': 'SERVER POINTS',
+  'servers.kpi.today': 'Today',
+  'servers.kpi.cap': "against the day's cap",
+  'servers.kpi.d30': '30 days',
+  'servers.kpi.matches': { one: '{count} match', other: '{count} matches' },
+  'servers.kpi.earned': 'All time',
+  'servers.kpi.balance': 'Your balance',
+  'servers.garage': 'REDEEM IN GARAGE',
+  'servers.publicTitle': 'PUBLIC LIST',
+  'servers.publicLabel': 'Show my name in the public list',
+  'servers.publicHelp': 'Otherwise you show as "Anfitrión" (Spanish for "host") and a number. You can take it away whenever you like.',
+  'servers.publicOn': 'Your name shows in the public list. Change it on your phone or your PC.',
+  'servers.publicOff': 'You show as "Anfitrión" and a number in the public list.',
+  'servers.helpTitle': 'HOW IT WORKS',
+  'servers.help.states': 'States: waiting for its test (we test the access to its DNS name), on probation (every match is verified until it has 20), active (a random share is verified), suspended or banned (it gets no matches).',
+  'servers.help.what': "What reaches your server: there is no P2P queue. It gets CASUAL matches (2 to 6 players, bots in the free seats) and the bots match of someone who waited alone 5 minutes, when most of their players are of your server's region (on a tie, the region of whoever waited longest). They are spread at random among the region's least loaded servers. COMPETITIVE, for now, does not reach servers that are not the project's. Lobbies are P2P and guests do not search.",
+  'servers.help.few': "Why few arrive: few people search in your region, other servers of the region are less loaded, or your server is on probation with its match cap. In an emergency, without Cloudflare's servers, your region's CASUAL matches wait for a server: one of your region first, then one of South America.",
+  'servers.help.points': "How server points are counted: verified player minutes, weighted. Your own minutes and a lone player's match against bots add nothing; the same players again are worth less, and there is a cap per day. The project servers' capacity also counts in your region and lowers its factor.",
+  'servers.help.measures': 'Automatic measures: if a match fails verification, the server is suspended until a person reviews it; if it loses several matches in a few days, it is suspended for a while and, if it happens again soon, it goes back to probation; if it refuses with no reason too many of the latest matches we assign it, it is out of placement for 1 hour. You see them here, on each server, with your strikes.',
+  'servers.help.data': "Your server receives each player's name, id, team, controls and IP address. You use them only to host their matches: you do not keep them after the match, do not copy them and give them to nobody. The only exception is your machine's technical logs that contain IP addresses (the system's, the firewall's or Caddy's): have them deleted after 7 days at most, unless the law requires you to keep them longer. The official installer keeps the system journal (journald) for 7 days and leaves that data out of Caddy's logs. Check your machine's other logs, such as /var/log/syslog and /var/log/ufw.log on Ubuntu.",
+  'servers.helpRules': 'Rules for hosts',
+  // On a TV the help links nothing (a remote's press would leave the game): where the rules are
+  'servers.helpRulesTv': 'The rules for hosts are section 12 of the Terms: read them on your phone or your PC.',
+  // PROFILE's MY SERVER and COMMUNITY entries once hosting is open (profile.hostServer stays for the closed state)
+  'profile.myServers': 'MY SERVERS',
+  'profile.myServersNote': 'Add a community server and follow its state.',
+  'profile.hostServerOpen': 'My servers',
+  // GARAGE's earn card, compact button and paused line once hosting is open (the closed ones are pinned by tests/garage-screen.test.mjs)
+  'garage.earnOpen': 'HOSTING A SERVER EARNS POINTS',
+  'garage.earnSubOpen': 'How it works · My servers',
+  'garage.earnShortOpen': 'My servers',
+  'garage.pausedOpen': 'Redeeming paused · check My servers',
+  'points.onlyOpen': 'Earned only by hosting a community server, never by playing.',
+  // REPORT SERVER at the end of a match on a community server: the team reads it, never the host
+  'final.report': 'REPORT SERVER',
+  'final.reportTitle': 'Report {name}',
+  'final.reportNote': "What happened? The team reads it, not the host, and no report sanctions anybody on its own. We send the reason, your ping and how many times the game corrected your car's position. One report per match.",
+  'final.reason.unresponsive': 'My car did not respond',
+  'final.reason.lag': 'Only I had lag',
+  'final.reason.disconnected': 'It disconnected me',
+  'final.reason.other': 'Something else',
+  'final.reported': 'Thanks: we got it.',
+  // MATCH FOUND's line on a community server (never a project server's)
+  'found.community': 'Community server',
+  // Settings › Gameplay: the approved name of the preference
+  'settings.groupServers': 'Servers',
+  'settings.projectOnly': 'Project servers only',
+  'settings.projectOnlyHelp': "The matches you search for from this browser or this TV never go to a community server that is not the project's: they go to a project server or a Cloudflare one (in an emergency, they wait for a project server). The option is kept only in this browser or on this TV, not in your account: turn it on in each one you play on, and again if you clear the site's data. If one player of the match turns it on, it applies to the whole match.",
+  // NODE CONTROL (maintainers only): the OPERATORS tab and the opening of hosting
+  'nodesAdmin.tab.operators': 'Operators',
+  'nodesAdmin.open.title': 'HOSTING OPENING',
+  'nodesAdmin.open.stage.closed': 'Closed',
+  'nodesAdmin.open.stage.canary': { one: 'Invited: {count} account', other: 'Invited: {count} accounts' },
+  'nodesAdmin.open.stage.all': 'Every account',
+  'nodesAdmin.open.pick.closed': 'CLOSED',
+  'nodesAdmin.open.pick.canary': 'INVITED',
+  'nodesAdmin.open.pick.all': 'EVERYONE',
+  'nodesAdmin.open.ids': 'Invited accounts (16-character ids, comma-separated)',
+  'nodesAdmin.open.badIds': '1 to {max} ids of 16 characters (0-9, a-f).',
+  'nodesAdmin.open.set': 'CHANGE THE OPENING',
+  'nodesAdmin.open.done': 'Done: {stage}. It lands within a minute or two.',
+  'nodesAdmin.open.termsOn': 'The terms in force ({version}) describe hosting.',
+  'nodesAdmin.open.termsOff': 'The terms in force ({version}) do not describe hosting yet ({needed} needed): the server refuses every value, closing too.',
+  'nodesAdmin.open.webhookOff': "No community servers' webhook: their alerts reach only this panel.",
+  'nodesAdmin.open.changes': 'Latest changes',
+  'nodesAdmin.confirm.flagNote': "It changes who may ask for a server code. It lands within a minute or two (KV keeps the value 60 s in each place). It goes into the audit, and the team channel's line says how many accounts, without their ids. Who gets matches is still nodes_on's.",
+  'nodesAdmin.confirm.blockNote': "Its servers stop connecting, it cannot ask for codes and its wallet is frozen. The team channel's line carries its id and the reason.",
+  'nodesAdmin.confirm.unblockNote': 'It may host again. Its wallet stays as it is: unfreeze it apart, in POINTS.',
+  'nodesAdmin.confirm.suspendAllNote': "Suspends each of its servers in service, for review. The team channel's line carries its id and the reason.",
+  'nodesAdmin.op.note': "The community's hosts: their state, their servers with refusals and effective capacity, codes, matches against the cap, today's points against the cap, concentration and the last week's reports. One report alone never sanctions: several accounts about one server are the signal to review it.",
+  'nodesAdmin.op.none': 'No community hosts yet.',
+  'nodesAdmin.op.ok': 'Enabled',
+  'nodesAdmin.op.blocked': 'Blocked',
+  'nodesAdmin.op.public': 'Public name',
+  'nodesAdmin.op.account': 'Account',
+  'nodesAdmin.op.nodes': 'Servers',
+  'nodesAdmin.op.refusals': 'Refusals',
+  'nodesAdmin.op.tokens': 'Codes',
+  'nodesAdmin.op.tokensOf': '{today} today · {unused} unused',
+  'nodesAdmin.op.running': 'Matches at a time',
+  'nodesAdmin.op.pointsToday': "Today's points",
+  'nodesAdmin.op.points': 'Points',
+  'nodesAdmin.op.pointsOf': '{d30} in 30 days ({matches} matches) · {earned} all time',
+  'nodesAdmin.op.concentration': 'Concentration (3 accounts)',
+  'nodesAdmin.op.reports': 'Reports ({days} days)',
+  'nodesAdmin.op.reportsOf': '{count} from {accounts} accounts',
+  'nodesAdmin.op.rules': 'Rules for hosts',
+  'nodesAdmin.op.rulesHeld': '{version}: the ones in force',
+  'nodesAdmin.op.rulesOld': '{version}: not the ones in force, no new matches',
+  'nodesAdmin.op.rulesNone': 'None accepted: no new matches',
+  'nodesAdmin.op.block': 'BLOCK',
+  'nodesAdmin.op.unblock': 'UNBLOCK',
+  'nodesAdmin.op.suspendAll': 'SUSPEND ALL',
+  'nodesAdmin.op.wallet': 'WALLET',
+  // Refusals of a community account's hosting, an owner's actions, a report and the opening's flag
+  'nodesShared.err.hosting_closed': 'Registering a server is not open to your account yet.',
+  'nodesShared.err.operator_blocked': 'Your account is blocked as a host.',
+  'nodesShared.err.email_required': 'Confirm an email on your account first.',
+  'nodesShared.err.deletion_pending': 'Your account has a deletion pending: cancel it first.',
+  'nodesShared.err.account_too_new': 'Your account is not 7 days old yet.',
+  'nodesShared.err.terms_required': 'Accept the Terms in force first.',
+  'nodesShared.err.adult_required': 'Declare that you are 18 or older.',
+  'nodesShared.err.reaccept_required': 'The Terms have a new version: accept the rules for hosts again in MY SERVERS.',
+  'nodesShared.err.first_code': 'The rules for hosts are accepted with the button that asks for your first code.',
+  'nodesShared.err.too_many_tokens': 'You reached the cap of codes (a day, or unused at once): use or revoke one, or come back later.',
+  'nodesShared.err.name_taken': 'Another server of the region, or a project server, already has that name.',
+  'nodesShared.err.rtc_not_available': 'WebRTC connections are not available yet: use wss.',
+  'nodesShared.err.region_mismatch': 'The region does not match the continent the machine registered from.',
+  'nodesShared.err.bad_public_url': 'The address must be wss on port 443.',
+  'nodesShared.err.behind_proxy': "The DNS name points to Cloudflare's proxy: a community server takes its players directly, its record set to 'DNS only'.",
+  'nodesShared.err.dns_unavailable': "We could not read the name's DNS. The code was not used: run the installer again in a minute.",
+  'nodesShared.err.trusted': 'This is a project account: it is run from NODE CONTROL.',
+  'nodesShared.err.banned': 'A banned server stays as the team left it.',
+  'nodesShared.err.suspended': 'A suspended server is retired once its review or its pause is over.',
+  'nodesShared.err.project_server': 'A project server is not reported.',
+  'nodesShared.err.host_deleted': "That server's host deleted their account: its servers are off the network.",
+  'nodesShared.err.already_reported': 'You reported this match already.',
+  'nodesShared.err.too_many_reports': 'Too many reports for today.',
+  'nodesShared.err.bad_reason': 'Pick one of the reasons.',
+  'nodesShared.err.bad_numbers': 'The report carried numbers that are not valid.',
+  'nodesShared.err.hosting_terms': 'The terms in force do not describe hosting yet: nothing was written.',
+  'nodesShared.err.bad_flag': 'The panel only changes the opening of hosting.',
+  'nodesShared.err.bad_value': 'Closed, every account, or up to 50 ids of 16 characters.',
+  'nodesShared.err.flag_not_written': 'KV did not take the change: nothing changed.',
+  'nodesShared.err.bad_action': 'That action does not exist.',
 } satisfies Messages;

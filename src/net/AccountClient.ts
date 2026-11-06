@@ -29,11 +29,20 @@
  * The HTTP implementation is injectable for node tests (tests/account-client.test.mjs).
  */
 import { legacyPasswordKey, normalizeEmail, passwordIssue, passwordKey, usernameIssue } from './account';
-import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, MyNode, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
+import type { AccountIssue, AccountSession, CodeResendAnswer, CodeStartAnswer, DeviceSession, EmailConfirmAnswer, ExperimentalAnswer, LeaderboardAnswer, MeInfo, OAuthProvider, PasswordLinkAnswer, Playlist, RankedResultAnswer, ResetPeekAnswer, SignupCheckAnswer, TvInfoAnswer, TvPollAnswer, TvStartAnswer, UndoPeekAnswer } from './account';
+import { alertsPageOf, eventsPageOf, historyPageOf, mineAnswerOf, openMatchesOf, operatorsOf, overviewOf as nodeOverviewOf } from './nodes';
+import type { AdminWallet, AlertsPage, EventsPage, FrozenList, HistoryPage, MineAnswer, OpenMatches, OperatorView, Overview, ReportReason, TokenAnswer, TokenAsk } from './nodes';
+
+/** The maintainers' POST /nodes/admin/* actions (server/src/nodeRoutes.ts ADMIN_ROUTES): `flags` the opening's flag, `operator` a community operator's block (Prompt 2, A1, A4). */
+export type NodeAction = 'status' | 'drain' | 'update' | 'reprobe' | 'retire' | 'tokens/revoke' | 'grant' | 'revoke' | 'unfreeze' | 'delist' | 'match/void' | 'match/verify' | 'flags' | 'operator';
+
+/** An owner's POST /nodes/mine/* action on a server of its own (Prompt 2, A12): never from a TV. */
+export type MineAction = 'drain' | 'rename' | 'retire';
 import { DEAD_LINK_CODES, keepAttempt, keepLastSignIn, keepLink, localResendAt, pageStore, readAttempt, readLastSignIn, readLink } from './emailAuth';
 import type { AccountLink, LastSignIn, LegacyPhase, StoredAttempt } from './emailAuth';
 import type { FetchLike, ResponseLike, StorageLike } from './NetClient';
 import { claimAnswerOf, itemsAnswerOf, shopAnswerOf } from './cosmetics';
+import { TERMS_VERSION_RE, termsField } from './terms';
 import type { ClaimAnswer, ItemsAnswer, ShopAnswer } from './cosmetics';
 import { STORAGE_PREFIX } from '../brand';
 import { isCarId, type CarId } from '../game/cosmetics';
@@ -64,6 +73,10 @@ export interface AccountErrorDetail {
   email?: string;
   /** deletion_pending (sign-in PR 12): when the account is purged (ms); the sign-in sent again with cancelDeletion calls it off. */
   purgeAt?: number;
+  /** account_too_new (a community node's code, Prompt 2 A2): the whole days the account still lacks. */
+  daysLeft?: number;
+  /** terms_required (the same code): the terms version in force, whose terms or rules for hosts are not accepted. */
+  version?: string;
 }
 
 /** A password sign-in's options (signIn, legacySignIn). */
@@ -73,12 +86,14 @@ export interface SignInOptions {
 }
 
 /** A refusal's detail from its body (each field only when it has its shape). */
-function detailOf(b: { triesLeft?: unknown; suggest?: unknown; email?: unknown; purgeAt?: unknown }): AccountErrorDetail {
+function detailOf(b: { triesLeft?: unknown; suggest?: unknown; email?: unknown; purgeAt?: unknown; daysLeft?: unknown; version?: unknown }): AccountErrorDetail {
   const d: AccountErrorDetail = {};
   if (typeof b.triesLeft === 'number' && Number.isInteger(b.triesLeft) && b.triesLeft >= 0) d.triesLeft = b.triesLeft;
   if (typeof b.suggest === 'string' && usernameIssue(b.suggest) === null) d.suggest = b.suggest;
   if (typeof b.email === 'string' && normalizeEmail(b.email) !== null) d.email = b.email;
   if (typeof b.purgeAt === 'number' && Number.isFinite(b.purgeAt) && b.purgeAt > 0) d.purgeAt = b.purgeAt;
+  if (typeof b.daysLeft === 'number' && Number.isInteger(b.daysLeft) && b.daysLeft >= 0 && b.daysLeft <= 366) d.daysLeft = b.daysLeft;
+  if (typeof b.version === 'string' && TERMS_VERSION_RE.test(b.version)) d.version = b.version;
   return d;
 }
 
@@ -184,6 +199,8 @@ export interface CreateOptions {
   news: boolean;
   lang: string;
   tz: string;
+  /** The terms version the notice above CREAR showed (AuthConfig.terms), accepted with the press; absent or null: none shown. */
+  terms?: string | null;
 }
 
 /** How long after a credential proof (a sign-in, a re-authentication) the client counts it fresh: a little under the server's 10 minutes. */
@@ -318,13 +335,20 @@ export function readAccountHint(storage: Pick<StorageLike, 'getItem'> | null): A
  * What GET /api/config's `auth` says about signing in (the sign-in design's §2.1), each false or
  * 'none' from a server without it: `email` the flows that send mail may show (sign-up, forgot, a
  * first password: sign-in PR 7's mailer, its kill flag off), `devSignIn` the dev-only sign-in
- * (§3.15), `legacy` the username sign-in's phase and its cutoff (sign-in PR 9).
+ * (§3.15), `legacy` the username sign-in's phase and its cutoff (sign-in PR 9). From its `legal`
+ * (the legal draft's P12, P1, P5): `terms` the terms version in force, null until the owner publishes
+ * (then nothing of the terms shows: no link, notice or acceptance), and `deletion` PERFIL's BORRAR
+ * CUENTA and its screens are open (DELETION_OPEN).
  */
 export interface AuthConfig {
   email: boolean;
   devSignIn: boolean;
   legacy: LegacyPhase;
   legacyUntil: number | null;
+  terms: string | null;
+  deletion: boolean;
+  /** The days a deletion leaves to cancel it (DELETE_GRACE; 14 from a server that does not say). */
+  graceDays: number;
 }
 
 /** A sign-up's proof of the mailbox: the code typed in the browser that started it, or the mailed link's token. */
@@ -342,6 +366,12 @@ const RESUME_MS = 10 * 60_000;
 const PROVIDER_TRY_KEY = STORAGE_PREFIX + 'auth.provider';
 /** That marker counts this long: a provider's round trip. */
 const PROVIDER_TRY_MS = 10 * 60_000;
+
+/** A history read's query: only the values given, each encoded. */
+function queryOf(q: Record<string, string | undefined>): string {
+  const parts = Object.entries(q).flatMap(([k, v]) => (v === undefined || v === '' ? [] : [`${k}=${encodeURIComponent(v)}`]));
+  return parts.length > 0 ? '?' + parts.join('&') : '';
+}
 
 export class AccountClient {
   /** The signed-in account's Bearer session, null for a guest. */
@@ -602,7 +632,7 @@ export class AccountClient {
   async createAccount(username: string, opts: CreateOptions): Promise<AccountSession> {
     const u = usernameIssue(username);
     if (u !== null) throw issueError(u, 'bad_username');
-    const res = await this.callAnonymous('/api/auth/pending/create', { username, news: opts.news, lang: opts.lang, tz: opts.tz });
+    const res = await this.callAnonymous('/api/auth/pending/create', { username, news: opts.news, lang: opts.lang, tz: opts.tz, ...termsField(opts.terms) });
     if (res.status === 409 || res.status === 400) {
       const b = (await res.json().catch(() => null)) as { error?: unknown; suggest?: unknown } | null;
       const read: ResponseLike = { ok: false, status: res.status, json: async () => b, text: async () => JSON.stringify(b) };
@@ -907,6 +937,11 @@ export class AccountClient {
    * claim must never reach it.
    */
   private async ownCall(path: string, body?: unknown): Promise<unknown> {
+    return this.jsonOrFail<unknown>(await this.ownResponse(path, body));
+  }
+
+  /** ownCall's answer before it is read: its 401 handled the same way (another account's session never asks). */
+  private async ownResponse(path: string, body?: unknown): Promise<ResponseLike> {
     const owner = this.account?.playerId ?? null;
     const refused = (): AccountError => new AccountError(t('auth.signInFirst'), 401, 'unauthorized');
     const first = owner === null ? null : await this.sessionForQueue();
@@ -918,7 +953,7 @@ export class AccountClient {
       res = await this.call(path, body, s.session);
       if (res.status === 401) throw refused();
     }
-    return this.jsonOrFail<unknown>(res);
+    return res;
   }
 
   /** The experimental routes' answer, parsed leniently (ownCall). */
@@ -1001,17 +1036,63 @@ export class AccountClient {
 
   /**
    * The signed-in account's community nodes (GET /nodes/mine, the operator route the node pages
-   * use): [] for an account without one, and where the Worker has no nodes (a fork, local dev: 404,
-   * or an answer that is not the route's JSON). Rejects for a guest or on a network / server error.
+   * use): the operator as the control plane sees it (trusted or not: the server's word), its nodes
+   * (never a retired one) and its rewards; empty for an account without one, and where the Worker
+   * has no nodes (a fork, local dev: 404, or an answer that is not the route's JSON). On ownCall:
+   * once more after a 401, nothing for a session that turned into another account. Rejects for a
+   * guest or on a network / server error (503 nodes_off too: the panel says the nodes are paused).
    */
-  async myNodes(): Promise<MyNode[]> {
-    const res = await this.call('/nodes/mine', undefined, await this.bearer());
-    if (res.status === 404) return [];
-    const b = await this.jsonOrFail<{ nodes?: unknown }>(res).catch((e: unknown): { nodes?: unknown } => {
-      if (e instanceof AccountError) throw e;
-      return {}; // not JSON: the dev server's page
-    });
-    return Array.isArray(b.nodes) ? (b.nodes as MyNode[]) : [];
+  async nodesMine(): Promise<MineAnswer> {
+    try {
+      return mineAnswerOf(await this.ownCall('/nodes/mine'));
+    } catch (e) {
+      if (e instanceof AccountError && e.status !== 404) throw e;
+      return { operator: null, nodes: [], rewards: null }; // 404, or not JSON: the dev server's page
+    }
+  }
+
+  /**
+   * An owner's action on a server of its own ("Mis servidores", Prompt 2 A12): POST /nodes/mine/drain
+   * { nodeId }, /rename { nodeId, name }, /retire { nodeId }; never from a TV (the Worker refuses it:
+   * tv_session). The refusals reject with their code (src/net/nodes.ts nodeErrorKey says them).
+   */
+  async nodesMineAction(what: MineAction, body: { nodeId: string; name?: string }): Promise<Record<string, unknown>> {
+    return ((await this.ownCall('/nodes/mine/' + what, body)) ?? {}) as Record<string, unknown>;
+  }
+
+  /** POST /nodes/tokens/revoke { id }: one of the account's own unused codes, by the short id /nodes/mine lists. */
+  async nodesRevokeOwn(id: string): Promise<void> {
+    await this.ownCall('/nodes/tokens/revoke', { id });
+  }
+
+  /**
+   * POST /nodes/mine/accept { acceptHost, adult }: the rules for hosts of a new terms version accepted
+   * again and 18 or older declared again (Terms 12.2), without a code; never from a TV, at level 2
+   * within 15 minutes as a code (403 reauth_required). `already`: it held them (nothing written). The
+   * refusals reject with their code (409 first_code: never a first acceptance, that one goes with a code).
+   */
+  async nodesAcceptAgain(adult: boolean): Promise<{ hostTerms: string | null; already: boolean }> {
+    const r = (await this.ownCall('/nodes/mine/accept', { acceptHost: true, adult })) as { hostTerms?: unknown; already?: unknown } | null;
+    return { hostTerms: typeof r?.hostTerms === 'string' ? r.hostTerms : null, already: r?.already === true };
+  }
+
+  /** POST /nodes/mine/public { show }: the operator's name in the public list (its consent, A14), or "Anfitrión <n>"; resolves the server's state after it. */
+  async nodesShowPublic(show: boolean): Promise<boolean> {
+    return ((await this.ownCall('/nodes/mine/public', { show })) as { showPublic?: unknown } | null)?.showPublic === true;
+  }
+
+  /**
+   * POST /nodes/report (A16): the community server a match of this account's was played on, reported
+   * for the team to review (never shown to its host, never a sanction alone), once per match. `ping`
+   * and `corrections` are this client's numbers, whole, informative only.
+   */
+  async nodesReport(r: { matchId: string; reason: ReportReason; ping?: number; corrections?: number }): Promise<void> {
+    await this.ownCall('/nodes/report', r);
+  }
+
+  /** GET /nodes/admin/operators: the community operators for the panel's Operadores tab (a maintainer's read, audited). */
+  async nodesOperators(): Promise<{ at: number; operators: OperatorView[] }> {
+    return operatorsOf(await this.ownCall('/nodes/admin/operators'));
   }
 
   async rankedResult(matchId: string): Promise<RankedResultAnswer> {
@@ -1073,7 +1154,7 @@ export class AccountClient {
    */
   authConfig(): Promise<AuthConfig> {
     if (this.authCfg !== null) return this.authCfg;
-    const none: AuthConfig = { email: false, devSignIn: false, legacy: 'none', legacyUntil: null };
+    const none: AuthConfig = { email: false, devSignIn: false, legacy: 'none', legacyUntil: null, terms: null, deletion: false, graceDays: 14 };
     let offline = false;
     const p = (async (): Promise<AuthConfig> => {
       let res: ResponseLike;
@@ -1085,11 +1166,21 @@ export class AccountClient {
       }
       if (!res.ok) return none;
       try {
-        const c = (await res.json()) as { auth?: { email?: unknown; devSignIn?: unknown; legacy?: { phase?: unknown; until?: unknown } } } | null;
+        const c = (await res.json()) as { auth?: { email?: unknown; devSignIn?: unknown; legacy?: { phase?: unknown; until?: unknown } }; legal?: { terms?: unknown; deletion?: unknown; graceDays?: unknown } } | null;
         const a = c?.auth;
         const phase = a?.legacy?.phase;
         const until = a?.legacy?.until;
-        return { email: a?.email === true, devSignIn: a?.devSignIn === true, legacy: phase === 'grace' || phase === 'closed' ? phase : 'none', legacyUntil: typeof until === 'number' && Number.isFinite(until) ? until : null };
+        const terms = c?.legal?.terms;
+        const grace = c?.legal?.graceDays;
+        return {
+          email: a?.email === true,
+          devSignIn: a?.devSignIn === true,
+          legacy: phase === 'grace' || phase === 'closed' ? phase : 'none',
+          legacyUntil: typeof until === 'number' && Number.isFinite(until) ? until : null,
+          terms: typeof terms === 'string' && TERMS_VERSION_RE.test(terms) ? terms : null,
+          deletion: c?.legal?.deletion === true,
+          graceDays: typeof grace === 'number' && Number.isInteger(grace) && grace >= 1 && grace <= 60 ? grace : 14,
+        };
       } catch {
         return none;
       }
@@ -1147,12 +1238,12 @@ export class AccountClient {
    * this device remembers an email sign-in. Name refusals reject with detail.suggest (the form puts
    * it in the field); the proof is never spent by them.
    */
-  async signupFinish(proof: CodeProof, f: { username: string; password: string; news: boolean; email: string }): Promise<AccountSession> {
+  async signupFinish(proof: CodeProof, f: { username: string; password: string; news: boolean; email: string; terms?: string | null }): Promise<AccountSession> {
     const u = usernameIssue(f.username);
     if (u !== null) throw issueError(u, 'bad_username');
     const p = passwordIssue(f.password, { username: f.username, email: f.email });
     if (p !== null) throw issueError(p, 'bad_password');
-    const body = { ...proofBody(proof), username: f.username, password: await passwordKey(f.password), news: f.news, lang: language(), tz: timeZone() };
+    const body = { ...proofBody(proof), username: f.username, password: await passwordKey(f.password), news: f.news, lang: language(), tz: timeZone(), ...termsField(f.terms) };
     const s = await this.settleLink(proof, true, async () => this.jsonOrFail<AccountSession>(await this.call('/api/auth/signup/finish', body)));
     if (!isSession(s)) throw new AccountError(t('error.server'), 200, 'protocol');
     keepAttempt(this.sessionStore, null);
@@ -1175,10 +1266,11 @@ export class AccountClient {
 
   /**
    * ENTRAR with an address (POST /api/auth/signin { email, password }): the current key only (a
-   * password of before signs in by its username, and re-keys there). One bad_credentials for an
-   * unknown address and a wrong password alike (I6). Level 2; this device remembers it. A pending
-   * deletion rejects with deletion_pending (detail.purgeAt), and `cancelDeletion` calls it off, as
-   * legacySignIn.
+   * password of before with no verified address signs in by its username, and re-keys there; beside
+   * an address it signs in nowhere until a reset or "confirm it's you" re-keys it). One
+   * bad_credentials for an unknown address and a wrong password alike (I6). Level 2; this device
+   * remembers it. A pending deletion rejects with deletion_pending (detail.purgeAt), and
+   * `cancelDeletion` calls it off, as legacySignIn.
    */
   async signIn(email: string, password: string, opts: SignInOptions = {}): Promise<AccountSession> {
     return this.adopt(sessionPart(await this.emailSignIn(email, password, false, opts.cancelDeletion === true)));
@@ -1367,6 +1459,135 @@ export class AccountClient {
   /** M9's link (/account#keep=<token>): POST /api/auth/delete/cancel { token } calls the deletion off; link_invalid when it cannot any more. */
   async cancelDeletion(token: string): Promise<void> {
     await this.settleLink({ token }, true, async () => this.jsonOrFail<{ ok: true }>(await this.call('/api/auth/delete/cancel', { token })));
+  }
+
+  // ---- the terms of service (the legal draft's P1, P33) and deletion on request (P4) -----------------
+
+  /**
+   * The re-accept sheet's ACEPTAR (POST /api/me/consent { kind: 'terms', version }, a TV's Bearer
+   * too): the account accepts `version`, which its MeInfo keeps (in place: nothing redraws).
+   * Refusals: terms_changed (another version is in force since this page loaded its config),
+   * deletion_pending, bad_consent (no terms in force).
+   */
+  async acceptTerms(version: string): Promise<string | null> {
+    const owner = this.account?.playerId ?? null;
+    const r = (await this.ownCall('/api/me/consent', { kind: 'terms', version })) as { terms?: unknown } | null;
+    const terms = typeof r?.terms === 'string' ? r.terms : null;
+    if (this.me !== null && this.me.playerId === owner) this.me.terms = terms;
+    return terms;
+  }
+
+  /**
+   * A maintainer's deletion on request (POST /api/admin/account-delete, the legal draft's P4), from
+   * the browser's console on turbo-gol.com (docs/legal/README.md): `account` its id or username,
+   * `confirm` its username typed again, `receivedAt` when the request came (ms or YYYY-MM-DD).
+   * Resolves the certificate to send back. Refusals: reauth_required { level: 2 } (PERFIL's
+   * CONFIRMAR CON LA CONTRASEÑA first), not_trusted, bad_confirm, no_user, maintainer_account, retry.
+   */
+  async adminDeleteAccount(account: string, confirm: string, receivedAt?: number | string): Promise<unknown> {
+    const r = (await this.ownCall('/api/admin/account-delete', { account, confirm, ...(receivedAt !== undefined ? { receivedAt } : {}) })) as { certificate?: unknown } | null;
+    if (typeof r?.certificate !== 'object' || r.certificate === null) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r.certificate;
+  }
+
+  /**
+   * The queues' anonymous daily counters (GET /nodes/admin/queue-stats?days=, server/src/queueStats.ts
+   * QueueDay), newest first, today's included, from the browser's console on turbo-gol.com:
+   * `await __game.accounts.queueStats(30)`. `days` 1 to 90. Refusals as adminDeleteAccount's
+   * (reauth_required { level: 2 }: PERFIL's CONFIRMAR CON LA CONTRASEÑA first; not_trusted).
+   */
+  async queueStats(days = 30): Promise<unknown[]> {
+    const n = Math.min(90, Math.max(1, Math.floor(Number.isFinite(days) ? days : 30)));
+    const r = (await this.ownCall('/nodes/admin/queue-stats?days=' + n)) as { days?: unknown } | null;
+    if (!Array.isArray(r?.days)) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r.days;
+  }
+
+  // ---- the maintainers' node panel (PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS) ----------------
+  // Every one goes through the Worker's maintainer gate (server/src/nodeRoutes.ts): a session that is
+  // not a TV's, of a NODE_TRUSTED_OPERATORS account, with its password typed in the last 15 minutes
+  // (403 reauth_required { level: 2 } otherwise: the panel asks for it and goes on), 30 a minute.
+  // The refusals reject with their code (src/net/nodes.ts nodeErrorKey says them).
+
+  /** GET /nodes/admin/overview: what the panel refreshes every 15 s (the nodes, tokens, regions, flags, warnings). */
+  async nodesOverview(): Promise<Overview> {
+    return nodeOverviewOf(await this.ownCall('/nodes/admin/overview'));
+  }
+
+  /** GET /nodes/admin/wallet?account=: an account's wallet, its freeze and its items (`account` 16 hex). */
+  async nodesWallet(account: string): Promise<AdminWallet> {
+    const r = (await this.ownCall('/nodes/admin/wallet?account=' + encodeURIComponent(account))) as Partial<AdminWallet> | null;
+    return { account: typeof r?.account === 'string' ? r.account : account, wallet: r?.wallet ?? null, items: Array.isArray(r?.items) ? r.items : [], car: typeof r?.car === 'string' ? r.car : null };
+  }
+
+  /** GET /nodes/admin/frozen: the wallets frozen now, newest first. */
+  async nodesFrozen(): Promise<FrozenList> {
+    const r = (await this.ownCall('/nodes/admin/frozen')) as Partial<FrozenList> | null;
+    return { frozen: Array.isArray(r?.frozen) ? r.frozen : [], more: r?.more === true };
+  }
+
+  /** POST /nodes/admin/<action>: a node's status (with its guards), drain, re-probe, retire; the channel announced again; a token revoked; points granted, revoked or unfrozen. */
+  async nodesAction(action: NodeAction, body: Record<string, unknown>): Promise<unknown> {
+    return this.ownCall('/nodes/admin/' + action, body);
+  }
+
+  /** POST /nodes/tokens: a one-time token of this account and its install line, composed by the server (409 too_many_nodes before any token at the cap). */
+  async nodesToken(ask: TokenAsk): Promise<TokenAnswer> {
+    const r = (await this.ownCall('/nodes/tokens', ask)) as Partial<TokenAnswer> | null;
+    if (typeof r?.token !== 'string' || typeof r.install?.linux !== 'string') throw new AccountError(t('error.server'), 200, 'protocol');
+    return { token: r.token, expiresAt: typeof r.expiresAt === 'number' ? r.expiresAt : this.now() + 3_600_000, ttlMinutes: typeof r.ttlMinutes === 'number' ? r.ttlMinutes : 60, install: { linux: r.install.linux } };
+  }
+
+  /** GET /nodes/admin/events: what happened to the nodes, newest first, a page at a time (`before`: the last page's `next`), one node's or all. */
+  async nodesEvents(q: { node?: string; before?: string } = {}): Promise<EventsPage> {
+    return eventsPageOf(await this.ownCall('/nodes/admin/events' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/history: the settled matches, newest first, a page at a time; one node's, or the one `match`. */
+  async nodesHistory(q: { node?: string; match?: string; before?: string } = {}): Promise<HistoryPage> {
+    return historyPageOf(await this.ownCall('/nodes/admin/history' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/alerts: the ALERT lines the control plane posted, newest first, a page at a time. */
+  async nodesAlerts(q: { before?: string } = {}): Promise<AlertsPage> {
+    return alertsPageOf(await this.ownCall('/nodes/admin/alerts' + queryOf(q)));
+  }
+
+  /** GET /nodes/admin/matches: the matches the control plane holds and has not settled. */
+  async nodesMatches(): Promise<OpenMatches> {
+    return openMatchesOf(await this.ownCall('/nodes/admin/matches'));
+  }
+
+  /**
+   * GET /nodes/admin/replay?matchId=: the match's raw replay (TGR1, as the node uploaded it), for
+   * `verify <file>` by hand. Every download is an ALERT in the team's channel; 404 no_replay once it
+   * is delisted, pruned or gone.
+   */
+  async nodesReplay(matchId: string): Promise<Uint8Array> {
+    const res = await this.ownResponse('/nodes/admin/replay?matchId=' + encodeURIComponent(matchId));
+    if (!res.ok) return this.fail(res);
+    const bytes = (res as ResponseLike & { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer;
+    if (typeof bytes !== 'function') throw new AccountError(t('error.server'), res.status, 'protocol');
+    return new Uint8Array(await bytes.call(res));
+  }
+
+  /** GET /nodes/admin/account-stats: the accounts' anonymous counts (numbers only). Shares 10 a minute with queueStats and the deletions on request. */
+  async accountStats(): Promise<Record<string, unknown>> {
+    const r = await this.ownCall('/nodes/admin/account-stats');
+    if (typeof r !== 'object' || r === null) throw new AccountError(t('error.server'), 200, 'protocol');
+    return r as Record<string, unknown>;
+  }
+
+  /** The provider whose round trip this tab started last (providerStarted, 10 minutes), null when none: a deletion_pending callback signs in with it again to call the deletion off. */
+  startedProvider(): OAuthProvider | null {
+    try {
+      const raw = this.sessionStore.getItem(PROVIDER_TRY_KEY);
+      if (raw === null) return null;
+      const v = JSON.parse(raw) as { p?: unknown; at?: unknown };
+      return (v.p === 'google' || v.p === 'discord') && typeof v.at === 'number' && this.now() - v.at < PROVIDER_TRY_MS ? v.p : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

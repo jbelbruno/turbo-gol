@@ -412,6 +412,7 @@ test('LobbyClient: create -> socket with the ticket -> state -> match -> leave',
     '/api/lobbies': (b, h) => {
       assert.equal(h.authorization, 'Bearer guest-jwt');
       assert.equal(b.password, 'pw');
+      assert.equal(b.api, 2, 'the client-version marker (QUEUE_API)');
       return res(200, { lobbyId: 'L'.repeat(64), code: 'ABC234', ticket: 'TICKET', wsUrl: 'ws://x/lobby/L' });
     },
     '/api/lobbies/join': () => res(403, { error: 'bad_password', message: 'Contraseña incorrecta' }),
@@ -661,37 +662,37 @@ test('AccountClient experimental calls: a refresh that hands back another accoun
 test("AccountClient cars and the hosts' shop: Bearer, paths and bodies; a car pick adopts the session it answers; refusals carry the player's text", async () => {
   let carStatus = 200;
   const srv = fakeServer({
-    '/api/me/items': () => res(200, { items: ['host-badge', 'pampero'], car: 'pampero', cars: ['dune', 'pampero'] }),
+    '/api/me/items': () => res(200, { items: ['host-badge', 'cyclone'], car: 'cyclone', cars: ['dune', 'cyclone'] }),
     '/api/me/car': (b) => (carStatus === 200 ? res(200, { ...SESSION('Tomi', Date.now() + 3600_000), session: 'jwt-Tomi-2', car: b.car }) : res(409, { error: 'not_owned', message: 'Ese auto no es tuyo todavía' })),
-    '/api/me/shop': () => res(200, { items: [{ id: 'pampero', kind: 'car', name: 'Pampero', description: '', cost: 1500, status: 'soon', owned: true, claimable: false, nameKey: 'car.pampero' }], wallet: { earned: 40, spent: 0, balance: 40, frozen: null } }),
-    '/api/me/shop/claim': (b) => (b.item === 'tero' ? res(409, { error: 'insufficient', message: 'insufficient' }) : res(200, { item: b.item, claimed: true, wallet: { earned: 1600, spent: 1500, balance: 100, frozen: null }, items: [b.item] })),
+    '/api/me/shop': () => res(200, { items: [{ id: 'cyclone', kind: 'car', name: 'Cyclone', description: '', cost: 1500, status: 'soon', owned: true, claimable: false, nameKey: 'car.cyclone' }], wallet: { earned: 40, spent: 0, balance: 40, frozen: null } }),
+    '/api/me/shop/claim': (b) => (b.item === 'magma' ? res(409, { error: 'insufficient', message: 'insufficient' }) : res(200, { item: b.item, claimed: true, wallet: { earned: 1600, spent: 1500, balance: 100, frozen: null }, items: [b.item] })),
     '/api/auth/refresh': () => res(401, { error: 'bad_refresh' }),
   });
   const a = new AC.AccountClient({ fetchFn: srv.fetchFn, storage: null });
   await assert.rejects(a.fetchItems(), (e) => e instanceof AC.AccountError && e.code === 'unauthorized', 'a guest: no request');
   assert.equal(srv.calls.length, 0);
   a.account = SESSION('Tomi', Date.now() + 3600_000);
-  assert.deepEqual(await a.fetchItems(), { items: ['host-badge', 'pampero'], car: 'pampero', cars: ['dune', 'pampero'] });
+  assert.deepEqual(await a.fetchItems(), { items: ['host-badge', 'cyclone'], car: 'cyclone', cars: ['dune', 'cyclone'] });
   assert.deepEqual(srv.calls.at(-1), { path: '/api/me/items', method: 'GET', body: undefined, headers: srv.calls.at(-1).headers });
   assert.equal(srv.calls.at(-1).headers.authorization, 'Bearer jwt-Tomi');
   let changes = 0;
   a.subscribe(() => changes++);
-  const s = await a.selectCar('pampero');
-  assert.deepEqual(srv.calls.at(-1).body, { car: 'pampero' });
-  assert.equal(s.car, 'pampero');
+  const s = await a.selectCar('cyclone');
+  assert.deepEqual(srv.calls.at(-1).body, { car: 'cyclone' });
+  assert.equal(s.car, 'cyclone');
   assert.equal(a.account.session, 'jwt-Tomi-2', 'the fresh session is the one the next queue carries');
-  assert.equal(a.account.car, 'pampero');
+  assert.equal(a.account.car, 'cyclone');
   assert.equal(changes, 1, 'the listeners (the Garage) hear of it');
   carStatus = 409;
-  await assert.rejects(a.selectCar('tero'), (e) => e instanceof AC.AccountError && e.code === 'not_owned' && e.status === 409 && e.message === 'That car is not yours yet');
-  assert.equal(a.account.car, 'pampero', 'refused: nothing adopted');
+  await assert.rejects(a.selectCar('magma'), (e) => e instanceof AC.AccountError && e.code === 'not_owned' && e.status === 409 && e.message === 'That car is not yours yet');
+  assert.equal(a.account.car, 'cyclone', 'refused: nothing adopted');
   const shop = await a.fetchShop();
   assert.equal(shop.items[0].owned, true);
   assert.deepEqual(shop.wallet, { earned: 40, spent: 0, balance: 40, frozen: null });
-  const c = await a.claimItem('condor');
-  assert.deepEqual(srv.calls.at(-1).body, { item: 'condor' });
-  assert.deepEqual(c, { item: 'condor', claimed: true, wallet: { earned: 1600, spent: 1500, balance: 100, frozen: null }, items: ['condor'] });
-  await assert.rejects(a.claimItem('tero'), (e) => e instanceof AC.AccountError && e.code === 'insufficient' && e.message === 'Not enough server points');
+  const c = await a.claimItem('sirocco');
+  assert.deepEqual(srv.calls.at(-1).body, { item: 'sirocco' });
+  assert.deepEqual(c, { item: 'sirocco', claimed: true, wallet: { earned: 1600, spent: 1500, balance: 100, frozen: null }, items: ['sirocco'] });
+  await assert.rejects(a.claimItem('magma'), (e) => e instanceof AC.AccountError && e.code === 'insufficient' && e.message === 'Not enough server points');
   // A session whose car this page does not know: no car (the default one).
   a.account = null;
   srv.calls.length = 0;
@@ -915,7 +916,9 @@ test("PERFIL's sign-in routes on '@': an address by email, a username by the leg
   const closed = login.indexOf("if (route.kind === 'closed')");
   assert.ok(closed > 0 && closed < login.indexOf('await acc.'), 'the cutoff answers before any request');
   assert.match(login.slice(closed, login.indexOf('try {', closed)), /user\.error\(legacyClosedText\(\)\);\s*newAccount\.hidden = false;\s*return;/);
-  assert.match(login, /if \(route\.kind === 'email'\) await acc\.signIn\(route\.email, pass\.input\.value\);\s*else await acc\.legacySignIn\(route\.username, pass\.input\.value\);/);
+  // The password typed, sent again with cancelDeletion when the account's deletion is pending and the player keeps it (the legal draft's P5).
+  assert.match(login, /const password = pass\.input\.value;/);
+  assert.match(login, /if \(route\.kind === 'email'\) await acc\.signIn\(route\.email, password, \{ cancelDeletion \}\);\s*else await acc\.legacySignIn\(route\.username, password, \{ cancelDeletion \}\);/);
   assert.match(login, /route\.kind === 'legacy' \? t\('auth\.badLegacyHint'\) : providers\.length > 0 \? t\('auth\.badCredentialsHint', \{ providers \}\) : null/, "bad_credentials' hint by branch");
   assert.match(login, /field\(closed \? t\('auth\.email'\) : t\('auth\.identity'\)/, '"Email or username" while usernames sign in');
 });
@@ -1335,9 +1338,10 @@ test("the arbiter's 'account' step: an /account#reset link waits while #auth=con
   }
 });
 
-test("Game.ts runs the mailed links in the arbiter: 'auth', then 'account', then 'tv'", async () => {
+test("Game.ts runs the mailed links in the arbiter: 'auth', then 'account', then #servers (Prompt 2, B1), then 'tv'", async () => {
   const game = await readFile(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
-  assert.match(game, /new UrlSheets\(\['auth', 'account', 'tv'\] as const\)/);
+  assert.match(game, /new UrlSheets\(\['auth', 'account', 'servers', 'tv'\] as const\)/);
+  assert.match(game, /installServersLink\(this\.menu, \(\) => this\.urlSheets\.turn\('servers'\)\)[\s\S]{0,160}\.finally\(\(\) => this\.urlSheets\.done\('servers'\)\)/);
   assert.match(game, /installAccountLinks\(this\.menu, \(\) => this\.urlSheets\.turn\('account'\)\)[\s\S]{0,160}\.finally\(\(\) => this\.urlSheets\.done\('account'\)\)/);
   assert.match(game, /installTvLink\(this\.menu, \(\) => this\.urlSheets\.turn\('tv'\)\)/);
   assert.match(fnOf(LINKS, 'installAccountLinks'), /await turn\(\);[\s\S]*await openAccountLink\(menu, link\);\s*return sheetsClosed\(menu\);/, 'done once its sheets are over');

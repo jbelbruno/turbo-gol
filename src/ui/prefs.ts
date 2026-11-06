@@ -1,54 +1,89 @@
 /**
  * The menus' own preferences, in localStorage `turbogol.menu.v1` (Menu.ts loads and saves them):
- * the region, the playlists picked for Casual and for Competitive, Casual's connection (MODOS ›
- * Advanced: auto, P2P or server; screens/modesModel.ts queueNet), the
- * leaderboard's playlist, the kind of the last search started anywhere, which JUGAR AHORA plays
- * again in one press (screens/homeModel.ts heroQueue), and the format of the last lobby the player
- * had (CREATE LOBBY AND SHARE's: screens/lobbyModel.ts lobbyFormat). Pure, no DOM: node tests import it.
+ * the region, Casual's preferred format (the format of its online bots match; Casual pools every
+ * format, so with other people searching the format follows how many they are) and that match's
+ * bots level (none until the player picks one: the server's level, the KV flag bot_level, sets it
+ * then; other people's matches always play the server's), the playlists
+ * picked for Competitive, the leaderboard's playlist, the kind of the last search started
+ * anywhere, which JUGAR AHORA plays again in one press (screens/homeModel.ts heroQueue), the format
+ * of the last lobby the player had (CREATE PUBLIC / PRIVATE LOBBY's: screens/lobbyModel.ts
+ * lobbyFormat) and the last pick of "While you search" (screens/waitSheet.ts). Pure, no DOM: node
+ * tests import it.
+ *
+ * Casual's connection (MODOS › Advanced: auto, P2P or server) is gone with the modes redesign
+ * (November 2026: Casual is always on a server); an older object's `net` is dropped, and its
+ * `casualModes` of one playlist becomes `casualPrefer`.
  */
 import { isRegion } from '../net/account';
 import type { RegionId } from '../net/account';
 import type { GameMode } from '../sim/constants';
+import type { Difficulty } from '../ai/Bot';
 import { STORAGE_PREFIX } from '../brand';
+
+/** What a search's "While you search" sheet offers (focused on the last pick). */
+export type WaitChoice = 'bots' | 'training' | 'menu';
 
 export interface MenuPrefs {
   region: RegionId | null;
-  casualModes: GameMode[];
+  /** Casual's format when it plays bots online (the 5-minute match), and its search's `prefer`. */
+  casualPrefer: GameMode;
+  /**
+   * The bots' level of that match the player picked (the search's `bots`); null until they pick one:
+   * the search sends none and the server's level (the KV flag bot_level) plays. A match with other
+   * people always plays the server's level.
+   */
+  casualBots: Difficulty | null;
   rankedModes: GameMode[];
-  net: 'auto' | 'p2p' | 'server';
   leaderboardPlaylist: GameMode;
   /** The kind of the last search started anywhere (hero, Casual, Competitive): what JUGAR AHORA repeats. */
   lastQueue: 'casual' | 'ranked';
   /** The format of the last lobby this player created or set (null: none yet). */
   lobbyMode: GameMode | null;
+  /** The last pick of "While you search" (the sheet's focus). */
+  waitChoice: WaitChoice;
+  /**
+   * "Solo servidores del proyecto" (Ajustes › JUEGO, Prompt 2 A15): the player's matches never go to
+   * a community server. Off until the player turns it on, which its row allows only once GET
+   * /api/config says hosting is open (screens/serversModel.ts projectOnlyShown); then sent with the
+   * search whenever it is on, and its row kept while it is.
+   */
+  projectOnly: boolean;
 }
 
-/** The same key as before lastQueue: an older object reads as Casual, no migration. */
+/** The same key as before: an older object reads with these defaults for what it lacks, no migration step. */
 export const PREFS_KEY = STORAGE_PREFIX + 'menu.v1';
 
-/** A first visit: Casual 2v2 in the automatic region (the connection's continent), the automatic connection. */
-export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualModes: ['2v2'], rankedModes: ['2v2'], net: 'auto', leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null };
+/** A first visit: Casual preferring 2v2 against the server's bots level in the automatic region (the connection's continent), bots while waiting. */
+export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualPrefer: '2v2', casualBots: null, rankedModes: ['2v2'], leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots', projectOnly: false };
+
+const isMode = (v: unknown): v is GameMode => v === '1v1' || v === '2v2' || v === '3v3';
+const isLevel = (v: unknown): v is Difficulty => v === 'easy' || v === 'medium' || v === 'hard';
 
 /** The prefs stored as `raw` (null when none); anything unreadable takes its default. Pure. */
 export function parsePrefs(raw: string | null): MenuPrefs {
-  const d: MenuPrefs = { ...DEFAULT_PREFS, casualModes: DEFAULT_PREFS.casualModes.slice(), rankedModes: DEFAULT_PREFS.rankedModes.slice() };
+  const d: MenuPrefs = { ...DEFAULT_PREFS, rankedModes: DEFAULT_PREFS.rankedModes.slice() };
   if (!raw) return d;
-  let o: Partial<MenuPrefs>;
+  let o: Record<string, unknown>;
   try {
     const v: unknown = JSON.parse(raw);
     if (v === null || typeof v !== 'object' || Array.isArray(v)) return d;
-    o = v as Partial<MenuPrefs>;
+    o = v as Record<string, unknown>;
   } catch {
     return d;
   }
-  const modes = (v: unknown): GameMode[] | null => (Array.isArray(v) && v.length > 0 && v.every((m) => m === '1v1' || m === '2v2' || m === '3v3') ? (v as GameMode[]) : null);
+  const modes = (v: unknown): GameMode[] | null => (Array.isArray(v) && v.length > 0 && v.every(isMode) ? (v as GameMode[]) : null);
+  // An older page's Casual pick: one playlist is the preferred format, several (ANY) the default.
+  const oldCasual = modes(o.casualModes);
+  const prefer = isMode(o.casualPrefer) ? o.casualPrefer : oldCasual !== null && oldCasual.length === 1 ? oldCasual[0] : d.casualPrefer;
   return {
     region: isRegion(o.region) ? o.region : null,
-    casualModes: modes(o.casualModes) ?? d.casualModes,
+    casualPrefer: prefer,
+    casualBots: isLevel(o.casualBots) ? o.casualBots : null,
     rankedModes: modes(o.rankedModes) ?? d.rankedModes,
-    net: o.net === 'server' || o.net === 'p2p' ? o.net : 'auto',
     leaderboardPlaylist: o.leaderboardPlaylist === '1v1' || o.leaderboardPlaylist === '3v3' ? o.leaderboardPlaylist : '2v2',
     lastQueue: o.lastQueue === 'ranked' ? 'ranked' : 'casual',
-    lobbyMode: o.lobbyMode === '1v1' || o.lobbyMode === '2v2' || o.lobbyMode === '3v3' ? o.lobbyMode : null,
+    lobbyMode: isMode(o.lobbyMode) ? o.lobbyMode : null,
+    waitChoice: o.waitChoice === 'training' || o.waitChoice === 'menu' ? o.waitChoice : 'bots',
+    projectOnly: o.projectOnly === true,
   };
 }

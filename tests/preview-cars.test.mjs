@@ -48,7 +48,7 @@ function fakeAccounts() {
   const accounts = {
     account: null,
     calls,
-    items: ['pampero'],
+    items: ['cyclone'],
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -106,12 +106,12 @@ test('a VITE_PREVIEW_CARS=1 build: the gate is on (the #car / #showroom flags to
 });
 
 test('preview build, a guest: every catalog car is entitled offline; a saved pick of any car is driven', () => {
-  const store = memoryStorage({ [CAR_PICK_KEY]: 'tero' });
+  const store = memoryStorage({ [CAR_PICK_KEY]: 'magma' });
   const { accounts, pick, garage } = makeGarage(store);
   assert.equal(garage.signedIn, false);
   assert.deepEqual(entitledCars(), CAR_IDS, 'every catalog car, menu order');
-  assert.equal(pick.current, 'tero', 'Friendly vs AI and Training drive the saved pick (Game.localCar)');
-  assert.equal(garage.equipped, 'tero');
+  assert.equal(pick.current, 'magma', 'Friendly vs AI and Training drive the saved pick (Game.localCar)');
+  assert.equal(garage.equipped, 'magma');
   assert.deepEqual(accounts.calls, [], 'a guest asks the server nothing');
 });
 
@@ -141,20 +141,20 @@ test('preview build, a guest: the garage shows every car owned, equip picks on t
 });
 
 test('preview build, signed in: the account\'s cars are the server\'s as in any build; a sign-out gives every car back', async () => {
-  const store = memoryStorage({ [CAR_PICK_KEY]: 'condor' });
+  const store = memoryStorage({ [CAR_PICK_KEY]: 'sirocco' });
   const { accounts, pick, garage } = makeGarage(store);
-  assert.equal(pick.current, 'condor');
-  accounts.items = ['pampero'];
-  accounts.signIn('a1', 'pampero');
+  assert.equal(pick.current, 'sirocco');
+  accounts.items = ['cyclone'];
+  accounts.signIn('a1', 'cyclone');
   await settle();
-  assert.deepEqual(entitledCars(), ['dune', 'pampero'], 'the default car and what the account owns, no more');
-  assert.equal(pick.current, 'pampero', 'the session\'s car');
+  assert.deepEqual(entitledCars(), ['dune', 'cyclone'], 'the default car and what the account owns, no more');
+  assert.equal(pick.current, 'cyclone', 'the session\'s car');
   const v = garage.view(null);
   assert.equal(v.preview, false);
-  assert.equal(v.cars.find((c) => c.id === 'condor').state, 'locked');
-  assert.equal(v.cars.find((c) => c.id === 'condor').action, null);
-  await assert.rejects(garage.equip('condor'), /not yours/, 'an account equips through the server, which refuses a car it does not own');
-  assert.equal(pick.current, 'pampero');
+  assert.equal(v.cars.find((c) => c.id === 'sirocco').state, 'locked');
+  assert.equal(v.cars.find((c) => c.id === 'sirocco').action, null);
+  await assert.rejects(garage.equip('sirocco'), /not yours/, 'an account equips through the server, which refuses a car it does not own');
+  assert.equal(pick.current, 'cyclone');
 
   accounts.signOut();
   assert.deepEqual(entitledCars(), CAR_IDS);
@@ -162,10 +162,10 @@ test('preview build, signed in: the account\'s cars are the server\'s as in any 
 });
 
 test('garageView: preview applies to a guest only; previewNotice in both languages, kept out of the locales', () => {
-  const guest = garageView({ signedIn: false, equipped: 'condor', owned: [], shop: null, selected: null, preview: true });
-  assert.equal(guest.selected.id, 'condor', 'a guest on a preview build drives any car');
+  const guest = garageView({ signedIn: false, equipped: 'sirocco', owned: [], shop: null, selected: null, preview: true });
+  assert.equal(guest.selected.id, 'sirocco', 'a guest on a preview build drives any car');
   assert.equal(guest.selected.state, 'equipped');
-  const account = garageView({ signedIn: true, equipped: 'condor', owned: [], shop: null, selected: null, preview: true });
+  const account = garageView({ signedIn: true, equipped: 'sirocco', owned: [], shop: null, selected: null, preview: true });
   assert.equal(account.preview, false);
   assert.equal(account.selected.id, 'dune', 'an account that does not own the car drives the default car');
   assert.equal(garageView({ signedIn: false, equipped: 'dune', owned: [], shop: null, selected: null }).preview, false, 'not a preview unless told');

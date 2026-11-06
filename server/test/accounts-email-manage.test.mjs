@@ -716,7 +716,7 @@ test('M10 from the alarm: in the last 7 days before the cutoff, a reset link to 
   assert.equal(outbox.length, 1);
   const m = outbox[0];
   assert.equal(m.to, 'ana.recuerda@x.com');
-  assert.match(m.subject, /^Your Turbogol username stops signing in on /, 'the account has no language: English');
+  assert.equal(m.subject, 'Choose your Turbogol password to sign in with your email', 'the account has no language: English');
   assert.equal(linkIn(m).kind, 'reset');
   assert.equal((await post(env, '/api/auth/reset/peek', { body: { token: linkIn(m).token } })).json.name, 'Ana_Recuerda', 'its link is a live reset');
   assert.equal(await obj.legacyAlarm(Date.now() + 1000), 0, 'once per account and cutoff');
@@ -733,4 +733,123 @@ test('M10 from the alarm: in the last 7 days before the cutoff, a reset link to 
   assert.equal(await stub.obj.legacyAlarm(Date.now()), 0);
   assert.equal(stub.obj.store.sql.exec('SELECT COUNT(*) AS n FROM mail_tokens').toArray()[0].n, 0);
   assert.equal(stub.outbox.length, 0);
+});
+
+// ---- M10's way in: what signs in an account whose password is of before and that has a verified address ----
+
+/** An account as M10 finds it: the password of before (pw_v 1) beside a verified address; its mail in Spanish. */
+async function remindedAccount(obj, name, email) {
+  const a = await legacyAccount(obj, name);
+  assert.equal(obj.store.claimEmail(a.id, email, 'mail', Date.now()), 'ok');
+  obj.store.sql.exec("UPDATE users SET lang = 'es' WHERE id = ?", a.id);
+  return a;
+}
+
+test("M10's way in, before the cutoff: the username sign-in refuses the account (it has an address) and the email sign-in reads the current key only, re-keying nothing; a mailbox code needs a session; the mail's own link stores the same password as the current key, and the address then signs in with it", async () => {
+  const until = Date.now() + 6 * DAY;
+  const { env, obj, outbox } = makeEnv({ LEGACY_PASSWORD_UNTIL: isoDay(until) });
+  obj.store.legacyCutoff(noonOf(until), Date.now() - 40 * DAY);
+  const ip = ips();
+  const ana = await remindedAccount(obj, 'Ana_Camino', 'ana.camino@x.com');
+  assert.equal((await req(env, 'GET', '/api/config')).json.auth.legacy.phase, 'grace');
+  // The client's username sign-in sends both keys: 401, the password never checked (an account with an address).
+  const byName = await login(env, { username: 'Ana_Camino', password: ana.v1, passwordV2: ana.v2 }, ip(0));
+  assert.deepEqual([byName.status, byName.json.error], [401, 'bad_credentials']);
+  // The client's email sign-in sends the current key alone (it cannot salt the legacy one with a name it
+  // does not know); a legacy key sent in its place is read as a current one. Neither signs in or re-keys.
+  for (const key of [ana.v2, ana.v1]) {
+    const r = await signin(env, 'ana.camino@x.com', key, ip(1));
+    assert.deepEqual([r.status, r.json.error], [401, 'bad_credentials']);
+  }
+  assert.equal(row(obj, ana.id).pw_v, 1, 'still the key of before');
+  // A mailbox code is no way in: "confirm it's you" by code needs a session first.
+  assert.equal((await post(env, '/api/auth/reauth/code', { ip: ip(1), body: { lang: 'es' } })).status, 401);
+  // M10, in the account's language, describes the way that works and carries it.
+  assert.equal(await obj.legacyAlarm(Date.now()), 1);
+  const m10 = outbox.at(-1);
+  assert.deepEqual([m10.to, m10.subject], ['ana.camino@x.com', 'Elige tu contraseña de Turbogol para entrar con tu correo']);
+  assert.ok(m10.text.includes('Tu cuenta tiene este correo, así que ya no entra con tu usuario: entra con el correo'), m10.text);
+  assert.ok(m10.text.includes('Tu contraseña de antes todavía no sirve con el correo. Elige tu contraseña con este enlace (puede ser la misma de siempre si cumple las reglas). Caduca en 30 minutos:'), m10.text);
+  assert.ok(m10.text.includes('Después entras con este correo y esa contraseña.'));
+  const link = linkIn(m10);
+  assert.equal(link.kind, 'reset');
+  // The link, with the same password typed again (its current key): stored as the current key, this browser signed in at level 2.
+  const reset = await post(env, '/api/auth/reset', { ip: ip(2), body: { token: link.token, password: ana.v2, lang: 'es' } });
+  assert.equal(reset.status, 200, JSON.stringify(reset.json));
+  assert.equal(claims(reset.json.session).aal, 2);
+  assert.equal(row(obj, ana.id).pw_v, 2, 'the current key now');
+  // Then, as the mail says: this address and that password.
+  const after = await signin(env, 'ana.camino@x.com', ana.v2, ip(3));
+  assert.deepEqual([after.status, after.json.name], [200, 'Ana_Camino']);
+  assert.equal((await login(env, { username: 'Ana_Camino', password: ana.v1, passwordV2: ana.v2 }, ip(4))).status, 401, 'the username still signs in nowhere');
+  assert.equal((await post(env, '/api/auth/reset', { ip: ip(2), body: { token: link.token, password: ana.v2 } })).status, 410, 'the link works once');
+});
+
+test("M10's way in, after the cutoff: the username answers 410, the email sign-in still refuses the password of before; ¿Olvidaste tu contraseña? (the mail's #forgot) mails a reset link that stores it; on a device still signed in a mailbox code re-keys nothing, \"confirm it's you\" with the password does", async () => {
+  const { env, obj, outbox } = closedEnv();
+  const ip = ips();
+  const ana = await remindedAccount(obj, 'Ana_Tarde', 'ana.tarde@x.com');
+  const beto = await remindedAccount(obj, 'Beto_Tarde', 'beto.tarde@x.com');
+  assert.equal((await req(env, 'GET', '/api/config')).json.auth.legacy.phase, 'closed');
+  const byName = await login(env, { username: 'Ana_Tarde', password: ana.v1, passwordV2: ana.v2 }, ip(0));
+  assert.deepEqual([byName.status, byName.json.error], [410, 'legacy_closed']);
+  assert.equal((await signin(env, 'ana.tarde@x.com', ana.v2, ip(0))).status, 401);
+  assert.equal(row(obj, ana.id).pw_v, 1);
+  // ¿Olvidaste tu contraseña? with the address: M3 to it, whose link stores the password as the current key.
+  const f = await post(env, '/api/auth/forgot', { ip: ip(1), body: { email: 'ana.tarde@x.com', lang: 'es' } });
+  assert.deepEqual([f.status, f.json], [200, { ok: true }]);
+  const m3 = outbox.at(-1);
+  assert.deepEqual([m3.to, m3.subject, linkIn(m3).kind], ['ana.tarde@x.com', 'Elige una contraseña nueva para Turbogol', 'reset']);
+  const reset = await post(env, '/api/auth/reset', { ip: ip(1), body: { token: linkIn(m3).token, password: ana.v2, lang: 'es' } });
+  assert.equal(reset.status, 200, JSON.stringify(reset.json));
+  assert.equal(row(obj, ana.id).pw_v, 2);
+  assert.equal((await signin(env, 'ana.tarde@x.com', ana.v2, ip(2))).status, 200, 'the address and the same password sign in');
+  // A device still signed in, never re-keyed: a mailbox code proves level 2 and re-keys nothing ...
+  obj.store.addRefresh(beto.id, await A.sha256Hex('d'.repeat(43)), Date.now(), 0);
+  const s = await refresh(env, 'd'.repeat(43), ip(3));
+  assert.equal(s.status, 200);
+  const ask = await post(env, '/api/auth/reauth/code', { ip: ip(3), bearer: s.json.session, body: { lang: 'es' } });
+  assert.equal(ask.status, 200, JSON.stringify(ask.json));
+  const ok = await post(env, '/api/auth/reauth/code/verify', { ip: ip(3), bearer: s.json.session, cookie: '__Host-tg_rt=' + s.rt, body: { attempt: ask.json.attempt, code: codeIn(outbox.at(-1)) } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.equal(claims(ok.json.session).aal, 2);
+  assert.equal(row(obj, beto.id).pw_v, 1, 'a code proves the mailbox, not the password');
+  assert.equal((await signin(env, 'beto.tarde@x.com', beto.v2, ip(4))).status, 401);
+  // ... and "confirm it's you" with the password (the client's two keys) re-keys it, after the cutoff too.
+  const re = await post(env, '/api/auth/reauth', { ip: ip(3), bearer: ok.json.session, cookie: '__Host-tg_rt=' + s.rt, body: { legacy: beto.v1, password: beto.v2 } });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  assert.equal(row(obj, beto.id).pw_v, 2);
+  assert.equal((await signin(env, 'beto.tarde@x.com', beto.v2, ip(5))).status, 200);
+});
+
+test("Google's fill of a legacy account's address (a key of before beside the Gmail address Google proved) leaves Google its one working way in: unlinking it is last_method until the password is re-keyed, so a reset is never left alone", async () => {
+  const { env, obj } = makeEnv();
+  const ip = ips();
+  const gabi = await legacyAccount(obj, 'Gabi_Google');
+  // Google linked before it carried an address; the password never re-keyed since.
+  obj.store.sql.exec('UPDATE users SET google_sub = ?, google_linked_at = ? WHERE id = ?', 'g-gabi', Date.now() - 100 * DAY, gabi.id);
+  // Its next Google sign-in claims the Gmail address Google proves (§3.8 step 6); the password stays as it was.
+  assert.equal(obj.store.oauth('google', 'g-gabi', null, await A.sha256Hex('g'.repeat(43)), Date.now(), 1, { email: 'gabi.google@gmail.com', trust: 'auth' }).userId, gabi.id);
+  assert.deepEqual([row(obj, gabi.id).pw_v, row(obj, gabi.id).email_canon, row(obj, gabi.id).email_proof], [1, 'gabigoogle@gmail.com', 'google']);
+  assert.deepEqual(obj.store.legacyReminderTargets(Date.now() + DAY, 10), [gabi.id], 'an account M10 goes to');
+  // Its password signs in nowhere: not by its name (it has an address), not by the address (the key of before).
+  assert.equal((await login(env, { username: 'Gabi_Google', password: gabi.v1, passwordV2: gabi.v2 }, ip(0))).status, 401);
+  assert.equal((await signin(env, 'gabi.google@gmail.com', gabi.v2, ip(1))).status, 401);
+  // So Google is its one way in, and a session at level 2 (a mailbox code reaches it) cannot unlink it.
+  obj.store.addRefresh(gabi.id, await A.sha256Hex('h'.repeat(43)), Date.now(), 0);
+  const s = await refresh(env, 'h'.repeat(43), ip(2));
+  assert.equal(s.status, 200);
+  const lvl2 = await sessionOf(env, gabi.id, 'Gabi_Google', { authAt: Date.now(), authLvl: 2 });
+  assert.equal((await req(env, 'GET', '/api/me', { ip: ip(2), bearer: lvl2 })).json.waysIn, 1);
+  const un = await post(env, '/api/auth/unlink', { ip: ip(2), bearer: lvl2, body: { provider: 'google' } });
+  assert.deepEqual([un.status, un.json.error], [409, 'last_method']);
+  assert.equal(row(obj, gabi.id).google_sub, 'g-gabi');
+  // "Confirm it's you" with the password re-keys it: then it signs in by address, and Google may go.
+  const re = await post(env, '/api/auth/reauth', { ip: ip(2), bearer: s.json.session, cookie: '__Host-tg_rt=' + s.rt, body: { legacy: gabi.v1, password: gabi.v2 } });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  assert.equal(row(obj, gabi.id).pw_v, 2);
+  assert.equal((await req(env, 'GET', '/api/me', { ip: ip(2), bearer: re.json.session })).json.waysIn, 2);
+  const ok = await post(env, '/api/auth/unlink', { ip: ip(2), bearer: re.json.session, body: { provider: 'google' } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.equal((await signin(env, 'gabi.google@gmail.com', gabi.v2, ip(3))).status, 200);
 });

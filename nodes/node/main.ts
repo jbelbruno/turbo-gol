@@ -1,9 +1,10 @@
 /**
  * turbogol-node: the community node program.
  *
- *   register --control <url> --token <tgn1_...> [--transport wss|rtc] [--public-url wss://<ip>]
- *            [--roles host,verify]   'wss' = public IP with ports 80/443 (a VPS); 'rtc' = a home PC
- *            behind NAT, nothing to open (WebRTC). Default: wss when --public-url is given, else rtc.
+ *   register --control <url> --token <tgn1_...> [--transport wss|rtc] [--public-url wss://<name>]
+ *            [--roles host,verify]   'wss' = a DNS name for this machine, ports 80/443 (a VPS; the
+ *            project's control plane refuses an IP address); 'rtc' = a home PC behind NAT, nothing
+ *            to open (WebRTC). Default: wss when --public-url is given, else rtc.
  *            [--name <name>] [--uplink-mbps <n>] [--matches <n>] [--data <dir>]
  *        One time. Generates this machine's Ed25519 key (it never leaves <data>/node.json), runs the
  *        capacity benchmark (or takes the declared --matches), trades the one-time token for a node
@@ -13,9 +14,12 @@
  *        channel from the launcher) drains: no new matches, exit 0 when the last one ends and is
  *        reported; { t: 'stop-now' } stops at once. Exit code 75 = drained for an update (the
  *        launcher restarts it); a requested stop always exits 0, even if an update came meanwhile.
+ *        A node the control plane refuses for good (banned, retired, an address its token does
+ *        not allow) exits 0 too, once its matches are over: the launcher does not restart it.
+ *        Writes <data>/status.json (mode 0600) at every change of its state.
  *   bench    [--seconds 5] [--uplink-mbps <n>]
  *   verify   <replay-file>          re-simulate a replay locally (debugging)
- *   status   [--data <dir>]
+ *   status   [--data <dir>]         what the control plane last told this node, and whether it runs
  *   rtc-test [--stun <url>] [--turn <url> --turn-user <u> --turn-pass <p>]   WebRTC reachability check
  */
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -26,9 +30,9 @@ import { loadWasm, nodeSimFactory } from '../shared/nodeArena';
 import { verifyReplay } from '../shared/verify';
 import { nodeSpecs, runBench } from './bench';
 import { registerNode } from './register';
-import { NodeRuntime } from './runtime';
+import { NodeRuntime, STATUS_FILE } from './runtime';
 import { rtcSelfTest } from './rtcTransport';
-import type { NodeIdentityFile } from './runtime';
+import type { NodeIdentityFile, StatusFile } from './runtime';
 import { NODE_VERSION } from './version';
 
 function arg(name: string, def?: string): string | undefined {
@@ -217,11 +221,57 @@ async function rtcTest(): Promise<void> {
   process.exit(r.ok ? 0 : 1);
 }
 
+/** The process `pid` exists (EPERM: it does, under another user, like the service's). */
+function alive(pid: unknown): boolean {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    (process as unknown as { kill(pid: number, signal: 0): boolean }).kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: unknown }).code === 'EPERM';
+  }
+}
+
+/**
+ * The node's own state, from <data>/status.json: what the control plane last told it over its
+ * logged-in link, whatever the status (the public list at /nodes/status holds only the nodes in
+ * service, without ids, and names are not unique), plus whether the node is running now. No network.
+ */
 async function status(): Promise<void> {
-  const id = await readIdentity(dataDir());
-  const res = await fetch(`${id.httpBase}/nodes/status`);
-  const s = (await res.json()) as { nodes: Array<{ name: string }> };
-  console.log(JSON.stringify(s.nodes.find((n) => n.name === id.name) ?? { name: id.name, status: 'unknown' }, null, 2));
+  const dir = dataDir();
+  const id = await readIdentity(dir);
+  let s: StatusFile | null = null;
+  // Only a missing file is "not written yet". On Windows a read can fail (EPERM, EBUSY) for the
+  // moment the running node puts a new status.json in place: read again, for up to 2 s.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      s = JSON.parse(await readFile(join(dir, STATUS_FILE), 'utf8')) as StatusFile;
+      break;
+    } catch (e) {
+      if ((e as { code?: unknown }).code === 'ENOENT') break;
+      if (attempt >= 40) fail(`cannot read ${join(dir, STATUS_FILE)}: ${String(e)}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  if (!s || s.nodeId !== id.nodeId) {
+    const why = s ? `${STATUS_FILE} is another node's` : `no ${STATUS_FILE} yet`;
+    console.log(JSON.stringify({ nodeId: id.nodeId, name: id.name, running: false, status: null, note: `not run since it was registered (${why})` }, null, 2));
+    return;
+  }
+  const running = s.running && alive(s.pid);
+  const c = s.closed;
+  const refused = c?.refusal === 'final' ? `the control plane refused this node for good (${c.code} ${c.reason}${c.fromEarlierRun ? ', in an earlier run' : ''})` : null;
+  let note: string | null = null;
+  if (!running) note = refused ? `not running: ${refused}` : s.running ? 'not running (it ended without a clean stop)' : 'not running';
+  else if (refused && !c?.fromEarlierRun) note = `running until its matches are over: ${refused}`;
+  else if (!s.connected) {
+    // A login of this run closed: its next one, while it is still ahead (the agent does not write
+    // the retries that fail before a login, so a time gone by says nothing).
+    const thisRun = c && !c.fromEarlierRun ? c : null;
+    const next = thisRun?.retryAt && Date.parse(thisRun.retryAt) > Date.now() ? ` (next login ${thisRun.retryAt})` : '';
+    note = `running, not connected to the control plane${thisRun ? next : ' yet'}${refused ? `: ${refused}` : ''}`;
+  }
+  console.log(JSON.stringify({ ...s, running, ...(note ? { note } : {}) }, null, 2));
 }
 
 const cmd = process.argv[2];

@@ -9,7 +9,8 @@
  * Tables
  *   meta          k -> v; 'state_version': the persist.ts STATE_VERSION the rows were written in;
  *                 'drains_asked': the node processes the object told to drain (NodeRegistryDO)
- *   node_tokens   registration tokens (only their hash), pruned an hour after they expire
+ *   node_tokens   registration tokens (only their hash), pruned an hour after they expire (at each
+ *                 new token and on the cron: Registry.pruneTokens)
  *   nodes         every registered node
  *   node_matches  the matches the control plane keeps (settled ones until its retention ends)
  *   outbox        the calls of each settled match (nodeOutcome.ts), until each is delivered
@@ -20,7 +21,7 @@
  *   ledger_notes  the repeat decay's notes of matches that earned nothing by themselves, kept 24 h
  *   replay_index  the public replay list (replayIndex.ts): one row per settled, not voided match
  *                 with a replay, written with the match it settles; kept as long as R2 keeps replays
- *                 (REPLAY_INDEX_DAYS: pruned with their R2 objects by the cron's health call) and
+ *                 (REPLAY_INDEX_DAYS: pruned with their R2 objects by the cron, nodes_off or not) and
  *                 served by whole settle hours (replayServedSpan): the matches of hour H from H + 2 h,
  *                 1 to 2 hours after each settled, until H + 30 days
  *   replay_players each listed match's human seats and their player ids (replayIndex.ts replaySeats),
@@ -30,6 +31,50 @@
  * Ledger.restore reads the three back at every start (ledgerSnapshot): a deploy keeps the decay,
  * the leaderboard and the summaries. The points themselves go to the operator's account (AccountsDO
  * host_credits, through the outbox), which keeps them for good.
+ *
+ * The maintainers' history (GET /nodes/admin/events, /history, /alerts), each kept HISTORY_DAYS, never
+ * read past it, and pruned as it is written and by the cron, nodes_off or not (historyOldest):
+ *   node_events   what happened to each node (registry.ts NodeEventKind): written through the sink
+ *                 the Registry and the ControlPlane are given (NodeRegistryDO nodeEvent), with the
+ *                 maintainer who made it happen when one did; at most NODE_EVENTS_MAX rows
+ *   node_match_history every settled match, void ones included: its node, times, outcome, reason,
+ *                 verdict, verifier, strike and whether it had a replay (MatchHistory), written in the
+ *                 transaction that settles it; delisted_at once a maintainer delisted its replay
+ *   node_match_players its human seats (name and player id, both for the maintainers only, ids never
+ *                 served elsewhere): a purged account's are blanked (forgetPlayer, at
+ *                 /internal/operator-deleted), a name its player hides is left out when read (NodeRegistryDO)
+ *   node_forgotten the ids of those purged accounts (no name, nothing else), kept HISTORY_DAYS: a
+ *                 match held when its player was purged settles later, and its seat is written blank
+ *                 (AccountsDO tells the purge once). The open matches leave them out too (forgotten)
+ *   node_alerts   the ALERT lines the object posts to the team's channel (log and audit), whether or
+ *                 not a webhook is set, as the channel gets them (the same alert once in 10 minutes,
+ *                 every audit line): a ring of ALERT_RING_MAX lines; the community nodes' too
+ *
+ * Hosting by the community (Prompt 2: A1, A2, A4, A14):
+ *   operators     one row per operator outside the project a maintainer acted on or that chose to
+ *                 show its name: its status (ok, blocked) with the reason, who set it and when, and
+ *                 show_public (the opt-in: its name in the public list). No deadline, like the
+ *                 nodes' records; when the account is purged a maintainer's row stays under an
+ *                 opaque key (deleted:<hex>), with show_public 0, and an opt-in's goes (forgetOperator)
+ *   admin_audit   every change of the KV flag node_operators (the opening): who, when, the value
+ *                 before and after (the canary's account ids; a purged account's becomes 'deleted'),
+ *                 the reason. ADMIN_AUDIT_DAYS
+ *   operator_tokens one row per community node token minted (the operator, when): the day's cap
+ *                 counts them across deploys. A day, then pruned; a purged account's go at once
+ *   host_rules    one row per operator outside the project: the version of the rules for hosts it
+ *                 accepted last (its newest 'host' consents row, AccountsDO's: the object's copy,
+ *                 written when it writes one and whenever GET /me says another), and when the
+ *                 object learned it. Placement reads it (no new match without the rules in force:
+ *                 hostPolicy.ts hostRulesVersion). No deadline, like the operators rows; a purged
+ *                 account's goes at once (forgetOperator)
+ *   node_reports  a player's report of a community server it played on (Prompt 2, A16): the match,
+ *                 the node and its operator, the reason picked from a closed list, the client's ping
+ *                 and position corrections, and the account that reported (one row per match and
+ *                 account). For the maintainers only (the Operadores tab), never its host's, and
+ *                 never a sanction by itself. REPORT_DAYS, pruned as it is written, at the start and
+ *                 by the cron; a purged account's go at once, and a purged operator's id in them
+ *                 becomes its opaque key (forgetOperator); none about its servers is taken after the
+ *                 purge (NodeRegistryDO report: 409 host_deleted), so its id never comes back
  */
 import { STATE_VERSION, matchToRow, nodeToRow, tokenToRow } from '../../nodes/control-plane/persist';
 import type { MatchRow, MatchStore, NodeRow, RegistryStore, TokenRow } from '../../nodes/control-plane/persist';
@@ -37,7 +82,8 @@ import type { MatchEntry, MatchOutcome, MatchState } from '../../nodes/control-p
 import { REPEAT_WINDOW_MS, WINDOW_DAYS, countsAsHosted } from '../../nodes/control-plane/ledger';
 import type { GroupNote, LedgerEntry, LedgerSnapshot } from '../../nodes/control-plane/ledger';
 import { TOKEN_TTL_MS } from '../../nodes/control-plane/registry';
-import type { NodeRecord, TokenRecord } from '../../nodes/control-plane/registry';
+import type { NodeEventKind, NodeRecord, TokenRecord } from '../../nodes/control-plane/registry';
+import type { GameMode, NodeTransport } from '../../nodes/shared/controlProtocol';
 import type { SqlLike } from './accountStore';
 import { outcomeCalls } from './nodeOutcome';
 import type { OutcomeCall } from './nodeOutcome';
@@ -46,10 +92,73 @@ import type { ReplayIndexRow, ReplaySeat } from './replayIndex';
 import type { ReplayListItem } from '../../src/net/replays';
 
 const DAY_MS = 24 * 60 * 60_000;
+/** How long the maintainers' history keeps its rows (node_events, node_match_history, node_alerts): HISTORY_RETENTION. */
+export const HISTORY_DAYS = 30;
+/** The ALERT lines node_alerts keeps at most, the newest (ALERT_RING_MAX). */
+export const ALERT_RING_MAX = 2000;
+/** The node events kept at most, the newest: a node that reconnects all day must not grow the table without end. */
+export const NODE_EVENTS_MAX = 100_000;
+/** History rows a write prunes at most on its way (the cron's prune takes REPLAY_PRUNE_MAX). */
+const HISTORY_PRUNE_ON_WRITE = 50;
+/** Player ids one node_forgotten query asks for at most (a Durable Object's SQL binds 100 values a query). */
+const FORGOTTEN_ASK_MAX = 50;
 /** A row's settle hour in SQL (integer division: `at` is an INTEGER), the expression replay_index_hour indexes. */
 const REPLAY_HOUR_SQL = `(at / ${HOUR_MS})`;
 /** Rows one prune deletes at most (the cron's, every 5 minutes): bounded work on the object's thread. */
 const REPLAY_PRUNE_MAX = 2000;
+/** How long admin_audit keeps a change of the opening's flag (the owner's: a year, like the Discord channel's lines). */
+export const ADMIN_AUDIT_DAYS = 365;
+/** How long operator_tokens keeps a minted token's row: the day the cap counts. */
+const OPERATOR_TOKENS_MS = DAY_MS;
+/** How long node_reports keeps a player's report (the owner's retention: 30 days). */
+export const REPORT_DAYS = 30;
+/** The reasons a report picks from (A16): its car did not answer, lag only for the player, a drop, something else. */
+export const REPORT_REASONS = ['unresponsive', 'lag', 'disconnected', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+/** A player's report of a community server (node_reports). */
+export interface ReportRow {
+  at: number;
+  /** The account that reported. */
+  reporterId: string;
+  matchId: string;
+  nodeId: string;
+  /** The node's operator when it was reported (its opaque key once that account is purged). */
+  operatorId: string;
+  reason: ReportReason;
+  /** The client's numbers, informative only (a modified client can say anything): its ping in ms, its position corrections. */
+  ping: number | null;
+  corrections: number | null;
+}
+
+/** An operator outside the project as the object keeps it (operators). */
+export interface OperatorRow {
+  operatorId: string;
+  status: 'ok' | 'blocked';
+  reason: string | null;
+  /** The maintainer who set the status ('name (account id)'), null for a row only the opt-in wrote. */
+  actor: string | null;
+  /** When the status was set (or the row first written). */
+  at: number;
+  /** The operator chose to show its name in the public list. */
+  showPublic: boolean;
+}
+
+/** One change of the opening's flag (admin_audit). */
+export interface AdminAuditRow {
+  id: number;
+  at: number;
+  actor: string;
+  flag: string;
+  old: string | null;
+  new: string | null;
+  reason: string | null;
+}
+
+/** The oldest time the maintainers' history keeps at `now` (HISTORY_DAYS): an older row is pruned, and never read before that. */
+function historyOldest(now: number): number {
+  return now - HISTORY_DAYS * DAY_MS;
+}
 
 /** A served row as the object reads it: the stored item and its human seats (null: a row from before replay_players). */
 export interface ReplayRow {
@@ -71,6 +180,117 @@ function playersOf(v: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** One settled match as the maintainers' history keeps it (node_match_history's data): never served outside the panel. */
+export interface MatchHistory {
+  matchId: string;
+  nodeId: string;
+  region: string;
+  mode: GameMode;
+  ranked: boolean;
+  transport: NodeTransport;
+  /** When it was placed, when its report came (null: none did) and when it settled. */
+  placedAt: number;
+  reportedAt: number | null;
+  settledAt: number;
+  result: MatchOutcome['kind'];
+  /** A void's reason (admin_void for a maintainer's); else how it ended, the verdict's or, unverified, the node's word. */
+  reason: string | null;
+  /** The score of a rated or unrated match (a void's is nobody's). */
+  score: { blue: number; red: number } | null;
+  /** A verifier re-simulated it (a rated match always; a void one when its verdict voided it). */
+  verified: boolean;
+  /** The node (or 'control-plane') whose verdict it got, when it got one. */
+  verifiedBy: string | null;
+  verdict: { ok: boolean; code: string } | null;
+  /** The node's fault it was void for (MatchEntry.strike), or null. */
+  strike: string | null;
+  /** The node uploaded its replay (what GET /nodes/admin/replay serves while R2 keeps it). */
+  replay: boolean;
+  /** The points its community operator earned for it, or null. */
+  points: number | null;
+  /** Its failed verification froze its operator's wallet. */
+  frozen: boolean;
+  /** A maintainer's reason when one voided it. */
+  adminReason: string | null;
+  /** Every seat: whose is in node_match_players (a human's), a bot's is only its slot and team. */
+  seats: Array<{ slot: number; team: 0 | 1; bot: boolean }>;
+}
+
+/** A human seat of a history row: null name and id once its account was purged (forgetPlayer). */
+export interface HistorySeat {
+  slot: number;
+  playerId: string | null;
+  name: string | null;
+}
+
+/** A history row as the object reads it: whether its replay is in the public list, and served there now (replayServedSpan). */
+export interface HistoryRow {
+  match: MatchHistory;
+  players: HistorySeat[];
+  delistedAt: number | null;
+  listed: boolean;
+  published: boolean;
+}
+
+/** Where a page of the history starts: after this row, newest first (its settle time, then its id). */
+export interface HistoryCursor {
+  at: number;
+  matchId: string;
+}
+
+export interface NodeEventRow {
+  id: number;
+  nodeId: string;
+  at: number;
+  kind: NodeEventKind;
+  detail: string | null;
+  /** The maintainer whose call it was ('name (account id)'), or null. */
+  actor: string | null;
+}
+
+export interface AlertRow {
+  id: number;
+  at: number;
+  /** 'alert': something the object saw go wrong (deduplicated on the channel); 'audit': what an account did (every one). */
+  kind: 'alert' | 'audit';
+  line: string;
+}
+
+/** A settled match's history row and its human seats (written by NodeStore.finished). */
+export function matchHistoryOf(m: MatchEntry, o: MatchOutcome): { match: MatchHistory; players: HistorySeat[] } {
+  const r = m.report;
+  const ended = r?.kind === 'ended' ? r.result : null;
+  const score = o.kind === 'void' ? null : { blue: o.blue, red: o.red };
+  const reason = o.kind === 'void' ? o.reason : (m.verdict?.endReason ?? ended?.endReason ?? null);
+  const verified = o.kind === 'rated' || (o.kind === 'unrated' ? o.verified : m.verdict !== null);
+  return {
+    match: {
+      matchId: m.assign.matchId,
+      nodeId: m.nodeId,
+      region: m.assign.region,
+      mode: m.assign.mode,
+      ranked: m.assign.ranked,
+      transport: m.transport,
+      placedAt: m.assign.createdAt,
+      reportedAt: m.reportedAt > 0 ? m.reportedAt : null,
+      settledAt: m.doneAt,
+      result: o.kind,
+      reason,
+      score,
+      verified,
+      verifiedBy: m.verdict ? m.verifiedBy : null,
+      verdict: m.verdict ? { ok: m.verdict.ok, code: m.verdict.code } : null,
+      strike: m.strike ?? null,
+      replay: m.replaySha !== null,
+      points: m.ledger ? m.ledger.points : null,
+      frozen: m.freeze !== undefined,
+      adminReason: m.adminReason ?? null,
+      seats: m.assign.roster.map((e) => ({ slot: e.slot, team: e.team, bot: !(e.kind === 'player' && e.playerId) })),
+    },
+    players: m.assign.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => ({ slot: e.slot, playerId: e.playerId as string, name: e.name })),
+  };
 }
 
 /** One undelivered call. */
@@ -127,6 +347,34 @@ export class NodeStore implements RegistryStore, MatchStore {
     s.exec('CREATE INDEX IF NOT EXISTS replay_players_player ON replay_players (player_id)');
     s.exec('CREATE TABLE IF NOT EXISTS replay_stars (match_id TEXT NOT NULL, account_id TEXT NOT NULL, PRIMARY KEY (match_id, account_id))');
     s.exec('CREATE INDEX IF NOT EXISTS replay_stars_account ON replay_stars (account_id)');
+    // The maintainers' history, added later like the replay tables: new tables, the state version unchanged.
+    s.exec('CREATE TABLE IF NOT EXISTS node_events (id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, detail TEXT, actor TEXT)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_events_at ON node_events (at)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_events_node ON node_events (node_id, id)');
+    s.exec('CREATE TABLE IF NOT EXISTS node_match_history (match_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, at INTEGER NOT NULL, result TEXT NOT NULL, reason TEXT, delisted_at INTEGER, data TEXT NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_match_history_at ON node_match_history (at, match_id)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_match_history_node ON node_match_history (node_id, at, match_id)');
+    s.exec('CREATE TABLE IF NOT EXISTS node_match_players (match_id TEXT NOT NULL, slot INTEGER NOT NULL, player_id TEXT, name TEXT, PRIMARY KEY (match_id, slot))');
+    s.exec('CREATE INDEX IF NOT EXISTS node_match_players_player ON node_match_players (player_id)');
+    s.exec('CREATE TABLE IF NOT EXISTS node_forgotten (player_id TEXT PRIMARY KEY, at INTEGER NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_forgotten_at ON node_forgotten (at)');
+    s.exec('CREATE TABLE IF NOT EXISTS node_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, line TEXT NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_alerts_at ON node_alerts (at)');
+    // Hosting by the community: new tables again, the state version unchanged.
+    s.exec("CREATE TABLE IF NOT EXISTS operators (operator_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'ok', reason TEXT, actor TEXT, at INTEGER NOT NULL, show_public INTEGER NOT NULL DEFAULT 0)");
+    s.exec('CREATE TABLE IF NOT EXISTS admin_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor TEXT NOT NULL, flag TEXT NOT NULL, old TEXT, new TEXT, reason TEXT)');
+    s.exec('CREATE INDEX IF NOT EXISTS admin_audit_at ON admin_audit (at)');
+    s.exec('CREATE TABLE IF NOT EXISTS operator_tokens (operator_id TEXT NOT NULL, at INTEGER NOT NULL)');
+    s.exec('CREATE INDEX IF NOT EXISTS operator_tokens_op ON operator_tokens (operator_id, at)');
+    // The players' reports of community servers (A16): a new table again, the state version unchanged.
+    s.exec(`CREATE TABLE IF NOT EXISTS node_reports (
+      match_id TEXT NOT NULL, reporter_id TEXT NOT NULL, at INTEGER NOT NULL, node_id TEXT NOT NULL, operator_id TEXT NOT NULL,
+      reason TEXT NOT NULL, ping INTEGER, corrections INTEGER, PRIMARY KEY (match_id, reporter_id))`);
+    s.exec('CREATE INDEX IF NOT EXISTS node_reports_at ON node_reports (at)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_reports_reporter ON node_reports (reporter_id, at)');
+    s.exec('CREATE INDEX IF NOT EXISTS node_reports_operator ON node_reports (operator_id, at)');
+    // The rules for hosts each operator holds (Terms 12.2, a new version accepted again): a new table, the state version unchanged.
+    s.exec('CREATE TABLE IF NOT EXISTS host_rules (operator_id TEXT PRIMARY KEY, version TEXT NOT NULL, at INTEGER NOT NULL)');
     const v = s.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'state_version'").toArray()[0]?.v;
     if (v === undefined) {
       s.exec("INSERT INTO meta (k, v) VALUES ('state_version', ?)", String(STATE_VERSION));
@@ -139,6 +387,7 @@ export class NodeStore implements RegistryStore, MatchStore {
   load(now: number): { tokens: TokenRow[]; nodes: NodeRow[]; matches: MatchRow[] } {
     const s = this.sql;
     s.exec('DELETE FROM node_tokens WHERE expires_at < ?', now - TOKEN_TTL_MS);
+    s.exec('DELETE FROM node_reports WHERE at < ?', now - REPORT_DAYS * DAY_MS);
     const tokens = s
       .exec<{ hash: string; expires_at: number; data: string }>('SELECT hash, expires_at, data FROM node_tokens')
       .toArray()
@@ -229,6 +478,7 @@ export class NodeStore implements RegistryStore, MatchStore {
   finished(m: MatchEntry, o: MatchOutcome): void {
     const humans = m.assign.roster.filter((e) => e.kind === 'player' && e.playerId).map((e) => e.playerId as string);
     const calls = outcomeCalls(o, m.assign, humans, m);
+    const history = matchHistoryOf(m, o);
     const now = this.now();
     this.tx(() => {
       this.save(m);
@@ -237,6 +487,8 @@ export class NodeStore implements RegistryStore, MatchStore {
       for (const c of calls) {
         this.sql.exec('INSERT INTO outbox (match_id, target, path, body, attempts, next_at, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)', c.matchId, c.target, c.path, c.body, now, now);
       }
+      // The maintainers' history: never a settled match without its row.
+      this.historyRow(history, now);
     });
     // Outside the settling transaction and never thrown: a row that fails only leaves the match unlisted.
     try {
@@ -414,15 +666,385 @@ export class NodeStore implements RegistryStore, MatchStore {
     return r ? { item: { ...(JSON.parse(r.data) as ReplayListItem), stars: this.starCounts([matchId]).get(matchId) ?? 0 }, sha: r.sha, seats: this.seatsOf([matchId]).get(matchId) ?? null } : null;
   }
 
-  /** A maintainer's delist (NodeRegistryDO adminDelist): the row and its seats go, whatever its age. True when there was a row. */
+  /**
+   * A maintainer's delist (NodeRegistryDO adminDelist): the row and its seats go, whatever its age,
+   * and its history row is marked (the raw download answers 404 from then on). True when there was a row.
+   */
   delistReplay(matchId: string): boolean {
     const had = this.sql.exec('SELECT 1 AS x FROM replay_index WHERE match_id = ?', matchId).toArray().length > 0;
     this.tx(() => {
       this.sql.exec('DELETE FROM replay_players WHERE match_id = ?', matchId);
       this.sql.exec('DELETE FROM replay_stars WHERE match_id = ?', matchId);
       this.sql.exec('DELETE FROM replay_index WHERE match_id = ?', matchId);
+      if (had) this.sql.exec('UPDATE node_match_history SET delisted_at = ? WHERE match_id = ? AND delisted_at IS NULL', this.now(), matchId);
     });
     return had;
+  }
+
+  // ---- the maintainers' history --------------------------------------------------------------
+
+  /**
+   * A settled match's row and seats (in finished()'s transaction), and the rows past HISTORY_DAYS that
+   * a write prunes on its way. A seat of an account purged while the match was held is written blank.
+   */
+  private historyRow(h: { match: MatchHistory; players: HistorySeat[] }, now: number): void {
+    const x = h.match;
+    const gone = this.forgotten(h.players.flatMap((p) => (p.playerId === null ? [] : [p.playerId])));
+    this.sql.exec('INSERT INTO node_match_history (match_id, node_id, at, result, reason, delisted_at, data) VALUES (?, ?, ?, ?, ?, NULL, ?) ON CONFLICT(match_id) DO NOTHING', x.matchId, x.nodeId, x.settledAt, x.result, x.reason, JSON.stringify(x));
+    for (const p of h.players) {
+      const blank = p.playerId !== null && gone.has(p.playerId);
+      this.sql.exec('INSERT INTO node_match_players (match_id, slot, player_id, name) VALUES (?, ?, ?, ?) ON CONFLICT(match_id, slot) DO NOTHING', x.matchId, p.slot, blank ? null : p.playerId, blank ? null : p.name);
+    }
+    this.pruneMatchHistory(now - HISTORY_DAYS * DAY_MS, HISTORY_PRUNE_ON_WRITE);
+  }
+
+  /** The oldest `max` history rows settled before `before`, with their seats. Returns how many went. */
+  private pruneMatchHistory(before: number, max: number): number {
+    const ids = this.sql
+      .exec<{ match_id: string }>('SELECT match_id FROM node_match_history WHERE at < ? ORDER BY at LIMIT ?', before, max)
+      .toArray()
+      .map((r) => r.match_id);
+    for (const id of ids) {
+      this.sql.exec('DELETE FROM node_match_players WHERE match_id = ?', id);
+      this.sql.exec('DELETE FROM node_match_history WHERE match_id = ?', id);
+    }
+    return ids.length;
+  }
+
+  /** One node event (NodeRegistryDO nodeEvent); the ones past HISTORY_DAYS, and past the newest NODE_EVENTS_MAX, go. */
+  nodeEvent(e: Omit<NodeEventRow, 'id'>): void {
+    this.sql.exec('INSERT INTO node_events (node_id, at, kind, detail, actor) VALUES (?, ?, ?, ?, ?)', e.nodeId, e.at, e.kind, e.detail, e.actor);
+    this.sql.exec('DELETE FROM node_events WHERE at < ?', e.at - HISTORY_DAYS * DAY_MS);
+    this.sql.exec('DELETE FROM node_events WHERE id <= (SELECT MAX(id) FROM node_events) - ?', NODE_EVENTS_MAX);
+  }
+
+  /** One ALERT line the object posted (or would have, without a webhook): the ring keeps the newest ALERT_RING_MAX, HISTORY_DAYS at most. */
+  alertLine(at: number, kind: AlertRow['kind'], line: string): void {
+    this.sql.exec('INSERT INTO node_alerts (at, kind, line) VALUES (?, ?, ?)', at, kind, line);
+    this.sql.exec('DELETE FROM node_alerts WHERE id <= (SELECT MAX(id) FROM node_alerts) - ?', ALERT_RING_MAX);
+    this.sql.exec('DELETE FROM node_alerts WHERE at < ?', at - HISTORY_DAYS * DAY_MS);
+  }
+
+  /**
+   * Node events, newest first: of one node or of all, before the event `before` (null: from the
+   * newest), at most `limit`; none past HISTORY_DAYS, pruned or not yet (`+at`: a filter, the order
+   * stays the id's index).
+   */
+  eventList(q: { nodeId: string | null; before: number | null; limit: number }): NodeEventRow[] {
+    const where: string[] = ['+at >= ?'];
+    const args: Array<string | number> = [historyOldest(this.now())];
+    if (q.nodeId !== null) {
+      where.push('node_id = ?');
+      args.push(q.nodeId);
+    }
+    if (q.before !== null) {
+      where.push('id < ?');
+      args.push(q.before);
+    }
+    return this.sql
+      .exec<{ id: number; node_id: string; at: number; kind: string; detail: string | null; actor: string | null }>(
+        `SELECT id, node_id, at, kind, detail, actor FROM node_events WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`,
+        ...args,
+        q.limit,
+      )
+      .toArray()
+      .map((r) => ({ id: Number(r.id), nodeId: r.node_id, at: Number(r.at), kind: r.kind as NodeEventKind, detail: r.detail ?? null, actor: r.actor ?? null }));
+  }
+
+  /** The ALERT lines, newest first, before the line `before` (null: from the newest), at most `limit`; none past HISTORY_DAYS, pruned or not yet. */
+  alertList(q: { before: number | null; limit: number }): AlertRow[] {
+    const oldest = historyOldest(this.now());
+    const rows =
+      q.before === null
+        ? this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts WHERE +at >= ? ORDER BY id DESC LIMIT ?', oldest, q.limit).toArray()
+        : this.sql.exec<{ id: number; at: number; kind: string; line: string }>('SELECT id, at, kind, line FROM node_alerts WHERE id < ? AND +at >= ? ORDER BY id DESC LIMIT ?', q.before, oldest, q.limit).toArray();
+    return rows.map((r) => ({ id: Number(r.id), at: Number(r.at), kind: r.kind === 'audit' ? 'audit' : 'alert', line: r.line }));
+  }
+
+  /**
+   * Settled matches, newest first (settle time, then id): one (`matchId`), or a page of one node's or
+   * of all, after `cursor` (null: from the newest), at most `limit`; each with its seats and whether
+   * its replay is listed, and served now. None settled past HISTORY_DAYS, pruned or not yet.
+   */
+  historyList(q: { nodeId: string | null; matchId: string | null; cursor: HistoryCursor | null; limit: number }): HistoryRow[] {
+    const where: string[] = ['at >= ?'];
+    const args: Array<string | number> = [historyOldest(this.now())];
+    if (q.matchId !== null) {
+      where.push('match_id = ?');
+      args.push(q.matchId);
+    }
+    if (q.nodeId !== null) {
+      where.push('node_id = ?');
+      args.push(q.nodeId);
+    }
+    if (q.cursor !== null) {
+      where.push('at <= ? AND NOT (at = ? AND match_id >= ?)');
+      args.push(q.cursor.at, q.cursor.at, q.cursor.matchId);
+    }
+    const rows = this.sql
+      .exec<{ match_id: string; delisted_at: number | null; data: string }>(
+        `SELECT match_id, delisted_at, data FROM node_match_history WHERE ${where.join(' AND ')} ORDER BY at DESC, match_id DESC LIMIT ?`,
+        ...args,
+        q.limit,
+      )
+      .toArray();
+    const ids = rows.map((r) => r.match_id);
+    const players = new Map<string, HistorySeat[]>();
+    const listed = new Map<string, number>();
+    if (ids.length > 0) {
+      const marks = ids.map(() => '?').join(', ');
+      for (const p of this.sql.exec<{ match_id: string; slot: number; player_id: string | null; name: string | null }>(`SELECT match_id, slot, player_id, name FROM node_match_players WHERE match_id IN (${marks}) ORDER BY match_id, slot`, ...ids).toArray()) {
+        const list = players.get(p.match_id) ?? [];
+        list.push({ slot: Number(p.slot), playerId: p.player_id ?? null, name: p.name ?? null });
+        players.set(p.match_id, list);
+      }
+      for (const r of this.sql.exec<{ match_id: string; at: number }>(`SELECT match_id, at FROM replay_index WHERE match_id IN (${marks})`, ...ids).toArray()) listed.set(r.match_id, Number(r.at));
+    }
+    const { newest, oldest } = replayServedSpan(this.now());
+    return rows.map((r) => {
+      const at = listed.get(r.match_id);
+      return {
+        match: JSON.parse(r.data) as MatchHistory,
+        players: players.get(r.match_id) ?? [],
+        delistedAt: r.delisted_at === null || r.delisted_at === undefined ? null : Number(r.delisted_at),
+        listed: at !== undefined,
+        published: at !== undefined && at < newest && at >= oldest,
+      };
+    });
+  }
+
+  /** The voids settled since `since`, by node and reason (the overview's last 24 h), the most first. */
+  voidsSince(since: number): Array<{ nodeId: string; reason: string; count: number }> {
+    return this.sql
+      .exec<{ node_id: string; reason: string | null; n: number }>("SELECT node_id, reason, COUNT(*) AS n FROM node_match_history WHERE at >= ? AND result = 'void' GROUP BY node_id, reason ORDER BY n DESC, node_id, reason LIMIT 100", since)
+      .toArray()
+      .map((r) => ({ nodeId: r.node_id, reason: r.reason ?? '', count: Number(r.n) }));
+  }
+
+  /**
+   * A purged account (/internal/operator-deleted): its name and id leave every history seat it held,
+   * and its id is kept (node_forgotten) so that a match it is still in settles with its seat blank:
+   * AccountsDO tells a purge once, and a match can be held for hours after it (its verification).
+   */
+  forgetPlayer(playerId: string): void {
+    const now = this.now();
+    this.tx(() => {
+      this.sql.exec('INSERT INTO node_forgotten (player_id, at) VALUES (?, ?) ON CONFLICT(player_id) DO NOTHING', playerId, now);
+      this.sql.exec('UPDATE node_match_players SET player_id = NULL, name = NULL WHERE player_id = ?', playerId);
+      this.sql.exec('DELETE FROM node_forgotten WHERE at < ?', now - HISTORY_DAYS * DAY_MS);
+    });
+  }
+
+  /** Which of `playerIds` are purged accounts' (forgetPlayer), asked FORGOTTEN_ASK_MAX at a time (a query binds 100 values at most). */
+  forgotten(playerIds: readonly string[]): Set<string> {
+    const out = new Set<string>();
+    const ids = [...new Set(playerIds)];
+    for (let i = 0; i < ids.length; i += FORGOTTEN_ASK_MAX) {
+      const part = ids.slice(i, i + FORGOTTEN_ASK_MAX);
+      const marks = part.map(() => '?').join(', ');
+      for (const r of this.sql.exec<{ player_id: string }>(`SELECT player_id FROM node_forgotten WHERE player_id IN (${marks})`, ...part).toArray()) out.add(r.player_id);
+    }
+    return out;
+  }
+
+  /**
+   * The cron's prune: the history past HISTORY_DAYS (the oldest `max` matches), the node events,
+   * ALERT lines and purged ids past it; and the opening's rows past theirs (admin_audit,
+   * operator_tokens, node_reports). Returns the matches pruned.
+   */
+  pruneHistory(now: number, max: number = REPLAY_PRUNE_MAX): number {
+    const before = historyOldest(now);
+    return this.tx(() => {
+      this.sql.exec('DELETE FROM node_events WHERE at < ?', before);
+      this.sql.exec('DELETE FROM node_alerts WHERE at < ?', before);
+      this.sql.exec('DELETE FROM node_forgotten WHERE at < ?', before);
+      this.sql.exec('DELETE FROM admin_audit WHERE at < ?', now - ADMIN_AUDIT_DAYS * DAY_MS);
+      this.sql.exec('DELETE FROM operator_tokens WHERE at <= ?', now - OPERATOR_TOKENS_MS);
+      this.sql.exec('DELETE FROM node_reports WHERE at < ?', now - REPORT_DAYS * DAY_MS);
+      return this.pruneMatchHistory(before, max);
+    });
+  }
+
+  // ---- hosting by the community --------------------------------------------------------------
+
+  /** Every operators row (the object keeps them in memory: a hello reads the block). */
+  operatorRows(): OperatorRow[] {
+    return this.sql
+      .exec<{ operator_id: string; status: string; reason: string | null; actor: string | null; at: number; show_public: number }>('SELECT operator_id, status, reason, actor, at, show_public FROM operators')
+      .toArray()
+      .map((r) => ({ operatorId: r.operator_id, status: r.status === 'blocked' ? 'blocked' : 'ok', reason: r.reason ?? null, actor: r.actor ?? null, at: Number(r.at), showPublic: Number(r.show_public) === 1 }));
+  }
+
+  /** A maintainer set an operator's status (POST /nodes/admin/operator): its row, its opt-in kept as it was. */
+  setOperatorStatus(o: Pick<OperatorRow, 'operatorId' | 'status' | 'reason' | 'actor' | 'at'>): void {
+    this.sql.exec(
+      'INSERT INTO operators (operator_id, status, reason, actor, at, show_public) VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(operator_id) DO UPDATE SET status = excluded.status, reason = excluded.reason, actor = excluded.actor, at = excluded.at',
+      o.operatorId,
+      o.status,
+      o.reason,
+      o.actor,
+      o.at,
+    );
+  }
+
+  /** The operator's opt-in (POST /nodes/mine/public): its row, its status kept as it was. */
+  setShowPublic(operatorId: string, show: boolean, at: number): void {
+    this.sql.exec('INSERT INTO operators (operator_id, status, at, show_public) VALUES (?, ?, ?, ?) ON CONFLICT(operator_id) DO UPDATE SET show_public = excluded.show_public', operatorId, 'ok', at, show ? 1 : 0);
+  }
+
+  /** Every host_rules row: the version of the rules for hosts each operator accepted last (the object keeps them in memory: placement reads them). */
+  hostRulesRows(): Array<{ operatorId: string; version: string }> {
+    return this.sql
+      .exec<{ operator_id: string; version: string }>('SELECT operator_id, version FROM host_rules')
+      .toArray()
+      .map((r) => ({ operatorId: r.operator_id, version: r.version }));
+  }
+
+  /** The rules for hosts `operatorId` accepted last, as AccountsDO holds them: `version`, or none (null: its row goes). */
+  setHostRules(operatorId: string, version: string | null, at: number): void {
+    if (version === null) this.sql.exec('DELETE FROM host_rules WHERE operator_id = ?', operatorId);
+    else this.sql.exec('INSERT INTO host_rules (operator_id, version, at) VALUES (?, ?, ?) ON CONFLICT(operator_id) DO UPDATE SET version = excluded.version, at = excluded.at', operatorId, version, at);
+  }
+
+  /**
+   * A purged account (/internal/operator-deleted): the account id leaves this object's hosting rows
+   * (decisions.md: the chosen name and the account id go with the account). Its name choice goes
+   * for good, its token counts with it. A status a maintainer set stays, as its nodes' records do,
+   * but under `alias` (an opaque key), with its status, reason, actor and date; a row only the
+   * opt-in wrote goes. In admin_audit's values (a canary's ids) the id becomes 'deleted'. The
+   * players' reports about its servers stay for their 30 days, under `alias` too; the object takes
+   * no new one about them (node_forgotten has the id, its nodes the purge's ban). Its copy of the
+   * rules for hosts it accepted goes (AccountsDO keeps the proof, consent_proofs). Its ledger rows
+   * go under `alias` as well, as its nodes' records do (Registry.forgetOperator, written by the
+   * caller in the same transaction, `then`): its all-time totals, its entries (its own seat in them
+   * too) and its repeat notes, so its points stay with its nodes and nothing links them to the id.
+   */
+  forgetOperator(operatorId: string, alias: string, then: () => void = () => undefined): void {
+    this.tx(() => {
+      this.sql.exec('DELETE FROM operators WHERE operator_id = ? AND actor IS NULL', operatorId);
+      this.sql.exec('UPDATE operators SET operator_id = ?, show_public = 0 WHERE operator_id = ?', alias, operatorId);
+      this.sql.exec('DELETE FROM operator_tokens WHERE operator_id = ?', operatorId);
+      this.sql.exec('DELETE FROM host_rules WHERE operator_id = ?', operatorId);
+      this.sql.exec('UPDATE node_reports SET operator_id = ? WHERE operator_id = ?', alias, operatorId);
+      const strip = (v: string | null) => (v === null ? null : v.split(',').map((x) => (x.trim() === operatorId ? 'deleted' : x)).join(','));
+      const audits = this.sql.exec<{ id: number; old: string | null; new: string | null }>('SELECT id, old, new FROM admin_audit WHERE instr(old, ?) > 0 OR instr(new, ?) > 0', operatorId, operatorId).toArray();
+      for (const r of audits) this.sql.exec('UPDATE admin_audit SET old = ?, new = ? WHERE id = ?', strip(r.old), strip(r.new), r.id);
+      const swap = (id: string) => (id === operatorId ? alias : id);
+      this.sql.exec('UPDATE ledger_totals SET operator_id = ? WHERE operator_id = ?', alias, operatorId);
+      for (const r of this.sql.exec<{ match_id: string; data: string }>('SELECT match_id, data FROM ledger_entries WHERE operator_id = ?', operatorId).toArray()) {
+        const e = JSON.parse(r.data) as LedgerEntry;
+        const data: LedgerEntry = { ...e, operatorId: alias, players: e.players.map((p) => ({ ...p, playerId: swap(p.playerId) })) };
+        this.sql.exec('UPDATE ledger_entries SET operator_id = ?, data = ? WHERE match_id = ?', alias, JSON.stringify(data), r.match_id);
+      }
+      for (const r of this.sql.exec<{ rowid: number; players: string }>('SELECT rowid, players FROM ledger_notes WHERE operator_id = ?', operatorId).toArray()) {
+        const players = (JSON.parse(r.players) as string[]).map(swap);
+        this.sql.exec('UPDATE ledger_notes SET operator_id = ?, players = ? WHERE rowid = ?', alias, JSON.stringify(players), r.rowid);
+      }
+      then();
+    });
+  }
+
+  /** One change of the opening's flag; the ones past ADMIN_AUDIT_DAYS go. */
+  adminAudit(r: Omit<AdminAuditRow, 'id'>): void {
+    this.sql.exec('INSERT INTO admin_audit (at, actor, flag, old, new, reason) VALUES (?, ?, ?, ?, ?, ?)', r.at, r.actor, r.flag, r.old, r.new, r.reason);
+    this.sql.exec('DELETE FROM admin_audit WHERE at < ?', r.at - ADMIN_AUDIT_DAYS * DAY_MS);
+  }
+
+  /** The newest changes of the opening's flag, at most `limit`, none past ADMIN_AUDIT_DAYS. */
+  adminAuditList(limit: number): AdminAuditRow[] {
+    return this.sql
+      .exec<{ id: number; at: number; actor: string; flag: string; old: string | null; new: string | null; reason: string | null }>('SELECT id, at, actor, flag, old, new, reason FROM admin_audit WHERE at >= ? ORDER BY id DESC LIMIT ?', this.now() - ADMIN_AUDIT_DAYS * DAY_MS, limit)
+      .toArray()
+      .map((r) => ({ id: Number(r.id), at: Number(r.at), actor: r.actor, flag: r.flag, old: r.old ?? null, new: r.new ?? null, reason: r.reason ?? null }));
+  }
+
+  /** A community node token minted for `operatorId`; the rows past the day go. */
+  tokenMinted(operatorId: string, at: number): void {
+    this.sql.exec('INSERT INTO operator_tokens (operator_id, at) VALUES (?, ?)', operatorId, at);
+    this.sql.exec('DELETE FROM operator_tokens WHERE at <= ?', at - OPERATOR_TOKENS_MS);
+  }
+
+  /** The community node tokens `operatorId` minted in the 24 hours before `now`. */
+  tokensToday(operatorId: string, now: number): number {
+    return Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM operator_tokens WHERE operator_id = ? AND at > ?', operatorId, now - OPERATOR_TOKENS_MS).toArray()[0]?.n ?? 0);
+  }
+
+  // ---- the players' reports (A16) ------------------------------------------------------------
+
+  /** A report, once per match and account (false: that account reported that match already); the rows past REPORT_DAYS go. */
+  report(r: ReportRow): boolean {
+    const had = this.sql.exec('SELECT 1 AS x FROM node_reports WHERE match_id = ? AND reporter_id = ?', r.matchId, r.reporterId).toArray().length > 0;
+    if (had) return false;
+    this.sql.exec(
+      'INSERT INTO node_reports (match_id, reporter_id, at, node_id, operator_id, reason, ping, corrections) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      r.matchId,
+      r.reporterId,
+      r.at,
+      r.nodeId,
+      r.operatorId,
+      r.reason,
+      r.ping,
+      r.corrections,
+    );
+    this.sql.exec('DELETE FROM node_reports WHERE at < ?', r.at - REPORT_DAYS * DAY_MS);
+    return true;
+  }
+
+  /** The reports `reporterId` made in the 24 hours before `now` (its day's cap). */
+  reportsBy(reporterId: string, now: number): number {
+    return Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM node_reports WHERE reporter_id = ? AND at > ?', reporterId, now - DAY_MS).toArray()[0]?.n ?? 0);
+  }
+
+  /** The reports about `operatorId`'s servers since `since`, newest first, at most `limit`. */
+  reportsAbout(operatorId: string, since: number, limit: number): ReportRow[] {
+    return this.sql
+      .exec<{ at: number; reporter_id: string; match_id: string; node_id: string; operator_id: string; reason: string; ping: number | null; corrections: number | null }>(
+        'SELECT at, reporter_id, match_id, node_id, operator_id, reason, ping, corrections FROM node_reports WHERE operator_id = ? AND at >= ? ORDER BY at DESC, match_id DESC LIMIT ?',
+        operatorId,
+        since,
+        limit,
+      )
+      .toArray()
+      .map((r) => ({
+        at: Number(r.at),
+        reporterId: r.reporter_id,
+        matchId: r.match_id,
+        nodeId: r.node_id,
+        operatorId: r.operator_id,
+        reason: (REPORT_REASONS as readonly string[]).includes(r.reason) ? (r.reason as ReportReason) : 'other',
+        ping: r.ping === null || r.ping === undefined ? null : Number(r.ping),
+        corrections: r.corrections === null || r.corrections === undefined ? null : Number(r.corrections),
+      }));
+  }
+
+  /** The operators some report is about (since `since`): the Operadores tab lists them with the rest. */
+  reportedOperators(since: number): string[] {
+    return this.sql
+      .exec<{ operator_id: string }>('SELECT DISTINCT operator_id FROM node_reports WHERE at >= ?', since)
+      .toArray()
+      .map((r) => r.operator_id);
+  }
+
+  /** A purged account's reports go at once (its id is in them: the privacy policy's "se borran antes si se borra la cuenta"). */
+  forgetReporter(reporterId: string): void {
+    this.sql.exec('DELETE FROM node_reports WHERE reporter_id = ?', reporterId);
+  }
+
+  /**
+   * The node of a settled match `playerId` had a seat in, from the maintainers' history
+   * (node_match_players: void matches too, 30 days) or the public replays' seats (replay_players),
+   * or null: what a report of a match no longer held by the control plane proves itself with.
+   */
+  seatNodeOf(matchId: string, playerId: string): string | null {
+    const r = this.sql
+      .exec<{ node_id: string }>(
+        'SELECT h.node_id AS node_id FROM node_match_history h WHERE h.match_id = ? AND (EXISTS (SELECT 1 FROM node_match_players p WHERE p.match_id = h.match_id AND p.player_id = ?) OR EXISTS (SELECT 1 FROM replay_players q WHERE q.match_id = h.match_id AND q.player_id = ?))',
+        matchId,
+        playerId,
+        playerId,
+      )
+      .toArray()[0];
+    return r ? r.node_id : null;
   }
 
   drop(matchId: string): void {
@@ -498,5 +1120,13 @@ export class NodeStore implements RegistryStore, MatchStore {
 
   outboxSize(): number {
     return Number(this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM outbox').toArray()[0]?.n ?? 0);
+  }
+
+  /** The undelivered calls by path (/host-credit, /host-freeze, /release, ...): how many, and when the oldest was written. */
+  outboxByPath(): Array<{ path: string; rows: number; oldestAt: number }> {
+    return this.sql
+      .exec<{ path: string; n: number; oldest: number }>('SELECT path, COUNT(*) AS n, MIN(created_at) AS oldest FROM outbox GROUP BY path ORDER BY path')
+      .toArray()
+      .map((r) => ({ path: r.path, rows: Number(r.n), oldestAt: Number(r.oldest) }));
   }
 }

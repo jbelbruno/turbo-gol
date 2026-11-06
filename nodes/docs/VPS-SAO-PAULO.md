@@ -75,11 +75,11 @@ ssh-add "$env:USERPROFILE\.ssh\<clave>"
 | Actualizaciones automáticas | `/etc/apt/apt.conf.d/52turbogol-unattended` | Las de Ubuntu por defecto (seguridad y actualizaciones de la distribución), con `Unattended-Upgrade::Automatic-Reboot "false"`, `Remove-Unused-Kernel-Packages "true"` y `Remove-Unused-Dependencies "true"`. La máquina nunca se reinicia sola: un reinicio corta partidas |
 | needrestart | `/etc/needrestart/conf.d/turbogol.conf` | `$nrconf{override_rc}{qr(^caddy)} = 0;` y lo mismo con `^turbogol-node`: reiniciar Caddy corta el WebSocket de todos los jugadores, y parar el nodo espera a que terminen sus partidas |
 | Swap | `/swapfile` en `/etc/fstab`, `/etc/sysctl.d/60-turbogol.conf` | `vm.swappiness=10`. Es una red de seguridad, no capacidad |
-| Logs | `/etc/systemd/journald.conf.d/turbogol.conf` | Un tope de tamaño (`SystemMaxUse`) |
+| Logs | `/etc/systemd/journald.conf.d/turbogol.conf`, `/etc/systemd/journald.conf.d/60-turbogol-retention.conf`, `/etc/logrotate.d/{rsyslog,ufw,fail2ban}` | Los 7 días de la política de privacidad (sección 6), porque los logs pueden tener direcciones IP. El journal: `SystemMaxUse=1G` en `turbogol.conf`; la retención en el archivo que escribe el instalador, `60-turbogol-retention.conf`: `MaxRetentionSec=6day` y `MaxFileSec=1day` (un archivo por día, que se borra cuando su primera línea tiene 6 días: ninguna pasa de 7). Antes del cambio previo a la apertura, `turbogol.conf` tenía `MaxRetentionSec=7day` y `MaxFileSec=1day`: el último archivo por nombre gana, así que esas dos líneas salen de `turbogol.conf`. Los logs de texto de rsyslog, ufw y fail2ban: `daily`, `rotate 6` y `maxage 7`. Hasta el 5 de noviembre de 2026 solo había un tope de tamaño y una rotación semanal de 4 archivos |
 | fail2ban | `/etc/fail2ban/jail.d/turbogol.local` | Jaula `sshd` sobre el journal (`backend = systemd`) |
 | Firewall (ufw) | — | Entrada denegada por defecto; abiertos solo SSH, HTTP (el desafío ACME y la redirección) y HTTPS (jugadores, wss y el chequeo de alcance del plano de control), en IPv4 e IPv6. Ningún puerto UDP: el transporte wss no lo usa |
 | SSH | `/etc/ssh/sshd_config.d/00-turbogol.conf` | `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `X11Forwarding no` |
-| Node.js | NodeSource | Node 24, el mismo camino que usa `install/install.sh` |
+| Node.js | NodeSource | Node 26, el mismo camino que usa `install/install.sh` |
 | Caddy | Repositorio oficial | Retenido con `apt-mark hold`, como Node (ver "Después de instalar") |
 
 Dos detalles del SSH:
@@ -190,9 +190,10 @@ bash /tmp/turbogol-install.sh --control https://turbo-gol.com --token '<tgn1_...
 
 - **`--roles host,verify`:** hostea y verifica. Los roles se fijan al registrar: cambiarlos pide
   un token nuevo.
-- **`--public-host <host>`:** sin esto, el instalador registra la IPv4 que ve `/nodes/whoami`, y
-  el chequeo de alcance nunca pasa: un Worker no puede pedir una IP. Nunca le pongas un puerto:
-  todo lo que tiene `:` se toma como IPv6.
+- **`--public-host <host>`:** el nombre del nodo. Sin él, o con una IP, una instalación nueva por
+  wss se detiene antes de instalar nada: el chequeo de alcance corre en un Worker, que no puede
+  pedir una IP, y el plano de control la rechaza (`ip_not_supported`). `--allow-ip` acepta una IP
+  solo para un plano de control de desarrollo. Nunca le pongas un puerto ni `https://`.
 - **`--egress-cap-gb <tope-gb>`:** el nodo cuenta lo que mandan las partidas que terminan
   (`node/runtime.ts:514-519`), por mes calendario UTC (`:617-620`), y el scheduler deja de
   mandarle partidas al 95 % del tope (`control-plane/scheduler.ts:55`). El tope tiene que dejar
@@ -207,7 +208,7 @@ bash /tmp/turbogol-install.sh --control https://turbo-gol.com --token '<tgn1_...
   no muestra freno, `floor(cpu / 2)`. Las partidas reales cuestan más que el benchmark (la red no
   entra en él): compáralo con una partida de verdad antes de subirla. Para cambiarla después, ver
   "Cambiar la capacidad declarada".
-- **El `mv` del Caddyfile:** Node 24 y Caddy ya están y el instalador no los vuelve a instalar,
+- **El `mv` del Caddyfile:** Node 26 y Caddy ya están y el instalador no los vuelve a instalar,
   pero Caddy pasa a ser del nodo: el instalador escribe su propio `/etc/caddy/Caddyfile` en cada
   corrida (sin HTTP/3, con un certificado de 90 días para el nombre y `stream_close_delay`, para
   que recargar Caddy no corte partidas). Antes de gastar el token se detiene si encuentra un
@@ -227,8 +228,10 @@ runuser -u turbogol -- node /opt/turbogol-node/launcher.mjs register --control h
   --public-url wss://<host> --name sao-paulo-1 --matches <n>
 ```
 
-El registro "Ubuntu" quedó `banned` con `/nodes/admin/status`: no recibe partidas ni alertas, pero
-cuenta para el tope de 2 nodos de la cuenta del proyecto.
+El registro "Ubuntu" quedó `banned` con `/nodes/admin/status`: no recibe partidas ni alertas, y no
+ocupa lugar en el tope de la cuenta del proyecto (`NODE_TRUSTED_MAX_NODES`, 6), porque un nodo
+baneado de una cuenta de confianza no cuenta. Retirarlo (`POST /nodes/admin/retire`) lo saca
+además de `/nodes/mine`.
 
 ## Después de instalar
 
@@ -337,21 +340,20 @@ del PR [7]: los jugadores con un lock de partida de nodo quedarían atascados ha
   y anota en el log cuántos segundos estuvo callado: desde ahí le quedan de 25 a 30 s para
   reconectarse. Los 60 s se cuentan por partida y en total, así que un corte anterior en la misma
   partida se descuenta. El nodo suma un strike, pero un nodo del proyecto no se pausa.
-- Las ranked de Sudamérica vuelven a `MatchDO`, como hoy, mientras no haya otro verificador: una
-  ranked solo va a un nodo si alguien puede re-simularla (`control-plane/controlPlane.ts:637`).
+- Desde noviembre de 2026 también verifican los servidores del proyecto en Alemania y Malasia
+  (`VPS-PROYECTO.md`): mientras uno de los dos esté en línea con la versión del nodo, las ranked
+  siguen yendo a nodos. Una ranked solo va a un nodo si alguien puede re-simularla
+  (`control-plane/controlPlane.ts:1201`); si no queda ningún verificador, vuelve a `MatchDO`.
 - Las partidas terminadas esperan su verificación hasta 6 horas
-  (`control-plane/controlPlane.ts:81`) y después se anulan sin penalizar a nadie. Eso vale solo
-  cuando el plano de control guarde su estado (PR [1]): hoy un deploy del Worker las borraría.
-- Más adelante conviene un segundo verificador de confianza. `docs/online/DECISIONS.md` lo pone
-  en Hetzner, Ashburn o Falkenstein.
+  (`control-plane/controlPlane.ts:111`) y después se anulan sin penalizar a nadie. La cola vive en
+  el SQLite del `NodeRegistryDO` (PR [1] y [6]), así que un deploy del Worker no la borra.
 
 ## Probarlo con jugadores
 
 Las pruebas antes de abrir la beta están en `PRODUCCION.md`. Para todas:
 - Juega con dos cuentas que no sean la del proyecto (ver "Antes de instalar el nodo", paso 3).
-- La casual, con la conexión en "Servidor". Una sala P2P nunca llega a un nodo, pero un jugador
-  solo en la cola P2P, pasada la espera, juega en el servidor contra bots
-  (`server/src/MatchmakerDO.ts:1028-1041`) y puede caer en el VPS.
+- Casual (siempre en servidor): dos cuentas con región Sudamérica buscando a la vez caen en el
+  nodo si tiene lugar. Una sala nunca llega a un nodo.
 - En la partida, `hostColo` tiene que decir `node:sao-paulo-1`. Hoy no aparece en ninguna
   pantalla: míralo en la consola del navegador con `window.__game.online.welcome.hostColo`
   (`src/game/Game.ts:672`). El PR [3] lo suma al panel de red.

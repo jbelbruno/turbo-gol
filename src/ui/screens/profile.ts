@@ -6,7 +6,8 @@
  * PRIVACIDAD (hide the name in public replays; with a verified address, "News by email", the news
  * consent, off unless the account opted in: sign-in PR 13),
  * MI SERVIDOR for a community node operator (GET /nodes/mine: each node, its state in words, its
- * region, the matches it hosted, its version), CUENTA Y SEGURIDAD folded (a disclosure: rename,
+ * region, the matches it hosted, its version), CUENTA DEL PROYECTO for the project's account (its
+ * checklist, CONFIRMAR CON LA CONTRASEÑA and CONTROL DE NODOS: screens/nodesAdmin.ts), CUENTA Y SEGURIDAD folded (a disclosure: rename,
  * the password (CAMBIAR with the current one; CREAR by a link to the account's own mailbox, or "add
  * an email first"), link a provider, the signed-in devices (each with where it signed in and a
  * sign-out of its own), sign out, sign out on every device), COMUNIDAD (Discord, host a server, the
@@ -42,11 +43,11 @@
 import { h, setChildren, navButton } from '../dom';
 import { AccountError } from '../../net/AccountClient';
 import type { AuthConfig } from '../../net/AccountClient';
-import { REGIONS, USERNAME_MAX, emailTypo, normalizeEmail, passwordIssue, usernameIssue } from '../../net/account';
+import { REGIONS, USERNAME_MAX, emailTypo, normalizeEmail, passwordIssue, usernameIssue, usernameKey } from '../../net/account';
 import type { AccountIssue, DeviceSession, MeInfo, MyNode, OAuthProvider, PlaylistRating } from '../../net/account';
 import { emailNudge, signInRoute } from '../../net/emailAuth';
 import type { StoredAttempt } from '../../net/emailAuth';
-import { authErrText, cutoffDay, emailProviders, emailSheet, googleHidden, graceSheet, graceText, keypadTyping, mailOffText, newPasswordFields, openForgotSheet, openReauthCodeSheet, passwordManagerUser, providersLine, sheetEnter, signupFinishFields, startEmailCode, welcome } from './accountLinks';
+import { authErrText, confirmItsYou, cutoffDay, emailProviders, emailSheet, googleHidden, graceSheet, graceText, keypadTyping, mailOffText, newPasswordFields, openForgotSheet, passwordManagerUser, providersLine, sheetEnter, signupFinishFields, startEmailCode, welcome } from './accountLinks';
 import type { EmailHooks } from './accountLinks';
 import { PROTOCOL_VERSION } from '../../net/protocol';
 import { PROBATION_MATCHES } from '../../../nodes/control-plane/registry';
@@ -54,6 +55,7 @@ import { ratingCard, rankBadge, tierById } from '../badges';
 import { playerName, regionName } from '../names';
 import type { Menu, Screen } from '../Menu';
 import { codeField, field, primary, screenHead, secondary, section } from './common';
+import type { Field } from './common';
 import { finePointer } from '../device';
 import { icon } from '../components/icons';
 import type { IconName } from '../components/icons';
@@ -64,6 +66,9 @@ import type { Key } from '../../i18n';
 import { DISCORD_URL, GAME_NAME, SOURCE_URL } from '../../brand';
 import { version } from '../../../package.json';
 import { openTvSignIn } from './tvSignIn';
+import { deletionDone, pendingSheet } from './deletion';
+import { legalPaths, legalState } from '../../net/terms';
+import { hostEntry, hostingOpen } from './serversModel';
 
 /** A node's state in words (nodes/shared/controlProtocol.ts NodeStatus). */
 const NODE_STATE: Readonly<Record<MyNode['status'], Key>> = {
@@ -213,6 +218,40 @@ export function openProfileTab(menu: Menu, tab: 'login' | 'register', email: str
   menu.open('profile');
 }
 
+/** The Correo row's action for `me` (§3.9): CAMBIAR a verified address, CONFIRMAR a hint the account has not confirmed, AGREGAR none. */
+export function emailModeOf(me: MeInfo | null): 'add' | 'change' | 'confirm' {
+  if (me?.emailVerified === true && typeof me.email === 'string') return 'change';
+  return typeof me?.emailHint === 'string' && me.emailHint.length > 0 ? 'confirm' : 'add';
+}
+
+/**
+ * AGREGAR, CAMBIAR or CONFIRMAR (§3.6 steps 2 to 4): "confirm it's you" first when this browser is
+ * not fresh enough (1 to add or confirm, 2 for the project account with a password: emailAddLevel;
+ * 2 to change; a password of before is re-keyed by itself first, level 2), then the address and
+ * its code. `direct`: the banner's ENVIAR CÓDIGO for a hint, the code straight away. A provider's
+ * round trip comes back to it (the marker keepResume). PERFIL's Correo row and banner open it, and
+ * so does "Mis servidores" for a host without a confirmed address (Prompt 2, B2: the same dialog,
+ * never a copy of it).
+ */
+export function emailDialog(menu: Menu, mode: 'add' | 'change' | 'confirm', direct = false): void {
+  const acc = menu.host.accounts;
+  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => confirmItsYou(menu, go, level, force, resume);
+  const me = acc.me;
+  const change = mode === 'change';
+  const legacy = me?.legacy === true;
+  const hooks: EmailHooks = { change, reauth: (level) => fresh(() => emailDialog(menu, mode, direct), level, true, 'email:' + mode) };
+  const hint = typeof me?.emailHint === 'string' ? me.emailHint : '';
+  const open = (): void => {
+    if (legacy) void acc.fetchMe().catch(() => undefined); // re-keyed by "confirm it's you": the row knows it
+    if (direct && hint.length > 0) {
+      void startEmailCode(menu, hint, hooks).then((err) => (err !== null ? menu.toast(err, 'error') : undefined));
+      return;
+    }
+    emailSheet(menu, change ? t('auth.emailChangeTitle') : mode === 'confirm' ? t('auth.emailConfirmTitle') : t('auth.emailAddTitle'), mode === 'confirm' ? hint : '', hooks);
+  };
+  fresh(open, change || legacy ? 2 : emailAddLevel(me), legacy, 'email:' + mode);
+}
+
 
 /**
  * Enter on a form's fields: the next field, the last one submits (`go`). Not the Enter / OK that
@@ -237,6 +276,8 @@ interface AccountData {
   name: string;
   me: MeInfo | null;
   nodes: readonly MyNode[];
+  /** GET /nodes/mine says hosting is open for this account and it is not the project's (Prompt 2, B1: MI SERVIDOR shows with no node too, with MIS SERVIDORES). */
+  hostOpen?: boolean;
 }
 
 export function profileScreen(menu: Menu): Screen {
@@ -252,8 +293,8 @@ export function profileScreen(menu: Menu): Screen {
    */
   const typesHere = (): boolean => !touch() && finePointer();
   let tab: GuestTab = 'login';
-  /** The signed-in account's community nodes (GET /nodes/mine), by account. */
-  let nodes: { who: string; list: MyNode[] } | null = null;
+  /** The signed-in account's community nodes (GET /nodes/mine), by account, and whether hosting is open for it (a community account's: not the project's). */
+  let nodes: { who: string; list: MyNode[]; hostOpen: boolean } | null = null;
   /** PRIVACIDAD's switch (GET /api/me/replay-name), by account: null until it is read; the switch on screen. */
   let replayHidden: { who: string; hidden: boolean } | null = null;
   let replaySwitch: { refresh(): void } | null = null;
@@ -288,7 +329,8 @@ export function profileScreen(menu: Menu): Screen {
   const loadAuthConfig = (): void => {
     if (authCfg !== null) return;
     void acc.authConfig().then((c) => {
-      const changed = c.email !== mailOn() || c.legacy !== legacyPhase() || c.legacyUntil !== null;
+      // The deletion's button and the legal links (the legal draft's P5, P12) come with the config too.
+      const changed = c.email !== mailOn() || c.legacy !== legacyPhase() || c.legacyUntil !== null || c.deletion === true || typeof c.terms === 'string';
       authCfg = c;
       // A guest's half-typed form is never redrawn; an account's view has nothing typed (its banner, its rows).
       if (changed && el.isConnected && sample === null && (acc.signedIn || !typed)) render();
@@ -361,17 +403,26 @@ export function profileScreen(menu: Menu): Screen {
         newAccount.hidden = false;
         return;
       }
-      try {
-        if (route.kind === 'email') await acc.signIn(route.email, pass.input.value);
-        else await acc.legacySignIn(route.username, pass.input.value);
+      const password = pass.input.value;
+      const signIn = async (cancelDeletion: boolean): Promise<void> => {
+        if (route.kind === 'email') await acc.signIn(route.email, password, { cancelDeletion });
+        else await acc.legacySignIn(route.username, password, { cancelDeletion });
         acc.dropSignupAttempt();
-        menu.toast(t('profile.hello', { name: acc.account?.name ?? '' }), 'ok');
+        menu.toast(cancelDeletion ? t('delete.keptToast') : t('profile.hello', { name: acc.account?.name ?? '' }), 'ok');
         // A username's sign-in (§3.10 step 3): the sheet that asks for an email, not only the banner.
         void acc.fetchMe().then((me) => {
           if (route.kind === 'legacy' && me !== null && emailNudge(me, acc.account?.tv === true) !== null) openGrace(me);
         }, () => undefined);
         render();
+      };
+      try {
+        await signIn(false);
       } catch (e) {
+        // The right password of an account whose deletion is pending (the legal draft's P5): keep it?
+        if (e instanceof AccountError && e.code === 'deletion_pending' && deletionOn()) {
+          void pendingSheet(menu, e.detail.purgeAt ?? 0, () => signIn(true));
+          return;
+        }
         pass.error(authErrText(menu, e));
         if (e instanceof AccountError && e.code === 'bad_credentials') {
           const providers = providersLine(menu);
@@ -734,11 +785,14 @@ export function profileScreen(menu: Menu): Screen {
   const accountView = (v: AccountData): HTMLElement => {
     const me = v.me;
     const banLeft = me ? me.rankedBanUntil - Date.now() : 0;
-    const providers = (menu.cfg?.oauth ?? []) as OAuthProvider[];
-    const linkable = providers.filter((p) => me && !me.providers.includes(p));
+    // The configured providers, Google left out inside another app's browser (§3.0), which says why where VINCULAR GOOGLE would be.
+    const linkable = emailProviders(menu).filter((p) => me && !me.providers.includes(p));
+    const googleNote = me && !me.providers.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
     const linked = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password');
-    // An unlink never takes the last way in (the server refuses it too: last_method).
-    const ways = me?.providers.length ?? 0;
+    // An unlink never takes the last way in (the server refuses it too: last_method). me.waysIn counts
+    // as the server does (a password of before beside an address is no way in until re-keyed);
+    // providers.length only from a server of before it.
+    const ways = me?.waysIn ?? me?.providers.length ?? 0;
     const linkedRow = (p: OAuthProvider): HTMLElement => {
       const at = me?.linkedAt?.[p];
       return h(
@@ -752,9 +806,12 @@ export function profileScreen(menu: Menu): Screen {
     // With its password, CONFIRMAR CON LA CONTRASEÑA: the level 2 the node token and maintenance routes ask for (nodes/docs/VPS-SAO-PAULO.md's console line).
     const project = me?.maintainer;
     const confirm = project?.password === true ? h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('profile.maintainerConfirmNote')), secondary(t('profile.maintainerConfirm'), () => fresh(() => menu.toast(t('profile.maintainerConfirmed'), 'ok'), 2, true), { 'data-key': 'profile-maintainer-confirm' })) : null;
+    // CONTROL DE NODOS (prompt 1, decision 5): the maintainers' panel (screens/nodesAdmin.ts), stacked on PERFIL (sections.ts
+    // SCREEN_SECTION). Shown with /api/me's maintainer, its password or not (the panel asks for it), never on a TV.
+    const panel = tv() ? null : h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('nodesAdmin.entryNote')), secondary(t('nodesAdmin.entry'), () => menu.open('nodes-admin'), { 'data-key': 'profile-nodes-admin' }));
     const projectChecks =
       project !== undefined && !(sample === null && acc.account?.tv === true)
-        ? section(t('profile.maintainerTitle'), h('div.mn-prof-node', null, h('p.mn-prof-node-reason', null, t('profile.maintainerNote')), ...maintainerChecks(project).map((c) => h('span.mn-prof-node-state', { 'data-ok': c.ok ? 'true' : 'false' }, h('span.mn-dot'), c.text)), confirm))
+        ? section(t('profile.maintainerTitle'), h('div.mn-prof-node', null, h('p.mn-prof-node-reason', null, t('profile.maintainerNote')), ...maintainerChecks(project).map((c) => h('span.mn-prof-node-state', { 'data-ok': c.ok ? 'true' : 'false' }, h('span.mn-dot'), c.text)), confirm, panel))
         : null;
     const abandons = (m: MeInfo): string =>
       banLeft > 0 ? t('profile.abandonsBanned', { count: m.abandons24h, minutes: Math.ceil(banLeft / 60000) }) : t('profile.abandons', { count: m.abandons24h });
@@ -791,6 +848,7 @@ export function profileScreen(menu: Menu): Screen {
       ...linked.map(linkedRow),
       // A link needs a credential proved on this browser in the last minutes: confirm it is you first.
       ...linkable.map((p) => secondary(t('profile.link', { provider: PROVIDER_NAMES[p].toUpperCase() }), () => fresh(() => (window.location.href = acc.oauthUrl(p, true)), linkLevel(me)), { 'data-key': 'profile-link-' + p })),
+      googleNote,
       secondary(t('profile.devices'), () => devicesDialog(), { 'data-key': 'profile-devices' }),
       secondary(
         t('profile.signOut'),
@@ -803,6 +861,8 @@ export function profileScreen(menu: Menu): Screen {
         { 'data-key': 'profile-signout' },
       ),
       secondary(t('profile.signOutAll'), () => signOutAllDialog(), { 'data-key': 'profile-signout-all' }),
+      // BORRAR CUENTA (the legal draft's P5): only while the server takes deletions; never the project's account (it is never deleted).
+      deletionOn() && me?.maintainer === undefined && sample === null ? secondary(t('delete.button'), () => deleteDialog(), { 'data-key': 'profile-delete', class: 'mn-btn-cancel' }) : null,
     );
     const toggle = h(
       'button.mn-picker.mn-prof-fold',
@@ -823,7 +883,18 @@ export function profileScreen(menu: Menu): Screen {
       h('span.mn-picker-label', null, t('profile.accountSecurity')),
       icon('next', 'mn-prof-fold-chev'),
     );
-    const server = v.nodes.length > 0 ? section(t('profile.myServer'), h('div.mn-prof-nodes', null, ...v.nodes.map(nodeView))) : null;
+    // MI SERVIDOR (Prompt 2, B1): its nodes; once hosting is open (GET /api/config, decision 1: dark
+    // before) and GET /nodes/mine says it is open for this community account, with no node too, and
+    // MIS SERVIDORES ("Mis servidores", screens/servers.ts). The project's account stays as it was.
+    const open = hostingOpen(menu.cfg);
+    const toServers = open && v.hostOpen === true ? h('div.mn-prof-device', null, h('p.mn-prof-node-reason', null, t('profile.myServersNote')), secondary(t('profile.myServers'), () => menu.open('servers'), { 'data-key': 'profile-servers' })) : null;
+    const server = v.nodes.length > 0 || toServers !== null ? section(t('profile.myServer'), h('div.mn-prof-nodes', null, ...v.nodes.map(nodeView), toServers)) : null;
+    // COMUNIDAD's hosting entry: the guide while hosting is closed (its copy pinned by
+    // tests/garage-screen.test.mjs), "Mis servidores" once it is open (hostEntry).
+    const hostLink =
+      hostEntry(open) === 'servers'
+        ? h('button.mn-btn.mn-prof-link', { type: 'button', 'data-nav': true, 'data-key': 'profile-host', onclick: () => menu.open('servers') }, icon('server'), h('span', null, t('profile.hostServerOpen')))
+        : link(HOST_GUIDE(), 'server', t('profile.hostServer'), 'profile-host');
     // PRIVACIDAD: the public replays show 'Jugador N' for this account (src/net/replays.ts), the
     // matches already listed too. Off by default; a TV signed in with the phone may change it too.
     const who = sample !== null ? 'sample' : (acc.account?.playerId ?? '');
@@ -886,26 +957,31 @@ export function profileScreen(menu: Menu): Screen {
         privacy,
         section(
           t('profile.community'),
-          h('div.mn-prof-links', null, link(DISCORD_URL, 'friends', t('profile.discord'), 'profile-discord'), link(HOST_GUIDE(), 'server', t('profile.hostServer'), 'profile-host'), link(SOURCE_URL, 'code', t('profile.source'), 'profile-source')),
+          h('div.mn-prof-links', null, link(DISCORD_URL, 'friends', t('profile.discord'), 'profile-discord'), hostLink, link(SOURCE_URL, 'code', t('profile.source'), 'profile-source')),
         ),
       ),
     );
   };
 
-  /** ACERCA DE, under either view. */
-  const about = section(
-    t('profile.about'),
-    h('p.mn-prof-about', null, t('profile.version', { game: GAME_NAME, version, protocol: PROTOCOL_VERSION })),
-    h('p.mn-note.mn-prof-about', null, menu.host.info),
-    h(
-      'div.mn-prof-links',
-      null,
+  /** ACERCA DE, under either view: the terms and the privacy policy join its links once the owner publishes them (the legal draft's P12). */
+  const aboutLinks = h(
+    'div.mn-prof-links',
+    null,
       // Same tab: the viewer is its own page (replay.html), with a way back. Not on a TV: that page has
       // no remote or controller navigation yet.
       tv() ? null : h('a.mn-btn.mn-prof-link', { href: './replay.html', 'data-nav': true, 'data-key': 'profile-replays' }, icon('play'), h('span', null, t('profile.replays'))),
       h('a.mn-btn.mn-prof-link', { href: './third-party-licenses.txt', target: '_blank', rel: 'noopener', 'data-nav': true, 'data-key': 'profile-licenses' }, icon('info'), h('span', null, t('menu.licenses'))),
-    ),
   );
+  void legalState(acc).then((c) => {
+    if (c.terms === null) return;
+    const paths = legalPaths(language());
+    // A new tab, so the game stays (on a TV, this one: Back returns to the game).
+    const legal = (href: string, text: string, key: string): HTMLAnchorElement => h('a.mn-btn.mn-prof-link', { href, target: tv() ? undefined : '_blank', rel: 'noopener', 'data-nav': true, 'data-key': key }, icon('info'), h('span', null, text));
+    aboutLinks.appendChild(legal(paths.terms, t('legal.terms'), 'profile-terms'));
+    aboutLinks.appendChild(legal(paths.privacy, t('legal.privacy'), 'profile-privacy'));
+    menu.refit();
+  });
+  const about = section(t('profile.about'), h('p.mn-prof-about', null, t('profile.version', { game: GAME_NAME, version, protocol: PROTOCOL_VERSION })), h('p.mn-note.mn-prof-about', null, menu.host.info), aboutLinks);
 
   // ---- the email of an account (sign-in PR 9: the design's §3.6, §3.9, §3.10) ------------------------
 
@@ -926,38 +1002,14 @@ export function profileScreen(menu: Menu): Screen {
     if (me === null || me.email === undefined) return null;
     const email = me.emailVerified === true && typeof me.email === 'string' ? me.email : null;
     const hint = email === null && typeof me.emailHint === 'string' && me.emailHint.length > 0 ? me.emailHint : null;
-    const mode = email !== null ? 'change' : hint !== null ? 'confirm' : 'add';
+    const mode = emailModeOf(me);
     const label = mode === 'change' ? t('profile.emailChangeBtn') : mode === 'confirm' ? t('profile.emailConfirmBtn') : t('profile.emailAddBtn');
     return h(
       'div.mn-prof-device',
       null,
       h('p', null, email ?? (hint !== null ? t('profile.emailHintRow', { email: hint }) : t('profile.emailNone'))),
-      mailOn() ? secondary(label, () => emailDialog(mode), { 'data-key': 'profile-email' }) : h('p.mn-note', null, mailOffText(menu)),
+      mailOn() ? secondary(label, () => emailDialog(menu, mode), { 'data-key': 'profile-email' }) : h('p.mn-note', null, mailOffText(menu)),
     );
-  };
-
-  /**
-   * AGREGAR, CAMBIAR or CONFIRMAR (§3.6 steps 2 to 4): "confirm it's you" first when this browser is
-   * not fresh enough (1 to add or confirm, 2 for the project account with a password: emailAddLevel;
-   * 2 to change; a password of before is re-keyed by itself first, level 2), then the address and
-   * its code. `direct`: the banner's ENVIAR CÓDIGO for a hint, the code straight away. A provider's
-   * round trip comes back to it (the marker keepResume).
-   */
-  const emailDialog = (mode: 'add' | 'change' | 'confirm', direct = false): void => {
-    const me = acc.me;
-    const change = mode === 'change';
-    const legacy = me?.legacy === true;
-    const hooks: EmailHooks = { change, reauth: (level) => fresh(() => emailDialog(mode, direct), level, true, 'email:' + mode) };
-    const hint = typeof me?.emailHint === 'string' ? me.emailHint : '';
-    const open = (): void => {
-      if (legacy) void acc.fetchMe().catch(() => undefined); // re-keyed by "confirm it's you": the row knows it
-      if (direct && hint.length > 0) {
-        void startEmailCode(menu, hint, hooks).then((err) => (err !== null ? menu.toast(err, 'error') : undefined));
-        return;
-      }
-      emailSheet(menu, change ? t('auth.emailChangeTitle') : mode === 'confirm' ? t('auth.emailConfirmTitle') : t('auth.emailAddTitle'), mode === 'confirm' ? hint : '', hooks);
-    };
-    fresh(open, change || legacy ? 2 : emailAddLevel(me), legacy, 'email:' + mode);
   };
 
   /** Right after a username's sign-in (§3.10 step 3): "Agrega tu correo", its date while there is one. */
@@ -986,7 +1038,7 @@ export function profileScreen(menu: Menu): Screen {
     const title = nudge === 'confirm' ? t('auth.confirmEmailBanner', { email: me.emailHint ?? '' }) : t('auth.graceTitle');
     const text = me.hasPassword ? h('p.mn-note', null, graceText(authCfg?.legacyUntil ?? null, legacyPhase() === 'closed')) : null;
     const buttons = mailOn()
-      ? [nudge === 'confirm' ? secondary(t('auth.sendCode'), () => emailDialog('confirm', true), { 'data-key': 'profile-grace-email', 'data-autofocus': true }) : secondary(t('profile.emailAddBtn'), () => emailDialog('add'), { 'data-key': 'profile-grace-email', 'data-autofocus': true })]
+      ? [nudge === 'confirm' ? secondary(t('auth.sendCode'), () => emailDialog(menu, 'confirm', true), { 'data-key': 'profile-grace-email', 'data-autofocus': true }) : secondary(t('profile.emailAddBtn'), () => emailDialog(menu, 'add'), { 'data-key': 'profile-grace-email', 'data-autofocus': true })]
       : [h('p.mn-note', null, mailOffText(menu))];
     const links = nudge === 'add' ? unlinked(me).map((p) => secondary(t('profile.link', { provider: PROVIDER_NAMES[p].toUpperCase() }), () => linkProvider(p), { 'data-key': 'profile-grace-link-' + p })) : [];
     const body = h('div.mn-prof-acct.mn-prof-grace-body', { id: 'mn-prof-grace', hidden: !graceOpen }, text, ...buttons, ...links);
@@ -1134,55 +1186,9 @@ export function profileScreen(menu: Menu): Screen {
   /**
    * Run `go` once this browser proved a credential at `level` in the last minutes (AccountClient.fresh,
    * the server's R6): at once when it did (unless `force`: the server just asked), else after
-   * "confirm it is you" with what reaches that level. Level 1: a provider already on the account (a
-   * round trip that comes back to PERFIL, then the player taps again) or the password here. Level 2
-   * (the server's reauth_required { level: 2 }): the password, or a code to the account's verified
-   * address (POST /api/auth/reauth/code); a press on a provider's page is level 1, and the sheet says
-   * so. A password of before (me.legacy) is only re-keyed by itself: no code then.
+   * "confirm it is you" (accountLinks.ts confirmItsYou, shared with CONTROL DE NODOS).
    */
-  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => {
-    if (!force && acc.fresh(level)) {
-      go();
-      return;
-    }
-    const me = acc.me;
-    const own = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
-    const offered = level === 1 ? own : [];
-    const pass = field(t('profile.yourPassword'), { type: 'password', autocomplete: 'current-password', maxLength: 128 });
-    const withPassword = me?.hasPassword === true;
-    // No code for the project's account: it confirms with its password (the server refuses it the code: 403 password_required).
-    const mailbox = me?.emailVerified === true && typeof me.email === 'string' && me.email.length > 0 && me.legacy !== true && me.maintainer === undefined ? me.email : null;
-    const ownNames = own.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
-    const notEnough = level === 2 && own.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
-    const byCode: HTMLButtonElement | null = mailbox !== null ? secondary(t('auth.reauthCode', { email: mailbox }), () => byCode !== null && void busyWhile(byCode, () => openReauthCodeSheet(menu, go)), { 'data-key': 'profile-reauth-code' }) : null;
-    menu.modal({
-      title: t('profile.reauthTitle'),
-      body: [h('p.mn-note', null, t('profile.reauthNote')), notEnough, ...offered.map((p) => secondary(t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })), byCode, withPassword ? pass.el : null],
-      actions: [
-        ...(withPassword
-          ? [
-              {
-                label: t('profile.reauthConfirm'),
-                primary: true,
-                onClick: async (): Promise<boolean> => {
-                  pass.error(null);
-                  try {
-                    await acc.reauth(pass.input.value);
-                    queueMicrotask(go);
-                    return true;
-                  } catch (e) {
-                    pass.error(errText(e));
-                    return false;
-                  }
-                },
-              },
-            ]
-          : []),
-        { label: t('profile.cancel'), onClick: () => true },
-      ],
-    });
-  };
-
+  const fresh = (go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void => confirmItsYou(menu, go, level, force, resume);
 
   /**
    * Take `p` off the account after "confirm it is you" at `level`: 1 first, and 2 when the server
@@ -1254,6 +1260,67 @@ export function profileScreen(menu: Menu): Screen {
     );
   };
 
+  /** The server takes deletions (GET /api/config legal.deletion, DELETION_OPEN): BORRAR CUENTA and its screens show (the legal draft's P5). */
+  const deletionOn = (): boolean => authCfg?.deletion === true;
+
+  /**
+   * POST /api/me/delete with the name typed (`f`: the dialog's field, null after "confirm it's you"):
+   * 403 reauth_required { level } asks for that level (fresh, forced: the server just said so) and
+   * sends the same request once more. Done: every device is signed out, this one too (AccountClient
+   * forgets its session), and deletionDone shows the day and the receipt.
+   */
+  const requestDeletion = async (confirm: string, f: Field | null): Promise<boolean> => {
+    const name = acc.account?.name ?? '';
+    const mailed = acc.me?.emailVerified === true;
+    try {
+      const purgeAt = await acc.deleteAccount(confirm);
+      queueMicrotask(() => deletionDone(menu, name, purgeAt, mailed));
+      render();
+      return true;
+    } catch (e) {
+      if (e instanceof AccountError && e.code === 'reauth_required' && f !== null) {
+        queueMicrotask(() => fresh(() => void requestDeletion(confirm, null), e.level === 2 ? 2 : 1, true));
+        return true;
+      }
+      if (f === null) {
+        menu.toast(errText(e), 'error');
+        return true;
+      }
+      f.error(errText(e));
+      return false;
+    }
+  };
+
+  /**
+   * BORRAR CUENTA (the legal draft's P5): what goes and the days to cancel, the username typed to
+   * confirm (as usernameKey compares names: the server's rule), BORRAR MI CUENTA (danger; CANCELAR
+   * takes the first focus), then the server's "confirm it's you" at the level the account reaches.
+   */
+  const deleteDialog = (): void => {
+    const name = acc.account?.name ?? '';
+    const typedName = field(t('delete.nameLabel'), { maxLength: USERNAME_MAX * 2, autocomplete: 'off', hint: t('delete.typeName', { name }), enterkeyhint: 'done' });
+    menu.modal({
+      title: t('delete.title'),
+      body: [h('p.mn-note', null, t('delete.note', { days: authCfg?.graceDays ?? 14 })), typedName.el],
+      actions: [
+        {
+          label: t('delete.confirm'),
+          danger: true,
+          onClick: async () => {
+            typedName.error(null);
+            const confirm = typedName.input.value;
+            if (name === '' || usernameKey(confirm.trim()) !== usernameKey(name)) {
+              typedName.error(t('delete.badName'));
+              return false;
+            }
+            return requestDeletion(confirm, typedName);
+          },
+        },
+        { label: t('profile.cancel'), autofocus: true, onClick: () => true },
+      ],
+    });
+  };
+
   /** Sign out on every device, this one too: the way out of a stolen session for any account (no password needed). */
   const signOutAllDialog = (): void => {
     menu.modal({
@@ -1289,21 +1356,22 @@ export function profileScreen(menu: Menu): Screen {
       sample !== null
         ? accountView(sample)
         : acc.signedIn
-          ? accountView({ name: acc.account?.name ?? '', me: acc.me, nodes: nodes !== null && nodes.who === who ? nodes.list : [] })
+          ? accountView({ name: acc.account?.name ?? '', me: acc.me, nodes: nodes !== null && nodes.who === who ? nodes.list : [], hostOpen: nodes !== null && nodes.who === who && nodes.hostOpen })
           : guestView();
     setChildren(body, view);
     menu.refit(); // a new view's name and titles (data-fit)
     menu.refocus();
   };
 
-  /** The operator's nodes, once per visit (a fork or local dev answers none: AccountClient.myNodes). */
+  /** The operator's nodes, once per visit (a fork or local dev answers none: AccountClient.nodesMine; never a retired node). */
   const loadNodes = (): void => {
     const who = acc.account?.playerId ?? null;
     if (who === null) return;
-    void acc.myNodes().then(
-      (list) => {
-        nodes = { who, list };
-        if (el.isConnected && list.length > 0) render();
+    void acc.nodesMine().then(
+      ({ nodes: list, hosting, operator }) => {
+        const hostOpen = hosting?.open === true && operator?.trusted !== true;
+        nodes = { who, list, hostOpen };
+        if (el.isConnected && (list.length > 0 || hostOpen)) render();
       },
       () => undefined, // offline: MI SERVIDOR waits for the next visit
     );
@@ -1375,7 +1443,7 @@ export function profileScreen(menu: Menu): Screen {
         const resume = acc.takeResume();
         void acc.fetchMe().then(() => {
           render();
-          if (resume !== null && acc.signedIn) emailDialog(resume.slice('email:'.length) as 'add' | 'change' | 'confirm');
+          if (resume !== null && acc.signedIn) emailDialog(menu, resume.slice('email:'.length) as 'add' | 'change' | 'confirm');
         }, () => undefined);
         loadNodes();
         loadReplayName();

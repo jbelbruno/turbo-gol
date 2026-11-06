@@ -5,9 +5,20 @@ the project's control plane. The control plane registers them, places matches on
 results by re-simulating the match** (every ranked match, casual ones by sample) and rewards the
 people who run them with points that unlock new items in the game. En español: [README.es.md](README.es.md).
 
-**Status:** a working prototype, not wired into the game yet: the control plane is in the Worker
-(`server/`), but the matchmaker does not send it matches. What is missing before real players use
-it is listed (in Spanish) in [docs/PRODUCCION.md](docs/PRODUCCION.md).
+**Status:** since 21 October 2026 the matchmaker sends matches to nodes, so far only to the
+project's own servers. The control plane runs in the Worker (`server/`). Every Casual and
+Competitive match asks first for a server of its host region (the region of most of its players),
+never one of another region except in an emergency, and, when none can take it, is played on
+Cloudflare's servers: we ask Cloudflare to place it near that region. Today the project runs one
+server per region: São Paulo (South America), Germany (Europe) and Malaysia (Asia) host and
+verify, and, for now, there are also servers in South Africa (Africa), Australia (Oceania) and the
+United States (North America), which only host. The ones in service are listed at
+[turbo-gol.com/nodes/status](https://turbo-gol.com/nodes/status).
+
+**Hosting is not open to the community yet:** only the project can register servers, so you
+cannot register one today. Server points are kept in the account and redeemed for cars in GARAGE,
+but only a community host's servers earn them (the project's earn none), so nobody earns them yet.
+What is missing before it opens is listed (in Spanish) in [docs/PRODUCCION.md](docs/PRODUCCION.md).
 
 ## Why it is safe to accept anyone's machine
 
@@ -34,7 +45,7 @@ looks the same to the game.
 
 ## Try it
 
-Node.js 24 is required. Run `npm install` in the repository root and in `server/` first (the node
+Node.js 26 is required. Run `npm install` in the repository root and in `server/` first (the node
 uses the game's wasm and code; the typecheck uses the root TypeScript), then, in `nodes/`:
 
 ```bash

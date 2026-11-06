@@ -8,14 +8,16 @@
  *
  * Every car is cosmetic: the same hitbox, wheels and physics (CarPreset.Standard) for all, ranked
  * or not. The bodies are in src/render/cars (docs/cars.md); a car whose body is not built yet
- * draws the default car. Names are invented, Spanish words of the pampas and the Andes (the
- * pampero wind, the capybara, the condor, the southern lapwing): no commercial car or game.
+ * draws the default car. Names are invented English words of wild nature (Dune, Cyclone, Vortex, Sirocco,
+ * Magma), the same in every language: no commercial car or game. Each car has a legend
+ * (car.<id>Story: what it stands for, told in the second person) beside its one line (car.<id>Desc);
+ * the ids are saved in accounts and loadouts, so they do not change.
  */
 
-export type CarId = 'dune' | 'pampero' | 'carpincho' | 'condor' | 'tero';
+export type CarId = 'dune' | 'cyclone' | 'vortex' | 'sirocco' | 'magma';
 
 /** Every car, in menu order. */
-export const CAR_IDS: readonly CarId[] = ['dune', 'pampero', 'carpincho', 'condor', 'tero'];
+export const CAR_IDS: readonly CarId[] = ['dune', 'cyclone', 'vortex', 'sirocco', 'magma'];
 
 /** The default car: free for everyone, every bot drives it, every car online for now. */
 export const DEFAULT_CAR: CarId = 'dune';
@@ -26,10 +28,10 @@ export type CarStatus = 'available' | 'soon';
 /** Price in host points (the shop's one table; the default car is free). */
 export const CAR_PRICES: Readonly<Record<CarId, number>> = {
   dune: 0,
-  pampero: 1500,
-  carpincho: 1500,
-  condor: 1500,
-  tero: 1500,
+  cyclone: 1500,
+  vortex: 1500,
+  sirocco: 1500,
+  magma: 1500,
 };
 
 /**
@@ -40,13 +42,13 @@ export const CAR_PRICES: Readonly<Record<CarId, number>> = {
 const CAR_STATUS: Readonly<Record<CarId, CarStatus>> = {
   dune: 'available',
 
-  pampero: 'available',
+  cyclone: 'available',
 
-  carpincho: 'available',
+  vortex: 'available',
 
-  condor: 'available',
+  sirocco: 'available',
 
-  tero: 'available',
+  magma: 'available',
 };
 
 export interface CarCosmetic {

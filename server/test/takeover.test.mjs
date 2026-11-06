@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
 const WASM_STUB = 'data:text/javascript,export const createHostArena = () => { throw new Error("no wasm in this test"); };';
@@ -32,8 +33,9 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   const u = String(url instanceof Request ? url.url : url);
   const ok = (b) => new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } });
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  // Google is read from the id_token of its token answer (no userinfo call: that URL is BLOCKED below).
+  if (u === 'https://oauth2.googleapis.com/token') return ok(googleTokenAnswer(identity.google));
+  if (u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -46,7 +48,7 @@ void realFetch;
 const { AccountsDO } = await import('../src/AccountsDO.ts');
 const A = await import('../src/accountRoutes.ts');
 const AUTH = await import('../src/auth.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'takeover-test-secret';
 const ORIGIN = 'https://turbo-gol.com';
@@ -341,8 +343,8 @@ test('auth-1: a TV signed in with the phone gets a limited scope: the tv claim, 
   const r1 = await refresh(env, tv.rt, ip(10));
   assert.equal(claims(r1.json.session).tv, 1, 'refreshed: still a TV');
   // Its car pick re-signs the session: the scope stays.
-  obj.store.grant(ana.id, 'pampero', Date.now());
-  const car = await post(env, '/api/me/car', { ip: ip(10), bearer: r1.json.session, body: { car: 'pampero' } });
+  obj.store.grant(ana.id, 'cyclone', Date.now());
+  const car = await post(env, '/api/me/car', { ip: ip(10), bearer: r1.json.session, body: { car: 'cyclone' } });
   assert.equal(car.status, 200);
   assert.equal(claims(car.json.session).tv, 1, 'no laundering the scope through /api/me/car');
   // It plays as the account: its profile answers.
@@ -364,15 +366,15 @@ test('auth-1 / auth-11: every credential, linking, redeem, TV-approval, device a
     ['POST', '/api/auth/reauth/code', {}],
     ['POST', '/api/auth/reauth/code/verify', { attempt: 'A'.repeat(43), code: '123456' }],
     ['POST', '/api/me/username', { username: 'Robado', password: KEY, newPassword: KEY2 }],
-    ['POST', '/api/me/shop/claim', { item: 'pampero' }],
-    ['POST', '/nodes/shop/claim', { item: 'pampero' }],
+    ['POST', '/api/me/shop/claim', { item: 'cyclone' }],
+    ['POST', '/nodes/shop/claim', { item: 'cyclone' }],
     ['POST', '/api/auth/tv/confirm', { code: other.json.code }],
     ['GET', '/api/auth/sessions', undefined],
     ['POST', '/api/auth/sessions/revoke', { id: 'a'.repeat(32) }],
     ['POST', '/api/auth/sessions/revoke-all', {}],
     ['POST', '/nodes/tokens', { region: 'SA' }],
     ['GET', '/nodes/admin/nodes', undefined],
-    ['POST', '/nodes/admin/grant', { account: ana.id, item: 'pampero' }],
+    ['POST', '/nodes/admin/grant', { account: ana.id, item: 'cyclone' }],
     ['POST', '/nodes/admin/drain', { nodeId: 'n1', reason: 'x' }],
   ];
   for (const [method, path, body] of calls) {
@@ -711,7 +713,7 @@ test('auth-11 / econ-2: a maintainer\'s 1-hour Bearer or refresh cookie alone gr
   const calls = [
     ['POST', '/nodes/tokens', { region: 'SA' }],
     ['GET', '/nodes/admin/nodes', undefined],
-    ['POST', '/nodes/admin/grant', { account: s.json.playerId, item: 'pampero' }],
+    ['POST', '/nodes/admin/grant', { account: s.json.playerId, item: 'cyclone' }],
     ['POST', '/nodes/admin/status', { nodeId: 'n1', status: 'banned', reason: 'x' }],
     ['POST', '/nodes/admin/drain', { nodeId: 'n1', reason: 'x' }],
     ['POST', '/nodes/admin/unfreeze', { account: s.json.playerId }],
@@ -739,10 +741,10 @@ test('auth-11 / econ-2: a maintainer\'s 1-hour Bearer or refresh cookie alone gr
   assert.equal(claims(fresh.json.session).aal, 2);
   for (const [method, path, body] of calls) assert.equal((await req(env, method, path, { ip: ip(0), bearer: fresh.json.session, body })).status, 200, `${method} ${path} fresh`);
   assert.equal(seen.length, calls.length);
-  // A non-maintainer still hears not_trusted, fresh or not.
+  // A non-maintainer hears hosting_closed while hosting is closed, fresh or not.
   const other = await oauth(env, 'discord', 'd-other', { ip: ip(1) });
   const o = await refresh(env, other.rt, ip(1));
-  assert.equal((await req(env, 'POST', '/nodes/tokens', { ip: ip(1), bearer: o.json.session, body: { region: 'SA' } })).json.error, 'not_trusted');
+  assert.equal((await req(env, 'POST', '/nodes/tokens', { ip: ip(1), bearer: o.json.session, body: { region: 'SA' } })).json.error, 'hosting_closed');
   // Twenty minutes after that sign-in, the routes ask again.
   const later = await AUTH.signJwt(SECRET, { ...claims(fresh.json.session), aat: Math.floor(Date.now() / 1000) - 16 * 60 });
   assert.equal((await req(env, 'GET', '/nodes/admin/nodes', { ip: ip(0), bearer: later })).json.error, 'reauth_required');

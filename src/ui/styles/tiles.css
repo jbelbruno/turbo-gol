@@ -339,6 +339,11 @@ html.tg-tv .mn-hero-x {
   grid-area: ranked;
 }
 
+/* A TV guest's SIGN IN WITH YOUR PHONE (home.ts: only in that role's DOM; home.css names its area). */
+.mn-mtile-tvsign {
+  grid-area: tvsign;
+}
+
 .mn-mtile-text {
   display: flex;
   flex-direction: column;

@@ -1,13 +1,13 @@
 /**
- * The Tero ('tero', the southern lapwing: small, loud, territorial): a compact retro rally
+ * The Magma ('magma', the fire within: small, loud, stubborn): a compact retro rally
  * hatchback. A short two-box body with a tall glasshouse (raked screen under a white sun strip,
  * blacked-out B-pillar, thick C-pillars, a painted tailgate under a small rear glass) and a crowned
  * roof, flanks bowed out a little at the doors, square-cut bolted-on box flares over all four wheels
  * (a lip that drops over each tyre's shoulder, rounded outer edges) joined by black sills, white mud
  * flaps behind the front wheels, a boxy roof scoop over the screen header with a black crest blade
- * behind it (the lapwing's), a roof wing standing on two pylons between black end plates, a
+ * behind it, a roof wing standing on two pylons between black end plates, a
  * four-lamp pod on the bonnet (selective yellow lenses set back in black bezels, in red cans: the
- * bird's red eye), square headlights in a black band across the nose (its black breast), a black
+ * the fire-red glow of the theme), square headlights in a black band across the nose, a black
  * front bumper with a tow strap and an alloy skid plate, wedge door mirrors on painted arms, a white
  * number plate with a black "7" on each door. At the rear: thin red lights standing on the
  * tailgate's corners (amber indicator cells at their feet), one chamfered black bumper beam across
@@ -39,7 +39,7 @@ const ACCENT = 0xffc21a;
 
 /** Knobby gravel tyres on white six-spoke rally rims over a dark dish, a white outer lip, a team hub cap. */
 export const TERO_WHEEL: WheelStyle = {
-  id: 'tero-rally-6',
+  id: 'magma-rally-6',
   tyre: 'knobby',
   spokes: 6,
   spokeWidth: 0.24,
@@ -60,11 +60,11 @@ export const TERO_WHEEL: WheelStyle = {
 const BLACK: Surface = { ...TRIM, color: 0x15171b, rough: 0.6 };
 /** White trim: number plates, the sun strip, the mud flaps. */
 const WHITE: Surface = { ...TRIM, color: 0xf1f1ec, metal: 0, rough: 0.42 };
-/** Tow straps: the lapwing's red spur. */
+/** Tow straps: red, a hot-rod accent. */
 const STRAP: Surface = { ...TRIM, color: 0xff4a1c, metal: 0, rough: 0.7 };
 /** The pod's lamp lenses: selective yellow, deep enough to stay yellow through the bloom and the tone map. */
 const POD_LAMP: Surface = { ...HEADLIGHT, color: 0xffb300, emissive: 1.1 };
-/** The pod's lamp cans: red, the lapwing's eye ring. */
+/** The pod's lamp cans: red, the fire-red ring round each lens. */
 const POD_CAN: Surface = { ...TRIM, color: 0x9e1a14, metal: 0.4, rough: 0.4 };
 /** Tail lights: a deep saturated red at a low emission, so neither the bloom nor the flat tone map (low tiers) turns them orange. */
 const TAIL: Surface = { ...TAILLIGHT, color: 0xd0101c, emissive: 0.8 };
@@ -913,7 +913,7 @@ function doors(k: BodyKit): void {
   }
 }
 
-// ---- front: bumper, breast band, skid plate, light pod, mirrors -------------------------------
+// ---- front: bumper, nose band, skid plate, light pod, mirrors ---------------------------------
 
 function nose(k: BodyKit): void {
   const hl = k.hl;
@@ -934,7 +934,7 @@ function nose(k: BodyKit): void {
       [49.5, -16.75],
     ].map(([x, y]) => ({ p: [x, y, z] as const, l: 'k' }));
   if (k.hi) sweep(k, [skid(-17), skid(17)], () => ALLOY);
-  // A black band across the nose face over the bumper (the lapwing's black breast), the square
+  // A black band across the nose face over the bumper, the square
   // headlights set in it, a little proud: a black frame round each lamp on every tier.
   k.box(BLACK, 0.5, 5.2, 53.0, 58.2, -7.6, 0);
   for (const side of [-1, 1]) k.box(HEADLIGHT, 0.5, 3.5, 8.0, 58.45, -7.6, side * 20.6);
@@ -1074,8 +1074,8 @@ function build(k: BodyKit): void {
   tail(k);
 }
 
-export const TERO: CarBodySpec = {
-  id: 'tero',
+export const MAGMA: CarBodySpec = {
+  id: 'magma',
   build,
   // The same tyre size (14.25 uu) front and rear: the rear's `visual` is its own (the sim's rear
   // wheels are bigger), full-width gravel tyres filling the flares.

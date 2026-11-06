@@ -38,19 +38,19 @@ const guest = (selected = null) => garageView({ signedIn: false, equipped: 'dune
 const account = (s, selected = null, equipped = 'dune') => garageView({ signedIn: true, equipped, owned: s.items.filter((i) => i.owned).map((i) => i.id), shop: s, selected });
 
 test('a row says its state: Equipado · Gratis for the free car, Tuyo, Canjeable / Bloqueado with the price', () => {
-  const v = account(shop(2100, { owned: ['pampero'] }));
+  const v = account(shop(2100, { owned: ['cyclone'] }));
   const by = Object.fromEntries(v.cars.map((c) => [c.id, M.rowLine(c)]));
   assert.deepEqual(by.dune, { key: 'garage.stateEquippedFree' });
-  assert.deepEqual(by.pampero, { key: 'garage.stateOwned' });
-  assert.deepEqual(by.carpincho, { key: 'garage.stateClaimable', params: { points: 1500 } });
+  assert.deepEqual(by.cyclone, { key: 'garage.stateOwned' });
+  assert.deepEqual(by.vortex, { key: 'garage.stateClaimable', params: { points: 1500 } });
   const poor = account(shop(0));
   assert.deepEqual(M.rowLine(poor.cars[1]), { key: 'garage.stateLocked', params: { points: 1500 } });
-  const drivesPampero = account(shop(0, { owned: ['pampero'] }), null, 'pampero');
-  assert.deepEqual(M.rowLine(drivesPampero.cars.find((c) => c.id === 'pampero')), { key: 'garage.stateEquipped' }, 'a car with a price is not "Gratis"');
+  const drivesCyclone = account(shop(0, { owned: ['cyclone'] }), null, 'cyclone');
+  assert.deepEqual(M.rowLine(drivesCyclone.cars.find((c) => c.id === 'cyclone')), { key: 'garage.stateEquipped' }, 'a car with a price is not "Gratis"');
 });
 
 test('a guest: CANJEAR is never lime, says to sign in, and its press opens the sign-in', () => {
-  const v = guest('pampero');
+  const v = guest('cyclone');
   const d = M.detailView(v.selected, v);
   assert.equal(d.button, 'redeem');
   assert.equal(d.lime, false);
@@ -62,7 +62,7 @@ test('a guest: CANJEAR is never lime, says to sign in, and its press opens the s
 
 test('0 points: CANJEAR says how many are missing, is never lime, and explains how points are earned', () => {
   for (const balance of [0, 600]) {
-    const v = account(shop(balance), 'carpincho');
+    const v = account(shop(balance), 'vortex');
     const d = M.detailView(v.selected, v);
     assert.equal(d.lime, false, `${balance} pts`);
     assert.equal(d.press, 'earn');
@@ -71,8 +71,8 @@ test('0 points: CANJEAR says how many are missing, is never lime, and explains h
   }
 });
 
-test('enough points: CANJEAR is the lime action and opens the redeem sheet; GANA PUNTOS steps back from lime', () => {
-  const v = account(shop(2100), 'condor');
+test('enough points: CANJEAR is the lime action and opens the redeem sheet; the earn card steps back from lime', () => {
+  const v = account(shop(2100), 'sirocco');
   const d = M.detailView(v.selected, v);
   assert.deepEqual([d.button, d.lime, d.press, d.reason], ['redeem', true, 'redeem', null]);
   assert.equal(M.earnIsLime(v), false);
@@ -83,12 +83,12 @@ test('enough points: CANJEAR is the lime action and opens the redeem sheet; GANA
 });
 
 test('owned: EQUIPAR (lime); driven: no button, "Lo usas en tu próximo partido"; paused: --warn and PERFIL', () => {
-  const v = account(shop(0, { owned: ['tero'] }), 'tero');
+  const v = account(shop(0, { owned: ['magma'] }), 'magma');
   assert.deepEqual(M.detailView(v.selected, v), { button: 'equip', lime: true, press: 'equip', reason: null, tone: 'plain' });
   const driven = M.detailView(v.cars[0], v);
   assert.equal(driven.button, null);
   assert.deepEqual(driven.reason, { key: 'garage.inUse' });
-  const paused = account(shop(1800, { frozen: 'review' }), 'pampero');
+  const paused = account(shop(1800, { frozen: 'review' }), 'cyclone');
   const d = M.detailView(paused.selected, paused);
   assert.deepEqual([d.lime, d.press, d.tone], [false, 'profile', 'warn']);
   assert.equal(M.pointsCard(paused, { signedIn: true, loading: false, error: null }).paused, true);
@@ -104,7 +104,7 @@ test('the points card waits for the shop, then shows its balance', () => {
 });
 
 test('revealDelta: the row picked comes wholly into the list as block nearest would (a phone held sideways)', () => {
-  // 844 x 390, Pampero tapped: the detail grew from 38 to 100 px, the list shrank to 178..268 and
+  // 844 x 390, Cyclone tapped: the detail grew from 38 to 100 px, the list shrank to 178..268 and
   // the row slid down to 252..310 (16 px of it in sight). Scroll padding 8 px.
   const list = { top: 178, bottom: 268 };
   assert.equal(M.revealDelta({ top: 252, bottom: 310 }, list, 8), 50, 'down until its bottom clears the padding');
@@ -127,8 +127,81 @@ test('every row and detail key exists in English and Spanish', () => {
     assert.equal(typeof en[k], 'string', 'en ' + k);
     assert.equal(typeof es[k], 'string', 'es ' + k);
   }
-  assert.equal(es['points.only'], 'Solo se ganan alojando un servidor comunitario. Nunca se venden.', "the owner's words as drawn");
+  assert.equal(es['points.only'], 'Solo se ganan alojando un servidor comunitario. Hoy nadie los gana. Nunca se venden.', "the owner's words as drawn, and what the terms say of today");
   assert.equal(es['garage.missing'], 'Tienes {have} pts: te faltan {missing}');
+});
+
+test('how points are earned, as the terms say it (Términos 11.1 and 12.1.2): only by hosting a community server, and while hosting is closed only the project has servers and nobody can register one, so no closed text invites a player to host one, and none sets a date', () => {
+  const copy = {
+    'garage.earn': ['ALOJAR UN SERVIDOR DA PUNTOS: AÚN NO ABIERTO', 'HOSTING A SERVER EARNS POINTS: NOT OPEN YET'],
+    'garage.earnSub': ['Cómo funciona · ver la guía', 'How it works · see the guide'],
+    'garage.earnShort': ['Cómo se ganan', 'How they are earned'],
+    'garage.guideTitle': ['Cómo se ganan los puntos de servidor', 'How server points are earned'],
+    'garage.guideText': ['Se ganan solo alojando un servidor comunitario, nunca jugando. Hoy solo el proyecto tiene servidores: aún no puedes registrar uno.', 'Earned only by hosting a community server, never by playing. Today only the project runs servers: you cannot register one yet.'],
+    'points.only': ['Solo se ganan alojando un servidor comunitario. Hoy nadie los gana. Nunca se venden.', 'Earned only by hosting a community server. Nobody earns them yet. Never sold.'],
+    'profile.hostServer': ['Guía de servidores', 'Server guide'],
+  };
+  for (const [k, [want, wantEn]] of Object.entries(copy)) {
+    assert.equal(es[k], want, 'es ' + k);
+    assert.equal(en[k], wantEn, 'en ' + k);
+    // No call to host (Aloja, Pon un servidor, Gana puntos; Host a, Earn points), no machine to host it
+    // on, and nothing that promises when.
+    assert.doesNotMatch(es[k], /\b(?:aloja|pon un servidor|gana puntos|vps|tu pc|próximamente|pronto)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:host a|earn points|vps|your pc|coming soon|soon)\b/i, 'en ' + k);
+  }
+  // The card says it even where its second line is hidden (a short screen, a TV: garage.css).
+  assert.match(es['garage.earn'], /AÚN NO/);
+  assert.match(en['garage.earn'], /NOT OPEN YET/);
+  // The layout keeps its room: the card's title and the links' words about as long as before.
+  assert.ok(es['garage.earn'].length <= 48 && en['garage.earn'].length <= 46);
+  assert.ok(es['profile.hostServer'].length <= 20 && en['profile.hostServer'].length <= 16);
+  // "Mis servidores"' own closed view (Prompt 2, B2: open, but not for this account) follows the same
+  // rule: no call to host, no machine, no date. (The open copy below may name the VPS.)
+  for (const k of ['servers.closedTitle', 'servers.closed', 'servers.closedNow', 'servers.what']) {
+    assert.doesNotMatch(es[k], /\b(?:aloja|pon un servidor|gana puntos|vps|tu pc|próximamente|pronto)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:host a|earn points|vps|your pc|coming soon|soon)\b/i, 'en ' + k);
+  }
+});
+
+test('the host copy once hosting is open (Prompt 2, B1 and B2): the same keys stay for the closed state, and the screen picks the open ones only when GET /api/config says hosting is open', async () => {
+  // Terms 11.1 and 12.1.2 of version (b) say both: "hasta la apertura ... nadie puede ganarlos", and
+  // from that day the host who meets section 12 earns them. The open words, as drawn here.
+  const open = {
+    'garage.earnOpen': ['ALOJAR UN SERVIDOR DA PUNTOS', 'HOSTING A SERVER EARNS POINTS'],
+    // Neutral, never "add yours": during a canary /api/config is open for every account, though most
+    // cannot register a server yet (Terms 12.1.2; "Mis servidores" tells them so).
+    'garage.earnSubOpen': ['Cómo funciona · Mis servidores', 'How it works · My servers'],
+    'garage.earnShortOpen': ['Mis servidores', 'My servers'],
+    'garage.pausedOpen': ['Canjes en pausa · revisa Mis servidores', 'Redeeming paused · check My servers'],
+    'points.onlyOpen': ['Solo se ganan alojando un servidor comunitario, nunca jugando.', 'Earned only by hosting a community server, never by playing.'],
+    'profile.hostServerOpen': ['Mis servidores', 'My servers'],
+  };
+  for (const [k, [want, wantEn]] of Object.entries(open)) {
+    assert.equal(es[k], want, 'es ' + k);
+    assert.equal(en[k], wantEn, 'en ' + k);
+    // Still no date, and never "nobody earns them" once it is open.
+    assert.doesNotMatch(es[k], /\b(?:próximamente|pronto|hoy nadie|aún no)\b/i, 'es ' + k);
+    assert.doesNotMatch(en[k], /\b(?:coming soon|soon|nobody|not open yet)\b/i, 'en ' + k);
+  }
+  assert.ok(es['garage.earnOpen'].length <= 48 && en['garage.earnOpen'].length <= 46);
+  assert.ok(es['profile.hostServerOpen'].length <= 20 && en['profile.hostServerOpen'].length <= 16);
+  // GARAJE and PERFIL choose by the gate alone (screens/serversModel.ts hostEntry(hostingOpen(cfg))).
+  const { readFile } = await import('node:fs/promises');
+  const GARAGE = await readFile(new URL('../src/ui/screens/garage.ts', import.meta.url), 'utf8');
+  const PROFILE = await readFile(new URL('../src/ui/screens/profile.ts', import.meta.url), 'utf8');
+  assert.match(GARAGE, /const open = \(\): boolean => hostEntry\(hostingOpen\(menu\.cfg\)\) === 'servers';/);
+  assert.match(GARAGE, /set\(earnTitle, t\(o \? 'garage\.earnOpen' : 'garage\.earn'\)\);/);
+  assert.match(GARAGE, /set\(earnSub, t\(o \? 'garage\.earnSubOpen' : 'garage\.earnSub'\)\);/);
+  assert.match(GARAGE, /set\(compactShort, t\(o \? 'garage\.earnShortOpen' : 'garage\.earnShort'\)\);/);
+  assert.match(GARAGE, /t\(opened \? 'points\.onlyOpen' : 'points\.only'\)/);
+  assert.match(GARAGE, /t\(opened \? 'garage\.pausedOpen' : 'garage\.paused'\)/);
+  assert.match(GARAGE, /const earnGo = \(\): void => \(open\(\) \? menu\.open\('servers'\) : openGuide\(\)\);/, 'the compact button and a locked car: the screen when open, the guide when closed');
+  // The earn card itself: the screen when open, its branch first; closed, the guide (a new tab, or its sheet with no pop-up).
+  assert.match(GARAGE, /const earnClick = \(e: MouseEvent\): void => \{\s*if \(open\(\)\) \{\s*e\.preventDefault\(\);\s*menu\.open\('servers'\);\s*return;\s*\}\s*if \(!noPopup\(\)\) return;\s*e\.preventDefault\(\);\s*openGuide\(\);/, 'the card: the screen when open, the guide (new tab or its sheet) when closed');
+  assert.match(GARAGE, /menu\.open\(open\(\) \? 'servers' : 'profile'\);/, "a paused wallet's car: the screen when open, PERFIL when closed");
+  assert.match(PROFILE, /hostEntry\(open\) === 'servers'\s*\? h\('button\.mn-btn\.mn-prof-link'[^\n]*menu\.open\('servers'\)[^\n]*t\('profile\.hostServerOpen'\)\)\)\s*: link\(HOST_GUIDE\(\), 'server', t\('profile\.hostServer'\), 'profile-host'\);/);
+  // And "Muy pronto" is gone for good: no host text promises when.
+  for (const [lang, msgs] of [['es', es], ['en', en]]) for (const [k, v] of Object.entries(msgs)) if (typeof v === 'string') assert.doesNotMatch(v, /muy pronto/i, `${lang} ${k}`);
 });
 
 test('one outline per car, on the 72 x 36 grid, the wheels on the ground', () => {

@@ -22,6 +22,13 @@
  *   - guests and accounts younger than NEW_ACCOUNT_DAYS weigh 0.25
  *   - the same group of players on the same operator decays within 24 h
  *   - a failed verification is worth 0, suspends the node and freezes the operator's wallet
+ *   With the options the NodeRegistryDO sets (the opening's rules, Prompt 2 A17):
+ *   - playerRepeat: each counted player also weighs 1 / (1 + their matches on that operator's
+ *     nodes in the last 24 h), so new combinations of the same accounts decay too
+ *   - dailyCap: an operator earns at most that many points a UTC day; what goes over is recorded
+ *     as 0 (`capped` says how much)
+ *   - a match of one human against bots (soloBots, decided by the control plane from the roster)
+ *     is recorded, worth 0
  *
  * Persistence (the NodeRegistryDO, server/src/nodeStore.ts): each entry is written with the match it
  * scores (MatchEntry.ledger, in the transaction that settles it), the group notes through onNote,
@@ -58,6 +65,8 @@ export interface CreditInput {
    * operator earns the same on average.
    */
   sampleRate?: number;
+  /** One human against bots (the control plane counts the roster's player seats): recorded, worth 0. */
+  soloBots?: boolean;
 }
 
 export interface LedgerEntry extends CreditInput {
@@ -67,6 +76,8 @@ export interface LedgerEntry extends CreditInput {
   regionFactor: number;
   quality: number;
   repeat: number;
+  /** The points over the operator's daily cap (LedgerOptions.dailyCap), recorded as 0; absent when none went over. */
+  capped?: number;
 }
 
 export const WINDOW_DAYS = 30;
@@ -146,6 +157,10 @@ export interface LedgerSnapshot {
 export interface LedgerOptions {
   /** A group note was taken (noteGroup): the store keeps it for the repeat window. */
   onNote?: (note: GroupNote) => void;
+  /** The most points an operator earns in a UTC day; the rest of a match over it is recorded as 0. Absent: no cap. */
+  dailyCap?: number;
+  /** Each counted player also decays by their own matches on the operator in the repeat window. Absent: the exact group only. */
+  playerRepeat?: boolean;
 }
 
 /** The repeat decay's key: the operator and the players it counts (everyone but the operator), sorted. */
@@ -154,15 +169,39 @@ function groupKey(operatorId: string, playerIds: readonly string[]): { key: stri
   return { key: operatorId + '|' + counted.join(','), counted: counted.length };
 }
 
+/** The UTC day a time falls in (the daily cap's). */
+function dayOf(at: number): number {
+  return Math.floor(at / DAY_MS);
+}
+
 export class Ledger {
   private readonly entries: LedgerEntry[] = [];
   private readonly groups = new Map<string, number[]>();
+  /** The per-player decay (playerRepeat): operator + '|' + player -> their matches' times in the repeat window. */
+  private readonly players = new Map<string, number[]>();
   private readonly totals = new Map<string, number>();
   private readonly verified = new Map<string, number>();
   private readonly onNote: ((note: GroupNote) => void) | null;
+  private readonly dailyCap: number | null;
+  private readonly playerRepeat: boolean;
 
   constructor(opts: LedgerOptions = {}) {
     this.onNote = opts.onNote ?? null;
+    this.dailyCap = opts.dailyCap !== undefined && Number.isFinite(opts.dailyCap) && opts.dailyCap >= 0 ? opts.dailyCap : null;
+    this.playerRepeat = opts.playerRepeat === true;
+  }
+
+  /** One more match of `playerId` on `operatorId`'s nodes at `at` (playerRepeat). */
+  private notePlayer(operatorId: string, playerId: string, at: number): void {
+    const k = operatorId + '|' + playerId;
+    const times = (this.players.get(k) ?? []).filter((t) => at - t < REPEAT_WINDOW_MS);
+    times.push(at);
+    this.players.set(k, times);
+  }
+
+  /** `playerId`'s matches on `operatorId`'s nodes in the repeat window before `at`. */
+  private playedRecently(operatorId: string, playerId: string, at: number): number {
+    return (this.players.get(operatorId + '|' + playerId) ?? []).filter((t) => at - t < REPEAT_WINDOW_MS).length;
   }
 
   /**
@@ -173,20 +212,30 @@ export class Ledger {
   restore(s: LedgerSnapshot, now: number): void {
     this.entries.length = 0;
     this.groups.clear();
+    this.players.clear();
     this.totals.clear();
     this.verified.clear();
     const since = now - WINDOW_DAYS * DAY_MS;
     this.entries.push(...s.entries.filter((e) => e.at >= since).sort((a, b) => a.at - b.at));
-    const note = (key: string, at: number) => {
+    const note = (map: Map<string, number[]>, key: string, at: number) => {
       if (now - at >= REPEAT_WINDOW_MS) return;
-      const times = this.groups.get(key);
+      const times = map.get(key);
       if (times) times.push(at);
-      else this.groups.set(key, [at]);
+      else map.set(key, [at]);
     };
-    for (const e of this.entries) note(groupKey(e.operatorId, e.players.map((p) => p.playerId)).key, e.at);
-    for (const n of s.notes) {
+    // The per-player decay from the same rows, in time order (each player's matches as record() and noteGroup() noted them).
+    const players = (operatorId: string, ids: readonly string[], at: number) => {
+      if (this.playerRepeat) for (const id of ids) if (id !== operatorId) note(this.players, operatorId + '|' + id, at);
+    };
+    for (const e of this.entries) {
+      const ids = e.players.map((p) => p.playerId);
+      note(this.groups, groupKey(e.operatorId, ids).key, e.at);
+      players(e.operatorId, ids, e.at);
+    }
+    for (const n of [...s.notes].sort((a, b) => a.at - b.at)) {
       const g = groupKey(n.operatorId, n.playerIds);
-      if (g.counted > 0) note(g.key, n.at);
+      if (g.counted > 0) note(this.groups, g.key, n.at);
+      players(n.operatorId, n.playerIds, n.at);
     }
     for (const t of s.totals) {
       this.totals.set(t.operatorId, round2(t.earned));
@@ -196,6 +245,7 @@ export class Ledger {
 
   /** Score a match and append it. `regionFactorValue` comes from the control plane's demand / supply view. */
   record(input: CreditInput, regionFactorValue: number): LedgerEntry {
+    this.prune(input.at);
     let playerMinutes = 0;
     let weighted = 0;
     const counted: string[] = [];
@@ -203,19 +253,29 @@ export class Ledger {
       const minutes = Math.max(0, p.connectedMs) / 60_000;
       playerMinutes += minutes;
       if (p.playerId === input.operatorId) continue;
-      const w = p.account && p.accountAgeDays >= NEW_ACCOUNT_DAYS ? 1 : LOW_WEIGHT;
+      let w = p.account && p.accountAgeDays >= NEW_ACCOUNT_DAYS ? 1 : LOW_WEIGHT;
+      // Its own decay too: two alternate accounts in ever new pairs are still the same two players.
+      if (this.playerRepeat) w /= 1 + this.playedRecently(input.operatorId, p.playerId, input.at);
       weighted += minutes * w;
       counted.push(p.playerId);
     }
     const quality = qualityFactor(input.tickLagP99Ms, input.underrunRate);
-    this.prune(input.at);
     const key = groupKey(input.operatorId, counted).key;
     const times = (this.groups.get(key) ?? []).filter((t) => input.at - t < REPEAT_WINDOW_MS);
     const repeat = counted.length === 0 ? 0 : 1 / (1 + times.length);
     times.push(input.at);
     this.groups.set(key, times);
+    if (this.playerRepeat) for (const id of counted) this.notePlayer(input.operatorId, id, input.at);
     const sample = input.sampleRate !== undefined && input.sampleRate > 0 && input.sampleRate <= 1 ? input.sampleRate : 1;
-    const points = input.verified ? round2((weighted * regionFactorValue * quality * repeat) / sample) : 0;
+    let points = input.verified && input.soloBots !== true ? round2((weighted * regionFactorValue * quality * repeat) / sample) : 0;
+    let capped = 0;
+    if (this.dailyCap !== null && points > 0) {
+      const room = Math.max(0, round2(this.dailyCap - this.pointsToday(input.operatorId, input.at)));
+      if (points > room) {
+        capped = round2(points - room);
+        points = room;
+      }
+    }
     const entry: LedgerEntry = {
       ...input,
       points,
@@ -224,6 +284,7 @@ export class Ledger {
       regionFactor: regionFactorValue,
       quality,
       repeat,
+      ...(capped > 0 ? { capped } : {}),
     };
     this.entries.push(entry);
     this.totals.set(input.operatorId, round2((this.totals.get(input.operatorId) ?? 0) + points));
@@ -243,7 +304,36 @@ export class Ledger {
     const times = (this.groups.get(key) ?? []).filter((t) => at - t < REPEAT_WINDOW_MS);
     times.push(at);
     this.groups.set(key, times);
+    if (this.playerRepeat) for (const id of playerIds) if (id !== operatorId) this.notePlayer(operatorId, id, at);
     this.onNote?.({ operatorId, playerIds: [...playerIds], at });
+  }
+
+  /**
+   * Its operator's account was purged (Registry.forgetOperator): what the ledger holds of it goes
+   * under `alias`, as its nodes do, so its points stay with them (its totals, its entries for the
+   * ranking's 30 days, its repeat decay) and nothing links them back to the account: its own seat in
+   * an entry of its nodes, too. The store re-keys its rows the same way (NodeStore.forgetOperator).
+   * Its seats on other operators' nodes are a player's and stay as they are.
+   */
+  forgetOperator(operatorId: string, alias: string): void {
+    for (const e of this.entries) {
+      if (e.operatorId !== operatorId) continue;
+      e.operatorId = alias;
+      e.players = e.players.map((p) => (p.playerId === operatorId ? { ...p, playerId: alias } : p));
+    }
+    for (const map of [this.groups, this.players]) {
+      for (const [key, times] of [...map]) {
+        if (!key.startsWith(operatorId + '|')) continue;
+        map.delete(key);
+        map.set(alias + key.slice(operatorId.length), times);
+      }
+    }
+    for (const map of [this.totals, this.verified]) {
+      const v = map.get(operatorId);
+      if (v === undefined) continue;
+      map.delete(operatorId);
+      map.set(alias, v);
+    }
   }
 
   /** Drop entries older than the window and stale repeat groups (the totals stay). */
@@ -252,9 +342,50 @@ export class Ledger {
     let k = 0;
     while (k < this.entries.length && this.entries[k].at < since) k++;
     if (k > 0) this.entries.splice(0, k);
-    if (this.groups.size > 1000) {
-      for (const [key, times] of this.groups) if (times.every((t) => now - t >= REPEAT_WINDOW_MS)) this.groups.delete(key);
+    for (const map of [this.groups, this.players]) {
+      if (map.size <= 1000) continue;
+      for (const [key, times] of map) if (times.every((t) => now - t >= REPEAT_WINDOW_MS)) map.delete(key);
     }
+  }
+
+  /** The daily cap (LedgerOptions.dailyCap), or null when there is none. */
+  capPerDay(): number | null {
+    return this.dailyCap;
+  }
+
+  /** The points an operator earned in the UTC day of `now` (what the daily cap counts against). */
+  pointsToday(operatorId: string, now: number): number {
+    const day = dayOf(now);
+    let sum = 0;
+    for (const e of this.entries) if (e.operatorId === operatorId && dayOf(e.at) === day) sum += e.points;
+    return round2(sum);
+  }
+
+  /**
+   * How much of an operator's points over the window came from the `top` accounts that played the
+   * most on its nodes (the maintainers' Operadores tab: one friend, or a few alternate accounts,
+   * behind most of a host's points is what to look at). Each match's points are split among its
+   * counted players by their weighted minutes. 0 when it earned nothing.
+   */
+  concentration(operatorId: string, now: number, top = 3, days = WINDOW_DAYS): { share: number; players: number } {
+    const by = new Map<string, { minutes: number; points: number }>();
+    let total = 0;
+    for (const e of this.recent(now, days)) {
+      if (e.operatorId !== operatorId) continue;
+      total += e.points;
+      const counted = e.players.filter((p) => p.playerId !== operatorId);
+      const w = (p: LedgerPlayer) => (Math.max(0, p.connectedMs) / 60_000) * (p.account && p.accountAgeDays >= NEW_ACCOUNT_DAYS ? 1 : LOW_WEIGHT);
+      const sum = counted.reduce((s, p) => s + w(p), 0);
+      for (const p of counted) {
+        const b = by.get(p.playerId) ?? { minutes: 0, points: 0 };
+        b.minutes += Math.max(0, p.connectedMs) / 60_000;
+        b.points += sum > 0 ? (e.points * w(p)) / sum : 0;
+        by.set(p.playerId, b);
+      }
+    }
+    const most = [...by.values()].sort((a, b) => b.minutes - a.minutes).slice(0, top);
+    const share = total > 0 ? most.reduce((s, b) => s + b.points, 0) / total : 0;
+    return { share: Math.round(Math.min(1, share) * 1000) / 1000, players: by.size };
   }
 
   /** All points an operator ever earned. */

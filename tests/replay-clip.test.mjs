@@ -1,0 +1,209 @@
+// Clips and links of the replay viewer (src/replay/clip.ts): the container the browser records, the
+// range around a goal, the goal's link and its ?t=, the file name (no player names), the frame box,
+// and the Spanish and English lines. The recording itself needs a browser (MediaRecorder).
+// Run: node --test tests/replay-clip.test.mjs
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    try {
+      return nextResolve(specifier, context);
+    } catch (err) {
+      const relative = specifier.startsWith('./') || specifier.startsWith('../');
+      if (relative && err && err.code === 'ERR_MODULE_NOT_FOUND' && !/\.[a-z]+$/i.test(specifier)) return nextResolve(specifier + '.ts', context);
+      throw err;
+    }
+  },
+});
+
+const C = await import('../src/replay/clip.ts');
+const { TICK_RATE } = await import('../src/sim/types.ts');
+const en = (await import('../src/locales/en.ts')).default;
+const es = (await import('../src/locales/es.ts')).default;
+
+const ID = 'ab12cd34'.repeat(8);
+
+test('the container: MP4 first (what every platform takes), WebM where only that records, null when none', () => {
+  assert.equal(C.pickMime(() => true).ext, 'mp4');
+  assert.equal(C.pickMime((m) => m.startsWith('video/webm')).ext, 'webm');
+  assert.equal(C.pickMime((m) => m === 'video/mp4').mime, 'video/mp4');
+  assert.equal(C.pickMime(() => false), null);
+});
+
+test('a goal clip keeps a lead and a tail, inside the match and never past the longest clip', () => {
+  const end = 60 * TICK_RATE;
+  const w = C.clipWindow(30 * TICK_RATE, end);
+  assert.equal(w.start, (30 - C.CLIP_LEAD_SECONDS) * TICK_RATE);
+  assert.equal(w.end, (30 + C.CLIP_TAIL_SECONDS) * TICK_RATE);
+  // a goal in the first seconds starts at 0; one at the very end stops with the match
+  assert.equal(C.clipWindow(TICK_RATE, end).start, 0);
+  assert.ok(C.clipWindow(end - 10, end).end <= end);
+  for (const g of [0, 1, 500, end - 1, end]) {
+    const r = C.clipWindow(g, end);
+    assert.ok(r.start >= 0 && r.end > r.start && r.end - r.start <= C.CLIP_MAX_SECONDS * TICK_RATE, `goal at ${g}`);
+  }
+});
+
+test('a clip from here is CLIP_HERE_SECONDS long, or the last ones of the match', () => {
+  const end = 100 * TICK_RATE;
+  const a = C.clipFrom(20 * TICK_RATE, end);
+  assert.equal(a.start, 20 * TICK_RATE);
+  assert.equal(a.end - a.start, C.CLIP_HERE_SECONDS * TICK_RATE);
+  const b = C.clipFrom(99 * TICK_RATE, end);
+  assert.equal(b.end, end);
+  assert.equal(b.end - b.start, C.CLIP_HERE_SECONDS * TICK_RATE);
+  assert.equal(C.clipFrom(-5, end).start, 0);
+});
+
+test('a goal link is this page with the match and the tick, and replaces any other query', () => {
+  const url = C.shareUrl('https://turbo-gol.com/replay?id=old&x=1#frag', ID, 1800.4);
+  const u = new URL(url);
+  assert.equal(u.origin + u.pathname, 'https://turbo-gol.com/replay');
+  assert.equal(u.searchParams.get('id'), ID);
+  assert.equal(u.searchParams.get('t'), '1800');
+  assert.equal(u.searchParams.get('x'), null);
+  assert.equal(u.hash, '');
+  assert.equal(new URL(C.shareUrl('https://turbo-gol.com/replay.html', ID, -3)).searchParams.get('t'), '0');
+});
+
+test('?t= is a plain whole number of at most 8 digits: anything else is no tick', () => {
+  assert.equal(C.parseStartTick('?id=x&t=1800'), 1800);
+  assert.equal(C.parseStartTick('?t=0'), 0);
+  for (const bad of ['', '?t=', '?t=-1', '?t=1.5', '?t=1e3', '?t=0x10', '?t=abc', '?t=123456789', '?t=%201', '?id=x']) assert.equal(C.parseStartTick(bad), null, bad);
+});
+
+test('the file name has the match and the time, never a player name', () => {
+  assert.equal(C.clipFileName(ID, 75 * TICK_RATE, 'mp4'), 'turbogol-ab12cd34-1m15s.mp4');
+  assert.equal(C.clipFileName(null, 9 * TICK_RATE, 'webm'), 'turbogol-0m09s.webm');
+  // an id that is not 64 hex digits is not put in a file name
+  assert.equal(C.clipFileName('../../etc/passwd', 0, 'mp4'), 'turbogol-0m00s.mp4');
+});
+
+test('the frame box is the largest of the clip shape that fits the window, centred', () => {
+  const v = C.fitBox(1280, 720, 720, 1280);
+  assert.equal(v.height, 720);
+  assert.equal(v.width, 405);
+  assert.equal(v.left, Math.floor((1280 - 405) / 2));
+  assert.equal(v.top, 0);
+  const phone = C.fitBox(390, 844, 720, 1280);
+  assert.ok(phone.width <= 390 && phone.height <= 844);
+  assert.ok(Math.abs(phone.width / phone.height - 9 / 16) < 0.01);
+  const w = C.fitBox(390, 844, 1280, 720);
+  assert.equal(w.width, 390);
+  assert.ok(w.top > 0);
+  for (const f of Object.values(C.CLIP_FORMATS)) assert.ok(f.w <= 1280 && f.h <= 1280 && f.w % 2 === 0 && f.h % 2 === 0, 'even sizes, 720p at most');
+});
+
+test('the range: inside the match, 1 to 60 s, and the end that did not move gives way', () => {
+  const end = 300 * TICK_RATE;
+  const R = (s, e, moved) => C.clampClipRange(s * TICK_RATE, e * TICK_RATE, end, moved);
+  assert.deepEqual(R(10, 25, 'start'), { start: 10 * TICK_RATE, end: 25 * TICK_RATE });
+  // the start pushed past the end drags the end along by the shortest clip; the end pulled before the start drags the start
+  assert.deepEqual(R(30, 25, 'start'), { start: 30 * TICK_RATE, end: 31 * TICK_RATE });
+  assert.deepEqual(R(30, 25, 'end'), { start: 24 * TICK_RATE, end: 25 * TICK_RATE });
+  // longer than the longest clip: the other end follows
+  assert.deepEqual(R(10, 200, 'start'), { start: 10 * TICK_RATE, end: 70 * TICK_RATE });
+  assert.deepEqual(R(10, 200, 'end'), { start: 140 * TICK_RATE, end: 200 * TICK_RATE });
+  // the match's edges
+  assert.deepEqual(R(-5, 4, 'start'), { start: 0, end: 4 * TICK_RATE });
+  assert.deepEqual(R(299.5, 400, 'start'), { start: 299 * TICK_RATE, end: 300 * TICK_RATE });
+  for (let s = -10; s < 320; s += 17) for (let e = -10; e < 320; e += 13) for (const m of ['start', 'end']) {
+    const r = C.clampClipRange(s * TICK_RATE, e * TICK_RATE, end, m);
+    assert.ok(r.start >= 0 && r.end <= end && r.end - r.start >= C.CLIP_MIN_SECONDS * TICK_RATE && r.end - r.start <= C.CLIP_MAX_SECONDS * TICK_RATE, `${s} ${e} ${m}`);
+  }
+  // a very short match still gives a valid range
+  const tiny = C.clampClipRange(0, 10, 50, 'end');
+  assert.ok(tiny.start === 0 && tiny.end > 0);
+});
+
+test('the sheet opens on the goal being watched, the next one, the last one, or ten seconds from here', () => {
+  const end = 300 * TICK_RATE;
+  const goals = [50 * TICK_RATE, 120 * TICK_RATE];
+  const w = (g) => C.clipWindow(g, end);
+  assert.deepEqual(C.defaultClipRange(48 * TICK_RATE, goals, end), w(goals[0]), 'inside the first goal window');
+  assert.deepEqual(C.defaultClipRange(10 * TICK_RATE, goals, end), w(goals[0]), 'the next goal');
+  assert.deepEqual(C.defaultClipRange(100 * TICK_RATE, goals, end), w(goals[1]), 'the next one after the first');
+  assert.deepEqual(C.defaultClipRange(250 * TICK_RATE, goals, end), w(goals[1]), 'past the last: the last');
+  assert.deepEqual(C.defaultClipRange(20 * TICK_RATE, [], end), C.clipFrom(20 * TICK_RATE, end), 'no goals: from here');
+});
+
+test('the range sliders show m:ss.d and the sheet an estimate of the file', () => {
+  assert.equal(C.timeText(0), '0:00.0');
+  assert.equal(C.timeText(75.5 * TICK_RATE), '1:15.5');
+  assert.equal(C.timeText(9 * TICK_RATE), '0:09.0');
+  assert.equal(C.estimateBytes(10, 'standard'), 6_250_000);
+  assert.ok(C.estimateBytes(10, 'max') > C.estimateBytes(10, 'high') && C.estimateBytes(10, 'high') > C.estimateBytes(10, 'standard'));
+  assert.equal(C.estimateBytes(-3, 'high'), 0);
+});
+
+test('the quality sets the video size, the frame rate and the bit rate: standard 720p, high and max 1080p, even sizes', () => {
+  assert.deepEqual(C.clipSize('vertical', 'standard'), { w: 720, h: 1280 });
+  assert.deepEqual(C.clipSize('vertical', 'high'), { w: 1080, h: 1920 });
+  assert.deepEqual(C.clipSize('wide', 'max'), { w: 1920, h: 1080 });
+  assert.deepEqual(C.clipSize('square', 'high'), { w: 1080, h: 1080 });
+  for (const f of Object.keys(C.CLIP_FORMATS)) for (const q of Object.keys(C.CLIP_QUALITIES)) {
+    const z = C.clipSize(f, q);
+    assert.ok(z.w % 2 === 0 && z.h % 2 === 0 && Math.max(z.w, z.h) <= 1920, `${f} ${q}`);
+  }
+  const { standard, high, max } = C.CLIP_QUALITIES;
+  assert.ok(standard.bitrate < high.bitrate && high.bitrate < max.bitrate);
+  assert.ok(standard.fps === 30 && high.fps === 30 && max.fps === 60);
+});
+
+test('the goal caption: drops in big and settles, pulses, bursts then fades out, never past its bounds', () => {
+  const g0 = C.goalAnim(0);
+  assert.ok(g0.scale > 2 && g0.alpha === 0, 'starts big and invisible');
+  assert.ok(g0.shake === 1 && g0.flash > 0.3 && g0.punch > 1.05, 'the frame shakes, flashes and punches in at the goal');
+  const settled = C.goalAnim(0.8);
+  assert.ok(Math.abs(settled.scale - 1) < 0.06 && settled.alpha === 1 && settled.shake === 0 && settled.flash === 0, 'settled');
+  assert.ok(settled.punch < 1.01);
+  assert.ok(C.goalAnim(C.GOAL_CAPTION_SECONDS).alpha < 1e-9, 'gone at its end');
+  assert.ok(C.goalAnim(C.GOAL_CAPTION_SECONDS - 0.2).alpha < 1 && C.goalAnim(C.GOAL_CAPTION_SECONDS - 0.2).alpha > 0, 'fading in its last 0.4 s');
+  // the bounce: the word dips under its size before it settles
+  let min = Infinity;
+  for (let a = 0.2; a < 0.6; a += 0.01) min = Math.min(min, C.goalAnim(a).scale);
+  assert.ok(min < 0.97, 'overshoots');
+  for (let a = -1; a < 4; a += 0.05) {
+    const g = C.goalAnim(a);
+    for (const [k, v] of Object.entries(g)) assert.ok(Number.isFinite(v), `${k} at ${a}`);
+    assert.ok(g.alpha >= 0 && g.alpha <= 1 && g.ringAlpha >= 0 && g.ringAlpha <= 1 && g.flash >= 0 && g.shake >= 0 && g.shake <= 1 && g.ring >= 0 && g.ring <= 1, `bounds at ${a}`);
+  }
+});
+
+test('the timeline: the ruler picks a label step that keeps its labels apart, a range moves whole inside the match', () => {
+  let last = 0;
+  for (const pps of [0.2, 0.5, 1, 4, 10, 40, 160, 600]) {
+    const r = C.rulerStep(pps);
+    assert.ok(r.major * pps >= 80 || r.major === 3600, `label spacing at ${pps} px/s`);
+    assert.ok(r.minor <= r.major && r.major / r.minor === Math.round(r.major / r.minor), `ticks divide the label step at ${pps}`);
+    assert.ok(r.minor === r.major || r.minor * pps >= 6, `ticks apart at ${pps}`);
+    assert.ok(r.major >= last || pps === 0.2, 'a smaller step when zoomed in');
+    last = 0;
+  }
+  assert.ok(C.rulerStep(0.2).major > C.rulerStep(40).major);
+  const end = 100 * TICK_RATE;
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, 5 * TICK_RATE, end), { start: 15 * TICK_RATE, end: 25 * TICK_RATE });
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, -50 * TICK_RATE, end), { start: 0, end: 10 * TICK_RATE });
+  assert.deepEqual(C.moveClipRange(10 * TICK_RATE, 20 * TICK_RATE, 500 * TICK_RATE, end), { start: 90 * TICK_RATE, end });
+});
+
+test('with sound the container names an audio codec too (AAC in MP4, Opus in WebM), and falls back to video only', () => {
+  assert.equal(C.pickMime(() => true, true).mime, 'video/mp4;codecs=avc1.64002A,mp4a.40.2');
+  assert.equal(C.pickMime((m) => m.startsWith('video/webm;codecs=vp9,'), true).mime, 'video/webm;codecs=vp9,opus');
+  assert.equal(C.pickMime((m) => m === 'video/mp4', true).mime, 'video/mp4');
+  assert.equal(C.pickMime(() => false, true), null);
+  assert.equal(C.pickMime(() => true).mime, 'video/mp4;codecs=avc1.64002A', 'without sound as before');
+});
+
+test('every clip line is in English and in Spanish, with the same placeholders', () => {
+  const keys = Object.keys(en).filter((k) => k.startsWith('replay.clip'));
+  assert.ok(keys.length >= 20, `${keys.length} clip lines`);
+  const slots = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
+  for (const k of keys) {
+    assert.equal(typeof es[k], 'string', `es ${k}`);
+    assert.equal(slots(es[k]), slots(en[k]), `${k} placeholders`);
+  }
+  assert.ok(Object.keys(es).filter((k) => k.startsWith('replay.clip')).length === keys.length, 'no Spanish-only line');
+});

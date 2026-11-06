@@ -1,0 +1,189 @@
+/* Waiting for a match (the modes redesign, November 2026): MODOS' searching panel's estimate and
+   its "While you wait: VS BOTS · TRAIN", VS AI's line while searching, SALAS' second button, the
+   Sala's line for a lone host, "While you search" (screens/waitSheet.ts), and the strip the match
+   HUD (render/Hud.ts setSearch; none while a touch card is up) and the training HUD
+   (render/TrainingHud.ts setSearch) show while the player plays waiting. Colours, font sizes and
+   radii as tokens only. */
+
+/* ---- MODOS' searching panel ---- */
+.mn-act-est {
+  margin-top: 0.5rem;
+  font-size: var(--t-body);
+  color: var(--text);
+}
+
+.mn-act-warn {
+  color: var(--warn);
+}
+
+.mn-act-wait {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.mn-act-wait-label {
+  font-size: var(--t-small);
+  color: var(--text-2);
+}
+
+.mn-act-wait .mn-act-practice {
+  margin-top: 0;
+}
+
+/* SALAS' CREATE PRIVATE LOBBY, under CREATE PUBLIC LOBBY. */
+.mn-act-go2 {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+html[data-shell='tv'] .mn-act-est {
+  margin-top: 0.375rem;
+  font-size: var(--t-small);
+}
+
+/* ---- The Sala: a host alone (START waits for a second player) ---- */
+.mn-sala-need {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--text-2);
+  text-align: right;
+}
+
+.mn-sala-need[hidden] {
+  display: none;
+}
+
+/* VS AI's PLAY while a search runs: its line (the match has no time limit) on every layout, the
+   sideways phone's rail and a TV too, which hide the zone's other lines (modes.css). */
+html[data-shell='rail'] .mn-act-line.mn-act-line-wait:not([hidden]),
+html[data-shell='tv'] .mn-act-line.mn-act-line-wait:not([hidden]) {
+  display: block;
+}
+
+/* ---- "While you search" ---- */
+.mn-wait-option .mn-icon {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Each choice: its name in the buttons' capitals, its line under it in sentence case. */
+.mn-wait-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.mn-wait-text small {
+  font-family: var(--font-body);
+  font-size: var(--t-small);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-2);
+}
+
+/* A TV: the choice's name in the buttons' size, its line a step below (a .mn-btn's 15 px made the
+   name the smallest text on the screen, under a 36 px line). */
+html[data-shell='tv'] .mn-wait-text b {
+  font-size: var(--t-heading);
+}
+
+/* SALAS' CREATE PRIVATE LOBBY on a TV: in the type scale too, a step below CREATE PUBLIC LOBBY; and
+   the empty list's CREATE PUBLIC LOBBY (a .mn-btn's 15 px too, __uiFit's smallText). */
+html[data-shell='tv'] .mn-act-go2,
+html[data-shell='tv'] .mn-lobbies-empty .mn-btn {
+  font-size: var(--t-body);
+}
+
+/* No actions under the choices (Back and STAY IN THE MENU are the way out): no room for them. */
+.mn-sheet-wait .mn-sheet-actions {
+  display: none;
+}
+
+/* A phone held sideways: the three choices fit the sheet without a scroll. */
+html[data-shell='rail'] .mn-sheet-wait {
+  padding-top: 1rem;
+  padding-bottom: calc(1rem + var(--safe-bottom));
+}
+
+html[data-shell='rail'] .mn-sheet-wait .mn-sheet-title {
+  margin-bottom: 0.25rem;
+}
+
+html[data-shell='rail'] .mn-wait-list {
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+html[data-shell='rail'] .mn-wait-option {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+/* ---- The HUD's strip under the scorebug, and the training panel's line ---- */
+/* Under the scorebug; hidden while a first match's touch card is up (Game.updateWaitHud). */
+.hud-search {
+  position: absolute;
+  z-index: var(--z-score);
+  top: calc(var(--safe-top) + clamp(10px, 3.4vh, 32px) + clamp(36px, 6vh, 56px) + 14px);
+  left: calc(var(--safe-left) + clamp(12px, 2.2vw, 36px));
+  /* Bounded by the right edge (a long line wraps): never past it on a narrow screen. */
+  right: calc(var(--safe-right) + clamp(12px, 2.2vw, 36px));
+  width: fit-content;
+  padding: 4px 12px;
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  background: var(--surface-0-94);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-pill);
+  pointer-events: none;
+}
+
+.hud-search[hidden] {
+  display: none;
+}
+
+/* A finger's pause: its plate sits under the scorebug too, where the strip runs (a phone held
+   sideways hid PAUSE's top behind it). The dock says the rest: CANCEL SEARCH, QUIT · the search
+   goes on. */
+.tg-touch .hud-pausing .hud-search {
+  display: none;
+}
+
+/* A held QUIT with a line of its own (the search goes on, ranked's abandon) has three lines with
+   its hold hint: on a finger's dock it grows to hold them (56 cut its label on the border), and
+   the two buttons above it step up by as much (render/Hud.ts: hud-pause-menu-tall). */
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > .hud-pause-quit {
+  height: 76px;
+}
+
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > :nth-last-child(2):not(.hud-pause-primary):not(.hud-pause-row) {
+  bottom: calc(var(--safe-bottom) + 112px);
+}
+
+.tg-touch .hud-pause-menu.hud-pause-menu-tall > :nth-last-child(3):not(.hud-pause-primary):not(.hud-pause-row) {
+  bottom: calc(var(--safe-bottom) + 180px);
+}
+
+.hud-search-warn {
+  color: var(--warn);
+}
+
+.trn-search {
+  margin-top: 4px;
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.trn-search[hidden] {
+  display: none;
+}

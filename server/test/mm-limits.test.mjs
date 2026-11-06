@@ -1,8 +1,9 @@
 // Security limits of the matchmaker (server/src/MatchmakerDO.ts) around the MatchDO slots (audit
-// rt-3, cost-6): ranked keeps a share of every region's slots, guest-only matches stop at their
-// share, a guest session plays one MatchDO match at a time across EVERY region (the guard, real
-// MatchmakerDO 'guard:<n>' instances here) and an IPv6 /64 a few, and a guest's lobby match is 5
-// minutes at most. A world of fakes: every MATCHMAKER name is a real MatchmakerDO on its own fake
+// rt-3, cost-6): ranked keeps a share of the slots (global in the queue hub since the modes
+// redesign; at a cap the group waits, wait.busy, no 503), guest-only matches stop at their share,
+// a guest session plays one MatchDO match at a time across EVERY region (the guard, real
+// MatchmakerDO 'guard:<n>' instances here) and an IPv6 /64 a few: dormant now (no guest queues),
+// still tested. Lobbies are P2P only (/custom never makes a MatchDO). A world of fakes: every MATCHMAKER name is a real MatchmakerDO on its own fake
 // storage, MATCH and ROOM answer their internal routes. Run from server/: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,7 +39,7 @@ globalThis.setTimeout = (fn, ms, ...args) => {
 const M = await import('../src/MatchmakerDO.ts');
 const L = await import('../src/LobbyDO.ts');
 const worker = (await import('../src/index.ts')).default;
-const { INTERNAL_HEADER, internalSecret, createSession } = await import('../src/auth.ts');
+const { INTERNAL_HEADER, internalSecret, createSession, signJwt } = await import('../src/auth.ts');
 const SECRET = 'mm-limits-test-secret';
 // The numbers as this PR sets them (literal fallbacks: the same tests run against main's matchmaker, which has none of them).
 const TRUST_MS = M.GUARD_TRUST_MS ?? 10_000;
@@ -143,11 +144,13 @@ async function makeWorld() {
   };
   /** A /join of `who` ({ id, guest?, ip? }) in `region`. */
   w.join = (region, who, kind = 'server', extra = {}) => call(region, '/join', { playerId: who.id, name: who.id, mode: '1v1', kind, ...(who.guest ? { guest: true, ip: who.ip ?? '198.51.100.1' } : {}), ...extra });
-  /** A lone guest's bot match in `region`: queued, then filled with a bot after BOT_FILL_MS. */
-  w.botMatch = async (region, who) => {
-    let r = await w.join(region, who);
+  /**
+   * A MatchDO match of `who` in `region`: `partner` (an account by default, which the guard never
+   * holds) waits, then `who` joins and the two form a Casual 2v2 at once (one bot on each side).
+   */
+  w.botMatch = async (region, who, partner = { id: who.id + '-mate' }) => {
+    let r = await w.join(region, partner);
     assert.equal(r.json.status, 'waiting', JSON.stringify(r.json));
-    w.advance(M.BOT_FILL_MS);
     r = await w.join(region, who);
     assert.equal(r.json.status, 'matched', `${region}: ${JSON.stringify(r.json)}`);
     return r.json.matchId;
@@ -157,9 +160,9 @@ async function makeWorld() {
 
 const guest = (id, ip) => ({ id, guest: true, ...(ip ? { ip } : {}) });
 
-// ---- the guard: one MatchDO match per guest session across the regions -------------------------------
+// ---- the guard (DORMANT since the modes redesign: the Worker never lets a guest queue; kept, so tested) ----
 
-test('a guest with a bot match in SA cannot hold another MatchDO match in NA: 409 active_match naming SA (server and p2p queues alike)', async () => {
+test('a guest with a match in SA cannot hold another MatchDO match in NA: 409 active_match naming SA (an older p2p kind alike)', async () => {
   const w = await makeWorld();
   const g = guest('g1');
   const sa = await w.botMatch('SA', g);
@@ -171,7 +174,7 @@ test('a guest with a bot match in SA cannot hold another MatchDO match in NA: 40
   assert.equal(r.json.matchId, sa);
   assert.equal(r.json.region, 'SA');
   r = await w.join('EU', g, 'p2p');
-  assert.equal(r.status, 409, 'a P2P queue would fall back to a bot match: refused too');
+  assert.equal(r.status, 409, "'p2p' is Casual now: refused too");
   assert.equal(w.created.length, 1, 'one MatchDO only');
 });
 
@@ -185,7 +188,7 @@ test('once the SA match is over (its MatchDO says so) the guest queues anywhere;
   await w.call('NA', '/leave', { playerId: g.id }); // Esc in the queue
   const acct = { id: 'acct1' };
   await w.botMatch('SA', acct);
-  await w.botMatch('NA', acct);
+  await w.botMatch('NA', acct, { id: 'acct1-mate2' });
   assert.equal(w.created.length, 3);
 });
 
@@ -194,11 +197,11 @@ test('two regions forming for the same guest at once: the guard lets one MatchDO
   const g = guest('g3');
   assert.equal((await w.join('SA', g)).json.status, 'waiting');
   assert.equal((await w.join('NA', g)).json.status, 'waiting', 'both queued before any match existed');
-  w.advance(M.BOT_FILL_MS);
+  assert.equal((await w.join('SA', { id: 'mate-sa' })).json.status, 'matched');
   const a = await w.join('SA', g);
   assert.equal(a.json.status, 'matched');
-  const b = await w.join('NA', g);
-  assert.notEqual(b.json.status, 'matched', `NA formed no second match (${JSON.stringify(b.json)})`);
+  const b = await w.join('NA', { id: 'mate-na' });
+  assert.notEqual(b.json.status, 'matched', `NA formed no match with the guest (${JSON.stringify(b.json)})`);
   assert.equal(w.created.length, 1);
   const again = await w.join('NA', g);
   assert.equal(again.status, 409);
@@ -234,14 +237,13 @@ test('two regions forming for the same guest at once while its old match is bein
   w.statusDelayMs = 30;
   assert.equal((await w.join('NA', g)).json.status, 'waiting');
   assert.equal((await w.join('EU', g)).json.status, 'waiting');
-  w.advance(M.BOT_FILL_MS);
-  const [na, eu] = await Promise.all([w.join('NA', g), w.join('EU', g)]);
+  const [na, eu] = await Promise.all([w.join('NA', { id: 'mate-na' }), w.join('EU', { id: 'mate-eu' })]);
   const matched = [na, eu].filter((r) => r.json.status === 'matched').length;
   assert.equal(w.created.length, 2, `the OC match and one more (NA ${JSON.stringify(na.json)}, EU ${JSON.stringify(eu.json)})`);
   assert.ok(matched <= 1);
 });
 
-test('an IPv6 /64 holds at most GUEST_MATCHES_PER_NET guest MatchDO matches across the regions (429 guest_limit on a server queue); an IPv4 address shared by a school is never capped', async () => {
+test('an IPv6 /64 holds at most GUEST_MATCHES_PER_NET guest MatchDO matches across the regions (429 guest_limit); an IPv4 address shared by a school is never capped', async () => {
   const w = await makeWorld();
   const perNet = M.GUEST_MATCHES_PER_NET;
   assert.ok(perNet >= 10, `a classroom on one IPv6 LAN segment gets at least 10 server matches (${perNet})`);
@@ -255,92 +257,61 @@ test('an IPv6 /64 holds at most GUEST_MATCHES_PER_NET guest MatchDO matches acro
   assert.equal(w.created.length, perNet + 8);
 });
 
-test('a /64 at its cap still plays P2P: its guests queue P2P and get a room; a lone one is not refused, it waits for a peer', async () => {
-  const w = await makeWorld();
-  const perNet = M.GUEST_MATCHES_PER_NET;
-  const regions = ['SA', 'NA', 'EU', 'AS', 'OC', 'AF'];
-  for (let i = 0; i < perNet; i++) await w.botMatch(regions[i % regions.length], guest('lan' + i, `2001:db8:7:8:${(i + 1).toString(16)}::1`));
-  w.advance(TRUST_MS + 1);
-  const made = w.created.length;
-  const a = guest('lan-a', '2001:db8:7:8:aa::1');
-  const b = guest('lan-b', '2001:db8:7:8:bb::1');
-  const first = await w.join('NA', a, 'p2p');
-  assert.equal(first.status, 200, `P2P is not a MatchDO: no guest_limit (${JSON.stringify(first.json)})`);
-  assert.equal(first.json.status, 'waiting');
-  const pair = await w.join('NA', b, 'p2p');
-  assert.equal(pair.status, 200, JSON.stringify(pair.json));
-  assert.equal(pair.json.status, 'matched');
-  assert.equal(pair.json.kind, 'p2p');
-  // A lone P2P waiter of that /64: past the fill wait its server path is held back by the /64, so it keeps waiting.
-  const c = guest('lan-c', '2001:db8:7:8:cc::1');
-  assert.equal((await w.join('EU', c, 'p2p')).json.status, 'waiting');
-  w.advance(M.P2P_FILL_WAIT + 1);
-  const alone = await w.join('EU', c, 'p2p');
-  assert.equal(alone.status, 200, JSON.stringify(alone.json));
-  assert.equal(alone.json.status, 'waiting');
-  const again = await w.join('EU', c, 'p2p');
-  assert.equal(again.status, 200, `its next poll is not refused either (${JSON.stringify(again.json)})`);
-  assert.equal(w.created.length, made, 'no MatchDO for the /64 at its cap');
-  // A peer turns up: the room forms with it.
-  const d = await w.join('EU', guest('lan-d', '2001:db8:7:8:dd::1'), 'p2p');
-  assert.equal(d.json.status, 'matched');
-  assert.equal(d.json.kind, 'p2p');
-});
+// ---- the hub's global shares (§1.9): no 503 any more, the group waits (wait.busy) ----------------------
 
-// ---- the regional shares -----------------------------------------------------------------------------
-
-test('casual matches stop at MAX_ACTIVE_ROOMS - RANKED_RESERVED_ROOMS; ranked still forms in the slots kept for it', async () => {
+test('Casual stops at MAX_ACTIVE_ROOMS - RANKED_RESERVED_ROOMS: the next pair waits (busy, no 503) and forms once a slot frees; ranked still forms in the slots kept for it', async () => {
   const w = await makeWorld();
   const casual = M.MAX_ACTIVE_ROOMS - RANKED_RESERVED;
+  const ids = [];
   for (let i = 0; i < casual; i++) {
     assert.equal((await w.join('SA', { id: 'a' + i })).json.status, 'waiting');
-    assert.equal((await w.join('SA', { id: 'b' + i })).json.status, 'matched', `casual match ${i}`);
+    const b = await w.join('SA', { id: 'b' + i });
+    assert.equal(b.json.status, 'matched', `casual match ${i}`);
+    ids.push(b.json.matchId);
   }
-  const full = await w.join('SA', { id: 'late' });
-  assert.equal(full.status, 503);
-  assert.equal(full.json.error, 'capacity');
+  const first = await w.join('SA', { id: 'late1' });
+  assert.equal(first.status, 200, 'no 503 capacity on a join any more');
+  const full = await w.join('SA', { id: 'late2' });
+  assert.equal(full.status, 200);
+  assert.equal(full.json.status, 'waiting');
+  assert.equal(full.json.wait.busy, true, 'a match could form but every server is full');
   const ratings = { '1v1': { mu: 25, sigma: 8 } };
   assert.equal((await w.join('SA', { id: 'r1' }, 'ranked', { ratings })).json.status, 'waiting');
   assert.equal((await w.join('SA', { id: 'r2' }, 'ranked', { ratings })).json.status, 'matched', 'ranked has its own slots');
   assert.equal(w.created.length, casual + 1);
+  // Two casual matches end (the ranked one counts in the total too): the waiting pair forms at its next POST.
+  await w.call('SA', '/release', { matchId: ids[0], playerIds: ['a0', 'b0'] });
+  assert.equal((await w.join('SA', { id: 'late2' })).json.wait.busy, true, '15 of 20 still alive with the ranked one');
+  await w.call('SA', '/release', { matchId: ids[1], playerIds: ['a1', 'b1'] });
+  w.advance(5_001); // past the back-off of the formation the cap refused
+  assert.equal((await w.join('SA', { id: 'late2' })).json.status, 'matched');
 });
 
-test('matches of guests only stop at GUEST_ROOMS_MAX in a region; an account casual match still forms', async () => {
+test('matches of guests only stop at GUEST_ROOMS_MAX (dormant: no guest queues any more); an account match still forms', async () => {
   const w = await makeWorld();
-  for (let i = 0; i < GUEST_ROOMS; i++) await w.botMatch('SA', guest('gg' + i));
-  const r = await w.join('SA', guest('gg-late'));
-  assert.equal(r.status, 503);
-  assert.equal(r.json.error, 'capacity');
-  assert.equal((await w.join('SA', { id: 'acct-a' })).json.status, 'waiting');
-  assert.equal((await w.join('SA', { id: 'acct-b' })).json.status, 'matched', 'accounts are not held by the guests\' share');
+  for (let i = 0; i < GUEST_ROOMS; i++) await w.botMatch('SA', guest('gg' + i), guest('gg' + i + '-mate'));
+  assert.equal((await w.join('SA', guest('gg-late'))).json.status, 'waiting');
+  const r = await w.join('SA', guest('gg-late2'));
+  assert.equal(r.status, 200, 'no 503: it waits');
+  assert.equal(r.json.status, 'waiting');
+  assert.equal(r.json.wait.busy, true);
+  w.advance(5_001);
+  assert.equal((await w.join('SA', { id: 'acct-a' })).json.status, 'matched', 'an account forms with the oldest waiter: not a guests-only match');
 });
 
-// ---- lobbies --------------------------------------------------------------------------------------------
+// ---- lobbies: P2P only (§1.11) ------------------------------------------------------------------------
 
-test('/custom: a MatchDO match with a guest in it is 300 s at most (400 guest_length for 600 or unlimited); accounts keep every length', async () => {
+test('/custom: any kind is a P2P room (never a MatchDO); one member is 400 need_players; guests keep any length', async () => {
   const w = await makeWorld();
-  const lone = (guestFlag, len) => w.call('SA', '/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'm' + len + guestFlag, name: 'Lu', team: 0, guest: guestFlag }], matchLengthSeconds: len });
-  for (const len of [600, 0]) {
-    const r = await lone(true, len);
-    assert.equal(r.status, 400, `guest ${len}`);
-    assert.equal(r.json.error, 'guest_length');
+  for (const kind of ['server', 'p2p']) {
+    const lone = await w.call('SA', '/custom', { kind, mode: '1v1', members: [{ playerId: 'm-' + kind, name: 'Lu', team: 0, guest: true }], matchLengthSeconds: 300 });
+    assert.deepEqual([lone.status, lone.json.error, lone.json.message], [400, 'need_players', 'Hace falta otro jugador para iniciar'], kind);
   }
-  assert.equal((await lone(true, 300)).status, 200);
-  assert.equal((await lone(false, 600)).status, 200);
-  assert.equal((await lone(false, 0)).status, 200);
-  assert.equal(M.GUEST_MAX_MATCH_SECONDS, L.GUEST_SERVER_MAX_SECONDS, 'the lobby says the same');
-  // A P2P room with guests keeps any length (no MatchDO).
-  const p2p = await w.call('SA', '/custom', { kind: 'p2p', mode: '1v1', members: [{ playerId: 'p1', name: 'A', team: 0, guest: true }, { playerId: 'p2', name: 'B', team: 1, guest: true }], matchLengthSeconds: 0 });
+  const p2p = await w.call('SA', '/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'p1', name: 'A', team: 0, guest: true }, { playerId: 'p2', name: 'B', team: 1, guest: true }], matchLengthSeconds: 0 });
   assert.equal(p2p.status, 200);
-});
-
-test('/custom: a guest member with a MatchDO match in another region makes the start 409 member_busy', async () => {
-  const w = await makeWorld();
-  await w.botMatch('NA', guest('gm'));
-  w.advance(TRUST_MS + 1);
-  const r = await w.call('SA', '/custom', { kind: 'server', mode: '1v1', members: [{ playerId: 'gm', name: 'Gus', team: 0, guest: true }], matchLengthSeconds: 300 });
-  assert.equal(r.status, 409);
-  assert.equal(r.json.error, 'member_busy');
+  assert.equal(p2p.json.results.p1.kind, 'p2p', "a 'server' lobby start is a P2P room");
+  assert.equal(w.created.length, 0, 'no MatchDO');
+  assert.equal(M.GUEST_MAX_MATCH_SECONDS, L.GUEST_SERVER_MAX_SECONDS, 'the dormant caps still agree');
 });
 
 test('the guard sweeps expired holds out of its storage', async () => {
@@ -354,7 +325,7 @@ test('the guard sweeps expired holds out of its storage', async () => {
   assert.equal(shard.ctx.storage.map.has('g:p:gs'), false);
 });
 
-test('Worker /api/queue hands the matchmaker guest: true and the address for a guest session only', async () => {
+test('Worker /api/queue: a guest session never reaches the matchmaker (403 account_required); an account\'s join carries no guest flag nor address', async () => {
   const calls = [];
   const env = {
     JWT_SECRET: SECRET,
@@ -371,9 +342,14 @@ test('Worker /api/queue hands the matchmaker guest: true and the address for a g
     },
   };
   const queue = async (token) =>
-    worker.fetch(new Request('http://127.0.0.1:8787/api/queue', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token, 'CF-Connecting-IP': '2001:db8::5' }, body: JSON.stringify({ mode: '1v1', kind: 'server' }) }), env);
+    worker.fetch(new Request('http://127.0.0.1:8787/api/queue', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token, 'CF-Connecting-IP': '2001:db8::5' }, body: JSON.stringify({ api: 2, mode: '1v1', kind: 'server' }) }), env);
   const { token } = await createSession(SECRET, '0123456789abcdef', 'Invitado');
-  assert.equal((await queue(token)).status, 200);
-  assert.equal(calls[0].guest, true);
-  assert.equal(calls[0].ip, '2001:db8::5');
+  const g = await queue(token);
+  assert.equal(g.status, 403);
+  assert.deepEqual(await g.json(), { error: 'account_required', message: 'Inicia sesión para jugar Casual' });
+  assert.equal(calls.length, 0);
+  const acct = await signJwt(SECRET, { sub: 'a1b2c3d4e5f60718', name: 'Ana', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, acct: 1 });
+  assert.equal((await queue(acct)).status, 200);
+  assert.equal(calls[0].guest, undefined);
+  assert.equal(calls[0].ip, undefined);
 });

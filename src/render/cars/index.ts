@@ -1,16 +1,16 @@
 /**
  * The car bodies the game can draw, by cosmetic id (src/game/cosmetics.ts CarId). Every catalog car
- * has its module here (dune.ts, pampero.ts, ...), exporting its CarBodySpec, or null while its body
+ * has its module here (dune.ts, cyclone.ts, ...), exporting its CarBodySpec, or null while its body
  * is still to come: adding a car (docs/cars.md) fills its own module and flips its catalog status
  * to 'available', and this registry never changes (the bodies can be built in parallel). An id
  * with no body (a catalog car still to come, a stale saved pick) draws the default body, so a
  * missing body never breaks a roster.
  */
-import { CARPINCHO } from './carpincho';
-import { CONDOR } from './condor';
+import { VORTEX } from './vortex';
+import { SIROCCO } from './sirocco';
 import { DUNE } from './dune';
-import { PAMPERO } from './pampero';
-import { TERO } from './tero';
+import { CYCLONE } from './cyclone';
+import { MAGMA } from './magma';
 import type { CarBodySpec } from './types';
 
 /** The default car, free for everyone: every bot, every online car for now, any unknown id. */
@@ -19,10 +19,10 @@ export const DEFAULT_BODY: CarBodySpec = DUNE;
 /** Every catalog car's body, in catalog order; null = still to come. */
 const MODULES: readonly (CarBodySpec | null)[] = [
   DUNE,
-  PAMPERO,
-  CARPINCHO,
-  CONDOR,
-  TERO,
+  CYCLONE,
+  VORTEX,
+  SIROCCO,
+  MAGMA,
 ];
 
 /** Every shipped body, in catalog order. */

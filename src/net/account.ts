@@ -14,6 +14,7 @@
 
 import type { RulesSnapshot, StoredPreset } from '../game/physicsRules';
 import type { CarId } from '../game/cosmetics';
+import type { Difficulty } from '../ai/Bot';
 
 export const CLIENT_KDF_ITERATIONS = 200_000;
 const CLIENT_KDF_SALT_PREFIX = 'turbogol/account/v1/';
@@ -528,10 +529,14 @@ export interface MeInfo {
   emailHint?: string | null;
   /** The account has a verified address (`email` is set). */
   emailVerified?: boolean;
-  /** Its password is still the legacy key, salted with the username: the next password sign-in or "confirm it's you" re-keys it. */
+  /** Its password is still the legacy key, salted with the username: a username sign-in (no verified address), a reset or "confirm it's you" re-keys it. */
   legacy?: boolean;
   /** The newest news consent is a grant (news by email, never by default). */
   news?: boolean;
+  /** The terms version the account accepted last (consents, kind 'terms'); null: none yet. Absent from older servers. */
+  terms?: string | null;
+  /** The version of the rules for hosts it accepted last, with its 18-or-older declaration (consents, kind 'host'); null: none. Absent from older servers. */
+  hostTerms?: string | null;
   /** A deletion was asked: the account is purged at this time (ms); 0 = none. */
   deletionAt?: number;
   /** How many ways in it has: Google, Discord, and a password while it can still sign in with one. */
@@ -602,16 +607,21 @@ export type RankedResultAnswer =
       banUntil: number;
     };
 
-/** GET /api/population?region=: players waiting / playing in that region's matchmaker (cached a few seconds). */
+/**
+ * GET /api/population?region=: players waiting / playing, from the queue hub (every public queue
+ * since November 2026; cached a few seconds).
+ */
 export interface PopulationAnswer {
   region: string;
-  /** Waiting per queue: casual (p2p + server) and ranked, by playlist. */
+  /** Waiting in that region: Casual by the format each prefers (the pool is shared), ranked by playlist. */
   casual: Record<Playlist, number>;
   ranked: Record<Playlist, number>;
   /** Players holding a match / room lock (playing right now). */
   playing: number;
   /** Open public lobbies (custom matches) in the region. */
   lobbies: number;
+  /** Players searching now in every region, per queue (absent from servers before the modes redesign). */
+  searching?: { casual: number; ranked: number };
 }
 
 // ---- custom lobbies -----------------------------------------------------------------------------
@@ -707,6 +717,14 @@ export type LobbyVisibility = 'public' | 'private';
 /** Match length options of a custom lobby (seconds; 0 = unlimited). */
 export const LOBBY_LENGTHS: readonly number[] = [180, 300, 600, 0];
 
+/** The bots' level of a lobby whose host picked none (a new lobby, a record of before the setting). */
+export const LOBBY_BOTS_DEFAULT: Difficulty = 'hard';
+
+/** A lobby's bots level as its settings say (absent: a record or a Worker of before the setting). */
+export function lobbyBots(s: Pick<LobbySettings, 'bots'>): Difficulty {
+  return s.bots ?? LOBBY_BOTS_DEFAULT;
+}
+
 export interface LobbySettings {
   name: string;
   mode: Playlist;
@@ -723,6 +741,12 @@ export interface LobbySettings {
    * no records, no no-show strikes, never on a community node. The server always sends it (null).
    */
   physics?: RulesSnapshot | null;
+  /**
+   * The bots' level of the lobby's matches, the host's pick (LOBBY_BOTS_DEFAULT when none): every
+   * peer runs it (RoomWelcome.botDifficulty). Shown to the members only, never in the public list
+   * (LobbySummary is built field by field). The server always sends it; absent = lobbyBots's default.
+   */
+  bots?: Difficulty;
 }
 
 /** A row of the public lobby list (GET /api/lobbies). */

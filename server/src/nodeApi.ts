@@ -15,6 +15,8 @@
  *                          knows neither the match nor the player in it (the lock is free)
  *   POST /internal/health  the cron's (index.ts scheduled) -> 200 { probed, problems }: the /healthz
  *                          of the trusted wss nodes, each problem an ALERT (nodeWatch.ts)
+ *   POST /internal/prune   the cron's while nodes_off is set -> 200 { replays, history }: only what the
+ *                          health call prunes (the public replays and the history past 30 days), no node asked
  *   GET  /internal/operators  the account counts' (nodeRoutes.ts) -> 200 { operators }: the distinct
  *                          account ids that operate a registered node, for AccountsDO only
  *   POST /internal/operator-deleted  { userId } (AccountsDO's purge, sign-in PR 12) -> 200 { ok, banned }:
@@ -25,6 +27,7 @@ import type { BuildId } from '../../nodes/shared/controlProtocol';
 import { PROTOCOL_VERSION } from '../../src/net/protocol';
 import { ROCKETSIM_WASM_SHA256 } from '../../src/sim/wasm/rocketsim.sha256';
 import { carsOf } from '../../src/net/cosmetics';
+import type { ServerMark } from '../../src/net/queueWait';
 import { INTERNAL_HEADER, internalSecret } from './auth';
 import { SERVER_VERSION, isHex, withTimeout } from './env';
 import type { Env } from './env';
@@ -62,17 +65,56 @@ export const NODE_ROUTES = {
 /** GET: the node operators' account ids, for the owner's account counts only (nodeRoutes.ts accountStats -> AccountsDO). */
 export const OPERATORS_ROUTE = '/internal/operators';
 
-/** POST { userId }: a purged account's nodes are banned (AccountsDO's alarm, best effort, tried again until answered). */
+/**
+ * POST: the cron's call while the kill switch nodes_off is set (nodeRoutes.ts nodeHealthCheck): the
+ * public replays and the maintainers' history past 30 days pruned, as the health call prunes them,
+ * and nothing else (no node probed, no ALERT of its own; an idle object starts first, as at any
+ * call). The switch keeps the nodes out, not the rows in.
+ */
+export const PRUNE_ROUTE = '/internal/prune';
+
+/**
+ * POST { userId }: a purged account's nodes are banned, and its name and id leave the maintainers'
+ * history (AccountsDO's alarm, best effort, tried again until answered; every purged account, a
+ * player's too).
+ */
 export const OPERATOR_DELETED_ROUTE = '/internal/operator-deleted';
 
-/** POST /internal/place: a match the matchmaker formed (its humans, fixed teams, length). */
+/**
+ * AccountsDO's POST /replay-hidden takes this many ids and as many names at most (a page of the
+ * public replays: 31 rows of 8 seats); the NodeRegistryDO asks in batches of it.
+ */
+export const REPLAY_HIDDEN_MAX = 256;
+
+/**
+ * POST { what } with x-operator-id / x-operator-name: a maintainer's read that the Worker answered
+ * itself (account-stats, queue-stats), audited in the object's one window for every read
+ * (NodeRegistryDO readAudit, READ_AUDIT_WINDOW_MS). Sent after the answer.
+ */
+export const READ_AUDIT_ROUTE = '/internal/read-audit';
+
+/** POST /internal/place: a match the matchmaker formed (its humans, fixed teams, length; projectOnly when one of them asked for the project's servers only). */
 export type PlaceBody = PlaceRequest;
 
 export interface PlaceAnswer {
   /** The node and every player's ticket; null: no node took the match. */
   placement: Placement | null;
-  /** Hosts online in the region that may take matches (ControlPlane.hostsOnline). 0: stop asking for a while. */
+  /** Hosts online in the region that may take matches (ControlPlane.hostsOnline; the project's only for a projectOnly body). 0: stop asking for a while. */
   hosts: number;
+  /**
+   * The players' mark of the server it was placed on (A15), the object's word, never the node's: a
+   * community node's always, a project node's once the terms in force describe hosting (env.ts
+   * hostingTermsInForce, never the KV flag), so nothing new reaches a player before (dark). Absent
+   * otherwise.
+   */
+  server?: ServerMark;
+}
+
+/** A mark as the object sent it (a name of 1 to 64 characters, `community` a boolean), or null. */
+export function serverMarkOf(v: unknown): ServerMark | null {
+  const { name, community } = (typeof v === 'object' && v !== null ? v : {}) as Partial<Record<keyof ServerMark, unknown>>;
+  if (typeof name !== 'string' || name.length < 1 || name.length > 64 || typeof community !== 'boolean') return null;
+  return { name, community };
 }
 
 /** POST /internal/rejoin: one player of one node match. */
@@ -86,8 +128,8 @@ export interface LeaveBody extends NodePlayerBody {
   connected?: boolean;
 }
 
-/** The 200 of /internal/rejoin: a fresh ticket and the node's own URL (absolute: not the Worker's /ws/), and the match's cars. */
-export type RejoinTicket = Omit<Extract<RejoinAnswer, { ok: true }>, 'ok'>;
+/** The 200 of /internal/rejoin: a fresh ticket and the node's own URL (absolute: not the Worker's /ws/), the match's cars, and its server's mark as PlaceAnswer's. */
+export type RejoinTicket = Omit<Extract<RejoinAnswer, { ok: true }>, 'ok'> & { server?: ServerMark };
 
 /** Why a player cannot rejoin (ControlPlane.rejoin). */
 export type RejoinRefusal = Extract<RejoinAnswer, { ok: false }>['code'];
@@ -201,13 +243,15 @@ export function placementFor(answer: unknown, playerIds: readonly string[]): Pla
 /**
  * The ticket in a 200 of POST /internal/rejoin when it is one, as placementFor checks a placement's:
  * a non-empty ticket and the node's own wss:// URL; with the match's `cars` when they read as such
- * (src/net/cosmetics.ts carsOf: any other shape is dropped, the ticket still counts).
+ * (src/net/cosmetics.ts carsOf: any other shape is dropped, the ticket still counts), and its
+ * server's mark when it reads as one (serverMarkOf).
  */
 export function rejoinTicketOf(body: unknown): RejoinTicket | null {
-  const { ticket, wsUrl, cars } = (typeof body === 'object' && body !== null ? body : {}) as Partial<Record<keyof RejoinTicket, unknown>>;
+  const { ticket, wsUrl, cars, server } = (typeof body === 'object' && body !== null ? body : {}) as Partial<Record<keyof RejoinTicket, unknown>>;
   if (typeof ticket !== 'string' || ticket.length === 0 || !isWss(wsUrl)) return null;
   const known = carsOf(cars);
-  return known ? { ticket, wsUrl, cars: known } : { ticket, wsUrl };
+  const mark = serverMarkOf(server);
+  return { ticket, wsUrl, ...(known ? { cars: known } : {}), ...(mark ? { server: mark } : {}) };
 }
 
 function isWss(v: unknown): v is string {

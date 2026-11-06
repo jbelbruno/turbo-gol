@@ -1,12 +1,17 @@
 /**
  * MODOS' decisions, pure (no DOM, no texts: tests/modes.test.mjs): its four tabs and their order,
- * the formats a search is named by (1v1, 2v2, 3v3 or any of them, never "pairs"), the connection
- * picked under Advanced and the queue it sends, the "bots join in" countdown (only for the path the
- * search really takes), the threshold under which a count is not shown, and what the action zone
- * offers on each tab. src/ui/screens/modes.ts puts them on the page.
+ * the formats a search is named by (1v1, 2v2, 3v3 or any of them, never "pairs"; Casual picks one,
+ * the format of its online bots match: it pools every format), the 5:00 "bots join in" countdown
+ * (Casual only) and the level of those bots (the player's once picked, else the server's), the
+ * threshold under which a count is not shown, and what the action zone offers on each tab.
+ * src/ui/screens/modes.ts puts them on the page.
+ *
+ * Since the modes redesign (November 2026) Casual and Competitive need an account and always play
+ * on a server: the connection picked under Advanced (auto, P2P, server) is gone.
  */
-import type { MenuPrefs } from '../prefs';
 import type { GameMode } from '../../sim/constants';
+import type { QueueWait } from '../../net/queueWait';
+import type { Difficulty } from '../../ai/Bot';
 
 /** The vertical tabs, in their order on every device. */
 export type ModeTab = 'casual' | 'ranked' | 'lobbies' | 'ai';
@@ -22,10 +27,17 @@ export function stepTab(tab: ModeTab, d: -1 | 1): ModeTab {
   return MODE_TABS[(i + d + MODE_TABS.length) % MODE_TABS.length];
 }
 
-/** A search's format: one playlist, or any of the three (whichever fills first). */
+/** A search's format: one playlist, or any of the three (whichever fills first: Competitive only). */
 export type Format = GameMode | 'any';
 export const FORMATS: readonly Format[] = ['1v1', '2v2', '3v3', 'any'];
+/** Casual's grid: one format, the one its online bots match plays (no ANY: Casual pools every format). */
+export const PREFER_FORMATS: readonly GameMode[] = ['1v1', '2v2', '3v3'];
 const ALL: readonly GameMode[] = ['1v1', '2v2', '3v3'];
+
+/** The formats a tab's grid shows. */
+export function formatsOf(kind: 'casual' | 'ranked'): readonly Format[] {
+  return kind === 'casual' ? PREFER_FORMATS : FORMATS;
+}
 
 /** The format of a stored playlist pick: one playlist is itself, anything else (an older pick of two) any. */
 export function formatOf(modes: readonly GameMode[]): Format {
@@ -37,44 +49,58 @@ export function modesOf(f: Format): GameMode[] {
   return f === 'any' ? ALL.slice() : [f];
 }
 
-/** Advanced › Connection. */
-export type NetPick = MenuPrefs['net'];
-export const NET_PICKS: readonly NetPick[] = ['auto', 'p2p', 'server'];
+/** The online bots match comes after this long alone in Casual (GET /api/config queue.soloAfterMs; the hub's SOLO_AFTER_MS). */
+export const SOLO_AFTER_MS = 300_000;
 
-/**
- * The queue a Casual search joins: Auto and P2P the P2P queue (the matchmaker forms a room with the
- * other players, or a server match with bots for a lone one), Server the server queue.
- */
-export function queueNet(n: NetPick): 'p2p' | 'server' {
-  return n === 'server' ? 'server' : 'p2p';
-}
-
-/** What decides when bots fill a search's match. */
+/** What decides the 5:00 countdown of a running search. */
 export interface BotsInput {
   kind: 'casual' | 'ranked';
-  net: 'p2p' | 'server';
   /** performance.now() when the search started, and now. */
   since: number;
   now: number;
-  /** The server queue's bot fill (GET /api/config botFillMs), null when the Worker did not say. */
-  botFillMs: number | null;
-  /** The P2P queue's wait (P2P_FILL_WAIT_MS): then a room forms with bots, or a lone player gets a server match with bots. */
-  p2pFillMs: number;
+  /** The last waiting answer's `wait` (null: none yet, or an older server). */
+  wait: QueueWait | null;
+  /** performance.now() when that answer arrived. */
+  waitAt: number;
+  /** The config's queue.soloAfterMs (absent: SOLO_AFTER_MS). */
+  soloAfterMs?: number;
 }
 
 /**
- * The countdown "bots join in" for a running search, as `{ left, total }` ms, or null when it would
- * not be true: Competitive never fills with bots, a server queue whose delay the Worker did not
- * say, and a wait that already ran out (a full region keeps waiters waiting: the box goes rather
- * than stand at 0:00). Counted from the search's start: the matchmaker counts from the oldest
- * waiter, so the bots come at the latest then (sooner when another player is waiting). Pure.
+ * The countdown to Casual's online bots match, as `{ left, total }` ms (total: the 5:00), or null
+ * when it would not be true: Competitive never plays bots, the servers are full (`busy`: the match
+ * waits for a slot), and a wait that already ran out (the box goes rather than stand at 0:00). From
+ * the server's `botsInMs` counted down locally since its answer, else (no answer yet) from the
+ * search's start. Pure.
  */
 export function botsCountdown(b: BotsInput): { left: number; total: number } | null {
   if (b.kind === 'ranked') return null;
-  const total = b.net === 'server' ? b.botFillMs : b.p2pFillMs;
-  if (total === null || !(total > 0)) return null;
-  const left = total - Math.max(0, b.now - b.since);
-  return left > 0 ? { left, total } : null;
+  const total = b.soloAfterMs !== undefined && b.soloAfterMs > 0 ? b.soloAfterMs : SOLO_AFTER_MS;
+  const w = b.wait;
+  if (w !== null && w.busy) return null;
+  const left = w !== null && typeof w.botsInMs === 'number' ? w.botsInMs - Math.max(0, b.now - b.waitAt) : total - Math.max(0, b.now - b.since);
+  return left > 0 ? { left: Math.min(left, total), total } : null;
+}
+
+/** The bots' level of Casual's 5:00 solo match when nothing says one (the Worker's CASUAL_BOT_LEVEL: an unset KV bot_level). */
+export const SERVER_BOTS_DEFAULT: Difficulty = 'hard';
+
+/**
+ * The search's `bots` (POST /api/queue): Casual's own level only once the player picked one
+ * (MenuPrefs.casualBots); none before, so the KV flag bot_level (the server's level) sets that
+ * match, and never for Competitive. Pure.
+ */
+export function searchBots(kind: 'casual' | 'ranked', picked: Difficulty | null): Difficulty | null {
+  return kind === 'casual' ? picked : null;
+}
+
+/**
+ * The level DIFFICULTY IF YOU PLAY BOTS shows picked and the 5:00 box names: the player's pick, else
+ * the server's (GET /api/config queue.botLevel, the KV flag bot_level), else SERVER_BOTS_DEFAULT
+ * (an older Worker, or no config yet). Pure.
+ */
+export function shownBots(picked: Difficulty | null, server: Difficulty | undefined): Difficulty {
+  return picked ?? server ?? SERVER_BOTS_DEFAULT;
 }
 
 /** How many of `segments` the countdown's bar fills (the time left, rounded up). */
@@ -101,16 +127,15 @@ export interface ActionInput {
 }
 
 /**
- * The action zone of `tab`: the searching panel on the tab of the running search; Competitive asks a
- * guest to sign in and tells a banned player why; VS AI plays, LOBBIES makes a lobby; else FIND MATCH. Pure.
+ * The action zone of `tab`: the searching panel on the tab of the running search; Casual and
+ * Competitive ask a guest to sign in, Competitive tells a banned player why; VS AI plays, LOBBIES
+ * makes a lobby; else FIND MATCH. Pure.
  */
 export function actionKind(a: ActionInput): ActionKind {
   if (a.tab === 'ai') return 'play';
   if (a.tab === 'lobbies') return 'lobbies';
   if (a.searching === a.tab) return 'searching';
-  if (a.tab === 'ranked') {
-    if (!a.signedIn) return 'signIn';
-    if (a.banLeft > 0) return 'banned';
-  }
+  if (!a.signedIn) return 'signIn';
+  if (a.tab === 'ranked' && a.banLeft > 0) return 'banned';
   return 'search';
 }

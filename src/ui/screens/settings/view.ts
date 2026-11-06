@@ -1,6 +1,6 @@
 /**
  * Ajustes (the Tablero plan PR 10, the owner's hub-ajustes-pc, dir-hub §6.9): one component for the
- * menus (screen.ts, a stacked mn- screen) and the pause (overlay.ts, z 60). A rail of six tabs and
+ * menus (screen.ts, a stacked mn- screen) and the pause (overlay.ts, z 60). A rail of seven tabs and
  * the tab's page, every setting of the old Hud screen with its saved key and value:
  *
  * - CONTROLES: a section per device detected (TÁCTIL, CONTROL, TECLADO Y MOUSE; an mn-seg picks one
@@ -11,8 +11,17 @@
  *   stick, deadzone and vibration (settings.touch; vibration only where the browser can).
  * - CÁMARA: the presets by name (the default marked), then the sliders with the default's mark.
  * - JUEGO: the rest of the old Gameplay rows, then INTERFAZ: the language (the menus only: a picker
- *   sheet, a reload), the interface size (the sizes the layout class lists) and reduced motion
+ *   sheet, a reload), the interface size (the sizes the layout class lists), full screen when
+ *   playing (where the device can: src/ui/fullscreenModel.ts fullscreenOffered) and reduced motion
  *   (settings.ui, src/ui/device.ts); its reset. AUDIO: the master volume and its reset.
+ * - HUD (the owner's "qué quiero ver", 2026-11-05): what a match shows this player (settings.hud,
+ *   src/render/hudView.ts), EN EL PARTIDO (the scorebug, the names over the cars and the teammates'
+ *   boost under them, the boost plate, the ball's arrow and ring, the camera pill, the goal banner,
+ *   the feed's players and demolitions, the control hints) and RENDIMIENTO (the signal bars, the fps,
+ *   the speed); the teammates' boost only while the names include them, the signal bars only while
+ *   the scorebug they sit in shows, and in touch mode none of the rows its own buttons make
+ *   pointless (hudView.ts HUD_TOUCH_HIDDEN); its reset. Applied at once, over a match too
+ *   (Game.applySettings).
  * - GRÁFICOS: Performance, High and Ultra as cards (quality.ts CARD_QUALITIES); the running one
  *   always lit (ACTUAL); ◀ ▶ only move the focus, A applies; the old tier comes back by itself 10 s
  *   later unless kept (a tier that reloads the page has no trial: it restarts). Then OPCIONES: the
@@ -26,7 +35,8 @@
  *
  * Back, inside: a capture cancels, then the focus goes from the page to its tab; the host closes it
  * after (backModel's sheet and field steps are the host's). Built on the first open; nothing runs
- * per frame (a 500 ms timer while open and in sight: the controller's status, the trial's clock).
+ * per frame (a 500 ms timer while open and in sight: the controller's status, the trial's clock,
+ * the rows a turn or touch mode lists).
  */
 import { h, navButton, setChildren } from '../../dom';
 import { LOCALES, savedLanguage, systemLanguage, t, type Key } from '../../../i18n';
@@ -38,16 +48,21 @@ import {
   DEFAULT_AUDIO,
   DEFAULT_CAMERA,
   DEFAULT_CONTROL_SETTINGS,
+  DEFAULT_HUD,
   DEFAULT_TOUCH,
   DEFAULT_UI,
+  NAME_TAG_MODES,
   TOUCH_DEADZONE_RANGE,
   TOUCH_OPACITY_RANGE,
   VOLUME_RANGE,
   type ControlSettings,
+  type HudSettings,
   type MotionPref,
+  type NameTagMode,
   type Settings,
   type TouchSize,
 } from '../../../settings';
+import { hudRowShown, netBarsOffered, teamBoostOffered } from '../../../render/hudView';
 import type { CameraSettings } from '../../../render/Camera';
 import { CARD_QUALITIES, DEFAULT_RESOLUTION_SCALE, RESOLUTION_SCALE_RANGE, needsReload, type FpsCap, type Quality } from '../../../render/quality';
 import { canVibrate } from '../../../input/TouchControls';
@@ -57,6 +72,8 @@ import { glyph } from '../../components/glyphs';
 import { seg, type Seg } from '../../components/seg';
 import { setRow, slider, toggleSwitch, type Slider, type Switch } from '../../components/rows';
 import { finePointer, interfaceSize, interfaceSizes, layoutClass, type InputKind, type LayoutClass } from '../../device';
+import { fullscreenEnv } from '../../fullscreen';
+import { fullscreenOffered, fullscreenPath } from '../../fullscreenModel';
 import { experimentalKit, pageItemOf } from './expKit';
 import {
   SETTINGS_TABS,
@@ -122,6 +139,13 @@ export interface SettingsOptions {
   setResolutionScale(pct: number): void;
   setFpsCap(cap: FpsCap): void;
   setMenuSceneAnimated(on: boolean): void;
+  /**
+   * JUEGO's "Solo servidores del proyecto" (Prompt 2, A15): present once GET /api/config says
+   * hosting is open (decision 1: the row stays hidden, and nothing is sent, before), and while the
+   * player has it on (serversModel.ts projectOnlyShown); the menus' prefs keep it, and a running
+   * search carries a change (Game.settingsOptions).
+   */
+  readonly projectOnly?: { get(): boolean; set(on: boolean): void };
 }
 
 /** What the host gives the view. */
@@ -191,6 +215,37 @@ const CONTROL_ROWS: Readonly<Record<ControlSection | 'game', ReadonlyArray<{ key
     { key: 'aerialSensitivity', label: 'settings.aerialSensitivity' },
     { key: 'invertAirPitch', label: 'settings.invertAirPitch' },
   ],
+};
+
+/** A switch of settings.hud (every field but the names' choice). */
+type HudFlag = { [K in keyof HudSettings]: HudSettings[K] extends boolean ? K : never }[keyof HudSettings];
+
+/** HUD's switches by group, in the owner's order (EN EL PARTIDO's names seg goes after the scorebug, buildHud). */
+const HUD_ROWS: Readonly<Record<'match' | 'performance', ReadonlyArray<{ key: HudFlag; label: Key; help: Key }>>> = {
+  match: [
+    { key: 'teamBoost', label: 'settings.hudTeamBoost', help: 'settings.hudTeamBoostHelp' },
+    { key: 'boost', label: 'settings.hudBoost', help: 'settings.hudBoostHelp' },
+    { key: 'ballIndicator', label: 'settings.hudBallIndicator', help: 'settings.hudBallIndicatorHelp' },
+    { key: 'ballMarker', label: 'settings.hudBallMarker', help: 'settings.hudBallMarkerHelp' },
+    { key: 'camera', label: 'settings.hudCamera', help: 'settings.hudCameraHelp' },
+    { key: 'goal', label: 'settings.hudGoal', help: 'settings.hudGoalHelp' },
+    { key: 'players', label: 'settings.hudPlayers', help: 'settings.hudPlayersHelp' },
+    { key: 'demos', label: 'settings.hudDemos', help: 'settings.hudDemosHelp' },
+    { key: 'controls', label: 'settings.hudControls', help: 'settings.hudControlsHelp' },
+  ],
+  performance: [
+    { key: 'netBars', label: 'settings.hudNetBars', help: 'settings.hudNetBarsHelp' },
+    { key: 'fps', label: 'settings.hudFps', help: 'settings.hudFpsHelp' },
+    { key: 'speed', label: 'settings.hudSpeed', help: 'settings.hudSpeedHelp' },
+  ],
+};
+
+/** The names' choices on their seg (uppercase). */
+const NAME_TAG_LABELS: Readonly<Record<NameTagMode, Key>> = {
+  all: 'settings.hudNamesAll',
+  rivals: 'settings.hudNamesRivals',
+  team: 'settings.hudNamesTeam',
+  none: 'settings.hudNamesNone',
 };
 
 /** TÁCTIL's sizes, in order. */
@@ -273,7 +328,13 @@ export class SettingsView {
   private readonly cards = new Map<Quality, { el: HTMLButtonElement; tag: HTMLElement }>();
   private uiSizes: Seg<number> | null = null;
   private uiSizeRow: HTMLElement | null = null;
+  /** HUD's rows by field (refreshHudRows lists them by the device, the names and the scorebug). */
+  private readonly hudRows = new Map<keyof HudSettings, HTMLElement>();
+  /** The scorebug row's help: how to see it hidden, by the device (refreshHudRows). */
+  private hudScoreHelp: HTMLElement | null = null;
   private langValue: HTMLElement | null = null;
+  /** JUEGO's "Solo servidores del proyecto" group and row: hidden while the options do not carry it (hosting dark). */
+  private projectOnlyRow: HTMLElement | null = null;
   private readonly savedLine: HTMLElement;
   private qualityLine: HTMLElement | null = null;
   private trialBar: HTMLElement | null = null;
@@ -445,6 +506,7 @@ export class SettingsView {
     setChildren(this.headActions, actions);
     this.body.scrollTop = 0;
     if (tab === 'controls') this.updatePadStatus();
+    if (tab === 'hud') this.refreshHudRows();
     if (tab === 'experimental') this.opts?.experimental?.onOpen?.();
   }
 
@@ -491,6 +553,7 @@ export class SettingsView {
       controls: () => this.buildControls(),
       camera: () => this.buildCamera(),
       game: () => this.buildGame(),
+      hud: () => this.buildHud(),
       audio: () => this.buildAudio(),
       graphics: () => this.buildGraphics(),
       experimental: () => this.buildExperimental(),
@@ -511,6 +574,8 @@ export class SettingsView {
         return t('settings.cameraNote');
       case 'game':
         return t('settings.gameplayNote');
+      case 'hud':
+        return t('settings.hudNote');
       case 'audio':
         return t('settings.audioNote');
       case 'graphics':
@@ -661,7 +726,13 @@ export class SettingsView {
   }
 
   private buildGame(): [HTMLElement, HTMLElement | null] {
-    const page = h('div.mn-set-game', null, ...CONTROL_ROWS.game.map((r) => this.controlRow(r.key, r.label)), this.group(t('settings.groupInterface')));
+    // "Solo servidores del proyecto" (Prompt 2, A15): built once like every row, hidden until the
+    // options carry it (hosting open, or the switch on: refreshAll), so nothing of it shows while dark.
+    const onlyText = t('settings.projectOnly');
+    const only = toggleSwitch('set-project-only', onlyText, () => this.opts?.projectOnly?.get() ?? false, (v) => this.opts?.projectOnly?.set(v));
+    this.refreshers.push(only.refresh);
+    this.projectOnlyRow = h('div.mn-set-projectonly', { hidden: true }, this.group(t('settings.groupServers')), setRow(onlyText, only.el, t('settings.projectOnlyHelp')));
+    const page = h('div.mn-set-game', null, ...CONTROL_ROWS.game.map((r) => this.controlRow(r.key, r.label)), this.projectOnlyRow, this.group(t('settings.groupInterface')));
     const language = this.hooks.language;
     if (language !== undefined) {
       this.langValue = h('span.mn-set-picker-value');
@@ -685,6 +756,25 @@ export class SettingsView {
     this.refreshers.push(sizes.refresh);
     this.uiSizeRow = setRow(sizeText, sizes.el);
     page.append(this.uiSizeRow);
+    // Full screen when playing: a computer's entry to the pitch or Android's tap; not listed on an
+    // iPhone, an iPad, a TV or a page launched from the home screen (src/ui/fullscreenModel.ts).
+    const fsEnv = fullscreenEnv();
+    if (fullscreenOffered(fsEnv)) {
+      const text = t('settings.fullscreen');
+      const sw = toggleSwitch(
+        'set-fullscreen',
+        text,
+        () => this.live?.ui.fullscreen ?? DEFAULT_UI.fullscreen,
+        (v) => {
+          const st = this.live;
+          if (st === null) return;
+          st.ui.fullscreen = v;
+          this.changed();
+        },
+      );
+      this.refreshers.push(sw.refresh);
+      page.append(setRow(text, sw.el, t(fullscreenPath(fsEnv) === 'tap' ? 'settings.fullscreenHelpTap' : 'settings.fullscreenHelp')));
+    }
     const motionText = t('settings.reducedMotion');
     const motion = seg<MotionPref>(
       'set-motion',
@@ -712,6 +802,67 @@ export class SettingsView {
       this.refreshAll();
       this.changed(true);
     });
+    return [page, reset];
+  }
+
+  /**
+   * HUD: what a match shows this player (settings.hud). Every change is pushed at once
+   * (Game.applySettings: Hud.setView, the ball's ring; the rest reads settings.hud each frame).
+   */
+  private buildHud(): [HTMLElement, HTMLElement | null] {
+    const page = h('div.mn-set-hud', null, this.group(t('settings.groupMatch')));
+    const hud = (): Readonly<HudSettings> => this.live?.hud ?? DEFAULT_HUD;
+    const add = (key: keyof HudSettings, label: Key, ctl: { el: HTMLElement; refresh(): void }, help: Key): void => {
+      this.refreshers.push(ctl.refresh);
+      const row = setRow(t(label), ctl.el, t(help));
+      this.hudRows.set(key, row);
+      page.append(row);
+    };
+    const flag = (r: { key: HudFlag; label: Key; help: Key }): void => {
+      const sw = toggleSwitch(
+        'set-hud-' + r.key,
+        t(r.label),
+        () => hud()[r.key],
+        (v) => {
+          const st = this.live;
+          if (st === null) return;
+          st.hud[r.key] = v;
+          this.changed();
+          // The signal bars sit in the scorebug: their row comes or goes with it.
+          if (r.key === 'scorebug') this.refreshHudRows();
+        },
+      );
+      add(r.key, r.label, sw, r.help);
+    };
+    flag({ key: 'scorebug', label: 'settings.hudScorebug', help: 'settings.hudScorebugHelp' });
+    // How to see it hidden: its key or button, or a tap in touch mode (refreshHudRows picks).
+    this.hudScoreHelp = this.hudRows.get('scorebug')?.querySelector<HTMLElement>('.mn-set-row-help') ?? null;
+    const names = seg<NameTagMode>(
+      'set-hud-names',
+      t('settings.hudNames'),
+      NAME_TAG_MODES.map((v) => ({ value: v, label: t(NAME_TAG_LABELS[v]) })),
+      () => hud().names,
+      (v) => {
+        const st = this.live;
+        if (st === null) return;
+        st.hud.names = v;
+        this.changed();
+        // The teammates' boost comes or goes with them.
+        this.refreshHudRows();
+      },
+    );
+    add('names', 'settings.hudNames', names, 'settings.hudNamesHelp');
+    for (const r of HUD_ROWS.match) flag(r);
+    page.append(this.group(t('settings.groupPerformance')));
+    for (const r of HUD_ROWS.performance) flag(r);
+    const reset = this.actionButton('reset-hud', t('settings.resetHud'), () => {
+      const st = this.live;
+      if (st === null) return;
+      Object.assign(st.hud, DEFAULT_HUD);
+      this.refreshAll();
+      this.changed();
+    });
+    reset.prepend(icon('refresh'));
     return [page, reset];
   }
 
@@ -886,6 +1037,32 @@ export class SettingsView {
       setText(this.langValue, saved === null ? t('lang.auto', { language: LOCALES[systemLanguage()].name }) : LOCALES[saved].name);
     }
     this.refreshSizes();
+    this.refreshHudRows();
+    // "Solo servidores del proyecto" once hosting is open, or while it is on (the options carry it then).
+    if (this.projectOnlyRow !== null) this.projectOnlyRow.hidden = this.opts?.projectOnly === undefined;
+  }
+
+  /**
+   * HUD's rows this screen lists: the teammates' boost while the names include them, the signal
+   * bars while the scorebug shows; in touch mode none of hudView.ts HUD_TOUCH_HIDDEN (a finger turns
+   * it on: the timer reads it again), and the scorebug's help says to tap.
+   */
+  private refreshHudRows(): void {
+    if (this.hudRows.size === 0) return;
+    const touch = touchMode();
+    const hud = this.live?.hud ?? DEFAULT_HUD;
+    if (this.hudScoreHelp !== null) setText(this.hudScoreHelp, t(touch ? 'settings.hudScorebugHelpTap' : 'settings.hudScorebugHelp'));
+    const had = this.pages.get('hud')?.contains(document.activeElement) === true;
+    let changed = false;
+    for (const [key, row] of this.hudRows) {
+      const off = !hudRowShown(key, touch) || (key === 'teamBoost' && !teamBoostOffered(hud.names)) || (key === 'netBars' && !netBarsOffered(hud.scorebug));
+      if (row.hidden === off) continue;
+      row.hidden = off;
+      changed = true;
+    }
+    // The focused row went: back on the screen.
+    const a = document.activeElement;
+    if (changed && had && this.openNow && (!(a instanceof HTMLElement) || a === document.body || a.closest('[hidden]') !== null)) this.hooks.refocus();
   }
 
   /** The interface sizes this screen lists (a turn changes them: the timer reads them again); one alone (a small phone): no row. */
@@ -967,6 +1144,7 @@ export class SettingsView {
       if (this.capture === null) this.updateSections();
     }
     if (this.tab === 'game') this.refreshSizes();
+    if (this.tab === 'hud') this.refreshHudRows();
     const tr = this.trial;
     if (tr !== null && !this.switching) {
       if (trialSecondsLeft(tr, performance.now()) <= 0) this.revertTrial();

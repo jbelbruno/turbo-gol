@@ -286,6 +286,10 @@ test("a member that left the lobby's match with no socket (a reload, a closed ta
   assert.deepEqual(st.members.map((m) => m.name), ['Ana'], 'she goes at the end of the grace');
   assert.equal(st.status, 'open', 'and the lobby opens');
   await h.send(host, { t: 'start' });
+  assert.equal(host.of('error').at(-1).code, 'need_players', 'alone, INICIAR needs another player (lobbies are P2P only)');
+  assert.equal(h.mm.calls.filter((c) => c.path === '/custom').length, 1);
+  await h.join('cleo');
+  await h.send(host, { t: 'start' });
   assert.equal(h.mm.calls.filter((c) => c.path === '/custom').length, 2, 'INICIAR starts again');
 });
 

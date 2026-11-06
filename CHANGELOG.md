@@ -7,6 +7,150 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Each car has a legend: the Dune is the beginning and the others are Cyclone (the edge), Vortex (the untamed),
+  Sirocco (the unreachable) and Magma (the fire within), with a one-line tagline and a short story in the second
+  person, shown in the garage's detail card where there is room (PC, tablet, a tall phone upright). The cars
+  have global English names of wild nature, and their ids follow them (`cyclone`, `vortex`, `sirocco`, `magma`).
+- Clips and links in the replay viewer (`replay.html`): a **Clip / Share** button opens a clip editor, a
+  video editor's layout. The goals are on the left, the player is in the middle (the canvas in the
+  clip's shape with the scorebug, the goal caption and the watermark drawn over it as they will be
+  recorded), the format (9:16 for TikTok, Reels and Shorts, 1:1, 16:9), the quality (720p, 1080p, 1080p
+  at 60 fps), the camera, the scorer's name and the sound are on the right, and under it all a
+  timeline: a ruler, the whole match with its goals, the clip's range with a handle at each end (drag an
+  end to trim, the body to move it), the playhead (click or drag to scrub), zoom, and I / O to set the
+  start and the end at the playhead. The range is whatever the player wants, 1 to 60 s, goal or not.
+  Export records it in the browser (`captureStream` + `MediaRecorder`, MP4 where the browser writes it,
+  WebM in Firefox) with nothing uploaded; the sheet after it offers Download, Share (the phone's share
+  sheet, which lists TikTok, Instagram, WhatsApp) and Copy link. A goal's link is
+  `replay?id=<match>&t=<tick>` and opens the viewer four seconds before it. With sound the file carries
+  the game's own audio (the music, the horn, the hits), its volume and music level set by the player
+  (`src/replay/clip.ts`, `timeline.ts`, `sound.ts`, `player.ts`, `src/audio/Audio.ts` recordingStream).
+- Sound in the replay viewer: the game's audio follows the re-simulation (music, countdown, goal horn, ball
+  and car hits, and the engine, boost and wind of the car a chase camera follows), at the game's saved
+  volumes, with a Sound switch on the bar.
+- The goal explosion and the ball-hit sparks in the replay viewer, which only the live game had, and an
+  animated goal caption in clips (the word drops in and bounces, a ring and spokes burst out, the frame
+  shakes and flashes in the team's colour, the scorer's name pops in letter by letter).
+- Community nodes: the server side of opening hosting to anyone with an account, shipped closed.
+  Nothing changes for players or for the project's servers until the terms that describe hosting
+  are in force (`NODE_HOSTING_TERMS`, unset until then) and the maintainers open it in the panel
+  (the KV key `node_operators`: closed, a canary of accounts, or everyone; `POST
+  /nodes/admin/flags`, the Worker's only KV write, audited a year, its Discord line counting the
+  accounts, never naming them). `GET /api/config` says whether it is open. Once it is, an account
+  asks for a code with a verified email, 7 days of age, the terms accepted, and the rules for hosts
+  accepted with the 18-or-older declaration (a `host` consent row, written only then), for a server
+  of its own by `wss` on port 443, in its token's continent, under a name nobody in its region
+  holds; at most 3 servers, 3 codes a day and 2 unused at once, counted through deploys. A
+  community server gets at most 4 matches at a time on probation and 16 active (32 for all of an
+  operator's), no Competitive match, an hour out after 3 unexcused refusals in 10, none on probation
+  while the verification queue is behind (which now serves Competitive first), and its points are
+  capped at 300 a day per host, each player's repeat decays on its own, a lone player's match
+  against bots and a void match earn nothing. Maintainers can block an operator (its servers off,
+  its wallet frozen), unblock it or suspend its servers, and list the community operators; a host
+  can choose to show its name in the public list. Community alerts go to a second staff-only
+  channel (`NODE_COMMUNITY_WEBHOOK`, never one the community reads), not the team's
+  (`server/src/hostPolicy.ts`, `server/README.md`).
+- Community nodes: "Mis servidores" on the server, shipped closed with the rest of hosting.
+  `GET /nodes/mine` now gives an operator its whole hosting: each server's service state, last
+  probe, progress to active, strikes, refusals and the matches it may run, its own codes and limits,
+  today's points against the daily cap and, once hosting is open for it, what it still lacks and
+  whether it accepted the rules for hosts. A host can drain, rename (once hosting is open; never
+  while blocked) and retire (never while suspended) its own servers and revoke its own unused
+  codes; the project's servers stay the panel's. The queue's and the rejoin's answers now carry
+  the server's mark (the Worker's word, never the server's own: a community server's always; a
+  project server's, never marked as a community one, once the terms that describe hosting are in
+  force), which the game shows in a later change. Once those terms are in force, the queue takes
+  "Solo servidores del proyecto" (one player asking for it takes the whole match to a project
+  server or a Cloudflare one, never a community server, whatever the opening's flag says later)
+  and a player can report a community server a match of theirs was played on (a closed list of
+  reasons, once per match, 20 a day, kept 30 days for the team only and deleted with the
+  reporter's account; a report alone never sanctions a host). Before, none of it is stored or
+  shown (`server/README.md`).
+- Community nodes: "Mis servidores" in the game, shipped closed: nothing of it shows until
+  `GET /api/config` says hosting is open (before, `/#servers` opens PERFIL, and PERFIL and GARAJE
+  keep the guide). Once it is open, PERFIL's MI SERVIDOR and COMUNIDAD and GARAJE's points card lead
+  to it: what the account still lacks with its fix, then a Linux VPS with a DNS name by region,
+  name and DNS name, a checklist, the rules for hosts and Annex B accepted with the 18-or-older
+  switch right above PEDIR CÓDIGO, "confirm it's you" (the password or a mailed code), the code's
+  install line with COPIAR and its follow-up to active; each server's state, load, egress, version,
+  strikes and refusals with DRENAR, RENOMBRAR and RETIRAR (held to confirm, then how to uninstall),
+  its own codes, today's points against the cap and the balance, and the name in the public list by
+  the host's choice. A TV lists the servers and shows a QR to `/#servers`. PARTIDO ENCONTRADO and
+  the FINAL say "servidor de la comunidad" only for a community server (no longer for every node),
+  whose FINAL offers REPORTAR SERVIDOR once per match; both follow the server's mark, never the
+  opening's flag. Ajustes › JUEGO gets "Solo servidores del proyecto" once hosting is open, sent
+  with every search while it is on (and kept shown while it is, so it can always be turned off);
+  CONTROL DE NODOS gets an Operadores tab and the opening's control in RESUMEN.
+- Community nodes: the rules for hosts accepted again when the Terms change version (Terms 12.2),
+  shipped closed with the rest of hosting. The rules are a part of the Terms, so the version a host
+  must hold is the `TERMS_VERSION` in force once the terms describe hosting (`server/src/hostPolicy.ts`
+  `hostRulesVersion`). A host that holds those of an earlier version asks for no code
+  (`reaccept_required`) and its servers get no new match (the matches they run finish) until it
+  accepts them again in "Mis servidores": a banner, then the first code's acceptance (the rules for
+  hosts and Annex B with the 18-or-older switch) with VOLVER A ACEPTAR (`POST /nodes/mine/accept`,
+  the code's own checks, a `host` consent row of source `host_reaccept`). While the terms do not
+  describe hosting, a server outside the project gets no match at all. The project's accounts are
+  never held to the rules. CONTROL DE NODOS' Operadores tab says which rules each host holds.
+- Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
+  P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
+  in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and
+  dimmer far away, a robot before a bot's name. A teammate's tag also shows the boost it has left, a
+  lime meter under the name; a rival's never does. Your own car has none, a tag over the ball fades
+  so it never hides it, a car off the screen is pinned to the edge with ›› or ‹‹ towards it, and a
+  demolished car's tag goes until it respawns. Tags never cover each other: cars bunched far away
+  stack their tags upwards, the nearest car's over it, and tags pinned to one edge line up along it,
+  without trading places or jumping up and down from frame to frame as cars side by side wobble. On
+  a TV the tags are a quarter larger; on super low they keep a hard outline instead of the glow. The
+  replay viewer draws the same tags instead of its plain pills, with every car's boost and none on
+  the car its camera follows, under its scorebug and clear of its Exit button and control bar
+  (`src/render/nameTags.ts`, `src/ui/styles/nametags.css`).
+- Settings > HUD, a tab of its own after Game: each player picks what a match shows them, over the
+  pause too, applied at once and saved in this browser. In the match: the score and clock (hidden,
+  the held scoreboard still shows both, and on a touch screen a tap on that corner opens it), the
+  names over the cars (all, the rivals', your team's or none; never over your own car), your team's
+  boost under their names (listed while the names include them; a rival's boost never shows), the
+  boost meter, the ball's arrow when it is off screen, the ring under the ball, the camera
+  indicator, the goal banner (a screen reader still announces each goal), the player notices, the
+  demolition notice and the control hints (the controls card, the mouse hint and the training
+  keys). Performance: the connection signal by the clock (listed while the score and clock show),
+  the frames per second and a speedometer, both off by default; F3 works as before. In touch mode the rows its own buttons make pointless
+  (the boost meter, the camera indicator, the control hints) are not listed. RESET HUD puts every
+  row back. The replay viewer keeps its look (`src/render/hudView.ts`).
+- An about page at /about (and /acerca in Spanish), served by the Worker as plain HTML that needs no
+  script: what Turbogol is, links to the game, the privacy policy, the terms and the source code,
+  what Sign in with Google asks Google for (only the `openid` and `email` scopes) and why, how to
+  unlink Google or delete the account, and who offers the game, with privacy@turbo-gol.com. It is
+  the home page of Google's OAuth consent screen, in the legal pages' shell and served while they
+  are (`docs/about/`, `docs/legal/README.md`).
+- Full screen on the pitch: on a computer the game fills the screen when a match or a training
+  starts. A found match, a lobby start or a slow rejoin goes full screen at the first key, click or
+  tap in the match. It stays full screen in the menus and on the FINAL. In Chrome and Edge a short
+  Esc is still the pause (from the pause it resumes when you let it go) and holding Esc leaves full
+  screen without resuming the match or going back a screen in the menus; a player who leaves is not
+  taken back until the next PLAY. Leaving full screen mid-match pauses it. Settings > Game > Interface, "Full
+  screen when playing" (on by default), turns it off, and Android's tap to full screen with it; the
+  row is not listed on an iPhone, an iPad or a TV. The replay viewer has a Full screen button and
+  the F key.
+- The terms of use and the privacy policy (version 2026-11-04, Spanish official, English informative) at
+  /terminos, /privacidad, /terms and /privacy, linked from Inicio, the About sheet and PERFIL. A short
+  notice above PLAY AS GUEST, CREATE ACCOUNT, NO, CREATE MY ACCOUNT and ACCEPT AND PLAY says what
+  pressing accepts; an account keeps the version it accepted, a guest's browser keeps it, and a new
+  version asks again. PERFIL can delete the account (14 days to call it off, a receipt on screen), and
+  the maintainer can delete one on request with a certificate (docs/legal/README.md).
+- PERFIL › CUENTA DEL PROYECTO › CONTROL DE NODOS, the maintainers' panel of the community nodes
+  (never on a TV): a summary (nodes online by region, matches, the verification queue, the outbox,
+  the trusted slots, the channel, the warnings and the KV switches, read only), every node with its
+  detail and actions behind a confirmation (status, drain, probe again, retire), the tokens, the
+  regions, the releases, the server points (a wallet by account id, the frozen ones, grant, take back,
+  unfreeze) and the account and queue counts. It refreshes every 15 s and asks for the password once
+  when the server wants it again. ADD A PROJECT SERVER asks the machine's data, a checklist and the
+  password, then shows the install line the server composed (COPY) and follows the node to active.
+- Google sign-in reads Google's id_token (with a nonce) instead of calling userinfo. A Gmail address
+  without a Workspace domain is now claimed as the account's verified email at sign-in, sign-up or
+  link; any other Google address stays a hint to confirm by code. Google proves level 1 at most (a
+  press on its account chooser); level 2 stays the password or a code by mail. Discord, Instagram,
+  Facebook, TikTok and Line browsers now get the "open it in your browser" note in LINK and
+  "confirm it's you" too, not only on the sign-in tab (`docs/online/ACCOUNTS.md`).
 - Portuguese (Brazil): the whole game in `pt` (tag `pt-BR`), picked from the browser's language or
   in Settings' language list (Gameplay › Interface). It keeps the game's voice (você, no regional slang) and the copy rules
   (no shop words, no emoji, the formats named 1v1 / 2v2 / 3v3).
@@ -26,8 +170,8 @@ All notable changes to Turbogol are documented here. The format follows
   each car's camera. The match is re-simulated from the recording, so the viewer says when a match
   was played on another version of the game, or from when it stops matching the recording. Only
   the names the game's servers assigned are shown, never account or server ids (`docs/replays.md`).
-- Four new cars: Pampero (a low, sharp wedge), Carpincho (a round, sturdy off-roader), Cóndor (a long
-  jet racer with a tail fin) and Tero (a compact rally hatch), beside the Dune, which stays free
+- Four new cars: Cyclone (a low, sharp wedge), Vortex (a round, sturdy off-roader), Sirocco (a long
+  jet racer with a tail fin) and Magma (a compact rally hatch), beside the Dune, which stays free
   for everyone. Every car drives the same: same handling, same hitbox, only the look changes, so
   ranked and every counted match are untouched. Other players see your car online, in server
   matches and in lobbies.
@@ -45,7 +189,7 @@ All notable changes to Turbogol are documented here. The format follows
   show in the top bar in GARAGE and PROFILE.
 - STADIUMS in GARAGE: Night harbour, Red canyon and Alpine valley, the same list as MODES › VS AI's
   Stadium row; the one you pick is used in your offline matches, in training and behind the menus.
-- The player plate on PLAY shows the car you drive (GARAGE · Pampero).
+- The player plate on PLAY shows the car you drive (GARAGE · Cyclone).
 - Music, made entirely in code (no audio files). A calm theme plays in the menus and an
   electronic track plays during a match. The track builds up, breaks down after every goal and
   drops back in at kickoff. It gets more intense in the last 30 seconds and in overtime, and it
@@ -337,6 +481,25 @@ All notable changes to Turbogol are documented here. The format follows
   menu opens Settings in the middle of a match or training.
 
 ### Fixed
+- The white rail on top of the stadium boards no longer shows as dashes from across the pitch (on
+  every quality tier, worse at low resolutions). It was 7 uu thick, under a pixel at that distance,
+  and drawn with a hard cut in the shader, which MSAA does not smooth: each pixel caught it or missed
+  it. The boards' bands (the LED face, its dark frame, the rail) are now drawn by their coverage of
+  the pixel, and the rail is 21 uu thick and a little calmer, so it reads as one soft continuous
+  line (`src/render/stadium/boards.ts`, `layout.ts`, `palette.ts`).
+- Firefox: a stadium baked while the grass and cloud shaders failed to compile (before the Firefox fix) is discarded: the world cache version is raised, so the sky and the skyline are baked again on the next visit (the first load after this takes a moment longer).
+- Firefox (WebGPU): the Ultra grass and the sky's clouds no longer fail to compile. Two shader expressions called a math function with only literal numbers (a smoothstep and a mix), which Firefox's validator rejects ("Abstract types may only appear in constant expressions"); the game fell back to a lower tier and the sky and background looked wrong. Both are evaluated in JavaScript or written differently now; every shader the game compiles passes Firefox 159's validator.
+- Community nodes (from node release 0.3.1): a node the control plane refuses for good (banned,
+  retired, or on an address its token does not allow) no longer keeps logging in (about every 30
+  seconds after a ban or retirement, every second on a refused address): it finishes its matches,
+  says in its log what to do next, and stops, and the launcher does not restart it. A node the
+  control plane is limiting (too many hellos or address changes) waits an hour before its next
+  login. A player whose connection goes silent (no input or ping for 10 seconds) is disconnected,
+  as if the socket had closed, so their car no longer repeats their last input to the end,
+  recorded in the replay as theirs. `turbogol-node status` shows what the control plane last told
+  this node, also when it is pending, suspended or banned (it said "unknown") and after a restart
+  while the control plane cannot be reached, from `<data>/status.json`, and says when the node is
+  not running.
 - Replays: "My replays" also finds the matches listed before the seats were kept (the first days: they have no seat, so they are found by the account's username).
 - You can choose the stadium again. In MODES › VS AI, Stadium opened an empty GARAGE; now it opens
   the list of stadiums (Night harbour, Red canyon, Alpine valley) with yours marked. Pick one with
@@ -479,6 +642,52 @@ All notable changes to Turbogol are documented here. The format follows
   night sky.
 
 ### Changed
+- The replay viewer on small screens (a phone upright or on its side): the control bar is one thin line
+  (play, timeline, time, Clip / Share; a ··· button opens the rest on a short screen) and the editor puts
+  its goals and settings in an Options sheet, so the match keeps the screen.
+- Node.js 26 (the LTS since 2026-10-28) is the minimum for development, CI and community nodes. The
+  next node release (0.3.1) needs it (`nodeMajor: 26`): a node on an older Node.js keeps running
+  the release it has until its operator upgrades. The installers set up 26 where Node.js is missing
+  or older (`install.sh`: NodeSource 26; Windows: the winget LTS, now 26), and `--node-version`
+  takes 26 or newer. The project's six servers already run 26.13.0: the same replays verify on 24
+  and 26 with the same hashes, and a 3v3 with bots costs about 11 % less CPU per second.
+- A softer picture on High and Ultra, to fix the hard, cut look of far edges: a fine film grain
+  (hides the banding of the gradients and the stair steps of far edges), a light sharpening of the
+  scene colour so it stays crisp, wider and softer car shadows (PCF radius 7 on High, 14 on Ultra),
+  and no live fog over the stadium (the baked sky keeps its haze). Low and Super low are untouched
+  and pay nothing for it: the passes are only built on the tiers that ask for them (`grain`,
+  `sharpen`, `fogScale` in `TierSpec`, `src/render/quality.ts`, `src/render/post/pipeline.ts`).
+- Casual: the bots that fill the free seats, and the 5:00 match against bots, now play hard (they
+  played normal), on the project's servers and on community nodes alike; the owner can change their
+  level without a deploy (KV `bot_level`, server/README.md). A Competitive match keeps normal bots
+  for the car of a player who leaves. Lobbies: the host picks the bots' level in SETTINGS (hard by
+  default) and every player's game runs it; the lobby's line shows it, the public list does not. The
+  P2P protocol goes to 6, so a page cached from before reloads before it plays in a lobby.
+- Casual: you pick the difficulty of the bots in your 5:00 match against bots (MODOS › CASUAL,
+  DIFFICULTY IF YOU PLAY BOTS: Easy, Normal or Hard; a running search takes the change at once, and
+  the 5:00 box names it). Until you pick one it shows the server's level (Hard, or what the owner
+  set with `bot_level`) and your search sends none, so `bot_level` still sets that match. A match
+  with other people plays the server's level. The search carries the pick, which the privacy policy
+  (and Terms 7.1 and 7.4) say from version 2026-11-05.
+- The terms of use and the privacy policy are at version 2026-11-05, in force on its deploy day: the
+  project's servers in Brazil, Germany and Malaysia (Hostinger) and, for now, South Africa,
+  Australia and the United States (Google Cloud), each taking its region's Casual and Competitive
+  matches; a Competitive match verified on a project server that may be in another country; the
+  public server list of the servers in service, with a community host as "Anfitrión" and a number;
+  the maintainers' 30-day history of the servers; the bots' level a player picks; and the notice of
+  an important change cut from 30 to 7 days, posted in Spanish in the repository and in English on
+  Discord (`docs/legal/avisos/2026-11-05.md`). The notice above the accepting buttons names the new
+  countries, and every account and guest accepts again before playing online.
+- The notice of version 2026-11-13 of the terms of use and the privacy policy, in force from
+  13 November 2026, 7 days after it (Términos 18.2; `docs/legal/avisos/2026-11-13.md`): the opening
+  of the community server network to hosts that are not the project, under the host rules of
+  Términos 12 and a new Annex B (the clauses of whoever processes players' data on the project's
+  behalf, for every host), 18 or older declared when asking for a code in MY SERVERS, Competitive
+  for now only on the project's servers, a host's name in the public list only by their choice,
+  "Project servers only" in Settings > Gameplay, and server points with a daily cap. The rules
+  apply only from the opening, announced apart on Discord. Until 13 November its four texts wait in
+  `docs/legal/avisos/2026-11-13/`, which the Worker does not serve, and `TERMS_VERSION` stays
+  2026-11-05.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%
@@ -628,6 +837,36 @@ All notable changes to Turbogol are documented here. The format follows
   solid tiles over it; every other menu keeps the solid page.
 - Language moved to PROFILE (until Settings has it), and says before you pick that the game
   reloads for a few seconds.
+- Regional placement: a Casual or Competitive match asks first for a community node of its host
+  region (its players' majority), never one of another region, and goes to a server near that
+  region when none takes it; with the emergency switch for our own servers (`do_disabled`), a node
+  of its region first and then one of São Paulo. Nothing changes until a node outside SA exists.
+  A node match's release goes to the one queue, and a ranked result always names the host region.
+- The community servers' public list (`/nodes/status`) shows only the servers in service (on
+  probation or active), never one pending, suspended, banned or retired, and names who runs each one
+  only for the project's servers: any other host is "Anfitrión" and a number, in the list and in the
+  points ranking, never its username or the start of its account id. A server registered without a
+  name is called by its region and a number (`sa-node-3`), never after who runs it. It goes out with
+  the legal texts that describe it.
+- Community node docs: the operator guide the game links to (`nodes/README.md`, `README.es.md`)
+  gives the real state: the matchmaker sends matches to nodes, so far only to the project's servers,
+  today one per region (São Paulo, Germany and Malaysia host and verify and, for now, there are also
+  servers in South Africa, Australia and the United States, which only host), each taking its
+  region's Casual and Competitive matches, and hosting is not open to the community yet. The
+  production plan marks the first real ranked match on the São Paulo server done (2026-10-21, two
+  accounts that run no server, verified and rated) and the second trusted verifier too; the online
+  decisions record the six servers and their budget, without the old Hetzner plan; and the four
+  cars are no longer "coming soon" in the rewards docs.
+- Community nodes: the VPS installer registers a new wss server only under a DNS name
+  (`--public-host`). With none, or with an IP address, it stops before it installs anything, as the
+  control plane refuses an IP address anyway; it no longer falls back to the machine's IPv4.
+  `--allow-ip` takes an IP address for a development control plane, and a node already registered
+  on one still runs the installer again and restores with `--restore` as before. `--node-version`
+  sets the Node.js the node runs, from NodeSource (a major, a major and minor, or an exact version;
+  the last two are held with `apt-mark hold`), and the installer now checks the Node.js at
+  `/usr/bin/node`, the one the service runs. A run ends with the node's page on the website
+  (`/#servers`, "Mis servidores") and the operator guide. It reaches the machines with the next
+  node release.
 
 ### Removed
 - The Casual, Competitive, Friendly and lobby list screens and their ‹ › pickers (mode, difficulty,
@@ -662,6 +901,14 @@ All notable changes to Turbogol are documented here. The format follows
 - Node releases are signed in a job that installs nothing and uploaded from a separate `releases-r2`
   environment that re-checks them and can be re-run; the deploy gate also checks the channel's
   minimum release and that releases come from main.
+- Community nodes, before the opening: the node installer's Caddy keeps no player's IP address, port
+  or request headers in its log (the ticket, with the player's name and account id, travels in one),
+  and the machine's system journal is kept 7 days at most (a journald drop-in). Cloudflare's proxy may sit
+  in front of the project's own servers only: the installer takes `--allow-proxied` for a name under
+  turbo-gol.com alone, and the control plane refuses a community server whose name resolves to the
+  proxy. When a host deletes their account, their servers' records keep neither their name nor
+  their account id, the public list leaves out a blocked host's servers and names a host only by
+  their account's name as it is now, and MIS SERVIDORES shows the automatic measures on each server.
 
 ## [0.1.0] - 2026-10-15
 

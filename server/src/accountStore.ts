@@ -23,7 +23,9 @@
  *                    family that is no longer its live one comes back only from a copy: the family is
  *                    revoked (rotate 'reused'), except within REFRESH_RACE_MS of its rotation (two tabs).
  *   ratings          (user, playlist, season) -> mu, sigma, games, wins, losses, peak
- *   ranked_matches   one row per reported / cancelled ranked match (idempotency + results)
+ *   ranked_matches   one row per reported / cancelled ranked match (idempotency + results); its
+ *                    region is the host region, where the match was hosted (its humans' majority,
+ *                    or SA when do_disabled sent it to a node of SA), on a MatchDO or a node alike
  *   ranked_players   per player of a ranked match: before / after, outcome, ban started
  *   abandons, bans   ranked abandon history (24 h window) and the queue ban it causes
  *   ranked_locks     a player's live ranked match (one at a time across every region matchmaker)
@@ -61,7 +63,7 @@
  * lives, or its undo):
  *   mail_tokens      one mailed proof (a link and maybe a code), by its token's hash
  *   email_holds      an old canon held during an email change's 7-day undo (counts as taken)
- *   consents         append-only: the state is the newest row per (user, kind)
+ *   consents         append-only: the state is the newest row per (user, kind: news, terms, host)
  *   auth_throttle    durable failure counters; mail_rate, mail_day: the mail caps and the day's lanes
  *   deleted_ids      ids of purged accounts: freshId never hands one out again (nodes are keyed by it)
  *   sanction_marks   a ban or abandon penalty that outlives a purge; protected_skel: names to protect
@@ -89,7 +91,8 @@
  *   deleted_nodes    purged ids whose nodes the NodeRegistryDO has not banned yet (the alarm asks again)
  *   consent_proofs   what the purge keeps of the consent log: each row's kind, version, granted or
  *                    withdrawn and time, by the tombstoned id (no source, address or name), for
- *                    CONSENT_PROOF_KEEP_MS from the purge, so a past consent or withdrawal can be shown
+ *                    CONSENT_PROOF_KEEP_MS from the purge (a 'host' row, HOST_CONSENT_PROOF_KEEP_MS),
+ *                    so a past consent or withdrawal can be shown
  *
  * The news consent (sign-in PR 13, the design's §2.11 and §3.14; no news is sent yet): the consent
  * log only grows and its newest news row is the state. The switch at sign-up and at the confirm
@@ -178,10 +181,19 @@ export const NEWS_CONSENT_VERSION = 'news-v1';
 
 /**
  * consents.source: the switch at email sign-up and at the OAuth confirm step's create, PERFIL's
- * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe) and a
- * deletion request (sign-in PR 12).
+ * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe), a deletion
+ * request (sign-in PR 12), the terms' re-accept, a community node token's request ('node_token':
+ * the NodeRegistryDO's POST /host-consent, kind 'host') and the rules for hosts of a new version
+ * accepted again in MIS SERVIDORES ('host_reaccept': POST /nodes/mine/accept, kind 'host' too).
  */
-export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion';
+export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept' | 'node_token' | 'host_reaccept';
+/**
+ * consents.kind: the news opt-in, the terms of a version, and 'host': the rules for hosts of a
+ * version (Terms section 12 and Annex B) accepted AND 18 or older declared, both with the request
+ * of a community node token, or both again in MIS SERVIDORES once the terms changed version. A
+ * 'host' row is never written without both (acceptHost).
+ */
+export type ConsentKind = 'news' | 'terms' | 'host';
 /** users.unsub_id: 16 random bytes as base64url, no padding (randomToken). It carries nothing of the account (review point S-L1). */
 export const UNSUB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 /** What POST /api/me/consent answers: the newest row of each kind wins (news granted; the terms version granted, null for none). */
@@ -259,6 +271,13 @@ export const DELETION_CONSENT_SOURCE: ConsentSource = 'deletion';
  * A placeholder until the lawyer answers.
  */
 export const CONSENT_PROOF_KEEP_MS = 2 * 365 * DAY_MS;
+/**
+ * The proof of the rules for hosts (consents kind 'host': Terms section 12 and Annex B, with the
+ * 18-or-older declaration) stays 3 years from the purge (Privacy §6, the "Prueba mínima" row, §11
+ * and §12.3 of version (b)): it shows the host took on Annex B, the processor's clauses, for as
+ * long as a player's claim for damages may come (3 years).
+ */
+export const HOST_CONSENT_PROOF_KEEP_MS = 3 * 365 * DAY_MS;
 
 /** A sanction mark's kind (sanction_marks.key, §1.3): 'e' an email canon (its own, its hint's, a held one), 'g' a Google sub, 'd' a Discord id. */
 export type MarkKind = 'e' | 'g' | 'd';
@@ -813,6 +832,49 @@ export class AccountStore {
     });
   }
 
+  // ---- deletion on request (the legal draft's P4: Ley 25.326 art. 16.2, 5 business days) -----------
+
+  /** The account an operator names (POST /api/admin/account-delete): its id (16 hex), else its username as usernameKey compares names; null for none. */
+  accountIdOf(account: string): string | null {
+    const a = account.trim();
+    if (/^[0-9a-f]{16}$/.test(a) && this.userById(a) !== null) return a;
+    const name = a.length > 0 && a.length <= USERNAME_MAX * 2 ? this.userByKey(usernameKey(a)) : null;
+    return name === null ? null : str(name.id);
+  }
+
+  /**
+   * The project's deletion on request (POST /api/admin/account-delete), one transaction, before its
+   * purge: refused for no account ('no_user'), the project's own ('maintainer_account', as every
+   * deletion) and a name typed wrong ('bad_confirm', usernameKey's comparison, as POST
+   * /api/me/delete's). A suspended account, one without an address and one whose deletion is
+   * pending already are taken: the 14 days to cancel are the player's choice in PERFIL, a request by
+   * mail is done at once. The purge is due now (delete_purge_at = now; delete_requested_at kept from
+   * the player's own request, else now), and what requestDeletion does at once is done too: every
+   * device signed out, the news withdrawn, every live mailed proof dead (the cancel link included:
+   * nothing calls this one off). The caller purges it (purgeAccount, the alarm's own path) right
+   * after. Resolves when the deletion was first asked.
+   */
+  forceDeletion(userId: string, confirm: unknown, now: number): { requestedAt: number } | 'no_user' | 'maintainer_account' | 'bad_confirm' {
+    return this.tx(() => {
+      const why = this.deletionRefusal(userId);
+      if (why !== null) return why;
+      const u = this.userById(userId) as Row;
+      if (typeof confirm !== 'string' || confirm.length > USERNAME_MAX * 2 || usernameKey(confirm.trim()) !== str(u.ukey)) return 'bad_confirm' as const;
+      const requestedAt = this.pendingDeletion(u) && num(u.delete_requested_at) > 0 ? num(u.delete_requested_at) : now;
+      this.sql.exec('UPDATE users SET delete_requested_at = ?, delete_purge_at = ? WHERE id = ?', requestedAt, now, userId);
+      this.deleteRefreshOf(userId);
+      if (this.newsGranted(userId)) this.consentIn(userId, 'news', NEWS_CONSENT_VERSION, false, DELETION_CONSENT_SOURCE, now);
+      this.killMailTokens({ userId }, ['reset', 'add_email', 'change_email', 'reauth', 'cancel_delete', 'undo_email'], now);
+      return { requestedAt };
+    });
+  }
+
+  /** One account as purgeCandidates lists it (the values its marks are made of), due or not; null for none. */
+  purgeCandidate(userId: string): PurgeCandidate | null {
+    const u = this.userById(userId);
+    return u === null ? null : { userId, values: this.markValues(u) };
+  }
+
   /** The values a purge marks (§3.13 step 1): the account's email canon, its hint's and the ones its undos hold, its Google sub and its Discord id. */
   private markValues(u: Row): Array<[MarkKind, string]> {
     const out: Array<[MarkKind, string]> = [];
@@ -888,10 +950,11 @@ export class AccountStore {
           marks++;
         }
       }
-      // The proof of what it consented to and withdrew outlives it: no source, address or name, only the tombstoned id.
+      // The proof of what it consented to and withdrew outlives it: no source, address or name, only
+      // the tombstoned id; the rules for hosts' a year longer than the rest.
       this.sql.exec(
-        'INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, ? FROM consents WHERE user_id = ? ORDER BY id',
-        now + CONSENT_PROOF_KEEP_MS, userId,
+        "INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, CASE WHEN kind = 'host' THEN ? ELSE ? END FROM consents WHERE user_id = ? ORDER BY id",
+        now + HOST_CONSENT_PROOF_KEEP_MS, now + CONSENT_PROOF_KEEP_MS, userId,
       );
       for (const table of PURGE_TABLES) this.sql.exec(`DELETE FROM ${table} WHERE user_id = ?`, userId);
       // Its mailed proofs: its own rows, and the sign-up rows it was made from (used_by).
@@ -987,6 +1050,8 @@ export class AccountStore {
       peak_mmr INTEGER NOT NULL DEFAULT 0, last_played INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, playlist, season))`);
     s.exec('CREATE INDEX IF NOT EXISTS ratings_board ON ratings(playlist, season, mu)');
+    // region: the host region (MatchDO's record host, a node match's assignment region). A MatchDO
+    // row written before November 2026's regional placement may name the queue hub instead.
     s.exec(`CREATE TABLE IF NOT EXISTS ranked_matches (
       match_id TEXT PRIMARY KEY, playlist TEXT NOT NULL, region TEXT NOT NULL, status TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '', blue INTEGER NOT NULL DEFAULT 0, red INTEGER NOT NULL DEFAULT 0,
@@ -1467,8 +1532,8 @@ export class AccountStore {
   /**
    * The highest level the account can reach (R6's ceiling) with the proofs this build takes: 2 with
    * a password (a v1 or v2 key: "confirm it's you" takes either) or a verified address (a code from
-   * its mailbox, sign-in PR 7), else 1, a press on a provider's page. Google's forced login joins it
-   * with the Google PR.
+   * its mailbox, sign-in PR 7), else 1, a press on a provider's page. Google never raises it: its
+   * account chooser is a press, and it cannot be asked for its password again.
    */
   private ceilingOf(u: Row): 1 | 2 {
     return (u.pw_hash !== null && u.pw_hash !== undefined) || (u.email_canon !== null && u.email_canon !== undefined) ? 2 : 1;
@@ -1491,9 +1556,11 @@ export class AccountStore {
       const u = this.userById(userId);
       if (u === null || num(u.banned) === 1) return 'no_user' as const;
       if (u[col] === null || u[col] === undefined) return 'not_linked' as const;
-      // A password is a way in by email (a verified address), or by the username until the cutoff (§2.8, §3.10).
+      // A password is a way in by email (a verified address) once it is the current key, or by the
+      // username until the cutoff (§2.8, §3.10). A key of before beside an address signs in nowhere
+      // (mailProfile): never the account's last way in, so Google's fill of it cannot leave a reset alone.
       const hasPassword = u.pw_hash !== null && u.pw_hash !== undefined;
-      const password = hasPassword && ((u.email_canon !== null && u.email_canon !== undefined) || !legacyClosed);
+      const password = hasPassword && (u.email_canon !== null && u.email_canon !== undefined ? num(u.pw_v) === PW_V_CURRENT : !legacyClosed);
       const ways = [password ? 1 : null, u.google_sub, u.discord_id].filter((v) => v !== null && v !== undefined).length;
       if (ways <= 1) return 'last_method' as const;
       if (this.maintainerIds.has(userId) && (!hasPassword || ways - 1 < 2)) return 'maintainer_two_ways' as const;
@@ -1670,9 +1737,11 @@ export class AccountStore {
    * identity got an owner meanwhile ('already_linked'), and when the address leads to an account,
    * a race included ('email_has_account': that account signs in and links). `lvl`: the callback's
    * level; the family's method is the provider. `news`: the news switch, a consent row only when it
-   * is on. `marks`: the identities' and their addresses' mark keys (§3.13 step 4).
+   * is on. `terms`: the terms version the notice above CREAR showed (the AccountsDO passes only the
+   * one in force), a 'terms' row when there is one. `marks`: the identities' and their addresses'
+   * mark keys (§3.13 step 4).
    */
-  createFromPending(pend: PendingIdentity, username: string, refreshHash: string | RefreshGrant, now: number, opts: { lvl?: 0 | 1 | 2; lang?: string; tz?: string; news?: boolean; marks?: MarkKeys } = {}): UserRef | 'username_taken' | 'lookalike' | 'email_has_account' | 'already_linked' {
+  createFromPending(pend: PendingIdentity, username: string, refreshHash: string | RefreshGrant, now: number, opts: { lvl?: 0 | 1 | 2; lang?: string; tz?: string; news?: boolean; terms?: string | null; marks?: MarkKeys } = {}): UserRef | 'username_taken' | 'lookalike' | 'email_has_account' | 'already_linked' {
     const idents = pendingIdents(pend);
     const lvl = opts.lvl ?? 0;
     return this.tx(() => {
@@ -1691,6 +1760,7 @@ export class AccountStore {
       const claimed = best !== undefined ? this.fillEmailIn(id, best, best.p, now) : null;
       this.applyMarksIn(id, [...idents.map((i) => markOf(opts.marks, providerMark(i.p), i.id)), markOf(opts.marks, 'e', claimed)], now);
       if (opts.news === true) this.consentIn(id, 'news', NEWS_CONSENT_VERSION, true, 'oauth_signup', now);
+      if (typeof opts.terms === 'string' && opts.terms !== '') this.consentIn(id, 'terms', opts.terms, true, 'oauth_signup', now);
       this.addRefresh(id, refreshHash, now, now, now, null, { lvl, method: pend.p });
       return { userId: id, username, car: DEFAULT_CAR, createdAt: now, authAt: now, authLvl: lvl };
     });
@@ -1870,7 +1940,7 @@ export class AccountStore {
   // ---- the news consent and unsubscribing (sign-in PR 13: the design's §2.11, §3.14) --------------
 
   /** The newest consent row of `kind` (the one that counts), null when the account has none. */
-  private newestConsent(userId: string, kind: 'news' | 'terms'): { granted: boolean; version: string } | null {
+  private newestConsent(userId: string, kind: ConsentKind): { granted: boolean; version: string } | null {
     const r = this.sql.exec('SELECT granted, version FROM consents WHERE user_id = ? AND kind = ? ORDER BY id DESC LIMIT 1', userId, kind).toArray()[0];
     return r === undefined ? null : { granted: num(r.granted) === 1, version: str(r.version) };
   }
@@ -1880,7 +1950,7 @@ export class AccountStore {
    * updates or deletes a row but the purge). A news grant mints the account's unsubscribe id when it
    * has none (§2.11), so every account that may get news has one.
    */
-  private consentIn(userId: string, kind: 'news' | 'terms', version: string, granted: boolean, source: ConsentSource, now: number): void {
+  private consentIn(userId: string, kind: ConsentKind, version: string, granted: boolean, source: ConsentSource, now: number): void {
     this.sql.exec('INSERT INTO consents (user_id, kind, version, granted, source, at) VALUES (?, ?, ?, ?, ?, ?)', userId, kind, version, granted ? 1 : 0, source, now);
     if (kind === 'news' && granted) this.sql.exec('UPDATE users SET unsub_id = ? WHERE id = ? AND unsub_id IS NULL', randomToken(), userId);
   }
@@ -1945,6 +2015,53 @@ export class AccountStore {
   }
 
   /**
+   * The re-accept sheet's ACEPTAR (POST /api/me/consent { kind: 'terms', version }, the legal
+   * draft's P1 and P33), one transaction: a 'terms' row of `version` (the one in force: the
+   * AccountsDO checks it against TERMS_VERSION), source 'reaccept', unless the account's newest
+   * terms row already is that version (a second press, another tab: nothing written, so the log
+   * grows by one row per version at most). A deletion pending writes nothing (the account is on its
+   * way out and plays nowhere). The account's consents after it.
+   */
+  acceptTerms(userId: string, version: string, now: number): ConsentState | 'no_user' | 'deletion_pending' {
+    return this.tx(() => {
+      const u = this.userById(userId);
+      if (u === null) return 'no_user' as const;
+      if (this.pendingDeletion(u)) return 'deletion_pending' as const;
+      const last = this.newestConsent(userId, 'terms');
+      if (last === null || !last.granted || last.version !== version) this.consentIn(userId, 'terms', version, true, 'reaccept', now);
+      return this.consentState(userId);
+    });
+  }
+
+  /** The version of the account's newest 'host' row when it is a grant (the rules for hosts it accepted last), else null. */
+  hostTerms(userId: string): string | null {
+    const last = this.newestConsent(userId, 'host');
+    return last !== null && last.granted ? last.version : null;
+  }
+
+  /**
+   * A community node token's acceptance (AccountsDO POST /host-consent, from the NodeRegistryDO,
+   * Prompt 2 A3), one transaction: a 'host' row of `version` (the one in force: the AccountsDO
+   * checks it, and that hosting is in it), granted, source 'node_token', meaning the rules for hosts
+   * of that version (Terms section 12 and Annex B) accepted and 18 or older declared; the caller
+   * writes it only with both. `source` 'host_reaccept' when they come again from MIS SERVIDORES for
+   * a new version (POST /nodes/mine/accept), the same row otherwise. Unless the newest 'host' row
+   * already is that version: one row per version at most. Refused: no such account, a deletion
+   * pending, or the terms of that version not accepted ('terms_required': the host rules are part
+   * of them). The purge copies the row to consent_proofs like any other.
+   */
+  acceptHost(userId: string, version: string, now: number, source: 'node_token' | 'host_reaccept' = 'node_token'): { hostTerms: string } | 'no_user' | 'deletion_pending' | 'terms_required' {
+    return this.tx(() => {
+      const u = this.userById(userId);
+      if (u === null) return 'no_user' as const;
+      if (this.pendingDeletion(u)) return 'deletion_pending' as const;
+      if (this.consentState(userId).terms !== version) return 'terms_required' as const;
+      if (this.hostTerms(userId) !== version) this.consentIn(userId, 'host', version, true, source, now);
+      return { hostTerms: version };
+    });
+  }
+
+  /**
    * The mail's unsubscribe (POST /api/news/unsubscribe, §2.11), one transaction: the account whose
    * unsub_id this is gets a news withdrawal (source 'unsubscribe') and a new random id, so the link
    * of an older mail does nothing any more. False for an id no account holds (nothing changes; the
@@ -1964,7 +2081,8 @@ export class AccountStore {
 
   /**
    * `legacyClosed`: the cutoff for passwords without a verified email has passed (the design's
-   * LEGACY_PASSWORD_UNTIL; none yet), so such a password no longer counts as a way in.
+   * LEGACY_PASSWORD_UNTIL; none yet), so such a password no longer counts as a way in. A password
+   * of before beside a verified email never counts: it signs in nowhere until it is re-keyed.
    */
   me(userId: string, now: number, legacyClosed: boolean = false): MeInfo | null {
     const u = this.userById(userId);
@@ -1978,7 +2096,8 @@ export class AccountStore {
     if (providers.includes('google') && num(u.google_linked_at) > 0) linkedAt.google = num(u.google_linked_at);
     if (providers.includes('discord') && num(u.discord_linked_at) > 0) linkedAt.discord = num(u.discord_linked_at);
     const email = u.email_canon !== null && u.email_canon !== undefined && u.email !== null && u.email !== undefined ? str(u.email) : null;
-    const passwordCounts = providers.includes('password') && (email !== null || !legacyClosed);
+    // As unlink counts it: by email once it is the current key, by the username until the cutoff.
+    const passwordCounts = providers.includes('password') && (email !== null ? num(u.pw_v) === PW_V_CURRENT : !legacyClosed);
     const waysIn = providers.filter((p) => p !== 'password').length + (passwordCounts ? 1 : 0);
     return {
       linkedAt,
@@ -1998,6 +2117,10 @@ export class AccountStore {
       emailVerified: email !== null,
       legacy: num(u.pw_v) === PW_V_LEGACY,
       news: this.newsGranted(userId),
+      // The terms version the account accepted last (the legal draft's P1, P33): the game asks again when TERMS_VERSION is another.
+      terms: this.consentState(userId).terms,
+      // The rules for hosts it accepted last (a 'host' row), null for none: every account's before the opening.
+      hostTerms: this.hostTerms(userId),
       deletionAt: num(u.delete_purge_at),
       waysIn,
       // PERFIL's checklist (§3.12 step 5), for the project's maintainer accounts only: booleans and a count.
@@ -2292,6 +2415,20 @@ export class AccountStore {
     return { ids: hidIds, names: hidNames };
   }
 
+  /**
+   * The usernames of the accounts among `ids` as they are now (POST /usernames: the public list of
+   * community servers names a host that chose it by its name of today, never one a record kept,
+   * which another account may hold after a rename). A purged or unknown id is left out.
+   */
+  usernames(ids: readonly string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of new Set(ids)) {
+      const u = this.userById(id);
+      if (u !== null) out[id] = str(u.username);
+    }
+    return out;
+  }
+
   // ---- cars and the hosts' shop -------------------------------------------------------------------
 
   /** Item ids the account owns (claimed or granted), sorted. */
@@ -2351,6 +2488,15 @@ export class AccountStore {
   frozen(userId: string): string | null {
     const r = this.sql.exec('SELECT reason, at, cleared_at FROM host_freeze WHERE user_id = ?', userId).toArray()[0];
     return r && num(r.at) > num(r.cleared_at) ? str(r.reason) : null;
+  }
+
+  /**
+   * GET /host-frozen (a maintainer, through the NodeRegistryDO): the wallets frozen now (`at` past
+   * `cleared_at`), newest first, at most `limit`; `more` when there are others. Read only.
+   */
+  frozenWallets(limit: number): { frozen: Array<{ account: string; reason: string; at: number }>; more: boolean } {
+    const rows = this.sql.exec('SELECT user_id, reason, at FROM host_freeze WHERE at > cleared_at ORDER BY at DESC, user_id LIMIT ?', limit + 1).toArray();
+    return { frozen: rows.slice(0, limit).map((r) => ({ account: str(r.user_id), reason: str(r.reason), at: num(r.at) })), more: rows.length > limit };
   }
 
   /**

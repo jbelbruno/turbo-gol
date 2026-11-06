@@ -5,7 +5,8 @@
  * production NodeRegistryDO calls the same methods (see docs/INTEGRACION.md) with a `store` that
  * writes every durable change to its SQLite storage as it happens (persist.ts), and `restore`
  * loads the rows back after a restart. Heartbeats never write: what they carry comes back with
- * the next one.
+ * the next one. A change of a node is also an event (`events`, NodeEventKind) for the maintainers'
+ * history, and so is each online / offline transition, the only time lastSeen is written (seenAt).
  *
  * Lifecycle of a node (status):
  *   pending    registered with a valid token; not proven reachable yet -> no matches
@@ -22,11 +23,23 @@
  *              STRIKE_COOLDOWN_MS, back to the previous status. Trusted nodes are never paused:
  *              a failed verification on one is a determinism bug and only raises an alert.
  *   banned     manual, permanent
+ *
+ * Beside the status (NodeStatus is the nodes' protocol, so these are fields of the record):
+ *   retired        a maintainer took the node off the books (retire): it no longer counts toward its
+ *                  operator's cap, takes no match and is refused at every login, like a banned one;
+ *                  its record stays for the panel.
+ *   trustRemovedAt its operator left the trusted operators (NODE_TRUSTED_OPERATORS) while the node
+ *                  was trusted: restore() sent it back to probation, its 20 verified matches to earn.
+ *
+ * A community operator (one outside the project) has at most MAX_NODES_PER_OPERATOR nodes and, when
+ * the registry is given CommunityRules (the NodeRegistryDO), registers only a wss host on port 443
+ * behind a DNS name, seen from its token's continent, under a name of its own (communityRefusal),
+ * that does not resolve to Cloudflare's proxy (behindProxy).
  */
 import { HEARTBEAT_TIMEOUT_MS } from '../shared/controlProtocol';
 import type { BuildId, HeartbeatData, HelloData, NodeCapacity, NodeRole, NodeSpecs, NodeStatus, NodeTransport, RegisterRequest } from '../shared/controlProtocol';
 import { isValidPublicKey, randomB64, randomHexId, sha256Hex } from '../shared/edcrypto';
-import { nodeFromRow, tokenFromRow } from './persist';
+import { nodeFromRow, rowWasTrusted, tokenFromRow } from './persist';
 import type { NodeRow, RegistryStore, TokenRow } from './persist';
 
 export const TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -37,14 +50,126 @@ export const STRIKE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const STRIKE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 /** A second strike pause within this window sends an active node back to probation (20 verified matches again). */
 export const REPEAT_PAUSE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-export const MAX_NODES_PER_OPERATOR = 10;
 /**
- * Stage 1: a trusted operator (the project) runs one VPS and keeps room for its replacement. A
- * trusted node is active at once and verifies its own ranked matches, so whoever holds the
- * project account's password must not be able to add more of them than this.
+ * The nodes an operator outside the project may have (the owner's COMMUNITY_MAX_NODES), its banned
+ * ones included (takesSlot): with OPERATOR_MATCHES_MAX (controlPlane.ts), what keeps one operator
+ * from filling a region.
+ */
+export const MAX_NODES_PER_OPERATOR = 3;
+/**
+ * The nodes a trusted operator (the project) may have: RegistryOptions.maxTrustedNodes, the Worker's
+ * NODE_TRUSTED_MAX_NODES var, bounded by trustedNodeCap to TRUSTED_NODES_MIN..TRUSTED_NODES_MAX; this
+ * many when it is not set, so a fork stays at the safe end. Each slot is a node with full trust:
+ * active at once, verifying ranked matches (its own included), its no-shows and abandons taken at its
+ * word, never paused. Minting its token takes the project account's password typed within the last
+ * 15 minutes (the Worker's maintainer gate), so the cap is what a stolen password, or a level-2
+ * session in the wrong hands, could add before anyone reads the ALERT lines: kept low on purpose.
+ * A retired node takes no slot, and neither does a banned one of a trusted operator.
  */
 export const MAX_TRUSTED_NODES_PER_OPERATOR = 2;
+export const TRUSTED_NODES_MIN = 2;
+export const TRUSTED_NODES_MAX = 8;
 export const MAX_CAPACITY = 200;
+
+/** A trusted operator's node cap from its setting (a var: text or a number): TRUSTED_NODES_MIN..MAX, MAX_TRUSTED_NODES_PER_OPERATOR when unset or unreadable. */
+export function trustedNodeCap(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d{1,3}\s*$/.test(v) ? Number(v) : NaN;
+  if (!Number.isInteger(n)) return MAX_TRUSTED_NODES_PER_OPERATOR;
+  return Math.min(TRUSTED_NODES_MAX, Math.max(TRUSTED_NODES_MIN, n));
+}
+
+/**
+ * A DNS name a node may be pinned to (a token's publicHost), lower-cased, or null: install.sh's
+ * is_dns_name (labels of letters, digits and inner hyphens, at least two, the last one starting
+ * with a letter), at most 253 characters. So no scheme, no port, no path and no IP address (an
+ * IPv4 one ends in digits, an IPv6 one has colons). Whether the name is a public one is the
+ * Worker's to check (nodeWatch.ts probeTargetOk).
+ */
+export function validPublicHost(v: unknown): string | null {
+  if (typeof v !== 'string' || v.length > 253) return null;
+  const h = v.toLowerCase();
+  return /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(h) ? h : null;
+}
+
+/** The host of a public URL as the URL parser reads it (lower case; an IPv6 one in brackets), or null. */
+export function hostOf(u: string): string | null {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The parsed host is an IP address. The parser of a special scheme (ws, wss, http, https) turns
+ * every IPv4 form (hex, octal, fewer parts) into the dotted one, and keeps an IPv6 one in brackets.
+ */
+export function isIpHost(host: string): boolean {
+  return host.startsWith('[') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** What a purged operator's records are keyed by (Registry.forgetOperator): this and random hex, which nothing links to the account. */
+export const DELETED_OPERATOR_PREFIX = 'deleted:';
+
+/** `operatorId` is a purged account's opaque key (forgetOperator), not an account: nothing reaches it any more. */
+export function isDeletedOperator(operatorId: string): boolean {
+  return operatorId.startsWith(DELETED_OPERATOR_PREFIX);
+}
+
+/** A node a maintainer retired: out of the cap, placement and counts, refused at every login. */
+export function isRetired(n: Pick<NodeRecord, 'retiredAt'>): boolean {
+  return n.retiredAt !== undefined && n.retiredAt !== null;
+}
+
+/** The short id the maintainers' panel names a token by: the start of its hash, never the token. */
+export function tokenIdOf(t: Pick<TokenRecord, 'hash'>): string {
+  return t.hash.slice(0, 12);
+}
+
+export type TokenState = 'unused' | 'used' | 'expired' | 'revoked';
+
+/** Where a token stands at `now`. */
+export function tokenState(t: TokenRecord, now: number): TokenState {
+  if (t.usedBy !== null) return 'used';
+  if (t.revokedAt !== undefined && t.revokedAt !== null) return 'revoked';
+  return t.expiresAt < now ? 'expired' : 'unused';
+}
+
+/**
+ * What the maintainers' panel keeps of a node's story (the NodeRegistryDO's node_events): the
+ * registry's own (registered, token_used, status_change, strike, pause, offline, online, retire,
+ * trust_removed) and the control plane's (verify_failed, probe_failed, unreachable, reachable,
+ * drain, link_quiet, link_back, link_4408, late_messages, update_sent). Each is a change, never a
+ * heartbeat that repeats the last one.
+ */
+export type NodeEventKind =
+  | 'registered'
+  | 'token_used'
+  | 'status_change'
+  | 'strike'
+  | 'pause'
+  | 'verify_failed'
+  | 'probe_failed'
+  | 'unreachable'
+  | 'reachable'
+  | 'offline'
+  | 'online'
+  | 'drain'
+  | 'retire'
+  | 'trust_removed'
+  | 'link_quiet'
+  | 'link_back'
+  | 'link_4408'
+  | 'late_messages'
+  | 'update_sent';
+
+/**
+ * Where a node's events go (RegistryOptions.events, ControlPlaneOptions.events), as the log takes
+ * its lines: synchronous, and it never throws back (the NodeRegistryDO writes a row, and a row that
+ * fails costs the history one line, never a registration or a match). `detail`: a short line, never
+ * a player's name or id.
+ */
+export type NodeEventSink = (nodeId: string, kind: NodeEventKind, detail: string | null) => void;
 
 export interface Operator {
   /** The operator's account id (the session `sub`): reputation and rewards attach to it. */
@@ -61,6 +186,12 @@ export interface TokenRecord {
   createdAt: number;
   expiresAt: number;
   usedBy: string | null;
+  /** The DNS name its node must register on, and keep (absent or null: any address). */
+  publicHost?: string | null;
+  /** The roles its node may register with (absent or null: whatever its operator may have). */
+  roles?: NodeRole[] | null;
+  /** A maintainer revoked it before it was used (POST /nodes/admin/tokens/revoke): it registers nothing. */
+  revokedAt?: number | null;
 }
 
 export interface NodeCounters {
@@ -73,6 +204,12 @@ export interface NodeCounters {
   strikes: number;
   /** Verified matches since the node last entered probation (promotion to active counts these). */
   probationVerified: number;
+  /**
+   * Assignments a community node refused with no excuse (when the assign was sent it was online,
+   * and by the control plane's own count not full, draining or at its egress cap: ControlPlane's
+   * refusal rule). 0 in rows from before it (persist.ts), and always on the project's nodes.
+   */
+  refused?: number;
 }
 
 export interface NodeRecord {
@@ -116,6 +253,25 @@ export interface NodeRecord {
   /** Strike suspensions lift by themselves at this time (null: manual review). */
   suspendedUntil: number | null;
   statusBeforeSuspension: NodeStatus | null;
+  /** The DNS name its token pinned (publicUrl stays on it), or null. Rows from before it: null (persist.ts). */
+  publicHost?: string | null;
+  /** When a maintainer retired it (isRetired), and why; null while it is not. */
+  retiredAt?: number | null;
+  retiredReason?: string | null;
+  /** When it lost its operator's trust (restore), or null; cleared when the operator is trusted again. */
+  trustRemovedAt?: number | null;
+  /**
+   * lastSeen as of the node's last online or offline transition, written then and only then (a
+   * heartbeat never writes; lastSeen itself is memory only): what a restart still knows of when an
+   * offline node was last heard. Null before its first transition, and in rows from before it.
+   */
+  seenAt?: number | null;
+  /**
+   * The continent Cloudflare saw the registration come from (a two-letter code, '' when it said
+   * none), or null when nobody told (the reference server, rows from before it). A community node's
+   * must be its token's region (CommunityRules.regionCheck); a project node's only shows in the panel.
+   */
+  seenContinent?: string | null;
 }
 
 export type RegisterResult = { ok: true; node: NodeRecord } | { ok: false; code: string; message?: string };
@@ -131,7 +287,53 @@ export interface RegistryOptions {
   store?: RegistryStore;
   /** The control plane's log (default console.log); its ALERT lines are for the maintainers. */
   log?: (msg: string) => void;
+  /** How many nodes a trusted operator may have (bounded by trustedNodeCap; MAX_TRUSTED_NODES_PER_OPERATOR when absent). */
+  maxTrustedNodes?: number;
+  /**
+   * Refuse a wss publicUrl on an IP address (ip_not_supported), at registration and at a hello: the
+   * reachability probe is a fetch of https://<host>/healthz, and a Worker's fetch cannot reach an IP
+   * address, so such a node would stay pending. The NodeRegistryDO sets it (but on a loopback base,
+   * wrangler dev); the reference server and the tests, which run on addresses, do not.
+   */
+  refuseIpUrls?: boolean;
+  /** A node's events, for the maintainers' history (none: not kept). */
+  events?: NodeEventSink;
+  /**
+   * The rules a node of an operator outside the project registers under (the NodeRegistryDO sets
+   * them; the reference server and the tests, which run home PCs and addresses, do not). Each is
+   * checked before the token is spent, so the installer can be run again.
+   */
+  community?: CommunityRules;
+  /** The operator may not host any more (a maintainer blocked it): its tokens register nothing (operator_blocked). */
+  operatorBlocked?: (operatorId: string) => boolean;
 }
+
+/**
+ * What a community node must be to register (Prompt 2, A5, A6, A13). Only a VPS behind a DNS name
+ * for now: wss on port 443 (rtc_not_available for WebRTC, bad_public_url for another port or a name
+ * under a reserved domain), in the continent its token's region names (region_mismatch), with a
+ * name no node of its region holds whatever the case, nor any project node (name_taken).
+ */
+export interface CommunityRules {
+  /** Domains no community node's host may be, or be under (the project's). */
+  reservedDomains: readonly string[];
+  /** The continent Cloudflare saw (register's `seen`) must be the token's region; none or another one is refused. */
+  regionCheck: boolean;
+  /**
+   * Whether the node's wss host resolves to Cloudflare's proxy, which would open every player's
+   * connection (Terms, Annex B, point 6: a host gives no one but the provider of its machine the
+   * players' data): true refuses the registration (behind_proxy), and so does null, a lookup that
+   * failed (dns_unavailable). Asked last, before the token is spent. Absent: not asked.
+   */
+  behindProxy?: (host: string) => Promise<boolean | null>;
+}
+
+/** `host` is one of the rules' reserved domains, or under one. */
+function reservedHost(rules: CommunityRules, host: string): boolean {
+  return rules.reservedDomains.some((d) => host === d || host.endsWith('.' + d));
+}
+
+const RTC_NOT_AVAILABLE: RegisterResult ={ ok: false, code: 'rtc_not_available', message: 'only a server with a DNS name, by wss on port 443, for now: run the installer with --public-host <name>' };
 
 function cleanName(s: unknown, fallback: string): string {
   if (typeof s !== 'string') return fallback;
@@ -166,22 +368,77 @@ export class Registry {
   private readonly opts: RegistryOptions;
   private readonly trusted: Set<string>;
   private readonly log: (msg: string) => void;
+  private readonly event: NodeEventSink;
+  private readonly maxTrusted: number;
 
   constructor(opts: RegistryOptions = {}) {
     this.opts = opts;
     this.trusted = new Set(opts.trustedOperators ?? []);
     this.log = opts.log ?? ((m) => console.log(`[control] ${m}`));
+    this.event = opts.events ?? (() => undefined);
+    this.maxTrusted = trustedNodeCap(opts.maxTrustedNodes);
+  }
+
+  /** A status change for the history: `from` -> the node's status now, and its reason. Nothing when it stayed. */
+  private statusEvent(n: NodeRecord, from: NodeStatus): void {
+    if (n.status !== from) this.event(n.nodeId, 'status_change', `${from} -> ${n.status}${n.statusReason ? `: ${n.statusReason}` : ''}`);
+  }
+
+  /**
+   * The node goes in or out of placement (`online` changes): an event, and seenAt, which the caller
+   * writes (the one write a transition costs: lastSeen itself is never written).
+   */
+  private transition(n: NodeRecord, online: boolean, now: number): void {
+    n.online = online;
+    n.seenAt = online ? now : n.lastSeen > 0 ? n.lastSeen : (n.seenAt ?? null);
+    this.event(n.nodeId, online ? 'online' : 'offline', null);
   }
 
   /**
    * Load the rows written through `store` (a fresh registry, after a restart). `trusted` comes
-   * from this registry's trusted operators, not from the rows.
+   * from this registry's trusted operators, not from the rows: a node written as trusted whose
+   * operator is no longer one loses what that trust gave it (trustLost), once, with an ALERT.
    */
-  restore(rows: { tokens: TokenRow[]; nodes: NodeRow[] }): void {
+  restore(rows: { tokens: TokenRow[]; nodes: NodeRow[] }, now: number = Date.now()): void {
     this.tokens.clear();
     this.nodes.clear();
     for (const r of rows.tokens) this.tokens.set(r.hash, tokenFromRow(r));
-    for (const r of rows.nodes) this.nodes.set(r.nodeId, nodeFromRow(r, this.trusted));
+    for (const r of rows.nodes) {
+      const n = nodeFromRow(r, this.trusted);
+      this.nodes.set(r.nodeId, n);
+      const was = rowWasTrusted(r);
+      if (!n.trusted && was) {
+        this.trustLost(n, now);
+      } else if (n.trusted && (!was || n.trustRemovedAt)) {
+        // Trusted again, or newly: the row says so now, so a later removal is seen at its start.
+        n.trustRemovedAt = null;
+        this.save(n);
+      }
+    }
+  }
+
+  /**
+   * A trusted node skipped probation, had its casual matches go unverified and its word taken on
+   * no-shows; without the trust it must earn its PROBATION_MATCHES verified matches like any
+   * community node, never stay active on the old trust. In service it goes back to probation; a
+   * pending, suspended or banned node keeps its status (a pending one reaches probation when it is
+   * proven reachable, never active). Written at once: the next start sees an untrusted row.
+   */
+  private trustLost(n: NodeRecord, now: number): void {
+    const was = n.status;
+    if (n.status === 'active' || n.status === 'probation') {
+      n.status = 'probation';
+      n.statusReason = 'trust_removed';
+    }
+    if (n.statusBeforeSuspension === 'active') n.statusBeforeSuspension = 'probation';
+    n.counters.probationVerified = 0;
+    n.trustRemovedAt = now;
+    this.save(n);
+    this.event(n.nodeId, 'trust_removed', `${was} -> ${n.status}, 0 of ${PROBATION_MATCHES} verified matches`);
+    this.statusEvent(n, was);
+    this.log(
+      `ALERT node ${n.name} (${n.nodeId}) of ${n.operatorName} (${n.operatorId}) lost its trust (the operator is no longer in NODE_TRUSTED_OPERATORS): ${was} -> ${n.status}, 0 of ${PROBATION_MATCHES} verified matches`,
+    );
   }
 
   private save(n: NodeRecord): void {
@@ -194,6 +451,7 @@ export class Registry {
     for (const n of this.nodes.values()) {
       if (n.operatorId !== id || n.trusted) continue;
       n.trusted = true;
+      n.trustRemovedAt = null;
       this.save(n);
     }
   }
@@ -204,8 +462,12 @@ export class Registry {
 
   // ---- tokens -----------------------------------------------------------------------------
 
-  /** A one-time token, valid TOKEN_TTL_MS, shown to the operator once (only its hash is kept). */
-  async createToken(op: Operator, region: string, now: number, name?: string): Promise<{ token: string; expiresAt: number }> {
+  /**
+   * A one-time token, valid TOKEN_TTL_MS, shown to the operator once (only its hash is kept).
+   * `pin`: the DNS name its node must register on (validPublicHost; checked by the caller) and the
+   * roles it may take.
+   */
+  async createToken(op: Operator, region: string, now: number, name?: string, pin: { publicHost?: string | null; roles?: NodeRole[] | null } = {}): Promise<{ token: string; expiresAt: number }> {
     if (this.opts.regions && !this.opts.regions.includes(region)) throw new Error('bad region');
     const token = TOKEN_PREFIX + randomB64(24);
     const rec: TokenRecord = {
@@ -217,8 +479,24 @@ export class Registry {
       createdAt: now,
       expiresAt: now + TOKEN_TTL_MS,
       usedBy: null,
+      ...(pin.publicHost ? { publicHost: pin.publicHost } : {}),
+      ...(pin.roles && pin.roles.length > 0 ? { roles: [...pin.roles] } : {}),
     };
     this.tokens.set(rec.hash, rec);
+    this.opts.store?.tokens([rec]);
+    this.pruneTokens(now);
+    // Its node will be trusted: it verifies ranked matches, its own included. A token nobody on the
+    // team asked for means the project account is in someone else's hands.
+    if (this.trusted.has(op.id)) this.log(`ALERT registration token created for trusted operator ${op.name} (${op.id}), region ${region}${rec.publicHost ? ` for ${rec.publicHost}` : ''}`);
+    return { token, expiresAt: rec.expiresAt };
+  }
+
+  /**
+   * The tokens past TOKEN_TTL_MS after they expired, used or not, out of the map and the store: at
+   * each new token, and on the NodeRegistryDO's cron (every 5 minutes), so none outlives that hour
+   * when nobody asks for another (the policy's "2 hours" for a code). Returns how many went.
+   */
+  pruneTokens(now: number): number {
     const pruned: string[] = [];
     for (const [h, t] of this.tokens) {
       if (t.expiresAt < now - TOKEN_TTL_MS) {
@@ -226,12 +504,8 @@ export class Registry {
         pruned.push(h);
       }
     }
-    this.opts.store?.tokens([rec]);
     if (pruned.length > 0) this.opts.store?.dropTokens(pruned);
-    // Its node will be trusted: it verifies ranked matches, its own included. A token nobody on the
-    // team asked for means the project account is in someone else's hands.
-    if (this.trusted.has(op.id)) this.log(`ALERT registration token created for trusted operator ${op.name} (${op.id}), region ${region}`);
-    return { token, expiresAt: rec.expiresAt };
+    return pruned.length;
   }
 
   /** Every token kept (unused, used, and expired ones until they are pruned). */
@@ -239,26 +513,123 @@ export class Registry {
     return [...this.tokens.values()];
   }
 
+  /**
+   * A maintainer revokes an unused token by its short id (tokenIdOf): from then on it registers
+   * nothing. 'none' when no kept token has that id (or more than one: never a guess), 'used' when its
+   * node registered already (retire the node instead), 'already' when it was revoked before.
+   */
+  revokeToken(id: string, now: number): { result: 'revoked' | 'already' | 'used' | 'none'; token?: TokenRecord } {
+    const hits = id.length >= 8 ? this.tokenList().filter((t) => t.hash.startsWith(id)) : [];
+    if (hits.length !== 1) return { result: 'none' };
+    const t = hits[0];
+    if (t.usedBy !== null) return { result: 'used', token: t };
+    if (t.revokedAt !== undefined && t.revokedAt !== null) return { result: 'already', token: t };
+    t.revokedAt = now;
+    this.opts.store?.tokens([t]);
+    return { result: 'revoked', token: t };
+  }
+
   // ---- registration ---------------------------------------------------------------------------
 
-  /** How many nodes this operator may have: fewer for a trusted one (MAX_TRUSTED_NODES_PER_OPERATOR). */
+  /** How many nodes this operator may have: fewer for a trusted one (maxTrustedNodes). */
   private nodeCap(operatorId: string): number {
-    return this.trusted.has(operatorId) ? MAX_TRUSTED_NODES_PER_OPERATOR : MAX_NODES_PER_OPERATOR;
+    return this.trusted.has(operatorId) ? this.maxTrusted : MAX_NODES_PER_OPERATOR;
+  }
+
+  /**
+   * The nodes that take a slot of their operator's cap: never a retired one; a banned one only for a
+   * community operator (else its owner would register again), not for the project's, whose ban is
+   * its own decision about a machine it no longer runs.
+   */
+  private takesSlot(n: NodeRecord): boolean {
+    if (isRetired(n)) return false;
+    return !(n.status === 'banned' && this.trusted.has(n.operatorId));
+  }
+
+  /** An operator's slots: the nodes that take one (takesSlot) and its cap. */
+  slots(operatorId: string): { used: number; max: number } {
+    return { used: this.byOperator(operatorId).filter((n) => this.takesSlot(n)).length, max: this.nodeCap(operatorId) };
   }
 
   /** The operator already has every node it may have. A trusted one at its cap gets an ALERT: a token nobody on the team used. */
   private atCap(tok: TokenRecord): boolean {
-    const cap = this.nodeCap(tok.operatorId);
-    if (this.byOperator(tok.operatorId).length < cap) return false;
-    if (this.trusted.has(tok.operatorId)) this.log(`ALERT registration refused: trusted operator ${tok.operatorName} (${tok.operatorId}) already has its ${cap} nodes`);
+    const { used, max } = this.slots(tok.operatorId);
+    if (used < max) return false;
+    if (this.trusted.has(tok.operatorId)) this.log(`ALERT registration refused: trusted operator ${tok.operatorName} (${tok.operatorId}) already has its ${max} nodes`);
     return true;
   }
 
-  async register(req: RegisterRequest, now: number): Promise<RegisterResult> {
+  /**
+   * The name of a node registered with none (no --name, a token without one): its region and a
+   * number, `sa-node-3`. Never its operator's name, which the public list (publicList.ts) would show
+   * beside the "Anfitrión <n>" that hides it, nor the start of the operator's id (the name a token
+   * carries when the account's could not be read). The number counts the region's records, which
+   * are never deleted, and skips a name already taken whatever its case, so two nodes never share one.
+   */
+  private unnamedName(region: string): string {
+    const taken = new Set(this.list().map((n) => n.name.toLowerCase()));
+    let k = this.list().filter((n) => n.region === region).length + 1;
+    while (taken.has(`${region.toLowerCase()}-node-${k}`)) k++;
+    return `${region.toLowerCase()}-node-${k}`;
+  }
+
+  /**
+   * `name` is not free for a community node of `region` (A13): a node of that region that is not
+   * retired holds it, whatever the case, or a project node anywhere does (a community server must
+   * never pass for one of the project's). Project nodes are never asked: their names are the team's.
+   * `except`: a node renamed (rename) does not hold its own name against itself.
+   */
+  nameTaken(region: string, name: string, except: string | null = null): boolean {
+    const k = name.toLowerCase();
+    return this.list().some((n) => n.nodeId !== except && n.name.toLowerCase() === k && (n.trusted || (n.region === region && !isRetired(n))));
+  }
+
+  /**
+   * Its operator renames a node (POST /nodes/mine/rename, Prompt 2 A12): `name` as a registration's
+   * --name is cleaned, at least 2 characters left (bad_name), and for a community node free in its
+   * region (nameTaken, A13: name_taken). Written; the node's own process keeps the name it runs
+   * with (its Welcome is the node's word: the players' mark is the Worker's, A15). Null when there is
+   * no such node or it is retired.
+   */
+  rename(id: string, name: string): { ok: true; node: NodeRecord; was: string } | { ok: false; code: 'bad_name' | 'name_taken' } | null {
+    const n = this.nodes.get(id);
+    if (!n || isRetired(n)) return null;
+    const clean = cleanName(name, '');
+    if (clean === '') return { ok: false, code: 'bad_name' };
+    if (!n.trusted && this.opts.community && this.nameTaken(n.region, clean, n.nodeId)) return { ok: false, code: 'name_taken' };
+    const was = n.name;
+    n.name = clean;
+    this.save(n);
+    return { ok: true, node: n, was };
+  }
+
+  /** The CommunityRules refusal of a host's registration, or null (`host`: its wss host; its transports are wss alone, checked before). */
+  private communityRefusal(rules: CommunityRules, tok: TokenRecord, req: RegisterRequest, host: string | null, seen: { continent?: string | null }): RegisterResult | null {
+    if (host === null) return RTC_NOT_AVAILABLE;
+    const reserved = reservedHost(rules, host);
+    if (new URL(req.publicUrl as string).port !== '' || reserved) {
+      return { ok: false, code: 'bad_public_url', message: reserved ? `a community server's name is never under ${rules.reservedDomains.join(', ')}` : 'wss://<name> on port 443, no other port' };
+    }
+    if (rules.regionCheck && (seen.continent ?? '') !== tok.region) {
+      return { ok: false, code: 'region_mismatch', message: `this machine is seen from ${seen.continent ? seen.continent : 'no known continent'}, and the token is for ${tok.region}: ask for a token of the region it is in` };
+    }
+    const explicit = typeof req.name === 'string' ? req.name : tok.name;
+    const name = explicit ? cleanName(explicit, '') : '';
+    if (name !== '' && this.nameTaken(tok.region, name)) return { ok: false, code: 'name_taken', message: `a server of the region is already called ${name}: choose another --name` };
+    return null;
+  }
+
+  /**
+   * `seen`: what the Worker saw of the caller (Cloudflare's continent), kept on the node
+   * (seenContinent) and, for a community node, checked against its token (CommunityRules).
+   */
+  async register(req: RegisterRequest, now: number, seen: { continent?: string | null } = {}): Promise<RegisterResult> {
     if (!req || typeof req.token !== 'string' || !req.token.startsWith(TOKEN_PREFIX) || req.token.length > 80) return { ok: false, code: 'bad_token' };
     const tok = this.tokens.get(await sha256Hex(req.token));
     if (!tok || tok.usedBy !== null) return { ok: false, code: 'bad_token', message: 'unknown or already used' };
+    if (tok.revokedAt !== undefined && tok.revokedAt !== null) return { ok: false, code: 'token_revoked', message: 'a maintainer revoked this token: ask for a new one' };
     if (tok.expiresAt < now) return { ok: false, code: 'token_expired' };
+    if (!this.trusted.has(tok.operatorId) && this.opts.operatorBlocked?.(tok.operatorId)) return { ok: false, code: 'operator_blocked', message: 'this account may not host servers' };
     if (this.atCap(tok)) return { ok: false, code: 'too_many_nodes' };
     if (!(await isValidPublicKey(req.publicKey))) return { ok: false, code: 'bad_public_key' };
     for (const n of this.nodes.values()) if (n.publicKey === req.publicKey) return { ok: false, code: 'key_in_use' };
@@ -269,13 +640,31 @@ export class Registry {
     if (roles.includes('verify') && !this.trusted.has(tok.operatorId)) {
       return { ok: false, code: 'verify_reserved', message: 'only project nodes verify matches for now; register with --roles host' };
     }
+    if (tok.roles && roles.some((r) => !tok.roles?.includes(r))) return { ok: false, code: 'bad_roles', message: `this token is for --roles ${tok.roles.join(',')}` };
     const insecure = this.opts.allowInsecure === true;
     let transports: NodeTransport[] = [];
     if (roles.includes('host')) {
       const asked = Array.isArray(req.transports) ? req.transports : req.publicUrl ? ['wss'] : ['rtc'];
       transports = [...new Set(asked)].filter((t): t is NodeTransport => t === 'wss' || t === 'rtc');
       if (transports.length === 0) return { ok: false, code: 'bad_transports' };
+      // A community node is a VPS by wss for now (no TURN): said before anything about its address.
+      const community = this.opts.community !== undefined && !this.trusted.has(tok.operatorId);
+      if (community && (transports.includes('rtc') || !transports.includes('wss'))) return RTC_NOT_AVAILABLE;
       if (transports.includes('wss') && !validPublicUrl(req.publicUrl, insecure)) return { ok: false, code: 'bad_public_url', message: insecure ? 'ws(s)://host[:port]' : 'wss://host[:port]' };
+    }
+    // Before the token is spent: an installer run on the wrong machine or name can be run again.
+    const host = transports.includes('wss') ? hostOf(req.publicUrl as string) : null;
+    if (tok.publicHost && host !== tok.publicHost) return { ok: false, code: 'public_host_mismatch', message: `this token is for wss://${tok.publicHost}: run the installer with --public-host ${tok.publicHost}` };
+    if (host !== null && this.opts.refuseIpUrls === true && isIpHost(host)) {
+      return { ok: false, code: 'ip_not_supported', message: 'a wss node needs a DNS name (--public-host <name>): the control plane cannot probe an IP address' };
+    }
+    if (this.opts.community && !this.trusted.has(tok.operatorId) && roles.includes('host')) {
+      const refused = this.communityRefusal(this.opts.community, tok, req, host, seen);
+      if (refused) return refused;
+      // host is a wss name here (communityRefusal refused any other).
+      const proxied = host !== null && this.opts.community.behindProxy ? await this.opts.community.behindProxy(host).catch(() => null) : false;
+      if (proxied === null) return { ok: false, code: 'dns_unavailable', message: `the DNS records of ${host} could not be read: the token was not used, run the installer again in a minute` };
+      if (proxied) return { ok: false, code: 'behind_proxy', message: `${host} resolves to Cloudflare's proxy: a community server is reached by its players directly. Set its DNS record to 'DNS only' and run the installer again` };
     }
     const b = req.build;
     if (!b || typeof b.version !== 'string' || typeof b.protocol !== 'number' || !/^[0-9a-f]{64}$/.test(String(b.wasmSha256))) return { ok: false, code: 'bad_build' };
@@ -283,12 +672,11 @@ export class Registry {
     if (!c || !Number.isInteger(c.matches) || c.matches < 1 || c.matches > MAX_CAPACITY) return { ok: false, code: 'bad_capacity' };
 
     const nodeId = randomHexId(8);
-    const count = this.byOperator(tok.operatorId).length + 1;
     const node: NodeRecord = {
       nodeId,
       operatorId: tok.operatorId,
       operatorName: tok.operatorName,
-      name: cleanName(req.name ?? tok.name, `${tok.region.toLowerCase()}-${tok.operatorName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'node'}-${count}`),
+      name: cleanName(req.name ?? tok.name, this.unnamedName(tok.region)),
       region: tok.region,
       publicKey: req.publicKey,
       roles,
@@ -313,11 +701,17 @@ export class Registry {
       tickLagP99Ms: 0,
       egressGB: 0,
       cpuLoad: 0,
-      counters: { assigned: 0, verified: 0, rankedVerified: 0, failedVerification: 0, lost: 0, strikes: 0, probationVerified: 0 },
+      counters: { assigned: 0, verified: 0, rankedVerified: 0, failedVerification: 0, lost: 0, strikes: 0, probationVerified: 0, refused: 0 },
       strikeTimes: [],
       pauseTimes: [],
       suspendedUntil: null,
       statusBeforeSuspension: null,
+      publicHost: tok.publicHost ?? null,
+      retiredAt: null,
+      retiredReason: null,
+      trustRemovedAt: null,
+      seenAt: null,
+      seenContinent: seen.continent ?? null,
     };
     // A verify-only node needs no reachability: it only dials out.
     if (!roles.includes('host')) {
@@ -328,11 +722,15 @@ export class Registry {
     // key or another token of this operator. Nothing yields from here until the token is spent, so
     // check again.
     if (tok.usedBy !== null) return { ok: false, code: 'bad_token', message: 'unknown or already used' };
+    if (tok.revokedAt !== undefined && tok.revokedAt !== null) return { ok: false, code: 'token_revoked', message: 'a maintainer revoked this token: ask for a new one' };
     if (this.atCap(tok)) return { ok: false, code: 'too_many_nodes' };
     for (const n of this.nodes.values()) if (n.publicKey === req.publicKey) return { ok: false, code: 'key_in_use' };
+    if (this.opts.community && !node.trusted && roles.includes('host') && this.nameTaken(tok.region, node.name)) return { ok: false, code: 'name_taken', message: `a server of the region is already called ${node.name}: choose another --name` };
     tok.usedBy = nodeId;
     this.nodes.set(nodeId, node);
     this.opts.store?.register(tok, node);
+    this.event(nodeId, 'token_used', `token ${tokenIdOf(tok)} (${tok.region}${tok.publicHost ? `, ${tok.publicHost}` : ''})`);
+    this.event(nodeId, 'registered', `${node.status}, roles ${roles.join('+')}, transports ${transports.join('+') || '-'}${node.trusted ? ', trusted' : ''}`);
     if (node.trusted) {
       this.log(`ALERT trusted node ${node.name} (${nodeId}) registered for ${node.operatorName} (${node.operatorId}), roles ${roles.join('+')}${node.publicUrl ? ' at ' + node.publicUrl : ''}`);
     }
@@ -353,6 +751,51 @@ export class Registry {
     return this.list().filter((n) => n.operatorId === operatorId);
   }
 
+  /**
+   * Its operator's account was purged (the NodeRegistryDO's /internal/operator-deleted, once its
+   * nodes are banned): every record of it, its nodes (banned, retired and pending ones too) and its
+   * tokens, goes under `alias` (DELETED_OPERATOR_PREFIX and random hex: no row links it back to the
+   * account) with no name. A node keeps its status, its counters and its slot; each is written.
+   * Returns how many nodes went.
+   */
+  forgetOperator(operatorId: string, alias: string): number {
+    let nodes = 0;
+    for (const n of this.nodes.values()) {
+      if (n.operatorId !== operatorId) continue;
+      n.operatorId = alias;
+      n.operatorName = '';
+      this.save(n);
+      nodes++;
+    }
+    const tokens = [...this.tokens.values()].filter((t) => t.operatorId === operatorId);
+    for (const t of tokens) {
+      t.operatorId = alias;
+      t.operatorName = '';
+    }
+    if (tokens.length > 0) this.opts.store?.tokens(tokens);
+    return nodes;
+  }
+
+  /**
+   * A project account's name as its account has it now (the NodeRegistryDO's public list, from
+   * AccountsDO): its records take it, nodes and tokens, so that the list's fallback when AccountsDO
+   * does not answer (publicOperatorNames) is never a name it left, which another account may hold
+   * by then. Only what differs is written. Returns how many records changed.
+   */
+  renameOperator(operatorId: string, name: string): number {
+    let changed = 0;
+    for (const n of this.nodes.values()) {
+      if (n.operatorId !== operatorId || n.operatorName === name) continue;
+      n.operatorName = name;
+      this.save(n);
+      changed++;
+    }
+    const tokens = [...this.tokens.values()].filter((t) => t.operatorId === operatorId && t.operatorName !== name);
+    for (const t of tokens) t.operatorName = name;
+    if (tokens.length > 0) this.opts.store?.tokens(tokens);
+    return changed + tokens.length;
+  }
+
   // ---- live state ---------------------------------------------------------------------------
 
   /**
@@ -364,7 +807,7 @@ export class Registry {
   connected(id: string, hello: HelloData, now: number, opts: { requireRelay?: boolean } = {}): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
-    n.online = true;
+    if (!n.online) this.transition(n, true, now); // written below with the hello
     n.lastSeen = now;
     n.build = hello.build;
     n.specs = hello.specs;
@@ -380,9 +823,11 @@ export class Registry {
     n.rtcReady = n.transports.includes('rtc') && hello.rtcReady === true && (opts.requireRelay !== true || hello.rtcRelay === true);
     const url = hello.publicUrl ? hello.publicUrl.replace(/\/$/, '') : null;
     if (n.transports.includes('wss') && url !== n.publicUrl) {
-      if (url && validPublicUrl(url, this.opts.allowInsecure === true)) {
+      if (url && validPublicUrl(url, this.opts.allowInsecure === true) && this.addressAllowed(n, url)) {
         n.publicUrl = url;
         n.reachableAt = null; // a new address must be proven again
+      } else if (url) {
+        this.log(`node ${n.name} (${n.nodeId}): a hello on another address (${url.slice(0, 120)}) kept ${n.publicUrl ?? 'none'}`);
       }
     }
     // An rtc-only host is reachable once its self-test passed.
@@ -395,7 +840,11 @@ export class Registry {
   heartbeat(id: string, hb: HeartbeatData, now: number): void {
     const n = this.nodes.get(id);
     if (!n) return;
-    n.online = true;
+    if (!n.online) {
+      // Its heartbeats again after the sweep took it out (held on the way, most likely): back in placement.
+      this.transition(n, true, now);
+      this.save(n);
+    }
     n.lastSeen = now;
     n.active = Math.min(hb.active, n.capacity.matches);
     n.draining = hb.draining;
@@ -417,9 +866,52 @@ export class Registry {
     n.lastSeen = now;
   }
 
+  /** Its logged-in link ended. Out of placement if it was not already (the sweep may have taken it out first). */
   disconnected(id: string): void {
     const n = this.nodes.get(id);
-    if (n) n.online = false;
+    if (!n || !n.online) return;
+    this.transition(n, false, n.lastSeen);
+    this.save(n);
+  }
+
+  /**
+   * A publicUrl `n` may move to: on its pinned host when it has one (publicHost: registration and
+   * every hello), never on an IP address where those are refused (refuseIpUrls), and a community
+   * node under the CommunityRules (A5) by wss on port 443 only, never under a reserved domain, as at
+   * its registration.
+   */
+  addressAllowed(n: Pick<NodeRecord, 'publicHost' | 'trusted'>, url: string): boolean {
+    return this.addressRefusal(n, url) === null;
+  }
+
+  /** Why `n` may not move to `url` (addressAllowed), in a few words for the log, or null when it may. */
+  addressRefusal(n: Pick<NodeRecord, 'publicHost' | 'trusted'>, url: string): string | null {
+    const host = hostOf(url);
+    if (host === null) return 'not an address';
+    if (n.publicHost && host !== n.publicHost) return `its token pinned ${n.publicHost}`;
+    if (this.opts.refuseIpUrls === true && isIpHost(host)) return 'an IP address';
+    const rules = this.opts.community;
+    if (rules && !n.trusted) {
+      if (new URL(url).port !== '') return 'a community server is on port 443 only';
+      if (reservedHost(rules, host)) return `a community server is never under ${rules.reservedDomains.join(', ')}`;
+    }
+    return null;
+  }
+
+  /**
+   * A maintainer takes a node off the books (POST /nodes/admin/retire): its slot is free, it takes no
+   * match and every login of it is refused (the caller closes its socket). The record stays, with
+   * when and why. Null when there is no such node or it was retired already.
+   */
+  retire(id: string, reason: string, now: number): NodeRecord | null {
+    const n = this.nodes.get(id);
+    if (!n || isRetired(n)) return null;
+    n.retiredAt = now;
+    n.retiredReason = reason;
+    n.online = false;
+    this.save(n);
+    this.event(n.nodeId, 'retire', reason);
+    return n;
   }
 
   /**
@@ -432,7 +924,8 @@ export class Registry {
     const restored: NodeRecord[] = [];
     for (const n of this.nodes.values()) {
       if (n.online && now - n.lastSeen > HEARTBEAT_TIMEOUT_MS) {
-        n.online = false;
+        this.transition(n, false, now);
+        this.save(n);
         offline.push(n);
       }
       if (n.status === 'suspended' && n.suspendedUntil !== null && now >= n.suspendedUntil) {
@@ -444,6 +937,7 @@ export class Registry {
         n.strikeTimes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
         n.counters.strikes = n.strikeTimes.length;
         this.save(n);
+        this.statusEvent(n, 'suspended');
         restored.push(n);
       }
     }
@@ -474,16 +968,15 @@ export class Registry {
 
   private reach(n: NodeRecord, now: number): NodeStatus | null {
     n.reachableAt = now;
+    const from = n.status;
     if (n.status === 'pending') {
       n.status = n.trusted ? 'active' : 'probation';
       n.statusReason = null;
-      return n.status;
-    }
-    if (n.trusted && n.status === 'probation') {
+    } else if (n.trusted && n.status === 'probation') {
       n.status = 'active';
-      return n.status;
     }
-    return null;
+    this.statusEvent(n, from);
+    return n.status === from ? null : n.status;
   }
 
   onAssigned(id: string): void {
@@ -493,10 +986,19 @@ export class Registry {
     this.save(n);
   }
 
+  /** An assignment the node refused with no excuse (ControlPlane's refusal rule): counted, written. */
+  onRefused(id: string): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    n.counters.refused = (n.counters.refused ?? 0) + 1;
+    this.save(n);
+  }
+
   /** A verification verdict for a match this node hosted. Returns the new status when it changed. */
   onVerified(id: string, ranked: boolean, ok: boolean): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
+    const from = n.status;
     let changed: NodeStatus | null = null;
     if (!ok) {
       n.counters.failedVerification++;
@@ -517,6 +1019,7 @@ export class Registry {
       }
     }
     this.save(n);
+    this.statusEvent(n, from);
     return changed;
   }
 
@@ -528,10 +1031,12 @@ export class Registry {
   onLost(id: string, reason: string, now: number): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n) return null;
+    const from = n.status;
     n.counters.lost++;
     n.strikeTimes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
     n.strikeTimes.push(now);
     n.counters.strikes = n.strikeTimes.length;
+    this.event(n.nodeId, 'strike', `${reason} (${n.counters.strikes} in 7 days)`);
     let changed: NodeStatus | null = null;
     if (n.counters.strikes >= MAX_STRIKES && (n.status === 'probation' || n.status === 'active') && !n.trusted) {
       n.pauseTimes = (n.pauseTimes ?? []).filter((t) => now - t < REPEAT_PAUSE_WINDOW_MS);
@@ -544,8 +1049,10 @@ export class Registry {
       n.statusReason = 'strikes:' + reason;
       n.suspendedUntil = now + STRIKE_COOLDOWN_MS;
       changed = n.status;
+      this.event(n.nodeId, 'pause', `${n.counters.strikes} strikes, for ${STRIKE_COOLDOWN_MS / 3_600_000} h${repeated ? ', the second pause in 30 days: back to probation after it' : ''}`);
     }
     this.save(n);
+    this.statusEvent(n, from);
     return changed;
   }
 
@@ -553,8 +1060,10 @@ export class Registry {
   setStatus(id: string, status: NodeStatus, reason: string | null): NodeStatus | null {
     const n = this.nodes.get(id);
     if (!n || n.status === status) return null;
+    const from = n.status;
     this.applyStatus(n, status, reason);
     this.save(n);
+    this.statusEvent(n, from);
     return status;
   }
 

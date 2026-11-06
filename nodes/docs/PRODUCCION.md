@@ -1,9 +1,12 @@
 # Camino a producción
 
-> Estado al 19/10/2026. El prototipo vive en `nodes/` del repo y funciona como demo local: las pruebas
-> automáticas pasan y corren en el CI de cada PR, y la demo de
-> punta a punta funciona (`node --import ./dev/ts-resolve.mjs scripts/demo.mjs --once`). **No está
-> listo para jugadores reales.** Este documento lista todo lo que falta, en orden, para cada etapa.
+> Estado al 05/11/2026. Los nodos viven en `nodes/` del repo: las pruebas automáticas corren en el CI
+> de cada PR, y la demo de punta a punta funciona
+> (`node --import ./dev/ts-resolve.mjs scripts/demo.mjs --once`). **Desde el 21/10/2026 el
+> matchmaker manda partidas a los nodos,** todavía solo a los del proyecto: hoy uno por región
+> (São Paulo, Alemania y Malasia alojan y verifican y, por ahora, también hay en Sudáfrica,
+> Australia y Estados Unidos, que solo alojan). El alta de la comunidad sigue cerrada. Este
+> documento lista todo lo que falta, en orden, para cada etapa.
 > Las rutas de archivos son del repo (`server/`, `src/`, `docs/online/`) o de `nodes/`
 > (`control-plane/`, `node/`, `shared/`, `client/`, `install/`). Los esfuerzos son estimaciones
 > para una persona. Lo revisaron dos agentes independientes contra el código y las fuentes.
@@ -300,17 +303,29 @@ las releases; sin `NODE_TRUSTED_OPERATORS`, nadie crea tokens (403 `not_trusted`
   - `tokens`, con la sesión de cuenta: 401 sin sesión, 403 `account_required` para un invitado y
     403 `not_trusted` para una cuenta que no está en `NODE_TRUSTED_OPERATORS`; el DO lo vuelve a
     comprobar. La respuesta trae la línea de instalación de Linux.
-  - Una cuenta de confianza tiene como mucho 2 nodos (`MAX_TRUSTED_NODES_PER_OPERATOR`,
-    `control-plane/registry.ts`): el VPS y uno de reemplazo. El tope va en el registro, así que
-    también vale para tokens creados antes; un registro rechazado (403 `too_many_nodes`) deja el
+  - Una cuenta de confianza tiene como mucho `NODE_TRUSTED_MAX_NODES` nodos (una var de
+    `wrangler.jsonc`, hoy 6; acotada en código de 2 a 8, y 2 si falta: `trustedNodeCap`,
+    `control-plane/registry.ts`). Un nodo retirado no ocupa lugar, y uno baneado tampoco para la
+    cuenta del proyecto (para la comunidad sí); al salir de su baneo vuelve a ocupar uno, así que
+    con el tope lleno sigue baneado (409 `too_many_nodes`). Con el tope lleno, `POST /nodes/tokens`
+    responde 409 `too_many_nodes` sin crear el token; el registro vuelve a comprobarlo, así que
+    también vale para tokens creados antes: un registro rechazado (403 `too_many_nodes`) deja el
     token sin gastar y un `ALERT`. Un operador que ya tenía más nodos al entrar a la lista los
     conserva.
+  - **Retiro y pérdida de confianza.** `POST /nodes/admin/retire` saca de los libros un nodo
+    apagado, o drenado y sin partidas abiertas: libera su lugar, no recibe partidas, sale de
+    `/nodes/mine` y el cron lo ignora; cada login suyo se rechaza (4403) y su ficha queda en el
+    panel. Si una cuenta sale de `NODE_TRUSTED_OPERATORS`, al arrancar el DO sus nodos vuelven a
+    `probation` (0 de 20 verificadas, motivo `trust_removed`) con un `ALERT`: ninguno queda
+    `active` por la confianza que ya no tiene.
   - Topes por dirección en el Worker, con una IPv6 contada por su /64: `connect`, 30 por minuto;
     subidas y bajadas de replays, 60 por minuto cada una; `status`, 60; y `mine`, 30 por minuto
     por cuenta. Un `register` o un `tokens` que declara más de 4 KB recibe 413, y una subida de
     más de 16 MiB también, antes de llegar al DO. Los topes de 5 registros por dirección por hora y
     10 tokens por cuenta por día los lleva el DO, en memoria: un deploy los pone en cero. El
-    Worker los repite por isolate, para que la basura no llegue al DO.
+    Worker los repite por isolate, para que la basura no llegue al DO. Los 10 tokens son los
+    emitidos: un pedido rechazado (un error de tipeo, el tope) cuenta solo entre 30 intentos por
+    minuto.
   - Las rutas de la tienda y de WebRTC, y cualquier otra bajo `/nodes/`, responden 404.
 
 #### [7] servidor: gancho del matchmaker y rejoin/leave (P22-P23): #29
@@ -325,7 +340,15 @@ configurados ni siquiera se lee KV).
   Un error, 8 s sin respuesta o una respuesta que no es una ubicación válida para esos jugadores
   vuelven a `MatchDO`, y frenan los intentos 60 s. Las partidas en nodos no cuentan para
   `MAX_ACTIVE_ROOMS`; una ranked en un nodo toma el lock ranked con el id del nodo; las salas
-  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11).
+  privadas nunca van a nodos (D10); el humano solo de una cola p2p puede caer en un nodo (D11)
+  (hasta 2026-11-04; desde entonces toda partida de Casual cuyo host es SA puede caer en un nodo).
+  **Colocación regional (PR 0 del prompt 1, noviembre de 2026):** toda partida de Casual o
+  Competitivo pide primero un nodo de su región anfitriona (la de la mayoría de sus humanos),
+  nunca uno de otra región; si ninguno la toma, va a un `MatchDO` cerca de esa región. Con
+  `do_disabled`, primero un nodo de su región y después uno de SA, nunca un `MatchDO`. Una región
+  sin nodos responde `hosts: 0` y se le pregunta una vez por minuto (hoy las seis tienen uno del
+  proyecto). La liberación de una partida de nodo va siempre a la cola central (`mm:SA`), y
+  `ranked_matches.region` es la región anfitriona, en `MatchDO` y en nodo.
 - [x] **P23. `/api/rejoin` y `/api/leave` para partidas de nodo:** `rejoin` libera el lock si
   la partida no existe, terminó o el jugador no estaba, y lo mantiene si salió (`left`) o el nodo
   no responde; un id de 64 hex que no es nada responde 404 y libera el lock. `leave` le pregunta
@@ -367,7 +390,7 @@ quedan en el log.
 | M2 | **Hecho.** Aprobar los cambios de sshd y ufw | — | El endurecimiento |
 | M3 | **Hecho.** DNS de `sp1.turbo-gol.com`: A y AAAA, solo DNS | — | El certificado y la instalación |
 | M16 | Confirmar las propuestas de "Decisiones pendientes del mantenedor" (D1 a D20). El precio real del VPS ya está en `docs/online/DECISIONS.md` ([4]) | Antes del deploy de [6] | [5], [6] |
-| M4 | **Hecho (19/10/2026)**: la cuenta del proyecto existe y entra con Discord, así que su seguridad es la de esa cuenta de Discord (verificación en dos pasos). Desde el PR 10 de la entrada tiene además contraseña (30/10/2026), el buzón del proyecto y un `ALERT` por cada entrada (ver "La cuenta del proyecto" en los riesgos). Su id va al secreto `NODE_TRUSTED_OPERATORS` (M7), no al repo. **Falta:** dos cuentas de prueba que nunca registren nodos | Antes del canary | M7, las pruebas de [6], el canary |
+| M4 | **Hecho (19/10/2026)**: la cuenta del proyecto existe y entra con Discord, así que su seguridad es la de esa cuenta de Discord (verificación en dos pasos). Desde el PR 10 de la entrada tiene además contraseña (30/10/2026), el buzón del proyecto y un `ALERT` por cada entrada (ver "La cuenta del proyecto" en los riesgos). Su id va al secreto `NODE_TRUSTED_OPERATORS` (M7), no al repo. **Falta:** dos cuentas de prueba que nunca registren nodos, y, si la cuenta entra con la dirección que una versión anterior de este documento publicaba (sigue en el historial de git), cambiar su correo en PERFIL a un buzón nuevo del proyecto que no se publique en ningún lado | Antes del canary | M7, las pruebas de [6], el canary |
 | M5 | **Hecho (19/10/2026)**: las claves de control y de releases de producción, generadas fuera de `nodes/.keys/` (que sigue siendo de desarrollo) y respaldadas en el gestor de contraseñas. La pública de releases va a P12 (`nodes/release-key.pub`) y la de control a `NODE_CONTROL_PUBLIC_KEY` (P19); las privadas, a M6 y M7, y después se borran del disco | — | P12, el deploy de [6] |
 | M6 | **Hecho (20/10/2026)**: los entornos `releases` (secreto `TGN_RELEASE_PRIVATE_KEY`) y `releases-r2` (secreto `CLOUDFLARE_R2_TOKEN`, un token solo de R2, y la variable `CLOUDFLARE_ACCOUNT_ID`), los dos solo desde tags `node-v*`, sin bypass de administrador y con DonJaimeHash como revisor | — | P14, las releases |
 | M7 | **Hecho (20/10/2026)**: los buckets `turbogol-node-replays` (sus objetos vencen a los 30 días) y `turbogol-node-releases`, y los secretos `NODE_CONTROL_PRIVATE_KEY` y `NODE_TRUSTED_OPERATORS`, cargados con `wrangler versions secret put` | — | P19, P20 |
@@ -378,7 +401,7 @@ quedan en el log.
 | M12 | **Hecho (20/10/2026)**: `node.json` copiado a la carpeta privada de la PC del mantenedor, para pasarlo al gestor de contraseñas. Falta, si se quiere, una instantánea del VPS en el panel del proveedor | — | — |
 | M13 | **Hecho (20/10/2026)**: el canal `#node-alerts` de Discord, solo del equipo (creado desde `private/discord`), y su webhook en el secreto `NODE_ALERT_WEBHOOK` | — | El canary |
 | M14 | **Hecho (20/10/2026)**: [7] y [8] desplegados con el flag apagado | — | El canary |
-| M15 | **Hecho (21/10/2026)**: canary con la cuenta del proyecto (una casual contra bots) y con dos invitados (una casual contra bots y una 1v1 entre los dos), todas en `node:sao-paulo-1`, sin cortes ni strikes; a las 00:32 UTC, `nodes_on` en `1`. `vm_disabled` queda como interruptor. **Falta** una ranked de verdad en el nodo, con dos cuentas que no sean la del proyecto (ver abajo) | — | La apertura |
+| M15 | **Hecho (21/10/2026)**: canary con la cuenta del proyecto (una casual contra bots) y con dos invitados (una casual contra bots y una 1v1 entre los dos), todas en `node:sao-paulo-1`, sin cortes ni strikes; a las 00:32 UTC, `nodes_on` en `1`. `vm_disabled` queda como interruptor. La primera ranked de verdad en `sao-paulo-1` la jugó el mantenedor ese mismo día, a las 00:40 UTC, con dos cuentas que no son de operador: la verificó el mismo VPS y quedó calificada, sin strikes (ver abajo) | — | La apertura |
 
 ### Pruebas antes de abrir la beta
 
@@ -390,8 +413,9 @@ aviso.
   con la cuenta del proyecto y con un invitado, y una 1v1 entre dos invitados. El panel de red
   dice `host node:sao-paulo-1`. Latencia desde la PC del mantenedor: 41 ms, jitter de 0,8 ms, ninguna
   desincronización.
-- [ ] **Una ranked desde un navegador,** con dos cuentas que no sean la del proyecto, viendo el
-  resultado en la pantalla de fin de partida (la verificación la hace el mismo VPS).
+- [x] **Una ranked desde un navegador** (21/10/2026), en `node:sao-paulo-1`, con dos cuentas que
+  no son la del proyecto: la jugó el mantenedor, la verificó el mismo VPS y quedó calificada,
+  sin strikes.
 - [ ] Una salida y un forfeit. La salida de una casual ya se probó (21/10/2026): el nodo cierra la
   partida y libera el lock, también si el jugador sale antes de conectarse.
 - [ ] Cerrar la pestaña en una ranked: cuenta como abandono, como en `MatchDO` (P7).
@@ -415,8 +439,9 @@ aviso.
   honestas fallan como `bad_takeover` o `no_replay`.
 - **Un agujero negro silencioso.** Un nodo que deja de ser alcanzable sigue recibiendo partidas
   hasta P6 y P26.
-- **Un solo verificador.** Si el VPS se cae, las ranked vuelven a `MatchDO`
-  (`control-plane/controlPlane.ts:637`) y las terminadas esperan hasta 6 horas (`:81`).
+- **Pocos verificadores.** Son tres, los del proyecto en São Paulo, Alemania y Malasia. Si ninguno
+  está en línea con la versión del nodo, las ranked no van a nodos y se juegan en `MatchDO`
+  (`control-plane/controlPlane.ts:1201`), y las terminadas esperan hasta 6 horas (`:111`).
 - **Instaladores sin firma.** El token de R2 puede cambiar los scripts que las instalaciones nuevas
   corren como root: va en su propio entorno (`releases-r2`), con la misma aprobación que la clave
   de firma, y la subida solo acepta los instaladores de `nodes/install/` con la clave del repo.
@@ -426,12 +451,12 @@ aviso.
   (`control-plane/controlPlane.ts:859-861`). Entra con su correo y su contraseña, o con un
   proveedor vinculado, y sus rutas de tokens y de mantenimiento piden una contraseña reciente:
   escrita en los últimos 15 minutos, al entrar o con CONFIRMAR CON LA CONTRASEÑA en PERFIL
-  (Discord no alcanza, y un código por correo tampoco). Contraseña fuerte y única, el buzón del proyecto
-  (`proyecto@turbo-gol.com`) y no uno personal, y la cuenta conserva su contraseña y al menos dos
-  formas de entrar (no se puede desvincular por debajo de eso) y no se puede borrar. Un `ALERT`
-  por cada inicio de sesión y cada confirmación con contraseña, con el método y el país (nunca la
-  IP ni el correo), otro por cada token y cada registro (P24), y un tope de 2 nodos para esa
-  cuenta (P20).
+  (Discord no alcanza, y un código por correo tampoco). Contraseña fuerte y única, un buzón propio
+  del proyecto que no se publica en ningún lado (no uno personal; ver M4), y la cuenta conserva su
+  contraseña y al menos dos formas de entrar (no se puede desvincular por debajo de eso) y no se
+  puede borrar. Un `ALERT` por cada inicio de sesión y cada confirmación con contraseña, con el
+  método y el país (nunca la IP ni el correo), otro por cada token y cada registro (P24), y un
+  tope de `NODE_TRUSTED_MAX_NODES` nodos (6) para esa cuenta (P20).
 - **Un solo DO para todo.** Quien juega en un nodo conoce el id de la partida y el del nodo. Sin
   topes, subidas de replays o conexiones sin autenticar pueden trabar el DO, y con 60 s sin
   heartbeats se anulan partidas en curso (P19, P20).
@@ -500,10 +525,11 @@ aviso.
 ### TURN
 
 - [ ] **Primero el tope de 900 GB, después las credenciales** (`TURN_KEY_ID` y `TURN_KEY_TOKEN`).
-  Así lo pide `docs/online/PHASE2.md`, y los mismos secretos prenden el TURN del P2P casual en
-  `GET /api/ice`. Cloudflare no tiene tope de gasto: al llegar al tope, dejar de mandar partidas a
-  PCs (van a los servidores del proyecto) y nunca pasar a conexión directa en silencio. Sin
-  credenciales ninguna PC recibe partidas: el autotest tiene que pasar por el relay.
+  Así lo pide `docs/online/PHASE2.md`, y los mismos secretos prenden el TURN del P2P de las salas
+  (desde 2026-11-04 la ruta suelta `GET /api/ice` ya no existe: `server/README.md`). Cloudflare no
+  tiene tope de gasto: al llegar al tope, dejar de mandar partidas a PCs (van a los servidores del
+  proyecto) y nunca pasar a conexión directa en silencio. Sin credenciales ninguna PC recibe
+  partidas: el autotest tiene que pasar por el relay.
 - [ ] **Credenciales que duren lo que la partida.** Hoy duran 600 s (`TURN_TTL_SECONDS` en `server/src/env.ts`), y
   Cloudflare corta la conexión poco después de que vencen. Una partida vive su largo más 600 s de
   tope, contados desde que se crea: la espera de ingreso entra ahí, y las pausas de gol lo estiran
@@ -545,16 +571,20 @@ aviso.
 
 ### Decisiones de producto
 
-- [ ] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
+- [x] **El casual por defecto es P2P** (las preferencias por defecto en `src/ui/Menu.ts`, y "P2P
   (recomendada)" en `src/locales/es.ts`). Las salas P2P nunca pasan por `formMatch`, así que nunca
   llegan a un nodo; solo un jugador que espera solo en la cola P2P termina en el servidor contra
   bots (`server/src/MatchmakerDO.ts:1028-1041`). Las PCs en prueba solo hostean casuales y
   necesitan 20 verificadas para el ranked: sin casuales por servidor, tardarían mucho. Hay que
   decidir si los nodos comunitarios toman casuales, por ejemplo con una opción "servidores de la
-  comunidad".
-- [ ] **La latencia no entra en la elección del nodo.** Las regiones son continentes y el
-  scheduler elige al azar entre los menos cargados. Para la beta, preferir el VPS de São Paulo;
-  después, que el cliente mida el ping a los nodos de su región.
+  comunidad". **Decidido 2026-11-04:** Casual y Competitivo siempre en servidor, ~~el nodo de São
+  Paulo primero~~ un nodo de la región anfitriona primero (colocación regional, PR 0 del prompt 1);
+  P2P solo en salas.
+- [ ] **La latencia no entra en la elección del nodo dentro de una región.** La región sí: desde
+  la colocación regional, una partida pide primero un nodo de su región anfitriona y nunca uno de
+  otra (con `do_disabled`, después uno de SA). Pero las regiones son continentes y, dentro de una,
+  el scheduler elige al azar entre los menos cargados. Después, que el cliente mida el ping a los
+  nodos de su región.
 
 ## Etapa 3: abierto a cualquiera
 
@@ -562,8 +592,12 @@ aviso.
 
 - [ ] **Términos para operadores** y un **aviso de privacidad para jugadores:** qué datos ve un
   operador (nombre, id de jugador, inputs y, sin relay, la IP), uso de ancho de banda, reglas de
-  los proveedores de internet sobre servidores hogareños, suspensiones y apelaciones. Hoy no hay
-  términos ni política de privacidad en el repo.
+  los proveedores de internet sobre servidores hogareños, suspensiones y apelaciones. Los términos
+  y la política de privacidad ya están en `docs/legal/` (desde el PR #96; hoy rige la versión
+  2026-11-05) y traen las reglas para anfitriones (sección 12 de los Términos y su Anexo A), pero
+  dicen que solo el proyecto tiene servidores y que esas reglas valen recién desde la apertura. La
+  aceptación de anfitrión, la declaración de 18 años y el Anexo B llegan con la versión de la
+  apertura.
 - [ ] **Revisión de un abogado.** Esto no es asesoramiento legal. Puntos a mirar:
   - **La IP como dato personal:** el GDPR la nombra (considerando 30). En Argentina, la Ley 25.326
     no la nombra y hay fallos en contra; en Brasil, la LGPD protege datos de personas
@@ -583,19 +617,21 @@ aviso.
 
 - [ ] **Forzar el relay de los jugadores** según lo decidido, con el tope de GB funcionando antes.
   Con los jugadores por relay, el tope de 900 GB alcanza para unas 900 horas de 2v2 por mes en
-  PCs, menos lo que use el P2P casual. Pasar de ahí pide subir el presupuesto de US$ 50.
+  PCs, menos lo que use el P2P de las salas. Pasar de ahí pide subir el presupuesto de US$ 50.
 
 ### Confianza y disponibilidad
 
 - [ ] **Un nombre para cada VPS comunitario.** El chequeo de alcance corre en el Worker, que no
-  puede pedir una IP, y el instalador hoy usa la IP por defecto (el `/nodes/whoami` de `install/install.sh`). Un
-  VPS registrado por IP nunca pasa de pendiente. Opciones: que el operador traiga su dominio
-  (`--public-host`), que el plano de control le dé un subdominio del proyecto con la API de DNS de
-  Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el verificador.
-  Esfuerzo: medio.
-- [ ] **Un segundo verificador de confianza.** Con uno solo, si el VPS de São Paulo se cae, los
-  resultados esperan hasta 6 horas y después se anulan. `docs/online/DECISIONS.md` ya lo pone en
-  Hetzner (Ashburn o Falkenstein), con su presupuesto.
+  puede pedir una IP: el plano de control rechaza una IP (`ip_not_supported`), y el instalador
+  pide un nombre (`--public-host`) para un nodo nuevo por wss y se detiene con una IP, salvo con
+  `--allow-ip`, que es para un plano de control de desarrollo. Hoy el operador trae su dominio.
+  Opciones para no pedírselo: que el plano de control le dé un subdominio del proyecto con la API
+  de DNS de Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el
+  verificador. Esfuerzo: medio.
+- [x] **Un segundo verificador de confianza** (noviembre de 2026). Alemania y Malasia, del
+  proyecto, alojan y verifican como São Paulo (`VPS-PROYECTO.md`; su costo va en el presupuesto de
+  `docs/online/DECISIONS.md`). Si uno se cae, verifican los otros dos: los resultados esperan hasta
+  6 horas, y después se anulan, solo si no queda ninguno.
 - [ ] **Verificar en un worker thread,** para que un VPS que hostea y verifica use sus dos
   núcleos.
 - [ ] **Un canal canary que funcione.** El campo existe en el protocolo, pero el lanzador no lo
@@ -614,8 +650,9 @@ aviso.
 
 ### El primer auto de la tienda
 
-- [ ] **El auto:** un segundo modelo, solo estético, con el mismo hitbox, para que el wasm y el
-  verificador no cambien. Precio decidido: 1.500 puntos.
+- [x] **Los autos:** cuatro modelos solo estéticos (Cyclone, Vortex, Sirocco y Magma, en
+  `src/game/cosmetics.ts`), con el mismo hitbox, así que el wasm y el verificador no cambian. Cuestan
+  1.500 puntos cada uno, el precio decidido, y ya se canjean en GARAJE.
 - [x] **El inventario:** `GET /api/me/items`, con las tablas de `AccountsDO`.
 - [x] **El protocolo:** no hace falta subir `PROTOCOL_VERSION` ni `P2P_PROTOCOL_VERSION`. El auto
   viaja con el asiento, como el nombre (`src/net/cosmetics.ts`, fuera del bundle de los nodos): en
@@ -654,7 +691,7 @@ aviso.
 ## Forzar TURN: costos y decisión
 
 Cloudflare cobra solo lo que sale de su red hacia quien usa el TURN. Los primeros 1.000 GB por
-mes son gratis, compartidos con el TURN del P2P casual, y después cuesta US$ 0,05 por GB
+mes son gratis, compartidos con el TURN del P2P de las salas, y después cuesta US$ 0,05 por GB
 (developers.cloudflare.com/realtime, páginas de precios y de TURN, 2026).
 
 | Qué se oculta | Qué se cobra | Costo |
@@ -707,8 +744,8 @@ En el navegador, para la etapa 3:
 - [ ] Si TURN falla, no hay partidas en PCs. Nunca conexión directa en silencio.
 
 **Lo que forzar TURN no cubre:** los VPS comunitarios por WebSocket ven la IP de los jugadores, y
-el P2P casual expone las IPs entre jugadores. Si la promesa es "nadie ve tu IP", esos dos caminos
-también tienen que cambiar.
+el P2P de las salas expone las IPs entre jugadores. Si la promesa es "nadie ve tu IP", esos dos
+caminos también tienen que cambiar.
 
 ## Decisiones pendientes del mantenedor
 
@@ -776,6 +813,10 @@ Sin número D: no frenan la etapa 1.
 - **Modo de relay:** la recomendación es ocultar al anfitrión desde la etapa 2 y a los jugadores
   por defecto al abrir. Pasar de unas 900 horas de 2v2 por mes con relay pide subir el
   presupuesto.
-- **Casuales en nodos comunitarios:** sí o no, y cómo se elige.
-- **Segundo verificador:** cuándo se levanta el de Hetzner.
-- **El primer auto:** cuál es. El precio ya está decidido en 1.500 puntos.
+- **Casuales en nodos comunitarios:** decidido 2026-11-04 (ver "El casual por defecto es P2P" en
+  Decisiones de producto): Casual siempre en servidor, ~~el nodo primero cuando el host es SA~~ un
+  nodo de la región anfitriona primero (colocación regional, PR 0 del prompt 1).
+- **Segundo verificador:** ~~cuándo se levanta el de Hetzner~~ decidido 2026-11-04: Alemania y
+  Malasia, del proyecto, también verifican.
+- **El primer auto:** ~~cuál es~~ decidido: los cuatro de `src/game/cosmetics.ts` (Cyclone,
+  Vortex, Sirocco y Magma), a 1.500 puntos cada uno.

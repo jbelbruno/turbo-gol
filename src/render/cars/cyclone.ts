@@ -1,5 +1,5 @@
 /**
- * The Pampero ('pampero', the cold southern wind of the pampas): a low, wide, razor-edged wedge of
+ * The Cyclone ('cyclone', the edge): a low, wide, razor-edged wedge of
  * an endurance hyper-GT, built from faceted lofts (polygon sections with hard creases, so every
  * facet takes its own light; super low shades them by diffuse alone), one design language from
  * the nose to the canopy and the tail.
@@ -42,7 +42,7 @@ const ICE = 0xcdeeff;
 
 /** Slick tyres on twelve-vane turbine rims (satin alloy) over a dark dish, a light lip, a team hub. */
 export const TURBINE: WheelStyle = {
-  id: 'pampero-turbine',
+  id: 'cyclone-turbine',
   tyre: 'slick',
   spokes: 12,
   spokeWidth: 0.11,
@@ -668,8 +668,8 @@ function build(k: BodyKit): void {
   }
 }
 
-export const PAMPERO: CarBodySpec = {
-  id: 'pampero',
+export const CYCLONE: CarBodySpec = {
+  id: 'cyclone',
   build,
   // The front track inside the rear's (the front pods narrower than the haunches: an arrow in
   // plan), the rear tyres tucked 2 uu under the haunches.

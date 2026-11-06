@@ -2,9 +2,11 @@
 
 Lo que hay que cambiar fuera de esta carpeta para que los nodos comunitarios reciban partidas de
 verdad. La etapa 1 lo reparte en ocho PR, con su orden y los ajustes a este diseño, en
-`PRODUCCION.md`: donde los dos no coinciden, manda esa lista. El plano de control en el Worker
-(§1, §2 y §4) lo aplica [6] (#28). Falta el gancho del matchmaker (§3), que es [7]: hasta
-entonces ninguna partida va a un nodo. Las líneas citadas se revisaron contra el commit `dead8ec`.
+`PRODUCCION.md`: donde los dos no coinciden, manda esa lista. La etapa 1 ya está aplicada: el
+plano de control en el Worker (§1, §2 y §4) con [6] (#28), el gancho del matchmaker (§3) con [7]
+(#29), el cliente de la etapa 1 (§5) con [3] (#25) y la operación (§6) con [8] (#30). Desde el
+21/10/2026 los nodos reciben partidas. Falta lo de la etapa 2, como el adaptador WebRTC del cliente
+(§5). Las líneas citadas se revisaron contra el commit `dead8ec`.
 El plano de control va en el dominio del juego: `https://turbo-gol.com/nodes/…`.
 
 ## 0. Dónde va el código
@@ -101,7 +103,7 @@ antes de mandar al sitio. `whoami` y las releases se responden en el Worker; el 
 | `PUT /nodes/replays/<id>`, `GET /nodes/replays/<id>` | `NodeRegistryDO`, con los encabezados firmados del nodo; el id, de 64 hex. La subida: 413 si declara más de 16 MiB |
 | `POST /nodes/tokens` | `NodeRegistryDO`, con la sesión de **cuenta**: 401 sin sesión, 403 `account_required` para un invitado y 403 `not_trusted` para una cuenta que no está en `NODE_TRUSTED_OPERATORS`. Responde el token, de un solo uso y una hora, y la línea de instalación de Linux. 413 si declara más de 4 KB |
 | `GET /nodes/mine` | `NodeRegistryDO`, con la sesión de cuenta: los nodos propios |
-| `GET /nodes/status` | `NodeRegistryDO`: la lista pública de nodos, sin direcciones, 10 s en caché |
+| `GET /nodes/status` | `NodeRegistryDO`: la lista pública de nodos (`control-plane/publicList.ts`, la misma del servidor de referencia). Solo los nodos en servicio (a prueba o activos, nunca uno retirado), sin direcciones ni ids de nodo o de operador. La cuenta del proyecto sale con su nombre y cualquier otro operador como "Anfitrión <n>", con el mismo número en `hosts` (el ranking de puntos de 30 días). Responde 200 también con la lista vacía. 10 s en caché |
 | `GET /nodes/replays` | Pública, también para invitados: las partidas que el plano de control cerró sin anularlas, de los últimos 30 días, de la más nueva a la más vieja (`?before=<ms>` pagina). Nombres del plano de control, sin ids de cuenta ni de nodo. La primera página, 30 s en caché por isolate |
 | `GET /nodes/replays/<id>/view` | Pública: la replay de una partida listada, para el visor del navegador (`replay.html`). El Worker la lee de R2, comprueba su SHA-256 contra el índice y rehace el encabezado con el registro del plano de control (`server/src/replayIndex.ts`). 404 si la partida se anuló, no está listada, ya venció o pesa más de 4 MiB. Queda en la caché del borde (Cache API) desde la primera vez que alguien la mira |
 
@@ -237,10 +239,17 @@ new NetClient({ ...opciones, webSocketFactory: nodeAwareSocketFactory() })
 ## 6. Operación
 
 - Alertas cuando una verificación falla: hoy queda en el log como `ALERT`. Conviene un webhook.
-- Endpoints de administración: `setStatus` y `drain` están (`/nodes/admin/status`, `drain`), y
-  la tienda tiene `/nodes/admin/grant`, `revoke` y `unfreeze`. El catálogo es código
+- Endpoints de administración: `setStatus` y `drain` están (`/nodes/admin/status`, `drain`), con
+  `retire` para sacar un nodo de los libros, `tokens/revoke`, y las lecturas del panel
+  (`overview`, `wallet`, `frozen`; `server/README.md`). La tienda tiene `/nodes/admin/grant`,
+  `revoke` y `unfreeze`, con un motivo opcional en la línea de auditoría. El catálogo es código
   (`src/game/cosmetics.ts` y `control-plane/shop.ts`). Un drenaje no tiene vuelta atrás (`node/runtime.ts:570-575`): el nodo solo vuelve a tomar
   partidas cuando se reinicia.
+- Historial del panel (30 días, en el SQLite del DO): los eventos de cada nodo, que `Registry` y
+  `ControlPlane` mandan por el *sink* `events` (como el log); cada partida resuelta, anuladas
+  incluidas, en la misma transacción que la resuelve; y las líneas `ALERT`. Se leen con
+  `/nodes/admin/events`, `history`, `alerts` y `matches`; `replay` baja el TGR1 crudo (siempre
+  auditado), y `match/void` y `match/verify` actúan sobre una partida sin resolver.
 - Releases: `.github/workflows/node-release.yml`, con un tag `node-vX.Y.Z` en un commit de
   `main`: arma la release sin firmar, la firma en el entorno `releases` y la sube a R2 desde el
   entorno `releases-r2`; la firma y la subida esperan la aprobación del mantenedor (P14 y M6 de

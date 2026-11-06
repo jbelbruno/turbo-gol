@@ -2,8 +2,8 @@
 
 Turbogol: physics car soccer for the browser. Single player with and against local AI
 (1v1, 2v2 or 3v3; see "Game modes"), and two online modes (see "Online"): a peer-to-peer
-deterministic rollback mesh (phase 2, casual) and an authoritative host in a Cloudflare Durable
-Object running the same physics (phase 1).
+deterministic rollback mesh (phase 2: the lobbies) and an authoritative host running the same
+physics, in a Cloudflare Durable Object (phase 1) or on a community node (Casual and ranked).
 
 ## Goals (in priority order)
 
@@ -222,8 +222,8 @@ src/render/
   cars/                 the car bodies (docs/cars.md): types.ts (CarBodySpec, the contract),
                         kit.ts (surfaces, lofts, the BodyKit, resolveWheels, buildBody and its
                         containment guard), wheels.ts (wheel styles: knobby, slick), one module
-                        per catalog car (dune.ts, the dune runner, the default car; pampero.ts,
-                        carpincho.ts, condor.ts, tero.ts), index.ts (the registry),
+                        per catalog car (dune.ts, the dune runner, the default car; cyclone.ts,
+                        vortex.ts, sirocco.ts, magma.ts), index.ts (the registry),
                         cache.ts (geometry shared per body / team / detail, reference-counted)
   Ball.ts               procedural panelled ball (truncated icosahedron: pearl hexagons, graphite
                         pentagons with lime glow rings, stitched seams; BALL_COLORS), blob shadow,
@@ -243,11 +243,26 @@ src/render/
                         sub; src/ui/nav.ts FocusNav driven by Input's menu edges through
                         pauseAction; online "MATCH IN PROGRESS"; setPauseCovered: Ajustes over it,
                         src/ui/screens/settings/overlay.ts), the controls card (setControlsCard: big
-                        card or slim strip, bottom right); its own keys are F3 and F4
+                        card or slim strip, bottom right); its own keys are F3 and F4; what the
+                        player chose to see (setView: Settings > HUD's classes, the feed by kind)
+  hudView.ts            Settings > HUD, pure: the HUD root's classes (hud-no-*, hud-sr-goal,
+                        hud-show-fps / -speed), the feed's chips by kind, whose cars get a name tag
+                        and which a boost meter (a rival never), the rows touch mode leaves out
   controlsCard.ts       the controls card of the first matches and free play, pure: when it shows
                         (ControlsCardPlan: the first 3 matches' kickoff countdown, free play until
                         the car moves, then a strip for 60 s of play; the count in localStorage)
                         and its rows from the live bindings of the device (controlsCardRows)
+  nameTags.ts           the names over the other cars (the matches and the replay viewer): a pure
+                        model (tagBucket: three distance steps with hysteresis; tagHasMeter: the
+                        lime boost meter on the viewer's teammates only, on every car for a
+                        spectator; tagAnchor / clampTag: the edge tag with its ‹‹ ››, mirrored
+                        behind the camera, held by a band at the edge; overBall: the fade over the
+                        ball; orderTags / declutterTags: no tag over another, nearer cars first in
+                        an order with hysteresis, a farther one lifted on screen, moved along its
+                        edge when pinned, a moved one held until TAG_STACK_HOLD clear of the tag
+                        it was moved off) and NameTags, a DOM layer under the HUD that writes a
+                        transform and an opacity per frame, a class only on a change
+                        (src/ui/styles/nametags.css)
 src/ai/
   Bot.ts                heuristic bot: produces CarControls from SimStateView + ball prediction;
                         stall / net / wall recovery; scans every car (nearest opponent, bump
@@ -293,7 +308,7 @@ src/input/
                         nothing; the scoreboard tap (scoreboardOpen), the three first-match cards
                         (cardsUp, turbogol.touchCards), the rotate notice (setLive: translucent
                         over a live online match, the scorebug above it), touch mode (tg-touch)
-src/settings.ts         Settings { controls, camera, bindings, audio, touch, ui }: defaults, ranges,
+src/settings.ts         Settings { controls, camera, bindings, audio, touch, ui, hud }: defaults, ranges,
                         validation, localStorage load / save. One live object shared by Input,
                         ChaseCamera and Ajustes; Game.applySettings() persists and re-applies
 src/game/
@@ -329,7 +344,7 @@ src/game/
                         p2pSampleInput / p2pAfterTick / p2pMatchEvent / p2pKickoffReset /
                         p2pSlotDropped (banner + BOT tag) / p2pHandover (fallback to the phase 1
                         session); restoreOfflineRoster
-  OnlineSession.ts      the online match inside the frame loop: quickMatch (guest -> queue ->
+  OnlineSession.ts      the online match inside the frame loop: quickMatch (session -> queue ->
                         connect), advance(dt) (staged snapshot -> rollback, lead = f(rtt, jitter)
                         + bufferHint adjust, drift absorbed by a 0.95-1.05 tick-rate scale, hard
                         resync beyond 8 ticks), stepTick (pack own input, step, send every 2nd
@@ -382,11 +397,14 @@ src/game/
   (Game.ts: startTraining / stopTraining run a one-car arena through trainingTick instead of tick;
   startTraining(FREEPLAY_ID, { rules }) is experimental free play: the preset's physics, its game
   speed, the TrainingHud's rules line, the pause menu's RULES applied when the settings close, no
-  records; startSearchPractice is free play over a menu search that keeps queueing (MODOS' "While
-  you wait: Free play"): the frame's watchSearchPractice sees the session leave its queue and
-  hands off through one function, practiceToMatch (training off, "MATCH FOUND · Entering…",
-  today's found -> match path; setSession and the session rosters call it too), a failed connect
-  shows the menus, and quitting practice keeps the search: stopTraining -> showMenu(true). The pack
+  records; wait play (./waitPlay.ts, pure) is local play over a menu search that keeps queueing:
+  startWaitTraining (free play or a pack) or startWaitBots (an unlimited match against the bots,
+  `match` switched to `waitMatch`); the frame's watchWaitPlay and the session's own callbacks (a
+  hidden tab too) see the session leave its queue and hand off through one function, waitToMatch
+  (local play off, the timed match back, PARTIDO ENCONTRADO, today's found -> match path), a
+  failed connect shows the menus, and quitting keeps the search (back to the menus still
+  searching). Room play (./roomPlay.ts, pure) is the same two kinds of local play for a lone lobby
+  host, watched from the lobby's callbacks: someone comes in -> back to the Sala. The pack
   summary (src/render/TrainingHud.ts, plan PR 13: AGAIN · NEXT LEVEL · TRAINING, a FocusNav of its
   own) takes the frame's edges while it is up: trainingSummaryActions routes the arrows / D-pad
   (before the pad's previous / next shot, which share the D-pad's ◀ ▶) and accept to it, the reset
@@ -414,14 +432,15 @@ src/ui/                 the front-end menus: the Tablero shell (styles/shell.css
                         leaderboard.css, profile.css: plan PR 13's, training.css also the three's
                         stage per class and menu.css's shared controls at the class's type roles
                         there)
-  screens/settings/     Ajustes (plan PR 10, its new rows PR 11): model.ts (pure: the six tabs, CONTROLES' device
+  screens/settings/     Ajustes (plan PR 10, its new rows PR 11): model.ts (pure: the seven tabs, CONTROLES' device
                         sections, the camera preset, the quality trial, the memory tag, a binding's
                         conflict, the sliders' maths; tests/settings-model.test.mjs), view.ts
                         (SettingsView, the one component: the rail of tabs and each tab's page,
                         every setting with its saved key; CONTROLES per device detected, the last
                         input's first, sensitivities then mn-bind rows, TÁCTIL's settings.touch;
                         CÁMARA's presets; JUEGO with INTERFAZ: Idioma (components/language.ts's
-                        sheet), the interface size, reduced motion; AUDIO; GRÁFICOS as cards,
+                        sheet), the interface size, reduced motion; HUD (settings.hud: EN EL
+                        PARTIDO and RENDIMIENTO, render/hudView.ts); AUDIO; GRÁFICOS as cards,
                         applied with A and back by themselves in 10 s unless kept, then the
                         resolution scale, the frame limit, the animated stadium, the Super low
                         switch (A only) and RESTABLECER GRÁFICOS; EXPERIMENTAL; "Se guarda solo"
@@ -606,10 +625,12 @@ src/ui/                 the front-end menus: the Tablero shell (styles/shell.css
                         sections are no history entries of their own: backModel.ts walks them);
                         released while JUGAR's "Leave Turbogol?" is up. Mid-match the Game adds a
                         beforeunload backstop (updateLeaveGuard)
-  prefs.ts              the menus' prefs (turbogol.menu.v1: region, playlists, Casual's connection
-                        (auto, the default, and P2P join the P2P queue; server the server one),
-                        the leaderboard's playlist, lastQueue: the kind searched last, which
-                        JUGAR AHORA repeats); parsePrefs, pure
+  prefs.ts              the menus' prefs (turbogol.menu.v1: region, Casual's preferred format
+                        (casualPrefer: its online bots match's, and the search's prefer),
+                        Competitive's playlists, the leaderboard's playlist, lastQueue: the kind
+                        searched last, which JUGAR AHORA repeats, the last lobby's format and the
+                        last pick of "While you search"); parsePrefs, pure (an older object's
+                        Casual connection, gone with the modes redesign, is dropped)
   howPlay.ts            "How will you play?": howPlayAsk (a new PC player pressing with the mouse
                         or the keyboard; a controller's press answers it; never a returning
                         player), the answer in turbogol.howPlay.v1; pure + storage
@@ -622,16 +643,19 @@ src/ui/                 the front-end menus: the Tablero shell (styles/shell.css
                         plateRank; tests/home-hero.test.mjs); MODOS (modes.ts, stacked on Inicio,
                         each tile opening it on its tab: Menu.open's tab, Screen.setTab): vertical
                         tabs CASUAL · COMPETITIVO · SALAS · CONTRA LA IA (Q / E, LB / RB, LT / RT
-                        step them: Screen.command; the hint bar names them, Screen.tabsVerb), the
-                        2 x 2 formats (a press picks and searches, restarting a running search of
-                        that kind), Region and Advanced (connection) rows, VS AI's mn-seg and
-                        Stadium row, SALAS' part (custom.ts lobbyBrowser: JOIN WITH CODE, the region,
-                        the public rows with their OPEN / IN MATCH / FULL slot, the empty line), and
-                        the action zone: FIND MATCH / SIGN IN (PERFIL as a detour, back on a sign-in)
-                        / a ban's reason / PLAY / CREATE LOBBY AND SHARE (BACK TO LOBBY in one), or
-                        the searching panel with "bots join in"
-                        (modesModel.ts, pure: tabs, formats, queueNet, botsCountdown from
-                        /api/config's botFillMs or P2P_FILL_WAIT_MS, countShown, actionKind;
+                        step them: Screen.command; the hint bar names them, Screen.tabsVerb),
+                        Casual's 1v1 / 2v2 / 3v3 (the preferred format, moved in place while
+                        searching) and Competitive's 2 x 2 formats (a press picks and searches,
+                        restarting a running search of that kind), the Region row, VS AI's mn-seg
+                        and Stadium row, SALAS' part (custom.ts lobbyBrowser: JOIN WITH CODE, the
+                        region, the public rows with their OPEN / IN MATCH / FULL slot, the empty
+                        line), and the action zone: FIND MATCH / SIGN IN (Casual and Competitive
+                        for a guest; PERFIL as a detour, back on a sign-in) / a ban's reason / PLAY
+                        / CREATE PUBLIC LOBBY and CREATE PRIVATE LOBBY (BACK TO LOBBY in one), or
+                        the searching panel (searchModel.ts waitLines: the clock, the estimate,
+                        who searches, the reach; the 5:00 box, CANCEL SEARCH, "While you wait:
+                        VS BOTS · TRAIN") (modesModel.ts, pure: tabs, formats, botsCountdown
+                        from wait.botsInMs, else the search's start, countShown, actionKind;
                         tests/modes.test.mjs), GARAJE (garage.ts, plan PR 8, the owner's drawing:
                         TU AUTO, PUNTOS DE SERVIDOR (a guest's 0 and SIGN IN: PERFIL as a
                         detour, back here on Back or a sign-in), GANA PUNTOS (the guide: a new tab, or with a pad, a remote or on a
@@ -698,8 +722,13 @@ src/net/
   protocol.ts           wire protocol shared with server/ (DONE): one binary frame per message,
                         Input / Snapshot / Ping / Pong packed, Welcome / Event / Error / Kick as
                         JSON; fnv1a32; the HTTP control-plane types (GuestSession, QueueResult)
-  NetClient.ts          guest record (localStorage), queue long-poll (401 re-register, 409 ->
-                        rejoin, cancel -> /api/leave), WebSocket with ['tg1', 'ticket.<jwt>'],
+  NetClient.ts          guest record (localStorage), the queue loop (api: 2; first: true until its
+                        first answer, which comes at once, then long-polls; network errors and
+                        5xx retried with backoff, a 35 s watchdog, early re-POSTs when prefer,
+                        local play or the tab's visibility change, at most one per 5 s, paused on
+                        pagehide with no leave; 401 re-register, 409 -> rejoin, cancel ->
+                        /api/leave),
+                        WebSocket with ['tg1', 'ticket.<jwt>'],
                         input / ready / ping senders, message dispatch, up to RECONNECT_TRIES (5)
                         automatic rejoins per drop (reconnectAttempt; a Welcome starts again);
                         the anti-bot token pre-warmed when Inicio shows (prewarmAntiBot, WARM_MS,
@@ -773,23 +802,29 @@ src/net/
                         batches with chunked backlogs and contiguous acks, hashes over 'ctl',
                         resync / abandon, drops, NetStatsView, fallback to OnlineSession
 server/                 Cloudflare Workers backend (own package, wrangler; server/README.md)
-  src/index.ts          Worker: /api/guest, /api/queue { mode, kind } (long-poll), /api/rejoin,
-                        /api/leave, /ws/:matchId and
+  src/index.ts          Worker: /api/guest, /api/queue { api: 2, mode | modes, kind, prefer, local,
+                        visible, first } (accounts only, to the queue hub: the first answer at
+                        once, then a long-poll), /api/rejoin, /api/leave (the hub and the region),
+                        /ws/:matchId and
                         /room/:roomId (one gate: ticket verified at the edge, role 'player' /
                         'peer', claims forwarded in headers; Origin checked against VITE_ORIGINS,
                         loopback page origins accepted while the Worker runs on a loopback host);
                         /api/lobbies (experimental rules from an account session only); the queues
                         never take rules (400 experimental_lobby_only)
   src/auth.ts           HS256 JWT on WebCrypto: sessions, tickets (jti), internal header
-  src/MatchmakerDO.ts   one per region (chosen in the menu or the continent): a waiter sits in
-                        the queue of every playlist it searches; 'ranked': MMR window growing
-                        with the wait, balanced teams, never bots; /custom forms a lobby's
-                        match with fixed teams (experimental rules: a P2P room with >= 2 humans,
-                        every member signed in, its locks marked: no no-show strikes);
-                        /population for the menus;
-                        queues per (mode, kind); 'server': bot fill after 10 s;
-                        'p2p': a room at once with the mode's humans, after 15 s with >= 2 humans
-                        + bots, a lone human -> a server match; rosters, seeds, tickets, locks
+  src/MatchmakerDO.ts   'mm:SA' is the queue hub of every public queue (every region's waiters,
+                        each with its home; queuePlan.ts holds the pure rules): Casual pools every
+                        format (2 or more humans at once with bots in the free seats, the oldest
+                        widened waiter first, a lone visible one's bots match at 5:00); 'ranked'
+                        per playlist, MMR window growing with the wait, balanced teams, never bots,
+                        any region once both waited 2 min; the host region by majority, a node
+                        first for SA, else a MatchDO with that region's location hint, under the
+                        global caps (20 / 5 ranked / 5 solo; busy at a cap); dropped searches,
+                        node solo records, the estimate's arrivals and the daily counters
+                        (queueStats.ts) in its storage; /population for the menus. Every region's
+                        instance keeps its lobbies' P2P rooms: /custom forms a lobby's match with
+                        fixed teams (>= 2 humans; experimental rules: every member signed in, its
+                        locks marked); rosters, seeds, tickets, locks
   src/RoomDO.ts         one per P2P room (Hibernation API, no simulation): RoomWelcome (seed,
                         slots, ICE, physics), signal relay, ready (its physicsFp must be the
                         room rules' fingerprint, else physics_mismatch) -> start { startAt: now +
@@ -819,14 +854,16 @@ server/                 Cloudflare Workers backend (own package, wrangler; serve
                         TV signed in by the phone: the session and cookie as login gives them);
                         server-side PBKDF2 of the client key
   src/LobbyDO.ts        one per custom lobby (hibernating): members / teams / host / settings,
-                        admit (password, kick list), start through the matchmaker's /custom; a
+                        admit (password, kick list), start through its region matchmaker's /custom
+                        (always P2P, a 'server' setting read as P2P; 2 members at least, else
+                        need_players); a
                         dropped member kept LOBBY_GRACE_MS (40 s, host role included) before the
                         alarm removes it (one in the lobby's match: once somebody is back from
                         it; the last one out of it opens the lobby); host / move / ready; /internal/peek (GET
                         /api/lobbies/peek, a join link's sheet);
                         experimental rules (P2P only, strict) only while every member is signed
                         in: guests refused at create, admit, upgrade, settings and start
-  src/LobbyDirectoryDO.ts  join codes -> lobby ids and the public list per region
+  src/LobbyDirectoryDO.ts  join codes -> lobby ids and the public list (every region, own first)
   src/roomHost.ts       RoomHost: per-slot input rings (hold last, bufferHint), BotTeam for bot
                         slots, Match rules, rs_save_state snapshots (env-agnostic; fake-sim tests)
   src/wasm.ts           the shared rocketsim.wasm as a WebAssembly.Module in workerd
@@ -1249,7 +1286,8 @@ path workerd allows) at 120 Hz from a `setInterval(8 ms)` + `Date.now()` accumul
 per callback; `Date.now()` only advances between callbacks in workerd). Every client runs the
 same sim `lead` ticks ahead with its own inputs and the last known input of every other slot,
 and reconciles on each snapshot. The control plane lives in the Worker (`server/src/index.ts`);
-rooms are formed by one `MatchmakerDO` per region.
+Casual and ranked matches are formed by the queue hub (the `MatchmakerDO` `mm:SA`), a lobby's
+room by its region's `MatchmakerDO`.
 
 Determinism contract (what makes the rollback bit-exact):
 
@@ -1279,7 +1317,8 @@ frame closes the socket with 1008.
 ## Online (phase 2: P2P rollback)
 
 Topology: no simulation server. Every human peer runs the same wasm, the same two `BotTeam`s
-(seeded `seed` / `seed + 1000003`, difficulty medium) and the same `Match`; peers exchange only
+(seeded `seed` / `seed + 1000003`, at the room's `botDifficulty`: the lobby host's pick, hard by
+default, every peer the same since protocol 6) and the same `Match`; peers exchange only
 packed inputs over a full WebRTC mesh (`Mesh.ts`), signalled through a hibernating `RoomDO`
 (`RoomClient.ts`). `P2PSession` drives the loop from the wall clock: tick 0 is `start.startAt`
 (server clock, placed locally through the room's ping / pong offset) and each frame simulates

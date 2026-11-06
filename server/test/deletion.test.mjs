@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { googleTokenAnswer, watchGoogleStarts } from './helpers/google.mjs';
 import { readFileSync } from 'node:fs';
 
 const DO_STUB = 'data:text/javascript,export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
@@ -40,8 +41,9 @@ const identity = { google: { sub: 'g-default' }, discord: { id: 'd-default' } };
 globalThis.fetch = async (url, init) => {
   const u = String(url instanceof Request ? url.url : url);
   const ok = (b) => new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } });
-  if (u === 'https://oauth2.googleapis.com/token' || u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
-  if (u === 'https://openidconnect.googleapis.com/v1/userinfo') return ok(identity.google);
+  // Google is read from the id_token of its token answer (no userinfo call: that URL is BLOCKED below).
+  if (u === 'https://oauth2.googleapis.com/token') return ok(googleTokenAnswer(identity.google));
+  if (u === 'https://discord.com/api/v10/oauth2/token') return ok({ access_token: 'fake-access' });
   if (u === 'https://discord.com/api/v10/users/@me') return ok(identity.discord);
   if (u === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
     const body = new URLSearchParams(await new Response(init?.body).text());
@@ -57,7 +59,7 @@ const AUTH = await import('../src/auth.ts');
 const ENV = await import('../src/env.ts');
 const L = await import('../src/limits.ts');
 const { ABANDON_WINDOW_MS, PLACEMENT_MATCHES } = await import('../../src/net/rating.ts');
-const worker = (await import('../src/index.ts')).default;
+const worker = watchGoogleStarts((await import('../src/index.ts')).default);
 
 const SECRET = 'deletion-test-secret';
 const ORIGIN = 'https://turbo-gol.com';
@@ -341,9 +343,9 @@ test('deletion: closed until the terms of service (DELETION_OPEN, "0" in wrangle
   const c = await post(env, '/api/auth/delete/cancel', { ip: ip(0), body: { token: linkIn(outbox.at(-1), 'keep') } });
   assert.equal(c.status, 200, JSON.stringify(c.json));
   assert.equal(row(obj, a.id).delete_purge_at, 0);
-  // The switch: only '1' opens it, and the committed wrangler.jsonc keeps production closed.
+  // The switch: only '1' opens it, and the committed wrangler.jsonc opens it with the terms (2026-11-04).
   for (const v of [undefined, '', '0', 'true', 1, ' 1 ', '1']) assert.equal(ENV.deletionOpen({ DELETION_OPEN: v }), v === '1' || v === ' 1 ' || v === 1, String(v));
-  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /\n\s*"DELETION_OPEN": "0"\s*\n/, 'production keeps it closed');
+  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /\n\s*"DELETION_OPEN": "1"\s*\n/, 'production is open with the terms');
 });
 
 test("deletion: M9 counts in the account's own caps (§2.16: 5 notices a day, 10 /api/me/* mails), taken before anything changes; a loop of requests and cancels with one Bearer stops at the 6th, and the day's notice lane stays for everyone else", async () => {

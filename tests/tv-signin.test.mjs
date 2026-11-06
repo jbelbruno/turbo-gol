@@ -25,7 +25,7 @@ const K = await import('../src/ui/components/keypad.ts');
 const M = await import('../src/ui/screens/tvSignInModel.ts');
 const L = await import('../src/ui/screens/lobbyModel.ts');
 const { AccountClient } = await import('../src/net/AccountClient.ts');
-const { NetClient, WARM_MS } = await import('../src/net/NetClient.ts');
+const { NetClient, WARM_MS, REWARM_AFTER_MS } = await import('../src/net/NetClient.ts');
 const { getToken } = await import('../src/net/Turnstile.ts');
 const P = await import('../src/net/protocol.ts');
 
@@ -120,7 +120,7 @@ test('/tv: a TV whose clock is minutes off the server still gets its code\'s who
 
 test('AccountClient: tvStart, tvPoll pending then approved (adopted only by signInWith), tvConfirm with the Bearer', async () => {
   const calls = [];
-  const session = { kind: 'account', playerId: 'u1', name: 'Ana', session: 'jwt', expiresAt: Date.now() + 3_600_000, car: 'pampero' };
+  const session = { kind: 'account', playerId: 'u1', name: 'Ana', session: 'jwt', expiresAt: Date.now() + 3_600_000, car: 'cyclone' };
   let approve = false;
   const acc = new AccountClient({
     storage: null,
@@ -147,7 +147,7 @@ test('AccountClient: tvStart, tvPoll pending then approved (adopted only by sign
   acc.signInWith(r);
   assert.equal(acc.signedIn, true);
   assert.equal(acc.account.name, 'Ana');
-  assert.equal(acc.account.car, 'pampero', "the session's car (PR 8): the garage's pick before the shop answers");
+  assert.equal(acc.account.car, 'cyclone', "the session's car (PR 8): the garage's pick before the shop answers");
   assert.equal(changes, 1);
   await acc.tvConfirm('ABC234');
   assert.equal(calls.at(-1).auth, 'Bearer jwt');
@@ -264,6 +264,36 @@ test('NetClient: Inicio pre-warms one token, the next registration uses it (no s
   assert.equal(api.rendered, 2);
   t.now += WARM_MS + 1;
   assert.equal(await c.antiBotToken(), 'tok-3', 'stale: a fresh check');
+});
+
+test("NetClient.antiBotReady (a TV guest's rooms): a warm token or a guest session; a pre-warm past REWARM_AFTER_MS solves a new one and keeps the old meanwhile", async () => {
+  let manual = false;
+  let solve = null;
+  const api = fakeTurnstile((o) => {
+    if (manual) solve = () => o.callback('tok-new');
+    else setTimeout(() => o.callback('tok-' + api.rendered), 0);
+  });
+  const { c, t } = client(api);
+  assert.equal(c.antiBotReady, false, 'nothing yet');
+  c.prewarmAntiBot();
+  await settle();
+  assert.equal(c.antiBotReady, true, 'a warm token');
+  t.now += REWARM_AFTER_MS - 1;
+  c.prewarmAntiBot();
+  await settle();
+  assert.equal(api.rendered, 1, 'still young: kept');
+  t.now += 2;
+  manual = true;
+  c.prewarmAntiBot();
+  await settle();
+  assert.equal(c.antiBotReady, true, 'the old token holds while the new one is solved');
+  solve?.();
+  await settle();
+  assert.equal(await c.antiBotToken(), 'tok-new', 'then the new one is the warm one');
+  t.now += WARM_MS + 1;
+  assert.equal(c.antiBotReady, false, 'gone with its time');
+  c.guest = { playerId: 'p1', name: 'Invitado 4821', session: 'jwt', expiresAt: Date.now() + 86_400_000 };
+  assert.equal(c.antiBotReady, true, 'a guest session');
 });
 
 test('NetClient: a pre-warm that wants a click gives up quietly; the registration own check asks the player (onAntiBotAsk)', async () => {

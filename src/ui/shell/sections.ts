@@ -2,9 +2,9 @@
  * The Tablero's five sections (plan §1.3 `mn-sections`, §1.5): JUGAR · ENTRENAMIENTO · GARAJE ·
  * CLASIFICACIÓN · PERFIL, in that order on every device (the top bar on a PC and a TV, the rail on
  * a phone held sideways, the tab bar on an upright one). Each section has a root screen; every
- * other screen is stacked on the root of the section it belongs to (SCREEN_SECTION: today all of
- * them are JUGAR's: MODOS, a lobby and its creation, stacked on Inicio). Pure, no DOM:
- * node tests import it (tests/back-model.test.mjs).
+ * other screen is stacked on the root of the section it belongs to (SCREEN_SECTION: PERFIL's
+ * CONTROL DE NODOS on PERFIL; every other one is JUGAR's: MODOS, a lobby and its creation, stacked
+ * on Inicio). Pure, no DOM: node tests import it (tests/back-model.test.mjs).
  */
 import type { Key } from '../../i18n';
 import type { IconName } from '../components/icons';
@@ -42,12 +42,22 @@ export function rootSection(screenId: string): SectionId | null {
   return SECTIONS.find((s) => s.root === screenId)?.id ?? null;
 }
 
-/** Screens of every section (Ajustes, from the top bar's gear or Start anywhere): stacked on the screen shown (backModel.ts stackAfterOpen). */
-export const EVERY_SECTION: readonly string[] = ['settings'];
+/**
+ * Screens of every section, stacked on the screen shown (backModel.ts stackAfterOpen), so Back
+ * returns there: Ajustes (the top bar's gear, Start anywhere) and "Mis servidores" (Prompt 2, B1's
+ * option (b): opened from GARAJE it stays GARAJE's, from PERFIL PERFIL's, from `#servers` Inicio's).
+ */
+export const EVERY_SECTION: readonly string[] = ['settings', 'servers'];
 
-/** The section a screen belongs to: its own for a root, JUGAR for every stacked screen of today. */
+/**
+ * The stacked screens of a section other than JUGAR, by id: opened from that section's root they
+ * stack on it, and Back comes back there (PERFIL's CONTROL DE NODOS, from CUENTA DEL PROYECTO).
+ */
+export const SCREEN_SECTION: Readonly<Record<string, SectionId>> = { 'nodes-admin': 'profile' };
+
+/** The section a screen belongs to: its own for a root, SCREEN_SECTION's for a stacked one listed there, else JUGAR. */
 export function sectionOf(screenId: string): SectionId {
-  return rootSection(screenId) ?? HOME_SECTION;
+  return rootSection(screenId) ?? (Object.hasOwn(SCREEN_SECTION, screenId) ? SCREEN_SECTION[screenId] : HOME_SECTION);
 }
 
 /** The section `d` places from `id` (LB / RB, Q / E, the bar's ‹ ›): no wrap, null past either end. */

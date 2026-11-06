@@ -23,7 +23,7 @@
  * seams at the panel and card edges. Bloom: the LEDs feed it softly (they are large), the rail more.
  */
 import * as THREE from 'three/webgpu';
-import { abs, dFdx, dFdy, float, floor, fract, fwidth, hash, length, max, mix, mod, normalWorld, oneMinus, positionWorld, smoothstep, step, texture, time, uv, vec2, vec3 } from 'three/tsl';
+import { abs, dFdx, dFdy, float, floor, fract, fwidth, hash, length, max, min, mix, mod, normalWorld, oneMinus, positionWorld, smoothstep, step, texture, time, uv, vec2, vec3 } from 'three/tsl';
 import { glowMrt } from '../materials';
 import type { TierSpec } from '../quality';
 import { BIG_FIRST, BIG_PANELS, FIELD, LED_FRAME, LED_HI, LED_LO, PANEL_COUNT, PANEL_LEN, RAIL_HI, RAIL_LO } from './layout';
@@ -44,6 +44,8 @@ const CHANGE_FADE = 0.55;
 const DIP_LEVEL = 0.08;
 /** A regular card's change (the first boards' "Mexican wave"): the new card slides down over the old in SLIDE_SECONDS. */
 const SLIDE_SECONDS = 0.36;
+/** Width (pixels) of the filter that antialiases the bands' edges. */
+const EDGE_SOFT = 4;
 
 export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: THREE.Texture): THREE.MeshStandardNodeMaterial | THREE.MeshBasicNodeMaterial {
   const m = spec.bakedLight ? new THREE.MeshBasicNodeMaterial() : new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0 });
@@ -54,8 +56,14 @@ export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: TH
   const surround = step(abs(p.x), float(FIELD.moduleHalfW + 20)).mul(step(float(FIELD.halfZ - 200), abs(p.z)));
   const boardsOn = oneMinus(surround);
 
-  const inBand = step(float(LED_LO), h).mul(step(h, float(LED_HI)));
-  const inLed = step(float(LED_LO + LED_FRAME), h).mul(step(h, float(LED_HI - LED_FRAME))).mul(boardsOn);
+  // The bands (the board, its dark frame, the rail) are drawn by their coverage of the pixel: a box
+  // filter of the band over EDGE_SOFT pixels of the profile distance, not a hard step. MSAA only
+  // smooths geometry edges, not edges computed in the shader, so a band of a pixel or less (the rail
+  // from across the pitch) used to show as dashes, on every tier.
+  const fw = fwidth(h).mul(EDGE_SOFT).max(1e-4);
+  const bandOf = (lo: number, hi: number): typeof h => min(h.add(fw.mul(0.5)), float(hi)).sub(max(h.sub(fw.mul(0.5)), float(lo))).div(fw).saturate();
+  const inBand = bandOf(LED_LO, LED_HI);
+  const inLed = bandOf(LED_LO + LED_FRAME, LED_HI - LED_FRAME).mul(boardsOn);
   const ly = h.sub(LED_LO + LED_FRAME).div(LED_HI - LED_LO - 2 * LED_FRAME).saturate();
   // Panel k spans s in [(k - 1/2), (k + 1/2)) PANEL_LEN (layout.ts panelAt); s >= 0, so mod is safe.
   const sp = s.div(PANEL_LEN).add(0.5);
@@ -112,7 +120,7 @@ export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: TH
   const seamR = max(oneMinus(smoothstep(0.996, 1, lx)), big.mul(step(d, BIG_PANELS - 1.5)));
   const gap = seamL.mul(seamR);
   const ledOn = led.mul(inLed).mul(gap).mul(level).mul(u.ledIntensity);
-  const rail = step(float(RAIL_LO), h).mul(step(h, float(RAIL_HI))).mul(boardsOn);
+  const rail = bandOf(RAIL_LO, RAIL_HI).mul(boardsOn);
   const railCol = vec3(0.85, 0.92, 1.0).mul(rail).mul(u.railIntensity);
 
   // The ramp pad under the boards: turf-coloured, darkening toward them. The frames and the cap
@@ -121,7 +129,7 @@ export function buildBoardMaterial(spec: TierSpec, u: StadiumUniforms, atlas: TH
   const frameCol = vec3(0.012, 0.013, 0.017);
   const seams = smoothstep(0.0, 0.02, fract(p.x.div(290))).mul(0.25).add(0.75);
   const surroundCol = vec3(0.022, 0.024, 0.03).mul(seams);
-  const base = mix(pad, frameCol, max(inBand, step(float(LED_HI), h)).mul(boardsOn));
+  const base = mix(pad, frameCol, max(inBand, bandOf(LED_HI, 1e5)).mul(boardsOn));
   const albedo = mix(mix(base, vec3(0, 0, 0), inLed), surroundCol, surround.mul(step(float(LED_LO), h)));
   if (m instanceof THREE.MeshStandardNodeMaterial) {
     m.colorNode = albedo;

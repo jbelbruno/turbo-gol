@@ -7,9 +7,9 @@
 | 1 | ¿Las PCs hogareñas hostean desde la primera versión? | **Sí.** | Transporte WebRTC: la PC no abre puertos ni necesita IP pública. Un DataChannel confiable y ordenado lleva los mismos mensajes que el WebSocket. Instaladores para Windows, macOS y Linux de escritorio. |
 | 2 | ¿Recompensas con dinero? | **Sin dinero.** Puntos para canjear autos nuevos y otras cosas que se agreguen después. **Solo quien comparte recursos puede tener las cosas nuevas.** | Saldo de puntos canjeable en una tienda de anfitriones. Los ítems no se compran, no se ganan jugando y no se intercambian. Ver `RECOMPENSAS.md`. |
 | 3 | ¿El código del nodo va al repo público con AGPL? | **Sí.** | Vive en `nodes/` del repo público desde el 19/10/2026, con su propio CI. |
-| 4 | ¿Quién verifica al principio? | **Un VPS en São Paulo que levanta el mantenedor**, que además es **el primer servidor ranked**. | Nodos "de confianza" del proyecto: entran directo como activos, verifican todas las partidas y no cobran puntos. La cola de verificación espera al VPS hasta 6 horas si está caído. Ver `VPS-SAO-PAULO.md`. |
+| 4 | ¿Quién verifica al principio? | **Un VPS en São Paulo que levanta el mantenedor**, que además es **el primer servidor ranked**. | Nodos "de confianza" del proyecto: entran directo como activos, verifican todas las partidas y no cobran puntos. La cola de verificación espera al VPS hasta 6 horas si está caído. Ver `VPS-SAO-PAULO.md`. Desde noviembre de 2026 también verifican los del proyecto en Alemania y Malasia (`VPS-PROYECTO.md`), así que la cola espera solo si no queda ninguno de los tres. |
 | 5 | ¿Cuántas partidas de prueba antes del ranked? | **20 partidas casuales verificadas.** | Ya era el valor por defecto. |
-| 6 | ¿Cuánto cuesta el primer auto de la tienda? | **1.500 puntos** (decidido el 15/10/2026). | Ya era el precio del catálogo (`car-next-1` en `control-plane/shop.ts`). Hoy es el precio de cada auto de `src/game/cosmetics.ts` (pampero, carpincho, cóndor, tero), "próximamente" hasta que su carrocería exista. |
+| 6 | ¿Cuánto cuesta el primer auto de la tienda? | **1.500 puntos** (decidido el 15/10/2026). | Ya era el precio del catálogo (`car-next-1` en `control-plane/shop.ts`). Hoy es el precio de cada auto de `src/game/cosmetics.ts` (cyclone, vortex, cóndor, magma): los cuatro tienen su carrocería y ya se canjean en GARAJE. |
 | 7 | ¿Qué partidas se verifican? | **Todas las ranked: el objetivo es proteger el ranking. Las casuales, no todas** (decidido el 19/10/2026). | Ranked: siempre. Casuales: todas las de un nodo a prueba, porque sus 20 casuales verificadas son el camino al ranked (decisión 5); el 20 % de las de un nodo activo, elegidas al azar al llegar el reporte; ninguna en los nodos del proyecto. Una casual sin verificar no da puntos; una verificada por muestreo los da multiplicados por 1 / 0,2. `casualVerifyRate` en `control-plane/controlPlane.ts`. |
 | 8 | ¿Cuánto duran las ranked? | **3 minutos** (decidido el 19/10/2026). | Aplicado en el juego para todas las partidas (PR #13: `DEFAULT_MATCH_SECONDS = 180`). El nodo y el verificador no tienen el largo fijo: lo reciben del matchmaker. |
 
@@ -41,8 +41,8 @@ Todas se pueden cambiar.
    jugadores cuesta todo el tráfico de la partida, pasados los 1.000 GB gratis por mes. La
    recomendación actualizada, con números, está en `PRODUCCION.md`: ocultar al anfitrión desde la
    beta con PCs de amigos y a los jugadores por defecto al abrir al público.
-2. **Cuál es el primer auto.** El precio quedó en 1.500 puntos. El juego todavía no tiene un
-   segundo auto: hace falta diseñarlo, y hasta entonces la tienda lo muestra como "próximamente".
+2. **Cuál es el primer auto.** Resuelta: son cuatro, Cyclone, Vortex, Sirocco y Magma
+   (`src/game/cosmetics.ts`), a 1.500 puntos cada uno, y ya se canjean en GARAJE.
 3. **Precios de los demás ítems.** Con la fórmula actual y partidas de 3 minutos, una PC con lugar
    para una partida que hostea diez 1v1 por noche gana unos 90 puntos, y hasta 180 en una región que
    no da abasto. El auto de 1.500 cuesta entre 8 y 17 noches de aporte. La estela (600) y la

@@ -57,7 +57,7 @@ export interface StadiumTheme {
 const STADIUM_THEMES: Readonly<Partial<Record<ThemeId, StadiumTheme>>> = {
   'harbour-night': {
     ledIntensity: 0.4,
-    railIntensity: 0.8,
+    railIntensity: 0.4,
     lampIntensity: 30,
     glare: 0.55,
     beam: 0.5,
@@ -77,7 +77,7 @@ const STADIUM_THEMES: Readonly<Partial<Record<ThemeId, StadiumTheme>>> = {
   // under the clear mountain light, and timber stands.
   'alpine-day': {
     ledIntensity: 1.0,
-    railIntensity: 1.1,
+    railIntensity: 0.55,
     lampIntensity: 30,
     glare: 0.55,
     beam: 0.5,
@@ -96,7 +96,7 @@ const STADIUM_THEMES: Readonly<Partial<Record<ThemeId, StadiumTheme>>> = {
   // the red canyon at sunset: warm sky light on the wire and the crowd, the steel rimmed by the sun
   'canyon-sunset': {
     ledIntensity: 0.45,
-    railIntensity: 0.8,
+    railIntensity: 0.4,
     lampIntensity: 30,
     glare: 0.45,
     beam: 0.35,

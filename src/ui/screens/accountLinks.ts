@@ -17,8 +17,8 @@
  *   /account#email=, #undo=  sign-in PR 9: the add or change's link, and its undo
  *   /account#unsub=<id>      a news mail's footer link (sign-in PR 13): DARME DE BAJA (POST
  *                            news/unsubscribe { u }), then "Done: we won't send you news anymore."
- *   keep                     sign-in PR 12's cancel link: this page says the link is not valid here
- *                            until the terms of service bring its sheet
+ *   /account#keep=<token>    sign-in PR 12's cancel link (M9): "¿Conservar tu cuenta?" (deletion.ts
+ *                            openKeepSheet) while DELETION_OPEN is '1'; before that, not valid here
  *
  * On load (installAccountLinks, the arbiter's 'account' step) the link is read from the path and
  * the fragment, its token kept in sessionStorage (AccountClient.keepPendingLink, until its POST
@@ -67,6 +67,8 @@ import { codeField, field } from './common';
 import type { Field } from './common';
 import { errText, openProfileTab } from './profile';
 import { namePrefill } from './accountLinksModel';
+import { termsNotice } from './terms';
+import { openKeepSheet } from './deletion';
 import { language, t } from '../../i18n';
 
 // ---- shared by PERFIL's forms and the sheets -------------------------------------------------------
@@ -214,6 +216,8 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
   const pw = newPasswordFields(email, t('profile.password'));
   let news = false;
   const newsSwitch = toggleSwitch('auth-news', t('auth.signupNews'), () => news, (v) => (news = v));
+  // Right above CREAR CUENTA (both callers put the button after these nodes): the press accepts the version it shows (the legal draft's P1, P2).
+  const notice = termsNotice(menu, t('profile.createAccount'));
   const create = async (): Promise<boolean> => {
     name.error(null);
     pw.pass.error(null);
@@ -232,7 +236,7 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
     const password = pw.check();
     if (password === null) return false;
     try {
-      const s = await acc.signupFinish(proof, { username, password, news, email });
+      const s = await acc.signupFinish(proof, { username, password, news, email, terms: notice.version() });
       hooks.done(s);
       return true;
     } catch (e) {
@@ -249,7 +253,7 @@ export function signupFinishFields(menu: Menu, email: string, hooks: FinishHooks
     }
   };
   // `inputs`: the name, then the password (and its repeat), for Enter's next field and its submit.
-  return { nodes: [name.el, ...pw.nodes, setRow(t('auth.signupNews'), newsSwitch.el)], name, inputs: [name.input, ...pw.inputs], create };
+  return { nodes: [name.el, ...pw.nodes, setRow(t('auth.signupNews'), newsSwitch.el), notice.el], name, inputs: [name.input, ...pw.inputs], create };
 }
 
 /** Welcome, signed in (§3.1 step 6): the toast and the account's profile; PERFIL itself is never opened for it. */
@@ -509,6 +513,92 @@ export async function openReauthCodeSheet(menu: Menu, then: () => void): Promise
     title: t('auth.reauthCodeTitle'),
     body: [h('p.mn-note', null, t('auth.codeSent', { email: start.to })), code.el],
     actions: [{ label: t('profile.cancel'), onClick: () => true }],
+  });
+}
+
+/**
+ * "Confirma que eres tú" (the sign-in design's R6), shared by PERFIL and CONTROL DE NODOS (and the
+ * community's servers of prompt 2): run `go` once this browser proved a credential at `level` in
+ * the last minutes (AccountClient.fresh): at once when it did (unless `force`: the server just
+ * asked, or the step wants its full 15 minutes), else after the sheet with what reaches that level.
+ * Level 1: a provider already on the account (a round trip that comes back to PERFIL, then the
+ * player taps again; `resume` is kept for it) or the password here. Level 2 (the server's
+ * reauth_required { level: 2 }): the password, or a code to the account's verified address (POST
+ * /api/auth/reauth/code); a press on a provider's page is level 1, Google's too (it cannot be asked
+ * for its password again), and the sheet says so. The project's account gets the password only: the
+ * server refuses it the code (403 password_required). Google is not offered at level 1 inside
+ * another app's browser, which refuses it (the sheet says why). A password of before (me.legacy) is
+ * only re-keyed by itself: no code then. Cancelled, nothing runs (the panel keeps its data and
+ * offers CONFIRMAR CON LA CONTRASEÑA).
+ */
+export function confirmItsYou(menu: Menu, go: () => void, level: 1 | 2 = 1, force = false, resume: string | null = null): void {
+  const acc = menu.host.accounts;
+  if (!force && acc.fresh(level)) {
+    go();
+    return;
+  }
+  const me = acc.me;
+  const configured = (me?.providers ?? []).filter((p): p is OAuthProvider => p !== 'password' && ((menu.cfg?.oauth ?? []) as string[]).includes(p));
+  // Level 1 offers the account's providers this browser can sign in with (Google is hidden inside another app's browser, §3.0); level 2 offers none and the note names them all.
+  const own = configured.filter((p) => emailProviders(menu).includes(p));
+  const offered = level === 1 ? own : [];
+  const pass = field(t('profile.yourPassword'), { type: 'password', autocomplete: 'current-password', maxLength: 128 });
+  const withPassword = me?.hasPassword === true;
+  // No code for the project's account: it confirms with its password (the server refuses it the code: 403 password_required).
+  const mailbox = me?.emailVerified === true && typeof me.email === 'string' && me.email.length > 0 && me.legacy !== true && me.maintainer === undefined ? me.email : null;
+  const ownNames = configured.map((p) => PROVIDER_NAMES[p]).join(` ${t('profile.or')} `);
+  const notEnough = level === 2 && configured.length > 0 ? h('p.mn-note', null, mailbox !== null ? t('profile.reauthPasswordOrCode', { providers: ownNames }) : t('profile.reauthPasswordOnly', { providers: ownNames })) : null;
+  let sending = false;
+  const byCode: HTMLButtonElement | null =
+    mailbox !== null
+      ? navButton(
+          'mn-btn',
+          t('auth.reauthCode', { email: mailbox }),
+          () => {
+            if (sending) return;
+            sending = true;
+            byCode?.setAttribute('aria-busy', 'true');
+            void openReauthCodeSheet(menu, go).finally(() => {
+              sending = false;
+              byCode?.removeAttribute('aria-busy');
+            });
+          },
+          { 'data-key': 'profile-reauth-code' },
+        )
+      : null;
+  const inAppNote = level === 1 && configured.includes('google') && googleHidden(menu) ? h('p.mn-note', null, t('auth.inAppGoogle', { site: location.hostname })) : null;
+  menu.modal({
+    title: t('profile.reauthTitle'),
+    body: [
+      h('p.mn-note', null, t('profile.reauthNote')),
+      notEnough,
+      ...offered.map((p) => navButton('mn-btn', t('profile.reauthWith', { provider: PROVIDER_NAMES[p] }), () => (acc.keepResume(resume), (window.location.href = acc.oauthUrl(p, 'reauth'))), { 'data-key': 'profile-reauth-' + p })),
+      inAppNote,
+      byCode,
+      withPassword ? pass.el : null,
+    ],
+    actions: [
+      ...(withPassword
+        ? [
+            {
+              label: t('profile.reauthConfirm'),
+              primary: true,
+              onClick: async (): Promise<boolean> => {
+                pass.error(null);
+                try {
+                  await acc.reauth(pass.input.value);
+                  queueMicrotask(go);
+                  return true;
+                } catch (e) {
+                  pass.error(errText(e));
+                  return false;
+                }
+              },
+            },
+          ]
+        : []),
+      { label: t('profile.cancel'), onClick: () => true },
+    ],
   });
 }
 
@@ -862,9 +952,8 @@ export async function openAccountLink(menu: Menu, link: AccountLink): Promise<vo
   if (link.kind === 'email') return openEmailLinkSheet(menu, link.token);
   if (link.kind === 'undo') return openUndoSheet(menu, link.token);
   if (link.kind === 'unsub') return openUnsubSheet(menu, link.token);
-  // keep: its sheet comes with the terms of service (sign-in PR 12's route is closed until then).
-  menu.host.accounts.keepPendingLink(null);
-  menu.toast(t('error.account.link_invalid'), 'error');
+  // keep: M9's cancel link, its sheet while the deletion screens are open (deletion.ts; DELETION_OPEN), else not valid here.
+  return openKeepSheet(menu, link.token);
 }
 
 /**
@@ -1017,6 +1106,8 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
   const name = field(t('auth.gameName'), { autocomplete: 'nickname', maxLength: USERNAME_MAX, value: namePrefill(t('auth.nameWord'), guestNumber(menu.host.guestName())), hint: t('auth.gameNameHint'), enterkeyhint: 'done' });
   let news = false;
   const sw = toggleSwitch('auth-news', t('auth.news'), () => news, (v) => (news = v));
+  // Last in the body, right above NO, CREAR MI CUENTA: the press accepts the version it shows (the legal draft's P1, P2).
+  const notice = termsNotice(menu, t('auth.create'));
   const create: SheetAction = {
     label: t('auth.create'),
     primary: true,
@@ -1031,7 +1122,7 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
         return false;
       }
       try {
-        const s = await acc.createAccount(username, { news, lang: language(), tz: timeZone() });
+        const s = await acc.createAccount(username, { news, lang: language(), tz: timeZone(), terms: notice.version() });
         handed = true;
         menu.toast(t('game.welcomeNew', { name: s.name }), 'ok');
         void acc.fetchMe().catch(() => undefined);
@@ -1078,6 +1169,7 @@ function confirmSheet(menu: Menu, info: PendingInfo, legacy: LegacyPhase, end: (
       name.el,
       setRow(t('auth.news'), sw.el),
       forgot,
+      notice.el,
     ],
     actions: [create, haveOne],
     onClose: () => {

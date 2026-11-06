@@ -8,10 +8,10 @@ prueba en `tests/rating.test.mjs`.
 Estructura:
 
 ```
-Inicio ── JUGAR ── Casual            (playlists Mano a mano / Parejas / Tríos, varias a la vez,
-      │        │                       región, conexión P2P o servidor)
+Inicio ── JUGAR ── Casual            (cuenta; todos los formatos juntos, región; siempre en
+      │        │                       servidor)
       │        ├─ Competitivo         (solo cuentas: rango por playlist, clasificación, bloqueo)
-      │        ├─ Partidas personalizadas ── lista pública por región, unirse por código,
+      │        ├─ Partidas personalizadas ── lista pública (tu región primero), unirse por código,
       │        │                             crear sala ── Sala (equipos, anfitrión, iniciar)
       │        └─ Amistoso            (offline contra la IA)
       ├─ ENTRENAMIENTO  (Práctica libre + 9 packs: Definición / Atajadas / Aéreos × Principiante / Intermedio / Experto)
@@ -43,17 +43,18 @@ Inicio ── JUGAR ── Casual            (playlists Mano a mano / Parejas / 
 | Recuperación | «¿Olvidaste tu contraseña?» manda un enlace a tu correo (30 minutos, un uso). Los códigos de recuperación viejos sirven hasta la fecha de corte |
 | Fuerza bruta | Turnstile en cada entrada y registro; límites durables en `AccountsDO` por correo y red, por correo y por red, más altos para una dirección IPv4 (escuelas, redes móviles) |
 | Almacenamiento | Un Durable Object con SQLite (`AccountsDO`): 25.000 cuentas ocupan pocos MB |
-| Invitados | Siguen igual: Casual, salas y entrenamiento. No tienen rango ni aparecen en la clasificación |
+| Invitados | Salas, contra la IA y entrenamiento (desde 2026-11-04, Casual necesita una cuenta). No tienen rango ni aparecen en la clasificación |
 
 ### Agregar o cambiar el correo
 
 En **PERFIL › Cuenta y seguridad**, la fila **Correo** muestra tu correo con **CAMBIAR CORREO**,
-**AGREGAR CORREO** si no tienes uno, o el correo de Discord o Google con **CONFIRMAR CORREO** si
-todavía no lo confirmaste.
+**AGREGAR CORREO** si no tienes uno, o el correo de Discord (o el de un Google que no sea un Gmail
+personal) con **CONFIRMAR CORREO** si todavía no lo confirmaste. Un Gmail personal que Google confirma
+(sin dominio de Workspace) no es una pista: queda como el correo de la cuenta, ya confirmado.
 
 1. Si hace rato que no confirmas que eres tú, el juego te lo pide primero: con tu contraseña, un
    código a tu correo o el botón de tu proveedor. Para cambiar un correo que ya tienes no alcanza
-   con Discord: usa tu contraseña o un código.
+   con Discord ni con Google: usa tu contraseña o un código.
 2. Escribe el correo nuevo y toca **ENVIAR CÓDIGO**. Te llega un código de 6 dígitos (y un enlace)
    a ese correo. Escríbelo en el juego o abre el enlace en cualquier dispositivo.
 3. Al cambiarlo:
@@ -108,24 +109,89 @@ sin fecha. Para fijarla:
    las cuentas con la contraseña vieja y un correo confirmado reciben un recordatorio.
 4. Si quitas la variable, el corte desaparece y el piso empieza de nuevo la próxima vez.
 
-### Activar Google y Discord
+### Activar Google
 
-El código está listo. Cada proveedor se activa cuando cargas sus dos secretos, y si no están, el
-botón no aparece.
+El código está listo. Google se activa cuando cargas sus dos secretos, `GOOGLE_CLIENT_ID` y
+`GOOGLE_CLIENT_SECRET` (los dos o ninguno): mientras falte uno, el botón no aparece y la ruta de
+inicio responde 404. Discord funciona igual (abajo).
 
-**Google** (console.cloud.google.com → APIs & Services):
-1. En *OAuth consent screen*, tipo External, completa nombre y email de soporte. El scope es
-   `openid email`: se pide el correo, nunca el nombre.
-2. En *Credentials → Create credentials → OAuth client ID*, tipo Web application.
-3. Authorized redirect URI: `https://turbo-gol.com/api/auth/oauth/google/callback`.
-4. Copia el Client ID y el Client secret.
+**1. El cliente OAuth** (console.cloud.google.com → APIs & Services):
+1. En *OAuth consent screen* (o *Google Auth Platform*), tipo **External**, con el nombre de la
+   aplicación, el correo de soporte y `turbo-gol.com` como dominio autorizado.
+2. En *Data access* (los scopes) agrega **solo `openid` y `email`** (`.../auth/userinfo.email`).
+   Nunca `profile`: el juego no lee el nombre ni la foto, y con estos dos scopes básicos Google no
+   pide revisión ni verificación de la aplicación.
+3. En *Credentials → Create credentials → OAuth client ID*, tipo **Web application**.
+4. Authorized redirect URI: `https://turbo-gol.com/api/auth/oauth/google/callback` (exacta, sin
+   barra al final). No hacen falta orígenes de JavaScript: el flujo es de servidor.
+5. Copia el Client ID y el Client secret.
 
-**Discord** (discord.com/developers/applications):
+**2. La pantalla de consentimiento: Testing o publicada.**
+- En estado **Testing** los scopes básicos funcionan, pero solo entran las cuentas que agregues como
+  *Test users* (hasta 100). Sirve para probar antes de abrirlo.
+- Para que entre cualquiera, pulsa *Publish app*. Con solo `openid` y `email` no hay revisión de
+  Google, pero la pantalla pide los enlaces a la política de privacidad y a los términos: publícala
+  cuando esas páginas estén en línea en `turbo-gol.com`.
+
+**3. Qué hace el servidor con la respuesta de Google.** Pide `scope=openid email`, un `state`, un
+`nonce` (guardado en la cookie firmada del inicio, aparte del `state`) y PKCE. Al volver, lee el
+`id_token` que Google entrega en su endpoint de tokens y comprueba el emisor (`iss`), el destinatario
+(`aud`: nuestro client id), la caducidad (`exp`) y el `nonce`. No verifica la firma: el token llega
+directo de Google por TLS en respuesta a nuestro secreto y a nuestro PKCE (OpenID Connect Core,
+«ID Token Validation»: el TLS hace de firma). Lee
+`sub`, `email`, `email_verified` y `hd`, y nada más (ni nombre ni foto).
+- **Gmail sin `hd`** (gmail.com o googlemail.com, verificado): Google es la autoridad de ese buzón
+  (confianza `auth`). Si la cuenta no tiene correo verificado, ese correo pasa a ser el suyo.
+- Si otra cuenta ya tiene ese correo (o lo tiene reservado los 7 días siguientes a un cambio), no se
+  reclama: el juego lleva a esa cuenta para vincular Google a ella. Un correo, una cuenta.
+- **Cualquier otro correo verificado** (Google Workspace con `hd`, o un dominio ajeno que no sea
+  Gmail): confianza `asserted`. Solo encuentra una cuenta que ya lo tenga y queda como pista; para
+  fijarlo hay que confirmarlo con un código por correo. Discord queda igual: siempre es una pista.
+- **Sin verificar o sin correo**: `none`. La cuenta se crea sin correo y PERFIL pide uno.
+- Una cuenta se encuentra por su `sub`, nunca por el correo. El callback no crea ninguna cuenta: la
+  crea el jugador en «¿Ya tienes cuenta en Turbogol?».
+
+**4. Google nunca prueba el nivel 2.** Su `prompt` solo acepta `none`, `consent` y `select_account`, no
+documenta `max_age`, y el `auth_time` no viene en el `id_token` salvo que se pida con el parámetro
+`claims` y se active en los ajustes (su documento de descubrimiento ni lo lista en `claims_supported`),
+así que ningún inicio con Google puede obligar ni comprobar que se escribió la contraseña otra vez.
+Entrar con Google (como con Discord) es el **nivel 1**: una persona pulsó en la pantalla de elegir
+cuenta de Google. El **nivel 2** es una contraseña escrita o un código o enlace que llegó al correo.
+Todos los flujos de Google (entrar, vincular, «ya tengo una», «Confirma que eres tú») piden
+`prompt=select_account`, y el servidor ignora cualquier `lvl` que le manden. Por eso «Confirma que
+eres tú» pide la contraseña o un código por correo cuando hace falta el nivel 2, y lo dice con el
+nombre de los proveedores que no alcanzan. Una cuenta que solo entra con Google y Discord, sin
+contraseña ni correo confirmado, tiene el nivel 1 como techo (como hasta ahora): lo que pide el nivel 2
+le pide el 1.
+
+**5. Navegadores dentro de otras apps.** Google rechaza los visores incrustados
+(`disallowed_useragent`). Dentro de Discord, Instagram, Facebook, TikTok y Line el juego esconde el
+botón de Google y dice «Abre turbo-gol.com en tu navegador para entrar con Google.».
+
+**6. La comprobación real (una vez, la hace el dueño).** Los tests no hablan con Google, así que esto
+solo se ve con el servidor de verdad. Con los secretos cargados y la pantalla en *Testing*:
+1. `GET /api/config` debe listar `google` en `oauth`.
+2. Agrega un Gmail de prueba como *Test user* y entra con él desde un navegador normal (no dentro de
+   otra app): crea la cuenta en «¿Ya tienes cuenta en Turbogol?».
+3. En PERFIL, el Correo debe ser ese Gmail y estar confirmado: quedó reclamado.
+4. Vincula Discord (o agrega una contraseña) para tener otra forma de entrar y desvincula Google.
+   Como la cuenta ya tiene un correo confirmado, PERFIL pide «Confirma que eres tú» y Google no
+   alcanza (es el nivel 1): usa el código que llega a ese Gmail (necesita el correo de producción activo). Después vuelve a vincular Google.
+5. El Correo sigue siendo el mismo Gmail, reclamado, en cada paso: el correo de la cuenta es del
+   juego y no sigue al proveedor.
+
+### Activar Discord
+
+Discord se activa igual, con sus dos secretos (discord.com/developers/applications):
 1. *New Application* → OAuth2.
 2. Redirect: `https://turbo-gol.com/api/auth/oauth/discord/callback`.
 3. Copia el Client ID y el Client Secret (con *Reset Secret*). El scope es `identify email`.
 
-Después cárgalos como secretos del Worker (cada comando pide el valor):
+### Cargar los secretos
+
+`server/.env` lo lee solo `scripts/deploy.mjs`, y solo para las credenciales de Cloudflare
+(`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) y `VITE_ORIGINS`; el Worker desplegado nunca lo lee. Por eso los
+secretos de producción no van ahí: se cargan como secretos del Worker (cada comando pide el valor):
 
 ```
 cd server
@@ -188,14 +254,14 @@ falsifica un Origin local) puede usar `POST /api/dev/signin` con cualquier nombr
 ## Salas personalizadas
 
 - Cada sala es un `LobbyDO` con hibernación. El código es de 6 caracteres, sin I/O/0/1.
-  - Opciones: contraseña opcional, pública (en la lista) o privada (solo por código), modo,
-    conexión P2P o servidor, y duración de 3, 5 o 10 min o sin límite.
+  - Opciones: contraseña opcional, pública (en la lista) o privada (solo por código), modo y
+    duración de 3, 5 o 10 min o sin límite (las salas siempre se juegan P2P).
 - **Lista pública:** se ordena con tu región primero, después las abiertas, y por cantidad de
   jugadores.
 - **Equipos:** cada jugador entra al equipo con menos gente y se cambia si hay lugar. El anfitrión
   configura, saca jugadores e inicia la partida, y si se va, pasa al que más tiempo lleva.
 - **Inicio:** el matchmaker de la región arma la partida con esos equipos exactos y completa con
-  bots. P2P necesita 2 humanos o más; uno solo juega en servidor. No suman ni restan rango.
+  bots. Hacen falta 2 humanos o más (P2P). No suman ni restan rango.
 - **Vuelta:** al terminar el partido vuelves a la sala. Se reabre cuando vuelven todos, o a los
   40 min.
 - **Reglas experimentales** (Ajustes > Experimental, solo cuentas con el interruptor activado):

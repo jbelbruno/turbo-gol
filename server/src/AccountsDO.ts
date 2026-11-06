@@ -92,6 +92,9 @@
  *   POST /replay-name/set { userId, hidden }                         -> { hidden } | 404
  *   POST /replay-hidden   { ids, names } (the NodeRegistryDO)        -> { ids, names }: those of an account that hides
  *                                                                     its name in the public replays (256 each at most)
+ *   POST /usernames       { ids } (the NodeRegistryDO's public list) -> { names: { <id>: username } }: each account's name
+ *                                                                     as it is now, a purged or unknown id left out (256
+ *                                                                     at most)
  *   POST /tv-start        { ip, secret, where?, checked? }           -> { code, expiresAt } | 503 busy (the table, or the
  *                                                                     caller's /48 or /24, is full; `checked` false: started
  *                                                                     without a solved check, tvCodes.ts TV_OPEN_* too)
@@ -115,15 +118,31 @@
  *   POST /shop/claim      { userId, item }                           -> ClaimAnswer | 404 unknown_item | 409 <ClaimRefusal> | 404
  *   POST /host-credit     HostCredit (the NodeRegistryDO's outbox)    -> { ok, applied } (once per matchId)
  *   POST /host-freeze     { userId, reason, at } (the outbox)        -> { ok, applied }
+ *   POST /host-consent    { userId, version, adult, again? } (the NodeRegistryDO's community token, Prompt 2 A3; again:
+ *                                                                     its POST /nodes/mine/accept) -> { hostTerms }:
+ *                                                                     a 'host' consents row (source 'node_token', or
+ *                                                                     'host_reaccept' with again: true: the rules
+ *                                                                     for hosts of the version in force accepted and 18 or
+ *                                                                     older declared), one per version at most | 400
+ *                                                                     bad_consent (no terms, or none that describe hosting:
+ *                                                                     env.ts hostingTermsInForce) | 403 adult_required (no
+ *                                                                     adult: true) | 409 terms_changed { version } (not the
+ *                                                                     version in force) | 403 terms_required { version } (that
+ *                                                                     version's terms not accepted) | 403 deletion_pending | 404
  *   POST /host-grant      { userId, item } (a maintainer, through the NodeRegistryDO) -> { granted, items } | 404
  *   POST /host-revoke     { userId, item }                           -> { revoked, refunded, items }
  *   POST /host-unfreeze   { userId }                                 -> { unfrozen }
+ *   GET  /host-frozen     (a maintainer, through the NodeRegistryDO)  -> { frozen: [{ account, reason, at }], more }:
+ *                                                                     the wallets frozen now, newest first, at most
+ *                                                                     FROZEN_LIST_MAX (read only)
  *   The email accounts (sign-in PR 7; emailPost): each answer's `mail` is what the Worker sends after
  *   it answers (R7), never shown to a client; the caps and lanes are mail_rate's and mail_day's.
  *   POST /signup-start    { email, attempt, lang?, ip }              -> { resendAt, codeLength, mail } | 400 bad_email | 429
  *                                                                     | 503 email_paused (one row for any address, I6)
  *   POST /signup-check    { attempt, code } | { token }              -> { email } | 400 code_wrong | 410 | 409 already_created
  *   POST /signup-finish   proof, { username, pw, news, lang, tz, terms?, refresh, ip } -> UserRef & { email } | 400 | 409 | 410 | 429
+ *                                                                     (`terms`: the version the notice showed, a consents row
+ *                                                                     only when it is TERMS_VERSION's; /pending-create the same)
  *                                                                     (429: the network's new accounts, NEW_ACCOUNTS, one
  *                                                                     budget with /pending-create)
  *   POST /code-resend     { attempt, ip, userId? }                   -> { resendAt, resendsLeft, mail } | 410 | 429 | 503
@@ -157,10 +176,19 @@
  *                                                                     maintainer_account / deletion_pending { purgeAt } |
  *                                                                     429 / 503 (M9 cannot go: nothing changes)
  *   POST /delete-cancel   { token }                                  -> { ok } | 410 link_invalid (M9's link)
+ *   POST /admin-delete    { account, confirm, by, receivedAt? }      -> { certificate } (the legal draft's P4: a maintainer's
+ *                                                                     deletion on request, now, also of a suspended account or
+ *                                                                     one without an address) | 400 bad_confirm | 404 no_user |
+ *                                                                     409 maintainer_account | 503 retry
  *   The news consent (sign-in PR 13, the design's §2.11 and §3.14; no news is sent yet):
  *   POST /me-consent      { userId, kind: 'news', granted }          -> { news, terms } | 400 bad_consent | 404 | 409
  *                                                                     email_required (a grant needs a verified address) /
  *                                                                     deletion_pending { purgeAt } | 429 (NEWS_CHANGES)
+ *                         { userId, kind: 'terms', version }         -> { news, terms } (the legal draft's P1, P33: the
+ *                                                                     re-accept sheet; a row of source 'reaccept' unless the
+ *                                                                     newest is that version) | 400 bad_consent (TERMS_VERSION
+ *                                                                     unset: as before the kind existed) | 409 terms_changed
+ *                                                                     { version } (another one is in force) / deletion_pending
  *   POST /news-unsubscribe { u }                                     -> { ok: true } for any id (that id's account: its
  *                                                                     news withdrawn, a new unsub_id)
  *     While a deletion is pending, 409 deletion_pending { purgeAt } answers /auth-finish and /oauth
@@ -198,12 +226,12 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, json, limitKey, nodesConfigured, trustedOperatorIds } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, hostingTermsInForce, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
 import { base64urlEncode, checkInternal } from './auth';
 import { AccountStore, DEV_NAME_PROBLEM } from './accountStore';
 import { CODE_TRIES, LEGACY_CLOSED, LEGACY_REMIND_MS, legacyDateOf, markSlot, providerMark } from './accountStore';
 import type { DeletionRefusal, EmailApplied, LegacyState, MailOrder, MailProfile, MailTokenRow, MarkKind } from './accountStore';
-import { OPERATOR_DELETED_ROUTE, askNodes } from './nodeApi';
+import { OPERATOR_DELETED_ROUTE, REPLAY_HIDDEN_MAX, askNodes } from './nodeApi';
 import { FAILURES, MAIL_CAPS, RESEND, alertAfterFailures, dailyCap, laneAllows, mailDay, mailKilled, networkCap, pauseAfterFailures, takeSlot } from './mailCaps';
 import type { MailLane, MailWindow, WindowCap } from './mailCaps';
 import { mailLang, renderMail } from './mailTemplates';
@@ -223,8 +251,6 @@ import { ITEM_ID_RE } from '../../nodes/control-plane/shop';
 const LOGIN_WINDOW_MS = 15 * 60_000;
 /** The most accounts one /equipped asks for (a lobby's members: a 3v3). */
 const EQUIPPED_MAX = 6;
-/** /replay-hidden: a page of the public replays at most (31 rows of 8 seats), ids and names each. */
-const REPLAY_HIDDEN_MAX = 256;
 export const LOGIN_FAILS_FREE = 5;
 const LOGIN_LOCK_BASE_MS = 30_000;
 export const LOGIN_LOCK_MAX_MS = 15 * 60_000;
@@ -286,6 +312,8 @@ const HOST_CREDIT_MAX = 100_000;
 export const STATS_OPERATORS_MAX = 500;
 /** The most NODE_TRUSTED_OPERATORS ids /account-stats reports on. */
 export const STATS_TRUSTED_MAX = 32;
+/** The most frozen wallets GET /host-frozen lists (newest first; `more` says there are others). */
+export const FROZEN_LIST_MAX = 200;
 
 function isIdList(v: unknown, max: number): v is string[] {
   return Array.isArray(v) && v.length <= max && v.every((id) => isHex(id, 16));
@@ -322,8 +350,8 @@ function isPw(v: unknown): v is PasswordRecord {
 
 /**
  * The level an OAuth sign-in, link or re-authentication carries (R6): what the Worker's start asked
- * the provider for, at most 1 in this build (a press on the provider's page; Google's forced
- * password, level 2, comes with its own change). Anything else is 0.
+ * the provider for, at most 1 (a press on the provider's page; Google cannot show more: it has no
+ * forced password login, docs/online/ACCOUNTS.md). Anything else is 0.
  */
 function oauthLevel(v: unknown): 0 | 1 {
   return v === 1 ? 1 : 0;
@@ -478,6 +506,16 @@ export const DELETION_REQUESTS: WindowCap = { day: 5 };
  */
 export const NEWS_CHANGES: WindowCap = { day: 20 };
 
+/**
+ * The terms version a sign-up's notice showed (signup/finish's and pending/create's `terms`), when it
+ * is the one in force (env.ts termsVersion: none while TERMS_VERSION is unset); null otherwise, and
+ * no row is written: a page of before the change shows the re-accept sheet before it plays online.
+ */
+export function termsAccepted(env: Parameters<typeof termsVersion>[0], sent: unknown): string | null {
+  const current = termsVersion(env);
+  return current !== null && sent === current ? current : null;
+}
+
 /** 409 deletion_pending { purgeAt } (§2.10): only ever after the account was proved (a password, a provider, a mailbox). */
 function deletionPending(purgeAt: number, extra: Record<string, unknown> = {}): Response {
   return json({ error: 'deletion_pending', message: 'Esta cuenta tiene un borrado pendiente', purgeAt, ...extra }, 409);
@@ -548,6 +586,64 @@ async function sha256Hex(s: string): Promise<string> {
   let h = '';
   for (let i = 0; i < d.length; i++) h += (d[i] < 16 ? '0' : '') + d[i].toString(16);
   return h;
+}
+
+/**
+ * The certificate of a deletion on request (POST /api/admin/account-delete, the legal draft's P4),
+ * for the owner to send back within 72 hours: a reference, the dates and a digest, nothing personal
+ * (no name, no address, no id). `digest` = SHA-256 hex of "turbogol-deletion-v1\n<ref>\n<account
+ * id>\n<deletedAt>" (deletionDigest): the account's id stays in deleted_ids (its tombstone), so the
+ * owner can show which account a certificate is for, and nobody else can.
+ */
+export interface DeletionCertificate {
+  kind: 'turbogol-deletion';
+  v: 1;
+  /** 8 random bytes, hex: how the person and the owner name this deletion. */
+  ref: string;
+  /** When the request came (the owner's date), ms; null when not given. */
+  receivedAt: number | null;
+  /** When the deletion was first asked: PERFIL's request when there was one, else the deletion itself. */
+  requestedAt: number;
+  deletedAt: number;
+  digest: string;
+  /** The certificate in words, in both languages, to paste into the answer. */
+  text: { es: string; en: string };
+}
+
+/** A certificate's digest (DeletionCertificate.digest). */
+export function deletionDigest(ref: string, userId: string, deletedAt: number): Promise<string> {
+  return sha256Hex(`turbogol-deletion-v1\n${ref}\n${userId}\n${deletedAt}`);
+}
+
+/** /admin-delete's receivedAt: ms or a YYYY-MM-DD date (12:00 UTC), within the last 400 days and not ahead; else null. */
+function receivedOf(v: unknown, now: number): number | null {
+  const m = typeof v === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim()) : null;
+  const at = typeof v === 'number' ? v : m !== null ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12) : NaN;
+  return Number.isFinite(at) && at <= now + 24 * 60 * 60_000 && at >= now - 400 * 24 * 60 * 60_000 ? Math.floor(at) : null;
+}
+
+async function deletionCertificate(userId: string, receivedAt: number | null, requestedAt: number, deletedAt: number): Promise<DeletionCertificate> {
+  const ref = randomHex(8);
+  const digest = await deletionDigest(ref, userId, deletedAt);
+  const iso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d{3}Z$/, ' UTC').replace('T', ' ');
+  const es = [
+    `Constancia de borrado de Turbogol (referencia ${ref}).`,
+    receivedAt !== null ? `Pedido recibido: ${iso(receivedAt)}.` : null,
+    requestedAt !== deletedAt ? `Borrado pedido en el juego: ${iso(requestedAt)}.` : null,
+    `Cuenta borrada: ${iso(deletedAt)}.`,
+    `Huella: ${digest}.`,
+    'La huella identifica la cuenta sin ningún dato personal.',
+  ];
+  const en = [
+    `Turbogol deletion certificate (reference ${ref}).`,
+    receivedAt !== null ? `Request received: ${iso(receivedAt)}.` : null,
+    requestedAt !== deletedAt ? `Deletion asked in the game: ${iso(requestedAt)}.` : null,
+    `Account deleted: ${iso(deletedAt)}.`,
+    `Digest: ${digest}.`,
+    'The digest identifies the account without any personal data.',
+  ];
+  const join = (lines: Array<string | null>): string => lines.filter((x): x is string => x !== null).join('\n');
+  return { kind: 'turbogol-deletion', v: 1, ref, receivedAt, requestedAt, deletedAt, digest, text: { es: join(es), en: join(en) } };
 }
 
 /** A row's code hash (section 1.6): bound to the attempt, so a copy of the database cannot test a code without the browser's id. */
@@ -804,6 +900,8 @@ export class AccountsDO extends DurableObject<Env> {
         const r = this.store.shop(p.get('userId') ?? '');
         return r === 'no_user' ? error(404, 'no_user') : json(r);
       }
+      case '/host-frozen':
+        return json(this.store.frozenWallets(FROZEN_LIST_MAX));
       case '/replay-name': {
         const r = this.store.replayName(p.get('userId') ?? '');
         return r === 'no_user' ? error(404, 'no_user') : json(r);
@@ -1119,6 +1217,9 @@ export class AccountsDO extends DurableObject<Env> {
         return this.meDelete(b, now);
       case '/delete-cancel':
         return this.deleteCancel(b, now);
+      // Deletion on request (the legal draft's P4).
+      case '/admin-delete':
+        return this.adminDelete(b, now);
       // The news consent and unsubscribing (sign-in PR 13).
       case '/me-consent':
         return this.meConsent(b, now);
@@ -1134,10 +1235,13 @@ export class AccountsDO extends DurableObject<Env> {
    * POST /me-consent { userId, kind: 'news', granted } -> { news, terms } (§2.11): the refusals of
    * accountStore.ts newsBlock first (a grant without a verified address: 409 email_required; with a
    * deletion pending: 409 deletion_pending), then, for a press that changes the state, one slot of
-   * NEWS_CHANGES (429, nothing written), then the row (setNews). Only the news kind for now: the
-   * terms' kind comes with the terms of service.
+   * NEWS_CHANGES (429, nothing written), then the row (setNews). The terms' kind (the legal draft's
+   * P1, P33: the re-accept sheet) only for the version in force: none (TERMS_VERSION unset) is 400
+   * bad_consent, the answer of before, another is 409 terms_changed { version }; then accountStore.ts
+   * acceptTerms (at most one row per version, so no cap).
    */
   private async meConsent(b: Record<string, unknown>, now: number): Promise<Response> {
+    if (b.kind === 'terms') return this.termsConsent(b, now);
     if (typeof b.userId !== 'string' || b.userId.length > 64 || b.kind !== 'news' || typeof b.granted !== 'boolean') return error(400, 'bad_consent', 'Consentimiento inválido');
     const key = await this.throttleKey('nc', b.userId);
     // ---- one step from here ----
@@ -1152,6 +1256,19 @@ export class AccountsDO extends DurableObject<Env> {
     }
     const r = s.setNews(b.userId, b.granted, now);
     return typeof r === 'string' ? error(409, r) : json(r);
+  }
+
+  /** POST /me-consent { userId, kind: 'terms', version } (meConsent): the version in force accepted again, after a change. */
+  private termsConsent(b: Record<string, unknown>, now: number): Response {
+    if (typeof b.userId !== 'string' || b.userId.length > 64 || typeof b.version !== 'string' || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+    const current = termsVersion(this.env);
+    // Unpublished: the answer of before this kind existed.
+    if (current === null) return error(400, 'bad_consent', 'Consentimiento inválido');
+    if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
+    const r = this.store.acceptTerms(b.userId, current, now);
+    if (r === 'no_user') return error(404, 'no_user');
+    if (r === 'deletion_pending') return deletionPending(this.store.deletionAt(b.userId));
+    return json(r);
   }
 
   /**
@@ -1205,6 +1322,53 @@ export class AccountsDO extends DurableObject<Env> {
     // `must` with no key: the lane had room above and the account's notice cap was taken with the others.
     const mail = p.email !== null ? this.notice(p, null, { kind: 'deletion_scheduled', name: p.name, at: r.purgeAt, token: cancel.token }, b.lang, now, true) : null;
     return json({ purgeAt: r.purgeAt, mail });
+  }
+
+  /**
+   * POST /admin-delete { account, confirm, by, receivedAt? } -> { certificate } (the legal draft's P4:
+   * a deletion asked by mail, done within Ley 25.326 art. 16.2's 5 business days, its certificate
+   * sent back within 72 hours). `account` is an id or a username, `confirm` that account's username
+   * as the maintainer typed it, `by` the maintainer's id (the Worker's gate checked it), `receivedAt`
+   * when the request came (ms, or a YYYY-MM-DD date; optional). accountStore.ts forceDeletion first
+   * (404 no_user, 409 maintainer_account, 400 bad_confirm; a suspended account, one without an
+   * address and one pending already are taken), then the purge the alarm runs (purgeAccount: the
+   * sanction marks of a sanction in force, every row, the tombstone), tried again when a value it
+   * marks changed between its keys and its transaction; then the NodeRegistryDO is told. Still not
+   * purged after 3 tries: 503 retry, and the alarm comes back for it in PURGE_AGAIN_MS (it is due).
+   * An ALERT line names the maintainer and the account (6 characters of each id), never a name.
+   */
+  private async adminDelete(b: Record<string, unknown>, now: number): Promise<Response> {
+    if (typeof b.account !== 'string' || b.account.length === 0 || b.account.length > 64 || typeof b.by !== 'string' || b.by.length > 64) return error(400, 'bad_request');
+    const maintainer = b.by.slice(0, 6);
+    const s = this.store;
+    const userId = s.accountIdOf(b.account);
+    if (userId === null) return error(404, 'no_user', 'No hay ninguna cuenta con ese nombre');
+    const f = s.forceDeletion(userId, b.confirm, now);
+    if (f === 'no_user') return error(404, 'no_user', 'No hay ninguna cuenta con ese nombre');
+    if (f === 'maintainer_account') return error(409, 'maintainer_account', 'La cuenta del proyecto no se puede borrar');
+    if (f === 'bad_confirm') return error(400, 'bad_confirm', 'Escribe el nombre de usuario de la cuenta tal como es');
+    let purged = false;
+    let marks = 0;
+    for (let tries = 0; tries < 3 && !purged; tries++) {
+      const c = s.purgeCandidate(userId);
+      if (c === null) break;
+      const r = s.purgeAccount(userId, await this.markKeys(c.values), now);
+      purged = r.result === 'purged';
+      marks = r.marks;
+      if (r.result !== 'retry' && !purged) break;
+    }
+    if (!purged) {
+      await this.ctx.storage.setAlarm(Date.now() + PURGE_AGAIN_MS);
+      return error(503, 'retry', 'La cuenta cambió mientras se borraba: vuelve a intentarlo');
+    }
+    const certificate = await deletionCertificate(userId, receivedOf(b.receivedAt, now), f.requestedAt, now);
+    console.warn(`ALERT maintainer ${maintainer} deleted the account ${userId.slice(0, 6)} on request (certificate ${certificate.ref}${marks > 0 ? `, ${marks} sanction marks kept` : ''})`);
+    try {
+      await this.tellNodes();
+    } catch {
+      /* the alarm tells the NodeRegistryDO next run (deleted_nodes) */
+    }
+    return json({ certificate });
   }
 
   /** POST /delete-cancel { token } -> { ok } | 410 link_invalid (§2.10): M9's link calls the deletion off (accountStore.ts cancelDeletionByToken). */
@@ -1728,7 +1892,8 @@ export class AccountsDO extends DurableObject<Env> {
     const caps = await this.newAccountCaps(b.ip);
     const marks = await this.markKeys([['e', first.canon]]);
     const lang = langField(b.lang);
-    const terms = typeof b.terms === 'string' && /^[a-z0-9._-]{1,32}$/.test(b.terms) ? b.terms : null;
+    // The terms version the notice above CREAR CUENTA showed: recorded only when it is the one in force (env.ts termsVersion).
+    const terms = termsAccepted(this.env, b.terms);
     // ---- one step from here ----
     const failKeys = failKey === null ? [] : [{ key: failKey, rule: CODE_FAIL_RULE }];
     const wait = this.throttled(failKeys, now);
@@ -2011,7 +2176,7 @@ export class AccountsDO extends DurableObject<Env> {
         const issue = usernameIssue(name);
         if (issue !== null && issue.code === 'usernameReserved') return json({ error: 'name_reserved', message: 'Ese nombre está reservado', suggest: s.suggestName(name, sl) }, 400);
         if (issue !== null) return error(400, 'bad_username', usernameProblem(name) ?? 'Nombre inválido');
-        const r = s.createFromPending(pend, name, { ...refresh, kind: 'web' }, now, { lvl: oauthLevel(b.lvl), lang, tz: tzField(b.tz), news: b.news === true, marks });
+        const r = s.createFromPending(pend, name, { ...refresh, kind: 'web' }, now, { lvl: oauthLevel(b.lvl), lang, tz: tzField(b.tz), news: b.news === true, terms: termsAccepted(this.env, b.terms), marks });
         if (r === 'username_taken') return json({ error: 'username_taken', message: 'Ese nombre ya está en uso', suggest: s.suggestName(name, sl) }, 409);
         if (r === 'lookalike') return json({ error: 'name_lookalike', message: 'Ese nombre se parece mucho a otro', suggest: s.suggestName(name, sl) }, 409);
         if (r === 'email_has_account') return error(409, 'email_has_account', 'Ese correo ya es de una cuenta de Turbogol: entra con ella para vincular');
@@ -2151,6 +2316,11 @@ export class AccountsDO extends DurableObject<Env> {
         if (!list(b.ids) || !list(b.names)) return error(400, 'bad_request');
         return json(s.replayHidden(b.ids, b.names));
       }
+      case '/usernames': {
+        const ids = b.ids;
+        if (!Array.isArray(ids) || ids.length > REPLAY_HIDDEN_MAX || !ids.every((x): x is string => typeof x === 'string' && x.length <= 64)) return error(400, 'bad_request');
+        return json({ names: s.usernames(ids) });
+      }
       case '/presets/delete': {
         if (typeof b.userId !== 'string') return error(400, 'bad_request');
         if (typeof b.id !== 'string' || !PRESET_ID_RE.test(b.id)) return error(400, 'bad_preset');
@@ -2185,6 +2355,21 @@ export class AccountsDO extends DurableObject<Env> {
       case '/host-freeze': {
         if (!isHex(b.userId, 16) || typeof b.reason !== 'string' || typeof b.at !== 'number' || !(b.at > 0)) return error(400, 'bad_request');
         return json({ ok: true, applied: s.hostFreeze(b.userId, b.reason.slice(0, 120), b.at) });
+      }
+      case '/host-consent': {
+        if (!isHex(b.userId, 16) || typeof b.version !== 'string' || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+        const current = termsVersion(this.env);
+        // No terms published, or none that describe hosting yet (NODE_HOSTING_TERMS): no 'host' row, ever.
+        if (current === null || !hostingTermsInForce(this.env)) return error(400, 'bad_consent', 'Consentimiento inválido');
+        // The account's own refusals are 403, as the token's (PR 2A's contract); a version that is not in force, 409.
+        if (b.adult !== true) return error(403, 'adult_required', 'Declara que tienes 18 años o más');
+        if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
+        // again: the rules of a new version accepted again in MIS SERVIDORES (POST /nodes/mine/accept), the row's source says so.
+        const r = s.acceptHost(b.userId, current, now, b.again === true ? 'host_reaccept' : 'node_token');
+        if (r === 'no_user') return error(404, 'no_user');
+        if (r === 'deletion_pending') return json({ error: 'deletion_pending', message: 'Esta cuenta tiene un borrado pendiente', purgeAt: s.deletionAt(b.userId) }, 403);
+        if (r === 'terms_required') return json({ error: 'terms_required', message: 'Primero acepta los términos vigentes', version: current }, 403);
+        return json(r);
       }
       case '/host-grant': {
         if (typeof b.userId !== 'string' || typeof b.item !== 'string') return error(400, 'bad_request');

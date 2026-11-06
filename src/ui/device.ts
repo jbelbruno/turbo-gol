@@ -11,9 +11,10 @@
  *   or the `#tv` emulation (hashFlags.ts).
  * - `finePointer()`: some pointer is fine (a mouse, a trackpad) and this is no TV: only then may a
  *   text field take a screen's first focus (a phone or a TV would pop the system keyboard up).
- * - The tap guard (`tapGuarded`, Menu): a tap whose finger went down before a menu screen or sheet
- *   was mounted, or within TAP_GUARD_MS after, is no press on it (a double tap on a tile landing on
- *   the next screen, a sheet that came up under a finger).
+ * - The tap guard (`tapGuarded`, `tapGuardSince`, Menu): a tap whose finger went down before a menu
+ *   screen or sheet was mounted, or the menus came up over a match, or within TAP_GUARD_MS after, is
+ *   no press on it (a double tap on a tile landing on the next screen, a sheet that came up under a
+ *   finger, QUIT held in the pause and lifted over the rail).
  * - Settings > Game's interface size (`interfaceFactor`: it multiplies --ui-scale) and reduced
  *   motion (`html.tg-reduce-motion`: the system's prefers-reduced-motion, or the player's Yes / No),
  *   applied by installDevice and again on every change (applyUiSettings).
@@ -31,6 +32,18 @@ export const TAP_GUARD_MS = 450;
 /** The tap guard: a finger that went down at `downAt` (ms) presses nothing mounted at `mountedAt`. Pure. */
 export function tapGuarded(downAt: number, mountedAt: number): boolean {
   return downAt < mountedAt + TAP_GUARD_MS;
+}
+
+/**
+ * The mount a tap is guarded against, by where it lands: a screen's control against the last mount
+ * (`mountedAt`), the rail or the top bar against their last change of shape (`chromeMovedAt`), the
+ * tab bar never; and any of them against the menus coming up over a match (`shownAt`): a finger
+ * that went down on the HUD (QUIT held in the pause) and lifted over the menus presses nothing
+ * there. Pure.
+ */
+export function tapGuardSince(bar: 'tabbar' | 'chrome' | null, at: { mountedAt: number; chromeMovedAt: number; shownAt: number }): number {
+  const own = bar === null ? at.mountedAt : bar === 'tabbar' ? Number.NEGATIVE_INFINITY : at.chromeMovedAt;
+  return Math.max(own, at.shownAt);
 }
 
 /** What a TV remote sends: on a TV with no controller connected these keys are the remote. */
@@ -180,7 +193,7 @@ export function reducesMotion(pref: MotionPref, system: boolean): boolean {
 }
 
 /** The interface settings in force (installDevice, applyUiSettings) and the layout's apply. */
-let uiNow: Readonly<UiSettings> = { size: 0, motion: 'system' };
+let uiNow: Readonly<Pick<UiSettings, 'size' | 'motion'>> = { size: 0, motion: 'system' };
 let relayout: (() => void) | null = null;
 /**
  * The system's prefers-reduced-motion, kept by its change event. Not read from the query each

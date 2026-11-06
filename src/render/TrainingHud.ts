@@ -97,6 +97,9 @@ export class TrainingHud {
   private readonly title: HTMLElement;
   /** Experimental free play's "Rules: <preset>" (hidden otherwise). */
   private readonly rulesLine: HTMLElement;
+  /** Training while a search runs: "Finding CASUAL · 1:23 · ... · Pause: cancel", or why it ended (setSearch). */
+  private readonly searchLine: HTMLElement;
+  private lastSearch: string | null = null;
   private readonly shotLine: HTMLElement;
   private readonly attemptsLine: HTMLElement;
   private readonly dots: HTMLElement;
@@ -161,6 +164,9 @@ export class TrainingHud {
     this.title = el('div', 'trn-title', '');
     this.rulesLine = el('div', 'trn-rules', '');
     this.rulesLine.hidden = true;
+    this.searchLine = el('div', 'trn-search', '');
+    this.searchLine.setAttribute('role', 'status');
+    this.searchLine.hidden = true;
     this.shotLine = el('div', 'trn-shot', '');
     this.attemptsLine = el('div', 'trn-attempts', '');
     this.dots = el('div', 'trn-dots');
@@ -173,7 +179,7 @@ export class TrainingHud {
     this.timer.append(track, this.timerText);
     this.boostLine = el('div', 'trn-boost', '');
     this.keys = el('div', 'trn-keys', '');
-    this.panel.append(this.title, this.rulesLine, this.shotLine, this.attemptsLine, this.dots, this.tally, this.timer, this.boostLine, this.keys);
+    this.panel.append(this.title, this.rulesLine, this.searchLine, this.shotLine, this.attemptsLine, this.dots, this.tally, this.timer, this.boostLine, this.keys);
 
     this.start = el('div', 'trn-start', t('trainingHud.start'));
     this.start.hidden = true;
@@ -227,6 +233,7 @@ export class TrainingHud {
     this.root.classList.toggle('trn-freeplay', freeplay);
     this.title.textContent = title;
     this.setRules(null);
+    this.setSearch(null);
     this.shotLine.hidden = freeplay;
     this.attemptsLine.hidden = freeplay;
     this.dots.hidden = freeplay;
@@ -269,6 +276,18 @@ export class TrainingHud {
   setRules(text: string | null): void {
     this.rulesLine.hidden = text === null;
     this.rulesLine.textContent = text ?? '';
+  }
+
+  /**
+   * The search's line while training waits for a match (the modes redesign; the Game at 2 Hz):
+   * its clock and estimate with the way to cancel, or why it ended; null hides it. Written on a
+   * change only; the panel's fold keeps it.
+   */
+  setSearch(text: string | null): void {
+    if (text === this.lastSearch) return;
+    this.lastSearch = text;
+    this.searchLine.hidden = text === null;
+    this.searchLine.textContent = text ?? '';
   }
 
   hide(): void {

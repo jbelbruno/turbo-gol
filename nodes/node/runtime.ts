@@ -11,8 +11,21 @@
  * The node trusts nothing it is told by players beyond what MatchDO trusts, and holds no secret of
  * the project: tickets are checked with the control plane's PUBLIC key (aud = this node), and the
  * node's own private key only proves who the node is.
+ *
+ * <data>/status.json (StatusFile, mode 0600): what the control plane last told this node over its
+ * own logged-in link (the welcome's status, a status message, a refusal), rewritten whole at each
+ * change and when the node stops. A new run keeps what an earlier run of the same node was told
+ * (its status and a refusal for good, marked as an earlier run's) until it hears from the control
+ * plane itself: a node restarted while the control plane is unreachable, or refused at its login,
+ * still says what it last knew. `turbogol-node status` prints it: the public list holds only
+ * nodes in service, without ids, so a pending, suspended or banned node cannot find itself there.
+ *
+ * Refused for good (4403, 1008 'address not allowed'; agent.ts refusalOf): the node drains and
+ * exits 0 once its running matches are over, which the installed launcher takes as a stop (it is
+ * never updated, so this cannot rely on anything newer). Nothing queued for the link is waited for:
+ * it can never be delivered.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Socket } from 'node:net';
 import { WS_SUBPROTOCOL, WS_TICKET_PREFIX } from '../../src/net/protocol';
@@ -39,7 +52,7 @@ import { verifyNodeTicket } from '../shared/nodeTickets';
 import { nodeSimFactory } from '../shared/nodeArena';
 import { verifyReplay } from '../shared/verify';
 import { Agent, AgentError } from './agent';
-import type { AgentOptions } from './agent';
+import type { AgentOptions, LinkClosed } from './agent';
 import { errorJson, json, startHttp } from './http';
 import type { IncomingMessage, RunningServer, ServerResponse } from './http';
 import { MAX_FRAME_BYTES, MatchRoom } from './matchRoom';
@@ -69,6 +82,38 @@ export interface NodeIdentityFile {
   publicUrl: string | null;
 }
 
+/** In <data>: what the running node knows of itself (StatusFile). */
+export const STATUS_FILE = 'status.json';
+
+/** <data>/status.json. Times are ISO 8601 on this machine's clock. */
+export interface StatusFile {
+  nodeId: string;
+  name: string;
+  region: string;
+  version: string;
+  /** The process that wrote it. running goes false when it stops; a crash leaves it true (`status` checks the pid). */
+  pid: number;
+  running: boolean;
+  /** Logged in to the control plane when written. */
+  connected: boolean;
+  draining: boolean;
+  /** What the control plane last said this node is (welcome or status message); null until a run of this node hears it. */
+  status: NodeStatus | null;
+  reason?: string;
+  statusAt?: string;
+  /** status, reason and statusAt were told to an earlier run of this node: this one has not heard from the control plane yet. */
+  statusFromEarlierRun?: true;
+  /**
+   * The last close of the control link, until the next welcome. refusal 'final' (retryAt null):
+   * refused for good; fromEarlierRun: an earlier run's (a new run tries to log in again).
+   */
+  closed?: { code: number; reason: string; refusal: 'final' | 'wait' | null; at: string; retryAt: string | null; fromEarlierRun?: true };
+  updatedAt: string;
+}
+
+/** Every NodeStatus, to check one read back from status.json. */
+const NODE_STATUSES: Record<NodeStatus, true> = { pending: true, probation: true, active: true, suspended: true, banned: true };
+
 export interface RuntimeOptions {
   identity: NodeIdentityFile;
   build: BuildId;
@@ -76,7 +121,7 @@ export interface RuntimeOptions {
   capacity: NodeCapacity;
   listenPort: number;
   listenHost: string;
-  /** Where egress counters live (optional). */
+  /** Where egress counters and status.json live (optional). */
   dataDir?: string;
   egressCapGB?: number | null;
   timings?: Partial<RoomTimings>;
@@ -169,6 +214,60 @@ export function transportsOf(id: NodeIdentityFile): NodeTransport[] {
   return id.publicUrl ? ['wss'] : ['rtc'];
 }
 
+/**
+ * What the operator reads in the log when the control plane refuses this node for good: why, and
+ * what to do next. The node then exits 0, and the launcher exits 0 after it, which its service
+ * does not restart (systemd Restart=on-failure, launchd SuccessfulExit false: only a failure), so a
+ * fix by hand ends with starting the node again.
+ * Only install.sh makes wss nodes, the only ones a 1008 'address not allowed' reaches; a 4403 can
+ * come to a node of any installer, so it gets no command. A new registration needs no start: the
+ * installer starts the node.
+ */
+export function refusedAdvice(c: { code: number; reason: string }, id: NodeIdentityFile): string {
+  const servers = `'Mis servidores' (${id.httpBase}/#servers)`;
+  if (c.code === 1008) {
+    return (
+      `the control plane does not accept this node's public address (${id.publicUrl ?? 'none'}): it is an IP address, or not the host name ` +
+      `its registration token allows. Put back in node.json the address it was registered with, then start the node again (installed ` +
+      `with install.sh: sudo systemctl start turbogol-node); or register this machine again with a new token and a DNS name (move ` +
+      `node.json away first). Your nodes: ${servers}`
+    );
+  }
+  if (c.reason === 'retired') {
+    return `this node was retired (${c.code}): it gets no more matches. To serve again, register this machine with a new token (move node.json away first): ${servers}`;
+  }
+  return `the control plane refused this node (${c.code} ${c.reason}): it will not log in again. Its state and what you can do: ${servers}. If it is let back in, start the node again (it does not restart on its own)`;
+}
+
+/** Tries, and the wait between them, of the rename that puts a new status.json in place (2 s in all). */
+const STATUS_RENAME_TRIES = 40;
+const STATUS_RENAME_RETRY_MS = 50;
+
+/**
+ * Write <dir>/status.json whole: a temporary file, mode 0600 like node.json, renamed over the old
+ * one (a reader never sees half of it). On Windows that rename fails (EPERM, EACCES, EBUSY) while
+ * another process has status.json open (`turbogol-node status`, an antivirus scan): it is tried
+ * again, as the next write, the next change of state, may be hours away.
+ */
+async function writeStatusFile(dir: string, body: string): Promise<void> {
+  const file = join(dir, STATUS_FILE);
+  const tmp = file + '.tmp';
+  await writeFile(tmp, body);
+  await chmod(tmp, 0o600).catch(() => undefined);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await rename(tmp, file);
+    } catch (e) {
+      const code = (e as { code?: unknown }).code;
+      if (attempt >= STATUS_RENAME_TRIES || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) throw e;
+      await new Promise((r) => setTimeout(r, STATUS_RENAME_RETRY_MS));
+    }
+  }
+}
+
+/** The pid of this process (types/node-shim.d.ts declares only what the rest of the package uses). */
+const ownPid = (): number => (process as unknown as { pid: number }).pid;
+
 export class NodeRuntime {
   readonly opts: RuntimeOptions;
   readonly rooms = new Map<string, MatchRoom>();
@@ -181,6 +280,8 @@ export class NodeRuntime {
   updateTo: string | null = null;
   /** The operator asked to stop (SIGTERM, the launcher): exit 0 once drained, whatever update comes. */
   stopRequested = false;
+  /** The control plane refused this node for good (the agent stopped): exit 0 once the running matches are over. */
+  refused = false;
   /** Random per process start, the same on every re-hello: a new one tells the control plane this node restarted. */
   readonly bootId = randomHexId(16);
   server: RunningServer | null = null;
@@ -209,11 +310,19 @@ export class NodeRuntime {
   private selfTestAgain = false;
   private rtcTimer: ReturnType<typeof setTimeout> | null = null;
   private rtcFailures = 0;
+  /** What the control plane last said this node is, for status.json (null: nothing yet; earlier: told to an earlier run, loadStatus). */
+  private told: { status: NodeStatus; reason?: string; at: number; earlier?: true } | null = null;
+  /** The welcome's region (node.json's until the first one). */
+  private region: string;
+  private lastClose: (LinkClosed & { at: number; earlier?: true }) | null = null;
+  /** Rewrites of status.json, one after the other. */
+  private statusWrites: Promise<void> = Promise.resolve();
 
   constructor(opts: RuntimeOptions) {
     this.opts = opts;
     this.transports = transportsOf(opts.identity);
     this.log = opts.log ?? ((m) => console.log(`[node] ${m}`));
+    this.region = opts.identity.region;
     this.controlKey = importPublicKey(opts.identity.controlPublicKey);
     this.nodeKey = importPrivateKey(opts.identity.privateKey);
     const id = opts.identity;
@@ -230,17 +339,24 @@ export class NodeRuntime {
         update: (version) => this.update(version),
         status: (s, reason) => {
           this.status = s;
+          this.told = { status: s, ...(reason ? { reason } : {}), at: Date.now() };
           this.log(`status ${s}${reason ? ` (${reason})` : ''}`);
+          this.writeStatus();
         },
         welcome: (w) => {
           this.status = w.status;
+          this.told = { status: w.status, at: Date.now() };
+          this.lastClose = null;
+          this.region = w.region;
           this.iceServers = w.iceServers;
           this.iceAt = performance.now();
           this.log(`connected to the control plane: ${w.status}, region ${w.region}, stable ${w.channel.stable}`);
+          this.writeStatus();
           if (compareVersions(this.opts.build.version, w.channel.minimum) < 0) this.update(w.channel.stable);
           // Fresh TURN credentials: test with them now (or right after the test in progress).
           if (this.transports.includes('rtc')) void this.selfTest();
         },
+        closed: (c) => this.linkClosed(c),
       },
       { ...(opts.agent ?? {}), heartbeatMs: opts.heartbeatMs, log: (m) => this.log(m) },
     );
@@ -248,6 +364,7 @@ export class NodeRuntime {
 
   async start(): Promise<void> {
     await this.loadEgress();
+    await this.loadStatus();
     if (this.transports.includes('wss')) {
       this.server = await startHttp(this.opts.listenPort, this.opts.listenHost, {
         onRequest: (req, res) => this.onRequest(req, res),
@@ -257,6 +374,7 @@ export class NodeRuntime {
     } else {
       this.log('WebRTC node: no listening port (players connect through ICE)');
     }
+    this.writeStatus();
     this.agent.start();
   }
 
@@ -270,6 +388,86 @@ export class NodeRuntime {
     await this.agent.stop();
     if (this.server) await this.server.close();
     this.server = null;
+    // The last word in status.json: not running (main.ts exits right after this).
+    this.writeStatus(false);
+    await this.statusWrites;
+  }
+
+  // ---- status.json --------------------------------------------------------------------------
+
+  /** What status.json says right now. */
+  statusFile(running = !this.stopped): StatusFile {
+    const id = this.opts.identity;
+    const iso = (t: number): string => new Date(t).toISOString();
+    const c = this.lastClose;
+    return {
+      nodeId: id.nodeId,
+      name: id.name,
+      region: this.region,
+      version: this.opts.build.version,
+      pid: ownPid(),
+      running,
+      connected: this.agent.connected,
+      draining: this.draining,
+      status: this.told?.status ?? null,
+      ...(this.told?.reason ? { reason: this.told.reason } : {}),
+      ...(this.told ? { statusAt: iso(this.told.at) } : {}),
+      ...(this.told?.earlier ? { statusFromEarlierRun: true as const } : {}),
+      ...(c ? { closed: { code: c.code, reason: c.reason, refusal: c.refusal, at: iso(c.at), retryAt: c.retryInMs === null ? null : iso(c.at + c.retryInMs), ...(c.earlier ? { fromEarlierRun: true as const } : {}) } } : {}),
+      updatedAt: iso(Date.now()),
+    };
+  }
+
+  /**
+   * At start: what an earlier run of this node last heard, from its status.json (the same node id):
+   * its status until this run's first welcome or status message, a refusal for good until its first
+   * close or welcome. Nothing else: a wait or a reconnect belonged to that run's link.
+   */
+  private async loadStatus(): Promise<void> {
+    if (!this.opts.dataDir) return;
+    let s: Partial<StatusFile>;
+    try {
+      s = JSON.parse(await readFile(join(this.opts.dataDir, STATUS_FILE), 'utf8')) as Partial<StatusFile>;
+    } catch {
+      return; // first run, or unreadable: start from nothing
+    }
+    if (!s || typeof s !== 'object' || s.nodeId !== this.opts.identity.nodeId) return;
+    const time = (v: unknown): number | null => {
+      const t = typeof v === 'string' ? Date.parse(v) : NaN;
+      return Number.isFinite(t) ? t : null;
+    };
+    const statusAt = time(s.statusAt);
+    if (typeof s.status === 'string' && NODE_STATUSES[s.status] === true && statusAt !== null) {
+      this.told = { status: s.status, ...(typeof s.reason === 'string' && s.reason ? { reason: s.reason } : {}), at: statusAt, earlier: true };
+    }
+    const c = s.closed;
+    const closedAt = time(c?.at);
+    if (c && c.refusal === 'final' && typeof c.code === 'number' && typeof c.reason === 'string' && closedAt !== null) {
+      this.lastClose = { code: c.code, reason: c.reason, refusal: 'final', retryInMs: null, at: closedAt, earlier: true };
+    }
+  }
+
+  /** Queue a rewrite of <data>/status.json with the state as it is now (no data dir: nothing). */
+  private writeStatus(running = !this.stopped): void {
+    const dir = this.opts.dataDir;
+    if (!dir) return;
+    const body = JSON.stringify(this.statusFile(running), null, 2) + '\n';
+    this.statusWrites = this.statusWrites.then(() => writeStatusFile(dir, body)).catch((e) => this.log(`cannot write ${STATUS_FILE}: ${String(e)}`));
+  }
+
+  /**
+   * The control link closed (the agent's handler). Refused for good, no new match can come and
+   * nothing queued can be delivered: drain, and exit 0 once the running matches are over.
+   */
+  private linkClosed(c: LinkClosed): void {
+    this.lastClose = { ...c, at: Date.now() };
+    if (c.refusal !== 'final') {
+      this.writeStatus();
+      return;
+    }
+    this.refused = true;
+    this.log(`${refusedAdvice(c, this.opts.identity)}. The node stops once its matches are over (${this.rooms.size} running).`);
+    this.drain('refused by the control plane');
   }
 
   get port(): number {
@@ -571,6 +769,7 @@ export class NodeRuntime {
     if (!this.draining) this.log(`draining: ${reason}`);
     this.draining = true;
     this.agent.pulse();
+    this.writeStatus();
     this.maybeExit();
   }
 
@@ -593,9 +792,10 @@ export class NodeRuntime {
   }
 
   private maybeExit(): void {
-    if (this.exited || this.stopped || (!this.stopRequested && this.updateTo === null)) return;
+    if (this.exited || this.stopped || (!this.stopRequested && this.updateTo === null && !this.refused)) return;
     if (this.rooms.size > 0) return; // the last room's onClosed calls again
-    if (this.agent.backlog > 0 || this.verifying > 0) {
+    // Refused for good, a report, an upload or a verdict has no link to go out on, ever.
+    if (!this.refused && (this.agent.backlog > 0 || this.verifying > 0)) {
       // A replay upload in flight, a report not acknowledged yet or a verification still running:
       // exiting now would lose it.
       if (!this.exitTimer) {
@@ -607,8 +807,9 @@ export class NodeRuntime {
       return;
     }
     this.exited = true;
-    const code = this.stopRequested ? 0 : EXIT_UPDATE;
-    this.log(code === 0 ? 'drained: stopping' : `drained: exiting for the update to ${this.updateTo}`);
+    // 0 is a stop for the launcher (no restart, whatever version it runs), 75 an update.
+    const code = this.stopRequested || this.refused ? 0 : EXIT_UPDATE;
+    this.log(code !== 0 ? `drained: exiting for the update to ${this.updateTo}` : this.refused ? 'drained: stopping (refused by the control plane)' : 'drained: stopping');
     this.opts.onExit?.(code);
   }
 

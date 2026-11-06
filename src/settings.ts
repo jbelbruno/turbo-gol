@@ -1,8 +1,9 @@
 /**
  * Player settings (the settings screen: controls, camera, gameplay, audio, the touch controls, the
- * interface), persisted in localStorage. Pure data + load/save. Input.ts mutates `controls` and
- * `bindings` in place, Camera.ts reads `camera`, the Game hands `audio` to the sound engine,
- * `touch` to the touch controls and `ui` to src/ui/device.ts; call saveSettings() after a change.
+ * interface, the match HUD), persisted in localStorage. Pure data + load/save. Input.ts mutates
+ * `controls` and `bindings` in place, Camera.ts reads `camera`, the Game hands `audio` to the sound
+ * engine, `touch` to the touch controls, `ui` to src/ui/device.ts and `hud` to the HUD, the name
+ * tags and the ball (src/render/hudView.ts); call saveSettings() after a change.
  * The graphics quality is not here: it is saved with the Game's prefs (Game.ts), and so are the
  * other Graphics rows (resolution scale, frame limit, the menus' stadium). Every group and field is
  * read over its default (mergeSettings): a save from before a field reads as its default.
@@ -79,9 +80,53 @@ export interface UiSettings {
   size: number;
   /** Reduced motion: 'system' follows prefers-reduced-motion, 'on' always, 'off' never. */
   motion: MotionPref;
+  /** Full screen when playing (src/ui/fullscreen.ts): on entering the pitch on a computer, Android's tap; off: neither. */
+  fullscreen: boolean;
 }
 
 export type MotionPref = 'system' | 'on' | 'off';
+
+/** Whose cars carry a name tag (Settings > HUD; src/render/hudView.ts tagShown): every other car, the rivals', the teammates' or none. */
+export type NameTagMode = 'all' | 'rivals' | 'team' | 'none';
+
+/** The name tag choices, in the seg's order. */
+export const NAME_TAG_MODES: readonly NameTagMode[] = ['all', 'rivals', 'team', 'none'];
+
+/**
+ * What a player sees during a match (Settings > HUD; src/render/hudView.ts, Hud.setView): each
+ * flag shows (true) or hides its part of the HUD; `fps` and `speed` show readouts that are hidden
+ * by default. Only this player's screen changes: nothing here reaches the match or another player.
+ */
+export interface HudSettings {
+  /** The scorebug (score and clock, top left); hidden, the full scoreboard still shows both. */
+  scorebug: boolean;
+  /** Name tags over the other cars. */
+  names: NameTagMode;
+  /** A teammate's boost under its tag (never a rival's). */
+  teamBoost: boolean;
+  /** The boost plate (bottom left). */
+  boost: boolean;
+  /** The off-screen ball's arrow at the edge. */
+  ballIndicator: boolean;
+  /** The ring on the floor under the ball in the air. */
+  ballMarker: boolean;
+  /** The ball cam / car cam pill. */
+  camera: boolean;
+  /** The ¡GOOOL! banner (a screen reader still hears it). */
+  goal: boolean;
+  /** The feed's joined / left / bot takeover chips. */
+  players: boolean;
+  /** The feed's DEMOLISHED chip. */
+  demos: boolean;
+  /** The controls card, the click-for-mouse hint and training's key hints. */
+  controls: boolean;
+  /** The network bars by the clock (online). */
+  netBars: boolean;
+  /** The frames per second (top right). */
+  fps: boolean;
+  /** The speed in km/h (over the boost plate). */
+  speed: boolean;
+}
 
 export interface Settings {
   controls: ControlSettings;
@@ -90,6 +135,7 @@ export interface Settings {
   audio: AudioSettings;
   touch: TouchSettings;
   ui: UiSettings;
+  hud: HudSettings;
 }
 
 export const DEFAULT_CONTROL_SETTINGS: Readonly<ControlSettings> = {
@@ -126,10 +172,28 @@ export const DEFAULT_TOUCH: Readonly<TouchSettings> = {
 export const TOUCH_OPACITY_RANGE: readonly [number, number, number] = [30, 100, 5];
 export const TOUCH_DEADZONE_RANGE: readonly [number, number, number] = [0.05, 0.3, 0.01];
 
-export const DEFAULT_UI: Readonly<UiSettings> = { size: 0, motion: 'system' };
+export const DEFAULT_UI: Readonly<UiSettings> = { size: 0, motion: 'system', fullscreen: true };
 
 /** The interface sizes a save may hold (%; 0: the device's own). */
 export const UI_SIZES: readonly number[] = [0, 100, 115, 125, 130, 150];
+
+/** Today's match HUD: everything on but the two readouts, names over every other car with a teammate's boost. */
+export const DEFAULT_HUD: Readonly<HudSettings> = {
+  scorebug: true,
+  names: 'all',
+  teamBoost: true,
+  boost: true,
+  ballIndicator: true,
+  ballMarker: true,
+  camera: true,
+  goal: true,
+  players: true,
+  demos: true,
+  controls: true,
+  netBars: true,
+  fps: false,
+  speed: false,
+};
 
 /** Ranges for the settings sliders. */
 export const CONTROL_RANGES: Readonly<Record<keyof ControlSettings, readonly [number, number, number] | null>> = {
@@ -185,7 +249,7 @@ const STORAGE_KEY = STORAGE_PREFIX + 'settings.v1';
 export const SETTINGS_REV = 2;
 
 export function defaultSettings(): Settings {
-  return { controls: { ...DEFAULT_CONTROL_SETTINGS }, camera: { ...DEFAULT_CAMERA }, bindings: defaultProfiles(), audio: { ...DEFAULT_AUDIO }, touch: { ...DEFAULT_TOUCH }, ui: { ...DEFAULT_UI } };
+  return { controls: { ...DEFAULT_CONTROL_SETTINGS }, camera: { ...DEFAULT_CAMERA }, bindings: defaultProfiles(), audio: { ...DEFAULT_AUDIO }, touch: { ...DEFAULT_TOUCH }, ui: { ...DEFAULT_UI }, hud: { ...DEFAULT_HUD } };
 }
 
 function num(v: unknown, lo: number, hi: number, fallback: number): number {
@@ -230,6 +294,7 @@ export function mergeSettings(raw: unknown): Settings {
     audio?: Record<string, unknown>;
     touch?: Record<string, unknown>;
     ui?: Record<string, unknown>;
+    hud?: Record<string, unknown>;
     rev?: unknown;
   };
   const c = r.controls ?? {};
@@ -261,6 +326,14 @@ export function mergeSettings(raw: unknown): Settings {
   const ui = typeof r.ui === 'object' && r.ui !== null ? r.ui : {};
   if (typeof ui.size === 'number' && UI_SIZES.includes(ui.size)) s.ui.size = ui.size;
   if (ui.motion === 'on' || ui.motion === 'off' || ui.motion === 'system') s.ui.motion = ui.motion;
+  if (typeof ui.fullscreen === 'boolean') s.ui.fullscreen = ui.fullscreen;
+  // The HUD's flags one by one (a save from before one reads it at its default), the names by their choices.
+  const hud = typeof r.hud === 'object' && r.hud !== null ? r.hud : {};
+  for (const k of Object.keys(DEFAULT_HUD) as (keyof HudSettings)[]) {
+    const v = hud[k];
+    if (typeof DEFAULT_HUD[k] === 'boolean' && typeof v === 'boolean') (s.hud as unknown as Record<string, boolean>)[k] = v;
+  }
+  if (NAME_TAG_MODES.includes(hud.names as NameTagMode)) s.hud.names = hud.names as NameTagMode;
   const b = r.bindings ?? {};
   for (const device of ['kbm', 'pad'] as const) {
     const prof = b[device];
