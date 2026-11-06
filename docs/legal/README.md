@@ -27,6 +27,17 @@ bots' level (PRs #107 and #108). It names the project's servers in Brazil, Germa
 not legal advice, and a lawyer has not reviewed them yet. The code never edits them: the Worker
 renders them as they are.
 
+**The next version, `2026-11-13`, takes effect on 13 November 2026,** 7 days after its notice
+(`avisos/2026-11-13.md`, posted on 6 November 2026): the opening of the community server network
+to hosts that are not the project (Términos 12 and a new Annex B, the 18-or-older declaration,
+COMPETITIVO "por ahora no" on their servers, the host's name in the public list only by their
+choice, and "Solo servidores del proyecto"). Until that day its four texts are in
+`avisos/2026-11-13/`, which the Worker does not serve; on that day they move here without changing
+a letter, with `TERMS_VERSION`. Its rules for hosts apply only from the opening, announced
+separately on Discord (Términos 12.1.2). It was checked against `main` and against the
+specification of the hosting code ("Mis servidores"), which ships before the opening; a lawyer has
+not reviewed it either.
+
 **Changing a text** means changing it in both languages, giving it a new version in its header and
 in `TERMS_VERSION`, in the same deploy, and announcing it 7 days ahead when it is an important
 change (Términos 18.2; it said 30 days before version `2026-11-05`). Versions `2026-11-04-2` and
@@ -45,6 +56,18 @@ Every notice of a change (Términos 18.2) is two files in `avisos/`, named after
 | `avisos/2026-11-04-2.en.md` | Its English translation: the text posted on Discord |
 | `avisos/2026-11-05.md` | The notice of version `2026-11-05` (5 November 2026), in Spanish: the official text |
 | `avisos/2026-11-05.en.md` | Its English translation: the text posted on Discord |
+| `avisos/2026-11-13.md` | The notice of version `2026-11-13` (6 November 2026, in force from 13 November 2026), in Spanish: the official text |
+| `avisos/2026-11-13.en.md` | Its English translation: the text posted on Discord |
+| `avisos/2026-11-13/` | The four texts of version `2026-11-13` until it takes effect (not served) |
+
+A version announced ahead keeps its four texts in `avisos/<version>/` (`terminos.es.md`,
+`privacidad.es.md`, `terms.en.md`, `privacy.en.md`, each with that version in its header) from its
+notice to its first day. The Worker serves only the four files of this folder
+(`server/src/legalPages.ts`), so a deploy in between publishes nothing new. On that day they move
+here unchanged (`git diff --no-index` between each copy and its new place is empty), the folder
+goes, and `TERMS_VERSION` takes the version, in the same deploy. The notice names that folder
+without a link to it, so nothing in the notice breaks when the folder goes, and the notice never
+changes after it is posted.
 
 **Discord in English, the official text in the repository.** The Discord server is English-only,
 so the post on Discord is the English translation, `<version>.en.md`, and only that. The official

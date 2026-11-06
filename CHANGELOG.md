@@ -675,6 +675,16 @@ All notable changes to Turbogol are documented here. The format follows
   an important change cut from 30 to 7 days, posted in Spanish in the repository and in English on
   Discord (`docs/legal/avisos/2026-11-05.md`). The notice above the accepting buttons names the new
   countries, and every account and guest accepts again before playing online.
+- The notice of version 2026-11-13 of the terms of use and the privacy policy, in force from
+  13 November 2026, 7 days after it (Términos 18.2; `docs/legal/avisos/2026-11-13.md`): the opening
+  of the community server network to hosts that are not the project, under the host rules of
+  Términos 12 and a new Annex B (the clauses of whoever processes players' data on the project's
+  behalf, for every host), 18 or older declared when asking for a code in MY SERVERS, Competitive
+  for now only on the project's servers, a host's name in the public list only by their choice,
+  "Project servers only" in Settings > Gameplay, and server points with a daily cap. The rules
+  apply only from the opening, announced apart on Discord. Until 13 November its four texts wait in
+  `docs/legal/avisos/2026-11-13/`, which the Worker does not serve, and `TERMS_VERSION` stays
+  2026-11-05.
 - three.js 0.187.0 (from 0.186.1): the game loads faster, most of all on the WebGL2 fallback
   (measured to the menu: about 46% faster on a first visit and 62% on a return; 23% / 32% on
   WebGPU), since the renderer compiles its shaders in about half the time, and three.js is 6%

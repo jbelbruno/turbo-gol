@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -423,4 +423,39 @@ test('P12: production is published: wrangler.jsonc routes the four paths to the 
     assert.ok(text.includes(`(versión ${version})**`) || text.includes(`(version ${version})**`), `docs/legal/avisos/${f}: its title names the version`);
     assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, `docs/legal/avisos/${f}: no token or draft mark left`);
   }
+});
+
+test('P12: a version announced ahead keeps its four texts in docs/legal/avisos/<version>/ until its first day: each with that version in its header, no token or draft mark, rendered whole; its notice is beside it; it is newer than TERMS_VERSION and the Worker serves none of them', async () => {
+  const LP = await import('../src/legalPages.ts');
+  const raw = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const inForce = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, '')).vars.TERMS_VERSION;
+  const AVISOS = new URL('avisos/', DOCS);
+  const drafts = readdirSync(AVISOS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  for (const v of drafts) {
+    const at = `docs/legal/avisos/${v}/`;
+    assert.match(v, /^[a-z0-9._-]{1,32}$/, `${at}: a TERMS_VERSION value`);
+    // Announced ahead: a later version than the one in force (the versions are dates).
+    assert.ok(v > inForce, `${at}: newer than TERMS_VERSION ${inForce}`);
+    // The four texts, the same files as the ones served (PAGES), and nothing else.
+    assert.deepEqual(readdirSync(new URL(`${v}/`, AVISOS)).sort(), Object.values(PAGES).map(([f]) => f).sort(), `${at}: the four texts`);
+    for (const [file] of Object.values(PAGES)) {
+      const text = readFileSync(new URL(`${v}/${file}`, AVISOS), 'utf8');
+      assert.match(text, new RegExp('^# .+\\n\\nVersi(?:ón|on) ' + v.replace(/\./g, '\\.') + '\\. '), `${at}${file}: the header says the folder's version`);
+      assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, `${at}${file}: no token or draft mark left`);
+      // On its first day it is served as it is: no heading, list or table left behind as text.
+      const out = LP.renderMarkdown(text).html;
+      assert.doesNotMatch(out.replace(/<code>[\s\S]*?<\/code>/g, ''), /^(?:#{1,6} |[-*] |\d+\. |\||>)/m, `${at}${file}`);
+    }
+    // Its notice, the official Spanish text and the English translation posted on Discord.
+    for (const f of [`${v}.md`, `${v}.en.md`]) {
+      const notice = new URL(f, AVISOS);
+      assert.ok(existsSync(notice), `docs/legal/avisos/${f}: the notice of version ${v}`);
+      const text = readFileSync(notice, 'utf8');
+      assert.ok(text.includes(`(versión ${v})**`) || text.includes(`(version ${v})**`), `docs/legal/avisos/${f}: its title names the version`);
+      assert.doesNotMatch(text, /\[\[|\[(?:CÓDIGO|ABOGADO|A CONFIRMAR|VERIFICAR)|BORRADOR/, `docs/legal/avisos/${f}: no token or draft mark left`);
+    }
+  }
+  // The Worker bundles only the four texts in force: a copy under avisos/ is never a page.
+  const imports = [...readFileSync(new URL('../src/legalPages.ts', import.meta.url), 'utf8').matchAll(/^import \w+ from '([^']+\.md)';$/gm)].map((m) => m[1]);
+  assert.deepEqual(imports.filter((p) => p.includes('/docs/legal/')).sort(), Object.values(PAGES).map(([f]) => `../../docs/legal/${f}`).sort());
 });
