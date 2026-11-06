@@ -2243,7 +2243,7 @@ test('two sessions on the real RollbackEngine + wasm + BotTeams with experimenta
 });
 
 test('a page from before the cars: room slots that carry `car` (src/net/cosmetics.ts) build the same roster and start as before', async () => {
-  const slots = SLOTS_2V2.map((s) => (s.kind === 'peer' ? { ...s, car: 'tero' } : s));
+  const slots = SLOTS_2V2.map((s) => (s.kind === 'peer' ? { ...s, car: 'magma' } : s));
   const env = await startedSession(slots, 0);
   assert.deepEqual(env.engine.humanSlots, [0, 2]);
   assert.equal(env.session.state, 'countdown');
@@ -2259,7 +2259,7 @@ test('a page from before the cars: room slots that carry `car` (src/net/cosmetic
   socket.onopen({});
   socket.onmessage({ data: JSON.stringify(welcomeFor(0, slots)) });
   assert.deepEqual(errors, []);
-  assert.deepEqual(welcomes[0].slots.map((s) => s.car ?? null), ['tero', null, 'tero', null]);
+  assert.deepEqual(welcomes[0].slots.map((s) => s.car ?? null), ['magma', null, 'magma', null]);
 });
 
 // ---- TURN on demand (audit cost-2) -----------------------------------------------------------------

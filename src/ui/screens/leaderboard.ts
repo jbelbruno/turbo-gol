@@ -310,7 +310,7 @@ export function leaderboardScreen(menu: Menu): Screen {
 
 /** Sample rows for the layout check (window.__board): 100 placed players, long names; yours 7th, 140th or none. */
 function sampleBoard(kind: 'rows' | 'below' | 'guest'): LeaderboardAnswer {
-  const names = ['MaximilianoGomez', 'Ñandú_Veloz', 'xX_Turbo_Xx', 'Carpincho', 'Pampero99', 'LaTeroDeOro'];
+  const names = ['MaximilianoGomez', 'Ñandú_Veloz', 'xX_Turbo_Xx', 'Vortex', 'Cyclone99', 'MagmaRojo'];
   const placed = TIERS.filter((x) => x.min > 0);
   const entries: LeaderboardEntry[] = Array.from({ length: 100 }, (_, i) => {
     const tier = placed[Math.max(0, placed.length - 1 - Math.floor(i / 6))] ?? TIERS[0];

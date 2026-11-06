@@ -38,19 +38,19 @@ const guest = (selected = null) => garageView({ signedIn: false, equipped: 'dune
 const account = (s, selected = null, equipped = 'dune') => garageView({ signedIn: true, equipped, owned: s.items.filter((i) => i.owned).map((i) => i.id), shop: s, selected });
 
 test('a row says its state: Equipado · Gratis for the free car, Tuyo, Canjeable / Bloqueado with the price', () => {
-  const v = account(shop(2100, { owned: ['pampero'] }));
+  const v = account(shop(2100, { owned: ['cyclone'] }));
   const by = Object.fromEntries(v.cars.map((c) => [c.id, M.rowLine(c)]));
   assert.deepEqual(by.dune, { key: 'garage.stateEquippedFree' });
-  assert.deepEqual(by.pampero, { key: 'garage.stateOwned' });
-  assert.deepEqual(by.carpincho, { key: 'garage.stateClaimable', params: { points: 1500 } });
+  assert.deepEqual(by.cyclone, { key: 'garage.stateOwned' });
+  assert.deepEqual(by.vortex, { key: 'garage.stateClaimable', params: { points: 1500 } });
   const poor = account(shop(0));
   assert.deepEqual(M.rowLine(poor.cars[1]), { key: 'garage.stateLocked', params: { points: 1500 } });
-  const drivesPampero = account(shop(0, { owned: ['pampero'] }), null, 'pampero');
-  assert.deepEqual(M.rowLine(drivesPampero.cars.find((c) => c.id === 'pampero')), { key: 'garage.stateEquipped' }, 'a car with a price is not "Gratis"');
+  const drivesCyclone = account(shop(0, { owned: ['cyclone'] }), null, 'cyclone');
+  assert.deepEqual(M.rowLine(drivesCyclone.cars.find((c) => c.id === 'cyclone')), { key: 'garage.stateEquipped' }, 'a car with a price is not "Gratis"');
 });
 
 test('a guest: CANJEAR is never lime, says to sign in, and its press opens the sign-in', () => {
-  const v = guest('pampero');
+  const v = guest('cyclone');
   const d = M.detailView(v.selected, v);
   assert.equal(d.button, 'redeem');
   assert.equal(d.lime, false);
@@ -62,7 +62,7 @@ test('a guest: CANJEAR is never lime, says to sign in, and its press opens the s
 
 test('0 points: CANJEAR says how many are missing, is never lime, and explains how points are earned', () => {
   for (const balance of [0, 600]) {
-    const v = account(shop(balance), 'carpincho');
+    const v = account(shop(balance), 'vortex');
     const d = M.detailView(v.selected, v);
     assert.equal(d.lime, false, `${balance} pts`);
     assert.equal(d.press, 'earn');
@@ -72,7 +72,7 @@ test('0 points: CANJEAR says how many are missing, is never lime, and explains h
 });
 
 test('enough points: CANJEAR is the lime action and opens the redeem sheet; the earn card steps back from lime', () => {
-  const v = account(shop(2100), 'condor');
+  const v = account(shop(2100), 'sirocco');
   const d = M.detailView(v.selected, v);
   assert.deepEqual([d.button, d.lime, d.press, d.reason], ['redeem', true, 'redeem', null]);
   assert.equal(M.earnIsLime(v), false);
@@ -83,12 +83,12 @@ test('enough points: CANJEAR is the lime action and opens the redeem sheet; the 
 });
 
 test('owned: EQUIPAR (lime); driven: no button, "Lo usas en tu próximo partido"; paused: --warn and PERFIL', () => {
-  const v = account(shop(0, { owned: ['tero'] }), 'tero');
+  const v = account(shop(0, { owned: ['magma'] }), 'magma');
   assert.deepEqual(M.detailView(v.selected, v), { button: 'equip', lime: true, press: 'equip', reason: null, tone: 'plain' });
   const driven = M.detailView(v.cars[0], v);
   assert.equal(driven.button, null);
   assert.deepEqual(driven.reason, { key: 'garage.inUse' });
-  const paused = account(shop(1800, { frozen: 'review' }), 'pampero');
+  const paused = account(shop(1800, { frozen: 'review' }), 'cyclone');
   const d = M.detailView(paused.selected, paused);
   assert.deepEqual([d.lime, d.press, d.tone], [false, 'profile', 'warn']);
   assert.equal(M.pointsCard(paused, { signedIn: true, loading: false, error: null }).paused, true);
@@ -104,7 +104,7 @@ test('the points card waits for the shop, then shows its balance', () => {
 });
 
 test('revealDelta: the row picked comes wholly into the list as block nearest would (a phone held sideways)', () => {
-  // 844 x 390, Pampero tapped: the detail grew from 38 to 100 px, the list shrank to 178..268 and
+  // 844 x 390, Cyclone tapped: the detail grew from 38 to 100 px, the list shrank to 178..268 and
   // the row slid down to 252..310 (16 px of it in sight). Scroll padding 8 px.
   const list = { top: 178, bottom: 268 };
   assert.equal(M.revealDelta({ top: 252, bottom: 310 }, list, 8), 50, 'down until its bottom clears the padding');

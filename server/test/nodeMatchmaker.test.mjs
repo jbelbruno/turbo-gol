@@ -1415,16 +1415,16 @@ test('Worker /api/leave passes connected: false on to the matchmaker, and nothin
 
 test("a node match's cars: the placement takes each human's car, account and age (the control plane keeps them; the node's assignment never has them), the result carries the cars by slot; none at all when every seat drives the default", async () => {
   const h = await makeMm();
-  const seatA = { car: 'tero', account: true, accountAgeDays: 12.7 };
+  const seatA = { car: 'magma', account: true, accountAgeDays: 12.7 };
   assert.equal((await h.join(A, 'server', '1v1', seatA)).json.status, 'waiting');
   const qb = await h.join(B, 'server', '1v1', { car: 'not-a-car', account: true });
   const qa = await h.join(A, 'server', '1v1', seatA);
   const place = h.nodes.of('/internal/place')[0].body;
   assert.deepEqual(place.humans, [
-    { playerId: A, name: 'P-a1b2', account: true, accountAgeDays: 12, car: 'tero' },
+    { playerId: A, name: 'P-a1b2', account: true, accountAgeDays: 12, car: 'magma' },
     { playerId: B, name: 'P-0123', account: true },
   ]);
-  assert.deepEqual(qa.json.cars, ['tero', null, null, null], 'by slot (the placement put A in slot 0; two humans play a 2v2)');
+  assert.deepEqual(qa.json.cars, ['magma', null, null, null], 'by slot (the placement put A in slot 0; two humans play a 2v2)');
   assert.deepEqual(qb.json.cars, qa.json.cars, 'every seat gets the whole match');
   assert.equal(qa.json.node, true);
   await h.call('/release', { matchId: qa.json.matchId, playerIds: [A, B] });
@@ -1439,20 +1439,20 @@ test("Worker /api/rejoin of a node match passes the match's cars on; a `cars` of
   const token = await tokenOf(P);
   const id = hex64();
   let w = workerEnv();
-  w.nodes.rejoin = (body) => ({ body: { ticket: 'again.' + body.playerId, wsUrl: `${NODE_URL}/m/${body.matchId}`, cars: [null, 'condor'] } });
+  w.nodes.rejoin = (body) => ({ body: { ticket: 'again.' + body.playerId, wsUrl: `${NODE_URL}/m/${body.matchId}`, cars: [null, 'sirocco'] } });
   let r = await post(w.env, '/api/rejoin', { matchId: id }, token);
-  assert.deepEqual(r.json, { status: 'matched', matchId: id, ticket: 'again.' + P, wsUrl: `${NODE_URL}/m/${id}`, node: true, cars: [null, 'condor'] });
+  assert.deepEqual(r.json, { status: 'matched', matchId: id, ticket: 'again.' + P, wsUrl: `${NODE_URL}/m/${id}`, node: true, cars: [null, 'sirocco'] });
   w = workerEnv();
   w.nodes.rejoin = (body) => ({ body: { ticket: 't', wsUrl: `${NODE_URL}/m/${body.matchId}`, cars: ['x'] } });
   r = await post(w.env, '/api/rejoin', { matchId: id }, token);
   assert.equal(r.status, 200);
   assert.equal('cars' in r.json, false);
   const url = `${NODE_URL}/m/x`;
-  for (const junk of [['x'], 'tero', [1, 2], Array(7).fill(null), { 0: 'tero' }]) assert.deepEqual(API.rejoinTicketOf({ ticket: 't', wsUrl: url, cars: junk }), { ticket: 't', wsUrl: url }, JSON.stringify(junk));
-  assert.deepEqual(API.rejoinTicketOf({ ticket: 't', wsUrl: url, cars: ['tero', null] }), { ticket: 't', wsUrl: url, cars: ['tero', null] });
-  assert.equal(API.rejoinTicketOf({ ticket: 't', wsUrl: '/m/x', cars: ['tero'] }), null, 'cars never make a ticket of what is none');
+  for (const junk of [['x'], 'magma', [1, 2], Array(7).fill(null), { 0: 'magma' }]) assert.deepEqual(API.rejoinTicketOf({ ticket: 't', wsUrl: url, cars: junk }), { ticket: 't', wsUrl: url }, JSON.stringify(junk));
+  assert.deepEqual(API.rejoinTicketOf({ ticket: 't', wsUrl: url, cars: ['magma', null] }), { ticket: 't', wsUrl: url, cars: ['magma', null] });
+  assert.equal(API.rejoinTicketOf({ ticket: 't', wsUrl: '/m/x', cars: ['magma'] }), null, 'cars never make a ticket of what is none');
   // A queue answer from the matchmaker keeps its cars too.
-  const onNode = workerEnv({ joinAnswer: { status: 'matched', matchId: id, ticket: 'n', wsUrl: `${NODE_URL}/m/${id}`, node: true, cars: ['tero', null] } });
+  const onNode = workerEnv({ joinAnswer: { status: 'matched', matchId: id, ticket: 'n', wsUrl: `${NODE_URL}/m/${id}`, node: true, cars: ['magma', null] } });
   r = await post(onNode.env, '/api/queue', { api: 2, mode: '1v1', kind: 'server' }, token);
-  assert.deepEqual(r.json.cars, ['tero', null]);
+  assert.deepEqual(r.json.cars, ['magma', null]);
 });
