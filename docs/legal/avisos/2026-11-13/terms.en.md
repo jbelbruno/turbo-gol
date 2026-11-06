@@ -83,7 +83,8 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 5. If you do not agree, do not use Turbogol.
 6. If you are under 18, read section 3.
 7. **If you want to be a host** of a community server, you also accept section 12 and Annex B with
-   the button that asks for the code to register it (section 12.2).
+   the button that asks for the code to register it and, if these terms change version, with the one
+   that asks you to accept them again in MY SERVERS (section 12.2).
 
 ## 3. Age
 
@@ -98,7 +99,8 @@ Version 2026-11-13. In force from November 13, 2026. The Spanish text is the off
 4. **If we know that an account belongs to someone under 13, we delete it.**
 5. **Hosts:** until the opening of the network (section 12.1.2), only the project runs community
    servers. From that day, to host a server you must be 18 or older. You declare it yourself when
-   you ask for the code to register it (section 12.2): we do not check it.
+   you ask for the code to register it and, if these terms change version, when you accept the rules
+   for hosts again in MY SERVERS (section 12.2): we do not check it.
 
 ## 4. Playing as a guest
 
@@ -407,7 +409,7 @@ sending matches to your servers, and the Annex B you already accepted still appl
    network. The program updates itself: it downloads each new signed version from turbo-gol.com and
    switches to it when its matches end, without asking you. To install it you need root access, and
    the installer also changes your machine: it adds the Node.js and Caddy (a web server)
-   repositories, installs them, creates a user, writes Caddy's configuration and, if the ufw
+   repositories, installs them, creates a user, writes Caddy's configuration, keeps the whole machine's system journal (journald) for 7 days at most and, if the ufw
    firewall is active, opens ports 80 and 443. The full list is at the start of the installer, in
    English: read it before you use it. If you do not want those changes, do not install it on that
    machine.
@@ -460,7 +462,8 @@ sending matches to your servers, and the Annex B you already accepted still appl
    "sa-node-3"). The name you choose cannot be that of another server in its region (ignoring
    upper and lower case) or that of a project server.
 2. **Your server's address is a DNS name,** with secure connections (wss) on port 443: never an IP
-   or a name under turbo-gol.com. The players who connect see that name and the IP it points to.
+   or a name under turbo-gol.com. It must point straight to your machine, with no proxy in front:
+   if it points to Cloudflare's proxy, the registration is refused. The players who connect see that name and the IP it points to.
    If you do not want to be recognized, do not put your name in it or in your server's name. The
    region you choose for your server must match the continent its registration comes from,
    according to Cloudflare: if it does not match, the registration is refused.
@@ -497,7 +500,7 @@ sending matches to your servers, and the Annex B you already accepted still appl
    cap), the system takes it out of placement for 1 hour. The system decides this on its own too.
 
    **If your server loses several matches in a few days** (for example, because it shuts down or
-   drops in the middle of a match), the system suspends it for a while and, if it happens again,
+   drops in the middle of a match), the system suspends it for a while and, if it happens again soon,
    puts it back on probation. The system decides this on its own too. MY SERVERS shows you your
    strikes.
 2. **We may suspend or block a server of yours, or block you as a host,** if you break these rules
@@ -728,7 +731,8 @@ These are today's values. Section 11.7 says how they can change.
 ## Annex B. Clauses for whoever hosts a community server
 
 This annex applies to each host that is not the project, wherever their server is. You accept it
-together with section 12, with the button that asks for the code to register your server (section 12.2). It applies while you are
+together with section 12, with the button that asks for the code to register your server and, if these terms change version,
+with the one that asks you to accept them again in MY SERVERS (section 12.2). It applies while you are
 a host and until you delete whatever is left about the players. If this annex and section 12 do
 not say the same, whatever protects the players more applies.
 

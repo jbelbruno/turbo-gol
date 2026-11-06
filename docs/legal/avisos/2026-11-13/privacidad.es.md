@@ -212,7 +212,7 @@ puntos consulta o cuyos canjes reactiva, el identificador de la cuenta de un anf
 borró, los identificadores de partidas y el motivo que escribe el equipo cuando saca una
 repetición, anula una partida, cambia algo de un servidor (por ejemplo, cuando lo bloquea o lo
 retira) o da, quita o reactiva algo en una cuenta. Ese motivo puede nombrar a un jugador, salvo el
-que escribe al cambiar el estado de un servidor, al retirarlo o al bloquear a un anfitrión: ese
+que escribe al cambiar el estado de un servidor, al drenarlo, al retirarlo o al bloquear a un anfitrión: ese
 motivo también lo ve el anfitrión, y por eso nunca nombra ni identifica a un jugador. Si al
 terminar una partida en un servidor de la comunidad no se puede registrar algo de ella (por
 ejemplo, su resultado o los puntos de su anfitrión), el aviso lleva además los identificadores de
@@ -484,8 +484,8 @@ art. 33 IX).
 | Dato | Cuánto |
 |---|---|
 | Puntos de servidor de cada partida (con el tiempo de cada jugador) | 30 días. Sin datos de los jugadores, quedan además en la cuenta del anfitrión mientras exista. Solo se guardan cuando el anfitrión no es el proyecto. Las notas contra las partidas repetidas para juntar puntos, 24 horas |
-| El registro de cuántos puntos ganó cada anfitrión (si se borra la cuenta, ya no se pueden usar) | Sin plazo, también después de borrar la cuenta. Hasta la apertura (Términos 12.1.2), solo el proyecto tiene servidores |
-| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión, el continente desde el que llegó su registro, las partidas que rechazó y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que nunca nombra ni identifica a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que se retire. Un servidor bloqueado o retirado sale de la lista pública |
+| El registro de cuántos puntos ganó cada anfitrión (si se borra la cuenta, ya no se pueden usar) | Sin plazo, también después de borrar la cuenta, sin el identificador de la cuenta. Hasta la apertura (Términos 12.1.2), solo el proyecto tiene servidores |
+| Ficha de cada servidor de la comunidad (con el nombre de usuario de su anfitrión, el continente desde el que llegó su registro, las partidas que rechazó y el último motivo que escribió el equipo al cambiar su estado o al retirarlo, que nunca nombra ni identifica a un jugador) | Sin plazo, también después de borrar la cuenta (el servidor queda bloqueado) o de que se retire. Al borrarse la cuenta, deja de llevar el nombre de usuario y el identificador de la cuenta. Un servidor bloqueado o retirado sale de la lista pública |
 | La aceptación de un anfitrión: las reglas para anfitriones y el Anexo B, con su declaración de 18 años o más, la versión y la fecha | Mientras exista la cuenta. Al borrarla, queda la prueba mínima (ver «Borrado») |
 | El estado de un anfitrión: si está bloqueado, el motivo, quién lo decidió y cuándo | Sin plazo, como la ficha de sus servidores. Al borrarse la cuenta, deja de llevar el identificador de la cuenta |
 | Si un anfitrión eligió mostrar su nombre de usuario en la lista de servidores | Hasta que lo cambie, mientras exista la cuenta. Se borra con la cuenta, y desde entonces se ve como «Anfitrión» y un número |
@@ -584,10 +584,13 @@ Estas decisiones las toma el juego solo, sin una persona:
   sistema suspende el servidor y pausa tus canjes hasta que una persona lo revise.
 - **Anfitriones,** desde la apertura (Términos 12.1.2): MIS SERVIDORES no te da un código si te
   falta un requisito (Términos 12.2); el registro de un servidor se rechaza si su región no
-  coincide con el continente desde el que llega, según Cloudflare; un servidor que no es del
+  coincide con el continente desde el que llega, según Cloudflare, o si su nombre DNS apunta al
+  proxy de Cloudflare; si los Términos cambian de versión, los servidores de un anfitrión que
+  todavía no volvió a aceptar las reglas para anfitriones no reciben partidas nuevas hasta que lo
+  haga (Términos 12.2); un servidor que no es del
   proyecto y rechaza sin motivo demasiadas de las últimas partidas que le asignamos sale de la
   colocación por 1 hora; uno que pierde varias partidas en pocos días se suspende por un tiempo y,
-  si vuelve a pasar, vuelve a estar en prueba; una partida contra bots de un solo jugador, y lo que pasa del tope diario
+  si vuelve a pasar en poco tiempo, vuelve a estar en prueba; una partida contra bots de un solo jugador, y lo que pasa del tope diario
   de puntos de servidor, no dan puntos (Términos, Anexo A). El bloqueo de un anfitrión, en cambio,
   lo decide una persona del equipo.
 - **Marcas de sanción:** si una cuenta usa un correo o una cuenta de Discord o Google con una marca
@@ -638,7 +641,8 @@ Puedes reclamar ante la autoridad de tu país:
 - **Novedades por correo:** solo desde los 16 años. Si tienes menos, no actives el interruptor: el
   juego no te pregunta la edad.
 - **Anfitriones:** para alojar un servidor de la comunidad tienes que tener 18 años o más
-  (Términos 3.5 y 12.2). Lo declaras al pedir el código para registrarlo, y no lo comprobamos.
+  (Términos 3.5 y 12.2). Lo declaras al pedir el código para registrarlo y, si los Términos cambian de versión, al volver a
+  aceptar las reglas para anfitriones en MIS SERVIDORES. No lo comprobamos.
 - **Si sabemos que una cuenta es de alguien menor de 13 años, la borramos.** Si eres madre, padre o
   tutor y crees que tu hijo o hija nos dio datos, escríbenos a
   <mailto:privacy@turbo-gol.com>. No hace falta que tengas cuenta.
@@ -880,9 +884,9 @@ Esto es lo que pasa si lo pides desde PERFIL. Si lo pides por correo, no hay esp
   - las copias de seguridad de Cloudflare (hasta 30 días).
 - **Si eras anfitrión:** hasta la apertura (Términos 12.1.2) solo el proyecto tiene servidores, así
   que esto no afecta a ningún jugador antes de ese día. Desde entonces: el registro de cuántos
-  puntos ganaron tus servidores (que ya no puedes usar), tu estado de anfitrión (sin el
-  identificador de tu cuenta) y la ficha de tus servidores, con tu nombre de usuario, quedan sin
-  plazo (sección 6), y los servidores quedan bloqueados y salen de la lista pública de servidores.
+  puntos ganaron tus servidores (que ya no puedes usar), tu estado de anfitrión y la
+  ficha de tus servidores quedan sin plazo, sin tu nombre de usuario ni el identificador de tu
+  cuenta (sección 6), y los servidores quedan bloqueados y salen de la lista pública de servidores.
   Tu elección de mostrar tu nombre se borra: tus puntos pueden seguir hasta 30 días en la tabla de
   anfitriones, siempre como «Anfitrión» y un número, nunca con tu nombre de usuario. El
   identificador de tu cuenta sale de los cambios de a qué cuentas abrimos el alojamiento. Los

@@ -211,7 +211,7 @@ redemptions of, the identifier of a host's account that was deleted, match ident
 reason the team writes when it takes down a replay, voids a match, changes something about a
 server (for example, when it blocks or retires it) or gives, takes or reactivates something on an
 account. That reason may name a player, except the one written when the team changes a server's
-status, retires it or blocks a host: the host also sees that reason, so it never names or
+status, drains it, retires it or blocks a host: the host also sees that reason, so it never names or
 identifies a player. If, when a match on a community server ends, something
 about it cannot be recorded (for example, its result or its host's points), the alert also carries
 the account identifiers of its players or that of its host's account. From the opening (Terms
@@ -477,8 +477,8 @@ art. 33 IX).
 | Data | How long |
 |---|---|
 | Server points of each match (with each player's time) | 30 days. Without the players' data, they also stay in the host's account while it exists. They are kept only when the host is not the project. The notes against repeated matches to farm points, 24 hours |
-| The record of how many points each host earned (if the account is deleted, they can no longer be used) | No time limit, also after the account is deleted. Until the opening (Terms 12.1.2), only the project has servers |
-| Each community server's entry (with its host's username, the continent its registration came from, the matches it refused and the last reason the team wrote when it changed its status or retired it, which never names or identifies a player) | No time limit, also after the account is deleted (the server stays blocked) or after it is retired. A blocked or retired server leaves the public list |
+| The record of how many points each host earned (if the account is deleted, they can no longer be used) | No time limit, also after the account is deleted, without the account's identifier. Until the opening (Terms 12.1.2), only the project has servers |
+| Each community server's entry (with its host's username, the continent its registration came from, the matches it refused and the last reason the team wrote when it changed its status or retired it, which never names or identifies a player) | No time limit, also after the account is deleted (the server stays blocked) or after it is retired. When the account is deleted, it no longer carries the username or the account's identifier. A blocked or retired server leaves the public list |
 | A host's acceptance: the rules for hosts and Annex B, with their declaration that they are 18 or older, the version and the date | While the account exists. When it is deleted, the minimal proof remains (see "Deletion") |
 | A host's status: whether they are blocked, the reason, who decided it and when | No time limit, like their servers' entries. When the account is deleted, it no longer carries the account's identifier |
 | Whether a host chose to show their username in the server list | Until they change it, while the account exists. It is deleted with the account, and from then on they show as "Anfitrión" and a number |
@@ -579,10 +579,13 @@ The game takes these decisions on its own, without a person:
   the server and pauses your redemptions until a person reviews it.
 - **Hosts,** from the opening (Terms 12.1.2): MY SERVERS does not give you a code if you are
   missing a requirement (Terms 12.2); a server's registration is refused if its region does not
-  match the continent it comes from, according to Cloudflare; a server that is not the project's
+  match the continent it comes from, according to Cloudflare, or if its DNS name points to
+  Cloudflare's proxy; if the Terms change version, the servers of a host who has not yet accepted
+  the rules for hosts again get no new matches until they do (Terms 12.2); a server that is not
+  the project's
   and refuses with no reason too many of the latest matches we assign it is taken out of placement
   for 1 hour; one that loses several matches in a few days is suspended for a while and, if it
-  happens again, goes back on probation; a bots match with a single player, and what goes over the daily cap of server points,
+  happens again soon, goes back on probation; a bots match with a single player, and what goes over the daily cap of server points,
   give no points (Terms, Annex A).
   Blocking a host, on the other hand, is decided by a person on the team.
 - **Sanction marks:** if an account uses an email or a Discord or Google account with a sanction
@@ -637,7 +640,8 @@ You can complain to the authority of your country:
 - **News by email:** only from age 16. If you are younger, do not turn on the switch: the game
   does not ask your age.
 - **Hosts:** to host a community server you must be 18 or older (Terms 3.5 and 12.2). You declare
-  it when you ask for the code to register it, and we do not check it.
+  it when you ask for the code to register it and, if the Terms change version, when you accept the
+  rules for hosts again in MY SERVERS. We do not check it.
 - **If we know that an account belongs to someone under 13, we delete it.** If you are a mother,
   father or guardian and think your child gave us data, write to us at
   <mailto:privacy@turbo-gol.com>. You do not need to have an account.
@@ -878,8 +882,8 @@ This is what happens if you ask from PROFILE. If you ask by email, there is no 1
   - Cloudflare's backups (up to 30 days).
 - **If you were a host:** until the opening (Terms 12.1.2) only the project has servers, so this
   does not affect any player before that day. From then on: the record of how many points your
-  servers earned (which you can no longer use), your status as a host (without your account's
-  identifier) and your servers' entries, with your username, remain with no time limit (section 6),
+  servers earned (which you can no longer use), your status as a host and your servers'
+  entries remain with no time limit, without your username or your account's identifier (section 6),
   and the servers stay blocked and leave the public server list. Your choice to show your name is
   deleted: your points may stay in the hosts' table for up to 30 days, always as "Anfitrión" and a
   number, never with your username. Your account's identifier leaves the changes of which accounts

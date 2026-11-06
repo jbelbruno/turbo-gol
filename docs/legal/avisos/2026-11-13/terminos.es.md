@@ -85,7 +85,8 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 5. Si no estás de acuerdo, no uses Turbogol.
 6. Si tienes menos de 18 años, lee la sección 3.
 7. **Si quieres ser anfitrión** de un servidor de la comunidad, aceptas además la sección 12 y el
-   Anexo B con el botón que pide el código para registrarlo (sección 12.2).
+   Anexo B con el botón que pide el código para registrarlo y, si estos términos cambian de versión,
+   con el que te pide volver a aceptarlos en MIS SERVIDORES (sección 12.2).
 
 ## 3. Edad
 
@@ -99,7 +100,8 @@ Versión 2026-11-13. Vigente desde el 13 de noviembre de 2026. Este texto en esp
 4. **Si sabemos que una cuenta es de alguien menor de 13 años, la borramos.**
 5. **Anfitriones:** hasta la apertura de la red (sección 12.1.2), solo el proyecto pone servidores
    de la comunidad. Desde ese día, para alojar un servidor tienes que tener 18 años o más. Lo
-   declaras tú al pedir el código para registrarlo (sección 12.2): no lo comprobamos.
+   declaras tú al pedir el código para registrarlo y, si estos términos cambian de versión, al volver
+   a aceptar las reglas para anfitriones en MIS SERVIDORES (sección 12.2): no lo comprobamos.
 
 ## 4. Jugar como invitado
 
@@ -415,7 +417,7 @@ aceptaste.
    cambiado a nuestra red. El programa se actualiza solo: baja de turbo-gol.com cada versión nueva
    firmada y pasa a ella cuando terminan sus partidas, sin preguntarte. Para instalarlo necesitas
    acceso como root, y el instalador también cambia tu máquina: agrega los repositorios de Node.js
-   y de Caddy (un servidor web), los instala, crea un usuario, escribe la configuración de Caddy y,
+   y de Caddy (un servidor web), los instala, crea un usuario, escribe la configuración de Caddy, deja el diario del sistema (journald) de toda la máquina en 7 días como máximo y,
    si el firewall ufw está activo, abre los puertos 80 y 443. La lista completa está al principio
    del instalador, en inglés: léela antes de usarlo. Si no quieres esos cambios, no lo instales en
    esa máquina.
@@ -469,7 +471,8 @@ aceptaste.
    con su región y un número (por ejemplo, «sa-node-3»). El nombre que elijas no puede ser el de
    otro servidor de su región (sin contar mayúsculas) ni el de un servidor del proyecto.
 2. **La dirección de tu servidor es un nombre DNS,** con conexiones seguras (wss) en el puerto 443:
-   nunca una IP ni un nombre bajo turbo-gol.com. Los jugadores que se conectan ven ese nombre y la
+   nunca una IP ni un nombre bajo turbo-gol.com. Tiene que apuntar directo a tu máquina, sin un
+   proxy delante: si apunta al proxy de Cloudflare, el registro se rechaza. Los jugadores que se conectan ven ese nombre y la
    IP a la que apunta. Si no quieres que te reconozcan, no pongas tu nombre en él ni en el nombre
    de tu servidor. La región que eliges para tu servidor tiene que coincidir con el continente
    desde el que llega su registro, según Cloudflare: si no coincide, el registro se rechaza.
@@ -507,7 +510,7 @@ aceptaste.
    tráfico), el sistema lo saca de la colocación por 1 hora. También lo decide el sistema solo.
 
    **Si tu servidor pierde varias partidas en pocos días** (por ejemplo, porque se apaga o se corta
-   en medio de una partida), el sistema lo suspende por un tiempo y, si vuelve a pasar, lo pone
+   en medio de una partida), el sistema lo suspende por un tiempo y, si vuelve a pasar en poco tiempo, lo pone
    otra vez en prueba. También lo decide el sistema solo. MIS SERVIDORES te muestra tus faltas.
 2. **Podemos suspender o bloquear un servidor tuyo, o bloquearte como anfitrión,** si rompes estas
    reglas o si pones en riesgo a los jugadores. El bloqueo de un anfitrión lo decide una persona
@@ -741,7 +744,8 @@ Estos son los valores de hoy. La sección 11.7 dice cómo pueden cambiar.
 ## Anexo B. Cláusulas para quien aloja un servidor de la comunidad
 
 Este anexo vale para cada anfitrión que no es el proyecto, esté donde esté su servidor. Lo aceptas
-junto con la sección 12, con el botón que pide el código para registrar tu servidor (sección 12.2). Vale mientras seas anfitrión y hasta que
+junto con la sección 12, con el botón que pide el código para registrar tu servidor y, si estos términos cambian de versión,
+con el que te pide volver a aceptarlos en MIS SERVIDORES (sección 12.2). Vale mientras seas anfitrión y hasta que
 borres lo que quede de los jugadores. Si este anexo y la sección 12 no dicen lo mismo, vale lo que
 más protege a los jugadores.
 
