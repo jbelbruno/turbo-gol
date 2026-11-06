@@ -288,10 +288,15 @@ const closedEnv = (over = {}) => makeEnv({ TERMS_VERSION: '2026-11-05', FLAGS: k
 /** Open: (b) in force and hosting open to every account. */
 const openEnv = (over = {}) => makeEnv({ ...IN_FORCE, FLAGS: kvOf({ node_operators: '1' }), ...over });
 
+/** The DNS a community registration reads (NodeRegistryDO dnsFn): no records for any name, so never Cloudflare's proxy (hosting.test.mjs tests the lookup). */
+const fakeDns = async () => [];
+
 async function boot(env, ctx = new FakeCtx()) {
   objectWorld();
   const obj = new D.NodeRegistryDO(ctx, env);
   obj.alertSleep = () => Promise.resolve();
+  // A community registration reads its name's DNS records (proxyCheck.ts): never the network here.
+  obj.dnsFn = fakeDns;
   await obj.ready;
   return { obj, ctx, env };
 }
@@ -450,8 +455,8 @@ test("open: /nodes/mine in full for a community operator: each node's service st
   assert.equal(m.status, 200, JSON.stringify(m.json));
   const n = m.json.nodes[0];
   assert.deepEqual(
-    [n.nodeId, n.name, n.status, n.createdAt, n.draining, n.reachableAt !== null, n.lastProbe.ok, n.needed, n.strikes, n.refused, n.capacityEffective, n.publicUrl],
-    [node.nodeId, 'juan-1', 'probation', createdAt, false, true, true, 20, { count: 0, max: 3, windowDays: 7 }, { count: 0, rate: 0, recent: 0, of: 0, outUntil: null }, 4, 'wss://juan.example.org'],
+    [n.nodeId, n.name, n.status, n.createdAt, n.draining, n.reachableAt !== null, n.lastProbe.ok, n.needed, n.strikes, n.pauses, n.afterPause, n.refused, n.capacityEffective, n.publicUrl],
+    [node.nodeId, 'juan-1', 'probation', createdAt, false, true, true, 20, { count: 0, max: 3, windowDays: 7, nextExpiry: null }, { count: 0, windowDays: 30 }, null, { count: 0, rate: 0, recent: 0, of: 0, outUntil: null }, 4, 'wss://juan.example.org'],
   );
   assert.deepEqual(m.json.hosting, { open: true });
   assert.deepEqual(m.json.requirements, { missing: ['email_required', 'account_too_new', 'reaccept_required'], daysLeft: 5 });
@@ -496,6 +501,53 @@ test("open: /nodes/mine in full for a community operator: each node's service st
   await community(c);
   const cm = await mine(c);
   assert.deepEqual([cm.json.hosting, cm.json.requirements, c.env.ACCOUNTS.calls], [{ open: false, reason: 'hosting_closed' }, null, []]);
+});
+
+test('/nodes/mine shows the automatic measures (Terms 9.2 and 12.6.1, "MIS SERVIDORES te muestra tus faltas"): the lost matches in their window and when the oldest goes, a strike pause and where it leaves the server, a second one back to probation, a failed verification', async () => {
+  const h = await boot(openEnv());
+  const { node } = await community(h, { active: true });
+  const reg = h.obj.cp.registry;
+  const view = async () => (await mine(h)).json.nodes.find((n) => n.nodeId === node.nodeId);
+  const t0 = clock;
+  reg.onLost(node.nodeId, 'node_offline', t0);
+  let n = await view();
+  assert.deepEqual([n.status, n.strikes, n.pauses, n.afterPause], ['active', { count: 1, max: 3, windowDays: 7, nextExpiry: t0 + 7 * DAY }, { count: 0, windowDays: 30 }, null]);
+  // The third in the window: a pause of a day, back where it was (active) when it lifts.
+  reg.onLost(node.nodeId, 'node_offline', t0 + 1000);
+  reg.onLost(node.nodeId, 'node_offline', t0 + 2000);
+  n = await view();
+  assert.deepEqual([n.status, n.statusReason, n.suspendedUntil, n.afterPause, n.pauses.count, n.strikes.count], ['suspended', 'strikes:node_offline', t0 + 2000 + DAY, 'active', 1, 3]);
+  // It lifts; another lost match within the week pauses it again, the second time in 30 days: back to probation after it.
+  clock = t0 + 2000 + DAY;
+  reg.sweep(clock);
+  assert.equal(reg.node(node.nodeId).status, 'active');
+  reg.onLost(node.nodeId, 'node_offline', clock);
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count, n.strikes.count, n.strikes.nextExpiry], ['suspended', 'probation', 2, 4, t0 + 7 * DAY]);
+  // A week after the last, the lost matches are out of their window: none counted, whatever the counter last said.
+  clock = t0 + 2000 + 8 * DAY;
+  n = await view();
+  assert.deepEqual([n.strikes.count, n.strikes.nextExpiry, n.pauses.count], [0, null, 2]);
+  // Lifted, on probation now. Three lost matches 29.5 days after the second pause began: a third
+  // pause, a repeated one, so Registry.onLost demotes it again. Its window ends where it began: still
+  // said once the second pause has left the 30 days, while this one runs.
+  reg.sweep(clock);
+  assert.equal(reg.node(node.nodeId).status, 'probation');
+  const third = t0 + 2000 + DAY + 29.5 * DAY;
+  for (const at of [third - 2000, third - 1000, third]) reg.onLost(node.nodeId, 'node_offline', at);
+  clock = third + 0.75 * DAY;
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count, n.suspendedUntil], ['suspended', 'probation', 2, third + DAY]);
+  assert.equal(reg.node(node.nodeId).counters.probationVerified, 0);
+  clock = third + DAY;
+  reg.sweep(clock);
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count], ['probation', null, 1], 'lifted: the 30 days from now again');
+  // A failed verification: suspended until a person looks, no end, nowhere it goes by itself.
+  reg.onVerified(node.nodeId, false, false);
+  n = await view();
+  assert.deepEqual([n.status, n.statusReason, n.suspendedUntil, n.afterPause], ['suspended', 'verification_failed', null, null]);
+  clock = t0;
 });
 
 // ---- A12: the owner's actions -------------------------------------------------------------------------

@@ -52,13 +52,17 @@ test('the shell installers parse', { skip }, () => {
   assert.equal(withInstaller('echo sourced'), 'sourced\n', 'sourcing it as a library runs nothing');
 });
 
-test('Caddyfile for a DNS name: default certificate, WebSockets kept across reloads, no HTTP/3', { skip }, () => {
+/** The Caddyfile's global log block (caddyfile): the default logger's lines without a player's address, port or headers. */
+const LOG_BLOCK = ['log {', 'format filter {', 'wrap console', 'fields {', 'request>remote_ip delete', 'request>remote_port delete', 'request>client_ip delete', 'request>headers delete', '}', '}', '}'];
+
+test('Caddyfile for a DNS name: default certificate, WebSockets kept across reloads, no HTTP/3, no player data in its log', { skip }, () => {
   const text = withInstaller('caddyfile sp1.turbo-gol.com 7350');
   assert.deepEqual(directives(text), [
     '{',
     'servers {',
     'protocols h1 h2',
     '}',
+    ...LOG_BLOCK,
     '}',
     'sp1.turbo-gol.com {',
     'reverse_proxy 127.0.0.1:7350 {',
@@ -76,6 +80,7 @@ test('Caddyfile for an IP address: the short-lived certificate profile; IPv6 in 
     'servers {',
     'protocols h1 h2',
     '}',
+    ...LOG_BLOCK,
     'cert_issuer acme {',
     'profile shortlived',
     '}',
@@ -89,6 +94,54 @@ test('Caddyfile for an IP address: the short-lived certificate profile; IPv6 in 
   const v6 = directives(withInstaller('caddyfile 2001:db8::7 7350'));
   assert.ok(v6.includes('profile shortlived'));
   assert.ok(v6.includes('[2001:db8::7] {'), v6.join('\n'));
+});
+
+test('no player data past the rules for hosts (Terms 12.3.2): Caddy logs no address, port or header, journald keeps 7 days; both in the list at the top', { skip }, async () => {
+  const source = await readFile(INSTALL_SH, 'utf8');
+  // The log block is a global option (the default logger: every line, the errors too), never a site's.
+  const text = withInstaller('caddyfile sp1.turbo-gol.com 7350');
+  const lines = directives(text);
+  const global = lines.slice(0, lines.indexOf('sp1.turbo-gol.com {'));
+  assert.deepEqual(global.slice(global.indexOf('log {'), global.indexOf('log {') + LOG_BLOCK.length), LOG_BLOCK);
+  assert.equal(lines.filter((l) => l.startsWith('log')).length, 1, 'no access log');
+  // Where the ticket travels: a header (the node reads Sec-WebSocket-Protocol), never the URL.
+  assert.match(await readFile(new URL('../node/wsServer.ts', import.meta.url), 'utf8'), /req\.headers\['sec-websocket-protocol'\]/);
+  assert.match(text, /Written for Caddy 2\.7 to 2\.10/);
+  assert.match(source, /version_at_least "\$CADDY_VERSION" 2 7 \|\| die/, 'the oldest Caddy the comment names is the one the installer takes');
+  // journald: a file a day, each gone once its first line is 6 days old (7 at most); the sizes stay the
+  // machine's, in a file of the installer's own name (the project's machines keep SystemMaxUse in turbogol.conf).
+  assert.deepEqual(directives(withInstaller('journald_conf')), ['[Journal]', 'MaxRetentionSec=6day', 'MaxFileSec=1day']);
+  assert.match(source, /^JOURNALD_CONF=\/etc\/systemd\/journald\.conf\.d\/60-turbogol-retention\.conf$/m);
+  assert.doesNotMatch(source, /journald\.conf\.d\/turbogol\.conf/);
+  // Terms 12.3.1: "La lista completa está al principio del instalador".
+  const header = source.slice(0, source.indexOf('set -euo pipefail'));
+  const list = header.slice(header.indexOf('# What it does (and nothing else):'));
+  assert.match(list, /4\. Caddy: .*\n.*\n#\s+itself .* Its log lines \(an error, such as a\n#\s+502 while the node restarts\) keep no player's IP address, port or request headers/);
+  assert.match(list, /7\. the system journal \(journald\) kept 7 days at most, .*\n#\s+a player's IP address \(Terms 12\.3\.2\): \/etc\/systemd\/journald\.conf\.d\/60-turbogol-retention\.conf\n#\s+\(its retention only, never a size\)/);
+  // A host whose law asks for more keeps it with a later drop-in; the other logs are theirs to check.
+  assert.match(list, /A\n#\s+drop-in named after it \(zz-local\.conf, say\) wins over it, if the law makes you keep more\. Other\n#\s+logs \(rsyslog's \/var\/log\/syslog, kern\.log, ufw\.log on Ubuntu\) are left as they are: check them/);
+  assert.match(header, /Keep\n#\s+\/etc\/systemd\/journald\.conf\.d\/60-turbogol-retention\.conf 7 days after the last match/);
+  assert.match(header, /--allow-proxied: also accepts Cloudflare's proxy .*\n.*for the project's own servers only: a name under turbo-gol\.com/);
+});
+
+test('--allow-proxied is for a name under the project\'s domain only, the one the Worker reserves', { skip }, async () => {
+  const out = withInstaller(`for h in sp1.turbo-gol.com SP1.Turbo-Gol.COM. turbo-gol.com juan.example.org turbo-gol.com.example.org evilturbo-gol.com 203.0.113.7; do if project_name "$h"; then echo "$h=project"; else echo "$h=-"; fi; done`);
+  assert.deepEqual(out.trim().split('\n'), ['sp1.turbo-gol.com=project', 'SP1.Turbo-Gol.COM.=project', 'turbo-gol.com=project', 'juan.example.org=-', 'turbo-gol.com.example.org=-', 'evilturbo-gol.com=-', '203.0.113.7=-']);
+  // The control plane never registers a community server under it (hostPolicy.ts RESERVED_HOST_DOMAIN).
+  const policy = await readFile(new URL('../../server/src/hostPolicy.ts', import.meta.url), 'utf8');
+  assert.equal(/RESERVED_HOST_DOMAIN = '([^']+)'/.exec(policy)[1], /^PROJECT_DOMAIN=(\S+)$/m.exec(await readFile(INSTALL_SH, 'utf8'))[1]);
+});
+
+test("Cloudflare's proxy addresses are the same here and in the Worker, which refuses a community registration behind them (server/src/proxyCheck.ts)", { skip }, async () => {
+  const sh = await readFile(INSTALL_SH, 'utf8');
+  const ts = await readFile(new URL('../../server/src/proxyCheck.ts', import.meta.url), 'utf8');
+  for (const v of ['V4', 'V6']) {
+    const inSh = /^CLOUDFLARE_(?:V4|V6)="([^"]*)"$/m.exec(sh.slice(sh.indexOf(`CLOUDFLARE_${v}="`)))[1].split(/\s+/).filter(Boolean);
+    const block = ts.slice(ts.indexOf(`export const CLOUDFLARE_${v}`));
+    const inTs = [...block.slice(0, block.indexOf('];')).matchAll(/'([0-9a-f.:/]+)'/g)].map((m) => m[1]);
+    assert.ok(inSh.length >= 7, v);
+    assert.deepEqual(inTs, inSh, v);
+  }
 });
 
 test('install.sh helpers: what is an IP address or a DNS name, which Caddy is new enough', { skip }, () => {
@@ -550,6 +603,10 @@ describe('install.sh on a fake machine', { skip, concurrency: true }, () => {
       { why: /--public-host <name> is required/, args: [...TOKEN, '--roles', 'host,verify', '--transport', 'wss'], early: true },
       { why: /--public-host 203\.0\.113\.7 is an IP address, .*only under a DNS name.*--allow-ip is only for a development control plane/, args: [...TOKEN, '--public-host', '203.0.113.7'], early: true },
       { why: /--public-host 2001:db8::7 is an IP address/, args: [...TOKEN, '--public-host', '[2001:db8::7]'], env: { FAKE_ADDR6: '2001:db8::7' }, early: true },
+      // Cloudflare's proxy in front of a community server: never, whatever its DNS says (Annex B, point 6).
+      { why: /--allow-proxied is only for the project's own servers \(a name under turbo-gol\.com\): a community server is reached by its players directly/, args: [...TOKEN, '--public-host', 'juan.example.org', '--allow-proxied'], env: { FAKE_A: '104.16.0.1' }, early: true },
+      { why: /--allow-proxied is only for the project's own servers/, args: [...TOKEN, '--public-host', 'juan.example.org', '--allow-proxied'], env: { FAKE_A: '203.0.113.7' }, early: true },
+      { why: /juan\.example\.org does not lead here: it resolves to Cloudflare's proxy \(104\.16\.0\.1\)/, args: [...TOKEN, '--public-host', 'juan.example.org'], env: { FAKE_A: '104.16.0.1' } },
       // Nothing but a version reaches the NodeSource URL and the apt-get arguments.
       ...['22', 'v24.14.0', '26.014', '26.14.0.1', '26.x', '26;id', '$(id)', '26.14.0-1'].map((v) => ({ why: /--node-version: Node\.js 26 or newer/, args: [...name, '--node-version', v], env: HERE, early: true })),
       // In the major here: NodeSource's repository stays the one it was.
@@ -578,6 +635,48 @@ describe('install.sh on a fake machine', { skip, concurrency: true }, () => {
       assert.ok(!runs[3].log.some((l) => l.startsWith('getent ') && !l.startsWith('getent -s dns ')), 'DNS only, never /etc/hosts');
     } finally {
       await Promise.all(machines.map((m) => m.cleanup()));
+    }
+  });
+
+  test("Cloudflare's proxy in front of a project server only; journald's 7 days written once, journald restarted only when they change", async () => {
+    const [project, restored] = await Promise.all([fakeMachine(), fakeMachine()]);
+    try {
+      // A project name behind the proxy (its A record is Cloudflare's): registered with --allow-proxied.
+      const proxied = { FAKE_A: '104.16.0.1', FAKE_SS: CADDY_ON_443 };
+      const first = await project.run([...NAMED, '--allow-proxied'], proxied);
+      assert.equal(first.code, 0, show(first));
+      assert.ok(registered(first), show(first));
+      assert.equal(await project.read('etc/systemd/journald.conf.d/60-turbogol-retention.conf'), withInstaller('journald_conf'));
+      assert.ok(first.log.includes('systemctl restart systemd-journald'), show(first));
+      assert.ok(first.log.indexOf('systemctl restart systemd-journald') < first.log.findIndex((l) => l.startsWith('runuser ')), 'before the token is spent');
+      // A re-run: the same file, journald left alone.
+      const again = await project.run([...RERUN, '--allow-proxied'], { ...proxied, FAKE_ACTIVE: 'caddy turbogol-node' });
+      assert.equal(again.code, 0, show(again));
+      assert.ok(!again.log.some((l) => l.includes('systemd-journald')), show(again));
+      // A file the machine changed is written back, and journald restarted.
+      await project.write('etc/systemd/journald.conf.d/60-turbogol-retention.conf', '[Journal]\nMaxRetentionSec=1month\n');
+      const fixed = await project.run(RERUN, { FAKE_A: '203.0.113.7', FAKE_ACTIVE: 'caddy turbogol-node', FAKE_SS: CADDY_ON_443 });
+      assert.equal(fixed.code, 0, show(fixed));
+      assert.ok(fixed.log.includes('systemctl restart systemd-journald'), show(fixed));
+      assert.equal(await project.read('etc/systemd/journald.conf.d/60-turbogol-retention.conf'), withInstaller('journald_conf'));
+
+      // A community identity (its name is never under turbo-gol.com): no proxy on a --restore or a re-run.
+      await restored.write('backup.json', JSON.stringify({ nodeId: 'n_juan', privateKey: 'k', roles: ['host'], transports: ['wss'], publicUrl: 'wss://juan.example.org' }));
+      const refusedRestore = await restored.run([...RERUN, '--restore', `${restored.root}/backup.json`, '--allow-proxied'], { FAKE_A: '104.16.0.1' });
+      assert.notEqual(refusedRestore.code, 0, show(refusedRestore));
+      assert.match(refusedRestore.err, /--allow-proxied is only for the project's own servers/);
+      assert.equal(await restored.read('var/lib/turbogol-node/node.json'), null);
+      assert.equal(await restored.read('etc/caddy/Caddyfile'), null);
+      const behind = await restored.run([...RERUN, '--restore', `${restored.root}/backup.json`], { FAKE_A: '104.16.0.1' });
+      assert.notEqual(behind.code, 0, show(behind));
+      assert.match(behind.err, /juan\.example\.org does not lead here: it resolves to Cloudflare's proxy/);
+      const direct = await restored.run([...RERUN, '--restore', `${restored.root}/backup.json`], { FAKE_A: '203.0.113.7' });
+      assert.equal(direct.code, 0, show(direct));
+      const rerun = await restored.run([...RERUN, '--allow-proxied'], { FAKE_A: '203.0.113.7', FAKE_ACTIVE: 'caddy turbogol-node', FAKE_SS: CADDY_ON_443 });
+      assert.notEqual(rerun.code, 0, show(rerun));
+      assert.match(rerun.err, /--allow-proxied is only for the project's own servers/);
+    } finally {
+      await Promise.all([project.cleanup(), restored.cleanup()]);
     }
   });
 

@@ -226,8 +226,8 @@ test('the acceptance step uses PR 2A\'s screen strings verbatim (es and en), the
     'servers.acceptAnnex': ['Anexo B', 'Annex B'],
     'servers.getCode': ['PEDIR CÓDIGO', 'GET CODE'],
     'servers.acceptSummary': [
-      'Para alojar un servidor de la comunidad aceptas las reglas para anfitriones: usar solo el programa oficial, cuidar los datos de los jugadores (los recibes por encargo nuestro y no los guardas después de la partida), no manipular partidas y cuidar tu máquina. Por ahora tu servidor no recibe partidas de COMPETITIVO, y los puntos de servidor tienen un tope por día.',
-      "To host a community server you accept the rules for hosts: use only the official program, look after the players' data (you get it on our behalf and do not keep it after the match), do not tamper with matches and look after your machine. For now your server gets no COMPETITIVE matches, and server points have a cap per day.",
+      'Para alojar un servidor de la comunidad aceptas las reglas para anfitriones: usar solo el programa oficial, cuidar los datos de los jugadores (los recibes por encargo nuestro y no los guardas después de la partida, salvo los registros técnicos de tu máquina con direcciones IP, 7 días como máximo), no manipular partidas y cuidar tu máquina. Por ahora tu servidor no recibe partidas de COMPETITIVO, y los puntos de servidor tienen un tope por día.',
+      "To host a community server you accept the rules for hosts: use only the official program, look after the players' data (you get it on our behalf and do not keep it after the match, except your machine's technical logs with IP addresses, 7 days at most), do not tamper with matches and look after your machine. For now your server gets no COMPETITIVE matches, and server points have a cap per day.",
     ],
     'servers.title': ['MIS SERVIDORES', 'MY SERVERS'],
     'settings.projectOnly': ['Solo servidores del proyecto', 'Project servers only'],
@@ -323,7 +323,7 @@ test("a code's follow-up from /nodes/mine alone: waiting, expired, revoked, then
   assert.equal(SM.followMine(mineAnswer(), 'abcdef123456', now).step, 'gone');
   // Every step has its words; an expired code's help names the installer's refusals and their fixes.
   for (const s of ['waiting', 'expired', 'revoked', 'pending', 'probation', 'active', 'stopped', 'gone']) for (const m of [es, en]) assert.equal(typeof m[`servers.follow.${s}`], 'string', s);
-  assert.deepEqual([...SM.INSTALL_ERRORS], ['region_mismatch', 'rtc_not_available', 'ip_not_supported', 'public_host_mismatch']);
+  assert.deepEqual([...SM.INSTALL_ERRORS], ['region_mismatch', 'rtc_not_available', 'ip_not_supported', 'public_host_mismatch', 'behind_proxy']);
   for (const c of SM.INSTALL_ERRORS) for (const m of [es, en]) assert.equal(typeof m[`servers.fix.${c}`], 'string', c);
 });
 
@@ -602,4 +602,84 @@ test('every new text exists in Spanish and English, Spanish in tú and its own w
   }
   const same = keys.filter((k) => typeof en[k] === 'string' && es[k] === en[k] && !/^(?:servers\.compatible|servers\.fact\.lag)$/.test(k));
   assert.deepEqual(same, [], 'translated');
+});
+
+// ---- the pre-opening change: the (b) texts made true -----------------------------------------------------
+
+test("MIS SERVIDORES says the system's measures (Terms 9.2 of (b): seen here): a failed verification, a strike pause and its way back to probation, the hour out after refusals; the team's own reason as written; the faltas and when the oldest goes", () => {
+  const now = 1_000_000;
+  const m = (o) => SM.measuresOf(node(o), now);
+  assert.deepEqual(m({}), []);
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'verification_failed' }), [{ kind: 'verification' }]);
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'strikes:node_offline', suspendedUntil: now + 5, afterPause: 'active', pauses: { count: 1, windowDays: 30 } }), [{ kind: 'strikes', until: now + 5, probation: false, days: 30 }]);
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'strikes:lost', suspendedUntil: now + 5, afterPause: 'probation', pauses: { count: 1, windowDays: 30 } }), [{ kind: 'strikes', until: now + 5, probation: false, days: 30 }], 'a first pause of a server on probation: back where it was');
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'strikes:lost', suspendedUntil: now + 5, afterPause: 'probation', pauses: { count: 2, windowDays: 30 } }), [{ kind: 'strikes', until: now + 5, probation: true, days: 30 }], 'the second: its verified matches start over');
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'strikes:lost', suspendedUntil: now + 5, afterPause: 'probation', pauses: { count: 3, windowDays: 30 } }), [{ kind: 'strikes', until: now + 5, probation: true, days: 30 }], 'a third too');
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'strikes:lost', suspendedUntil: now - 1 }), [], 'lifted (the next sweep says so)');
+  assert.deepEqual(m({ refused: { count: 9, rate: 0.5, recent: 6, of: 10, outUntil: now + 60 } }), [{ kind: 'refusals', until: now + 60 }]);
+  assert.deepEqual(m({ refused: { count: 9, rate: 0.5, recent: 6, of: 10, outUntil: now } }), []);
+  assert.deepEqual(m({ status: 'suspended', statusReason: 'review by the team' }), [], "the team's suspension is not the system's");
+  for (const r of ['verification_failed', 'strikes:node_offline']) assert.equal(SM.automaticReason(r), true, r);
+  for (const r of [null, 'review by the team', 'verification_failed later', 'strike:x']) assert.equal(SM.automaticReason(r), false, String(r));
+  // The faltas: the server's live count and when the oldest leaves the window; an older server's counter, none.
+  assert.deepEqual(SM.nodeFacts(node({ strikes: { count: 2, max: 3, windowDays: 7, nextExpiry: now + 9 } }), null).strikes, { count: 2, max: 3, windowDays: 7, nextExpiry: now + 9 });
+  assert.deepEqual(SM.nodeFacts(node(), null).strikes, { count: 1, max: 3, windowDays: 7, nextExpiry: null });
+  // The card: each measure in words, the raw code never; the team's reason as it wrote it.
+  const card = fnOf(SERVERS, 'nodeCard');
+  assert.match(card, /\.\.\.measuresOf\(n, now\)\.map\(\(x\) => h\('p\.mn-prof-node-reason', null, measureText\(x\)\)\),/);
+  assert.match(card, /n\.statusReason !== null && !automaticReason\(n\.statusReason\) && \(n\.status === 'suspended' \|\| n\.status === 'banned'\) \? h\('p\.mn-prof-node-reason', null, n\.statusReason\)/);
+  assert.match(card, /t\('servers\.strikesNext', \{ time: when\(f\.strikes\.nextExpiry\) \}\)/);
+  assert.match(SERVERS, /\['states', 'what', 'few', 'points', 'measures', 'data'\]/);
+  for (const k of ['servers.measure.verification', 'servers.measure.strikes', 'servers.measure.strikesAgain', 'servers.measure.refusals', 'servers.strikesNext', 'servers.help.measures']) for (const l of [es, en]) assert.equal(typeof l[k], 'string', k);
+  assert.match(es['servers.measure.strikes'], /\{time\}/);
+  assert.match(es['servers.measure.strikesAgain'], /^No es su primera pausa en \{days\} días: /, 'no ordinal: a third pause in the window demotes it too (Registry.onLost)');
+  assert.match(en['servers.measure.strikesAgain'], /^It is not its first pause in \{days\} days: /);
+  // Terms 9.1 and 12.6.1: only a refusal "sin motivo" counts (connected, with room, not draining, under its traffic cap).
+  for (const k of ['servers.measure.refusals', 'servers.help.measures']) {
+    assert.match(es[k], /rechaz[óa] sin motivo demasiadas de las últimas partidas que le asignamos/, k);
+    assert.match(en[k], /refuse[sd] with no reason too many of the latest matches we assign/, k);
+  }
+  // The Terms name no thresholds (12.6.1): neither does the help.
+  assert.doesNotMatch(es['servers.help.measures'], /\b3\b|24 horas|30 días/);
+});
+
+test("the game's strings say what the (b) texts say: the preference lives in this browser or TV; a review is asked by email; a report gets no promise of one; the 7 days of the machine's logs; the opening's words; no Discord", () => {
+  // Terms 7.6: "La opción se guarda solo en ese navegador o esa TV, no en tu cuenta: actívala en cada uno donde juegues, y otra vez si borras los datos del sitio."
+  assert.match(es['settings.projectOnlyHelp'], /La opción se guarda solo en este navegador o esta TV, no en tu cuenta: actívala en cada uno donde juegues, y otra vez si borras los datos del sitio\./);
+  assert.match(en['settings.projectOnlyHelp'], /The option is kept only in this browser or on this TV, not in your account: turn it on in each one you play on, and again if you clear the site's data\./);
+  assert.match(es['settings.projectOnlyHelp'], /^Las partidas que buscas desde este navegador o esta TV nunca van/);
+  // Terms 12.1.2: no "la red sigue cerrada" any more; during a canary only the invited register.
+  assert.doesNotMatch(es['servers.closed'], /sigue cerrada|Discord/);
+  assert.doesNotMatch(en['servers.closed'], /stays closed|Discord/);
+  assert.match(es['servers.closed'], /solo las personas que invitamos/);
+  // Terms 9.3: by email only.
+  for (const k of ['servers.frozenNote', 'servers.req.operator_blocked']) {
+    assert.match(es[k], /por correo a privacy@turbo-gol\.com/, k);
+    assert.match(en[k], /by email at privacy@turbo-gol\.com/, k);
+    assert.doesNotMatch(es[k] + en[k], /Discord/, k);
+  }
+  // A report: received, no review promised (Terms 12.6.2: "Ningún reporte te sanciona por sí solo").
+  assert.equal(es['final.reported'], 'Gracias: lo recibimos.');
+  assert.equal(en['final.reported'], 'Thanks: we got it.');
+  assert.match(es['final.reportNote'], /ningún reporte lo sanciona por sí solo/);
+  assert.doesNotMatch(es['final.reportNote'], /un reporte solo/);
+  // Terms 12.3.2 and Annex B, point 9: the machine's own logs, 7 days at most unless the law asks more; the
+  // installer caps journald alone, so the other logs are the host's to check (rsyslog's on Ubuntu).
+  assert.match(es['servers.help.data'], /La única excepción son los registros técnicos de tu máquina que tengan direcciones IP \(del sistema, del firewall o de Caddy\): haz que se borren a los 7 días como máximo, salvo que la ley te obligue a más\. El instalador oficial deja el diario del sistema \(journald\) en 7 días y saca esos datos de los registros de Caddy\. Revisa los otros registros de tu máquina, como \/var\/log\/syslog y \/var\/log\/ufw\.log en Ubuntu\.$/);
+  assert.match(en['servers.help.data'], /have them deleted after 7 days at most, unless the law requires you to keep them longer\. The official installer keeps the system journal \(journald\) for 7 days .*\/var\/log\/ufw\.log on Ubuntu\.$/);
+  assert.doesNotMatch(es['servers.help.data'] + en['servers.help.data'], /registro del sistema en 7|system log for 7/, 'journald only: the installer leaves rsyslog alone');
+  // The summary above the acceptance says the same exception (Annex B, point 9).
+  assert.match(es['servers.acceptSummary'], /no los guardas después de la partida, salvo los registros técnicos de tu máquina con direcciones IP, 7 días como máximo\)/);
+  // Terms 12.5.2: COMPETITIVE never reaches a server that is not the project's (the project's are community servers too).
+  assert.match(es['servers.help.what'], /no llega a los servidores que no son del proyecto/);
+  // Annex B, point 6: never behind Cloudflare's proxy; the installer's refusals have their words and their fix.
+  for (const c of ['behind_proxy', 'dns_unavailable']) {
+    assert.ok(N.NODE_ERROR_CODES.includes(c), c);
+    for (const l of [es, en]) assert.equal(typeof l[`nodesShared.err.${c}`], 'string', c);
+  }
+  assert.match(es['servers.hostHint'], /DNS only \(sin el proxy de Cloudflare\)/);
+  assert.equal(typeof es['servers.fix.behind_proxy'], 'string');
+  // Nothing of the game's hosting words sends a review or a report to Discord.
+  const hosting = Object.keys(es).filter((k) => /^(?:servers\.|final\.report|settings\.projectOnly)/.test(k));
+  for (const k of hosting) if (typeof es[k] === 'string') assert.doesNotMatch(es[k], /Discord/, k);
 });

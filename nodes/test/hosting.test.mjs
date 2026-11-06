@@ -16,7 +16,7 @@ const C = await import('../control-plane/controlPlane.ts');
 const { ControlPlane, COMMUNITY_POLICY } = C;
 const { ineligibility } = await import('../control-plane/scheduler.ts');
 const { Ledger, countsAsHosted } = await import('../control-plane/ledger.ts');
-const { publicOperatorNames, publicStatus } = await import('../control-plane/publicList.ts');
+const { publicNamesWanted, publicOperatorNames, publicStatus } = await import('../control-plane/publicList.ts');
 const { nodeFromRow, nodeToRow } = await import('../control-plane/persist.ts');
 const { generateEd25519, importPrivateKey, sign } = await import('../shared/edcrypto.ts');
 const { authMessage, reachMessage } = await import('../shared/controlProtocol.ts');
@@ -135,6 +135,111 @@ test('a blocked operator registers nothing, its token kept; the project is never
   assert.ok((await reg.register(await request(token, 'wss://j.example.org'), 0, { continent: 'SA' })).ok);
   const p = (await reg.createToken({ id: 'project', name: 'Proyecto' }, 'SA', 0)).token;
   assert.ok((await reg.register(await request(p, 'wss://sp.example.org'), 0)).ok);
+});
+
+test("a community node is never registered behind Cloudflare's proxy (Annex B, point 6): asked last, a failed lookup refuses too, the token kept either way; the project is never asked", async () => {
+  const answers = new Map([['proxied.example.org', true], ['direct.example.org', false], ['broken.example.org', null]]);
+  const asked = [];
+  const reg = new Registry({
+    trustedOperators: ['project'],
+    log: quiet,
+    community: { ...RULES, behindProxy: async (host) => (asked.push(host), answers.has(host) ? answers.get(host) : false) },
+  });
+  const { token } = await reg.createToken({ id: 'op1', name: 'Juan' }, 'SA', 0);
+  const seen = { continent: 'SA' };
+  const proxied = await reg.register(await request(token, 'wss://proxied.example.org'), 0, seen);
+  assert.deepEqual([proxied.ok, proxied.code], [false, 'behind_proxy']);
+  assert.match(proxied.message, /resolves to Cloudflare's proxy: a community server is reached by its players directly\. Set its DNS record to 'DNS only'/);
+  const broken = await reg.register(await request(token, 'wss://broken.example.org'), 0, seen);
+  assert.deepEqual([broken.ok, broken.code], [false, 'dns_unavailable']);
+  assert.match(broken.message, /the token was not used/);
+  assert.equal(reg.tokenList()[0].usedBy, null, 'the token is not spent');
+  // The other rules come first: a lookup is never asked for what they refuse.
+  asked.length = 0;
+  assert.equal((await reg.register(await request(token, 'wss://proxied.example.org:8443'), 0, seen)).code, 'bad_public_url');
+  assert.equal((await reg.register(await request(token, 'wss://proxied.example.org'), 0, { continent: 'EU' })).code, 'region_mismatch');
+  assert.deepEqual(asked, []);
+  const ok = await reg.register(await request(token, 'wss://direct.example.org'), 0, seen);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  assert.deepEqual(asked, ['direct.example.org']);
+  // The project's servers may sit behind the proxy: never asked.
+  const p = (await reg.createToken({ id: 'project', name: 'Proyecto' }, 'SA', 0)).token;
+  assert.ok((await reg.register(await request(p, 'wss://proxied.example.org'), 0)).ok);
+  assert.deepEqual(asked, ['direct.example.org']);
+});
+
+test("a purged operator's records go under an opaque key with no name: its nodes (banned, retired, pending), its tokens and its ledger, its points kept with them", async () => {
+  const written = { nodes: [], tokens: [] };
+  const store = { node: (n) => written.nodes.push({ ...n }), register: () => undefined, tokens: (ts) => written.tokens.push(...ts.map((t) => ({ ...t }))), dropTokens: () => undefined };
+  const reg = new Registry({ trustedOperators: ['project'], log: quiet, store });
+  const juan = { id: 'op1', name: 'Juan' };
+  const nodes = [];
+  for (const status of ['active', 'banned', 'pending']) {
+    const { token } = await reg.createToken(juan, 'SA', 0);
+    const n = (await reg.register(await request(token, 'wss://j.example.org'), 0)).node;
+    n.status = status;
+    nodes.push(n);
+  }
+  reg.retire(nodes[2].nodeId, 'gone', 1);
+  await reg.createToken(juan, 'SA', 0); // unused
+  const ana = (await reg.register(await request((await reg.createToken({ id: 'op2', name: 'Ana' }, 'SA', 0)).token, 'wss://a.example.org'), 0)).node;
+  const ledger = new Ledger({ playerRepeat: true });
+  // Juan's own node, Juan playing on it too; Juan playing on Ana's.
+  ledger.record(credit('op1', NOON, [player('a'), player('b'), { ...player('x'), playerId: 'op1' }], { nodeId: nodes[0].nodeId }), 1);
+  ledger.record(credit('op2', NOON, [player('c'), { ...player('x'), playerId: 'op1' }], { nodeId: ana.nodeId }), 1);
+  const before = { earned: ledger.earned('op1'), verified: ledger.verifiedMatches('op1'), d30: ledger.summary('op1', NOON).points30d };
+  assert.ok(before.earned > 0);
+  written.nodes.length = 0;
+  written.tokens.length = 0;
+  const alias = R.DELETED_OPERATOR_PREFIX + 'abcdef012345';
+  assert.equal(reg.forgetOperator('op1', alias), 3);
+  ledger.forgetOperator('op1', alias);
+  assert.equal(R.isDeletedOperator(alias), true);
+  assert.equal(R.isDeletedOperator('op1'), false);
+  // Every node of it, its status and counters as they were, under the alias, with no name; written.
+  assert.deepEqual(reg.byOperator('op1'), []);
+  assert.deepEqual(reg.byOperator(alias).map((n) => [n.status, n.operatorName, R.isRetired(n)]), [['active', '', false], ['banned', '', false], ['pending', '', true]]);
+  assert.deepEqual(written.nodes.map((n) => [n.operatorId, n.operatorName]), [[alias, ''], [alias, ''], [alias, '']]);
+  assert.ok(reg.tokenList().filter((t) => t.operatorId !== 'op2').every((t) => t.operatorId === alias && t.operatorName === ''));
+  assert.equal(written.tokens.length, 4);
+  assert.equal(reg.node(ana.nodeId).operatorId, 'op2', "another operator's untouched");
+  // Its points stay with its nodes, under the alias; nothing of the ledger keeps its id but its seat on Ana's node.
+  assert.deepEqual({ earned: ledger.earned(alias), verified: ledger.verifiedMatches(alias), d30: ledger.summary(alias, NOON).points30d }, before);
+  assert.deepEqual([ledger.earned('op1'), ledger.summary('op1', NOON).matches30d], [0, 0]);
+  assert.deepEqual(ledger.leaderboard(NOON).map((e) => e.operatorId).sort(), [alias, 'op2'].sort());
+  const mine = ledger.recent(NOON).find((e) => e.operatorId === alias);
+  assert.deepEqual(mine.players.map((p) => p.playerId).filter((id) => id === 'op1' || id === alias), [alias], 'its own seat too');
+  assert.ok(ledger.recent(NOON).find((e) => e.operatorId === 'op2').players.some((p) => p.playerId === 'op1'), "a player's seat on another's node stays");
+  // The repeat decay follows: the same group again on its nodes is still decayed.
+  const again = ledger.record(credit(alias, NOON + 1, [player('a'), player('b')], { nodeId: nodes[0].nodeId }), 1);
+  assert.ok(again.repeat < 1, JSON.stringify(again));
+  // A second call finds nothing under the id.
+  assert.equal(reg.forgetOperator('op1', R.DELETED_OPERATOR_PREFIX + 'ffffffffffff'), 0);
+});
+
+test("a project account's records take its account's name as it is now (the public list's fallback is never a name it left): nodes and tokens, only what differs written, another's untouched", async () => {
+  const written = { nodes: [], tokens: [] };
+  const store = { node: (n) => written.nodes.push({ ...n }), register: () => undefined, tokens: (ts) => written.tokens.push(...ts.map((t) => ({ ...t }))), dropTokens: () => undefined };
+  const reg = new Registry({ trustedOperators: ['project'], log: quiet, store });
+  const project = { id: 'project', name: 'Turbogol' };
+  const n = (await reg.register(await request((await reg.createToken(project, 'SA', 0)).token, 'wss://p.example.org'), 0)).node;
+  await reg.createToken(project, 'SA', 0); // unused
+  const ana = (await reg.register(await request((await reg.createToken({ id: 'op2', name: 'Ana' }, 'SA', 0)).token, 'wss://a.example.org'), 0)).node;
+  written.nodes.length = 0;
+  written.tokens.length = 0;
+  assert.equal(reg.renameOperator('project', 'TurbogolOficial'), 3);
+  assert.equal(reg.node(n.nodeId).operatorName, 'TurbogolOficial');
+  assert.deepEqual(written.nodes.map((x) => [x.nodeId, x.operatorName]), [[n.nodeId, 'TurbogolOficial']]);
+  assert.ok(reg.tokenList().filter((t) => t.operatorId === 'project').every((t) => t.operatorName === 'TurbogolOficial'));
+  assert.equal(written.tokens.length, 2);
+  assert.equal(reg.node(ana.nodeId).operatorName, 'Ana');
+  // The same name again: nothing written.
+  assert.equal(reg.renameOperator('project', 'TurbogolOficial'), 0);
+  assert.deepEqual([written.nodes.length, written.tokens.length], [1, 2]);
+  // The public list without the name of now: the one its records took.
+  const cp = { registry: reg, ledger: new Ledger(), currentBuild: BUILD, sameBuildAs: () => true };
+  reg.node(n.nodeId).status = 'active';
+  assert.deepEqual(publicStatus(cp, NOON, { current: () => undefined }).nodes.map((x) => x.operator), ['TurbogolOficial'], "Ana's is pending: not listed");
 });
 
 test('rows of before load with no continent and no refusal; a refusal is counted and written', async () => {
@@ -536,11 +641,62 @@ test('the public list names an operator outside the project only when it chose t
   ledger.record(credit('op1', NOON, [player('a'), player('b')]), 1);
   const cp = { registry: reg, ledger, currentBuild: BUILD, sameBuildAs: () => true };
   const shows = (id) => id === 'op1' || id === 'op2';
+  // The accounts' names as they are now (the NodeRegistryDO asks AccountsDO for them).
+  const current = (id) => ({ op1: 'Juan', op2: 'Anfitrión' })[id];
   assert.deepEqual(publicStatus(cp, NOON).nodes.map((n) => n.operator), ['Anfitrión 1', 'Anfitrión 2']);
-  const s = publicStatus(cp, NOON, shows);
-  assert.deepEqual(s.nodes.map((n) => n.operator), ['Juan', 'Anfitrión 1'], "a name that is the label itself gets a number");
+  const s = publicStatus(cp, NOON, { shows, current });
+  assert.deepEqual(s.nodes.map((n) => n.operator), ['Juan', 'Anfitrión 2'], 'a name that is the label itself gets its number, the one it had');
   assert.deepEqual(s.hosts, [{ name: 'Juan', points: 20 }]);
-  assert.equal(publicOperatorNames(reg.list(), () => false, [], shows)('op1'), 'Juan');
+  assert.equal(publicOperatorNames(reg.list(), () => false, [], shows, current)('op1'), 'Juan');
+  // Never the name its records kept: without the account's name of now, its number.
+  assert.deepEqual(publicStatus(cp, NOON, { shows }).nodes.map((n) => n.operator), ['Anfitrión 1', 'Anfitrión 2']);
+});
+
+test('the public list follows the host: its name as it is now (a rename, never the old name someone else may take), its switch, a block of the host; a number that stays with its operator', async () => {
+  const reg = new Registry({ trustedOperators: ['project'], log: quiet });
+  const regNode = async (op, status = 'active') => {
+    const { token } = await reg.createToken(op, 'SA', 0);
+    const r = await reg.register(await request(token, 'wss://x.example.org'), 0);
+    r.node.status = status;
+    return r.node;
+  };
+  await regNode({ id: 'op1', name: 'Juan' });
+  await regNode({ id: 'project', name: 'Proyecto' });
+  await regNode({ id: 'op2', name: 'Ana' });
+  await regNode({ id: 'op3', name: 'Beto' });
+  const ledger = new Ledger();
+  ledger.record(credit('op3', NOON, [player('a'), player('b')]), 1);
+  const cp = { registry: reg, ledger, currentBuild: BUILD, sameBuildAs: () => true };
+  let showing = new Set(['op1', 'op3']);
+  let names = { op1: 'Juan', op2: 'Ana', op3: 'Beto', project: 'Proyecto' };
+  const blocked = new Set();
+  const list = () => {
+    const s = publicStatus(cp, NOON, { shows: (id) => showing.has(id), current: (id) => names[id], blocked: (id) => blocked.has(id) });
+    return { nodes: s.nodes.map((n) => n.operator), hosts: s.hosts.map((h) => h.name) };
+  };
+  assert.deepEqual(list(), { nodes: ['Juan', 'Proyecto', 'Anfitrión 2', 'Beto'], hosts: ['Beto'] });
+  // Juan renames his account to Juanito and Pedro takes "Juan": the list says Juanito, never Juan.
+  names = { ...names, op1: 'Juanito', pedro: 'Juan' };
+  assert.deepEqual(list().nodes, ['Juanito', 'Proyecto', 'Anfitrión 2', 'Beto']);
+  // The account's name not known (AccountsDO did not answer): a number, never the record's "Juan".
+  names = { ...names, op1: undefined };
+  assert.deepEqual(list().nodes, ['Anfitrión 1', 'Proyecto', 'Anfitrión 2', 'Beto']);
+  // A project account goes by its name of now too, by its record's when it is not known.
+  names = { ...names, op1: 'Juanito', project: 'Turbogol' };
+  assert.deepEqual(list().nodes, ['Juanito', 'Turbogol', 'Anfitrión 2', 'Beto']);
+  names = { ...names, project: undefined };
+  assert.equal(list().nodes[1], 'Proyecto');
+  // Beto turns the switch off: his number, in the nodes and in the ranking; Ana's stays 2 throughout.
+  showing = new Set(['op1']);
+  assert.deepEqual(list(), { nodes: ['Juanito', 'Proyecto', 'Anfitrión 2', 'Anfitrión 3'], hosts: ['Anfitrión 3'] });
+  // A maintainer blocks Beto as a host: his servers leave the list (Terms 12.4.1), his points stay in the ranking.
+  blocked.add('op3');
+  assert.deepEqual(list(), { nodes: ['Juanito', 'Proyecto', 'Anfitrión 2'], hosts: ['Anfitrión 3'] });
+  assert.deepEqual(publicNamesWanted(cp, NOON, { shows: (id) => showing.has(id), blocked: (id) => blocked.has(id) }).sort(), ['op1', 'project'], 'what the object asks AccountsDO for: the named ones it shows');
+  showing = new Set(['op1', 'op3']);
+  assert.deepEqual(publicNamesWanted(cp, NOON, { shows: (id) => showing.has(id), blocked: (id) => blocked.has(id) }).sort(), ['op1', 'op3', 'project'], "a blocked host's name in the ranking");
+  // The reference server's list (no names, no blocks): the project by its records, every other host by its number.
+  assert.deepEqual(publicStatus(cp, NOON).nodes.map((n) => n.operator), ['Anfitrión 1', 'Proyecto', 'Anfitrión 2', 'Anfitrión 3']);
 });
 
 // ---- Prompt 2, PR 2: the project-only preference, the server's trust, an operator's rename -----------

@@ -92,6 +92,9 @@
  *   POST /replay-name/set { userId, hidden }                         -> { hidden } | 404
  *   POST /replay-hidden   { ids, names } (the NodeRegistryDO)        -> { ids, names }: those of an account that hides
  *                                                                     its name in the public replays (256 each at most)
+ *   POST /usernames       { ids } (the NodeRegistryDO's public list) -> { names: { <id>: username } }: each account's name
+ *                                                                     as it is now, a purged or unknown id left out (256
+ *                                                                     at most)
  *   POST /tv-start        { ip, secret, where?, checked? }           -> { code, expiresAt } | 503 busy (the table, or the
  *                                                                     caller's /48 or /24, is full; `checked` false: started
  *                                                                     without a solved check, tvCodes.ts TV_OPEN_* too)
@@ -2312,6 +2315,11 @@ export class AccountsDO extends DurableObject<Env> {
         const list = (v: unknown): v is string[] => Array.isArray(v) && v.length <= REPLAY_HIDDEN_MAX && v.every((x) => typeof x === 'string' && x.length <= 64);
         if (!list(b.ids) || !list(b.names)) return error(400, 'bad_request');
         return json(s.replayHidden(b.ids, b.names));
+      }
+      case '/usernames': {
+        const ids = b.ids;
+        if (!Array.isArray(ids) || ids.length > REPLAY_HIDDEN_MAX || !ids.every((x): x is string => typeof x === 'string' && x.length <= 64)) return error(400, 'bad_request');
+        return json({ names: s.usernames(ids) });
       }
       case '/presets/delete': {
         if (typeof b.userId !== 'string') return error(400, 'bad_request');

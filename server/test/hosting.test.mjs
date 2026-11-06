@@ -227,6 +227,8 @@ function accountsNs(people = new Map()) {
     calls: [],
     /** When set, /host-consent answers this (status, body). */
     consent: null,
+    /** When set, /usernames fails (AccountsDO down). */
+    down: false,
     /** Milliseconds each answer takes (a real AccountsDO is another object: its answer comes on a later turn). */
     delay: 0,
     idFromName: (n) => ({ n }),
@@ -240,6 +242,11 @@ function accountsNs(people = new Map()) {
         if (u.pathname === '/me') {
           const p = people.get(u.searchParams.get('userId'));
           return p ? out(p) : out({ error: 'no_user' }, 404);
+        }
+        // The public list's names as they are now (AccountsDO /usernames): a person's `username`; ns.down: no answer.
+        if (u.pathname === '/usernames') {
+          if (ns.down) return out({ error: 'internal' }, 500);
+          return out({ names: Object.fromEntries(body.ids.filter((id) => typeof people.get(id)?.username === 'string').map((id) => [id, people.get(id).username])) });
         }
         if (u.pathname === '/host-consent') {
           if (ns.consent) return out(ns.consent.body, ns.consent.status);
@@ -281,7 +288,7 @@ function makeEnv(over = {}) {
     NODE_TRUSTED_MAX_NODES: '6',
     NODES_PUBLIC_BASE: BASE,
     FLAGS: kvOf(),
-    ACCOUNTS: accountsNs(new Map([[JUAN, person()], [ANA, person()]])),
+    ACCOUNTS: accountsNs(new Map([[JUAN, person({ username: 'Juan' })], [ANA, person({ username: 'Ana' })]])),
     MATCHMAKER: accountsNs(),
     ...over,
   };
@@ -290,9 +297,16 @@ function makeEnv(over = {}) {
 /** The object hosting is open in for JUAN (a canary of one) unless `over` says otherwise. */
 const openEnv = (over = {}) => makeEnv({ ...IN_FORCE, FLAGS: kvOf({ node_operators: JUAN }), ...over });
 
+/** The DNS a community registration reads (NodeRegistryDO dnsFn): `dns` by "<type> <name>" (none: no records); a name in `dnsDown` fails. */
+const dns = new Map();
+const dnsDown = new Set();
+const fakeDns = async (name, type) => (dnsDown.has(name) ? null : (dns.get(`${type} ${name}`) ?? []));
+
 async function boot(env, ctx = new FakeCtx()) {
   const obj = new D.NodeRegistryDO(ctx, env);
   obj.alertSleep = () => Promise.resolve();
+  // A community registration reads its name's DNS records (proxyCheck.ts): never the network here.
+  obj.dnsFn = fakeDns;
   await obj.ready;
   return { obj, ctx, env };
 }
@@ -604,6 +618,76 @@ test("registration of a community node: its token's continent (an unknown one or
   assert.deepEqual([v.capacityEffective, v.seenContinent, v.refusals], [4, 'SA', { recent: 0, of: 0, outUntil: null }]);
 });
 
+test("a community node behind Cloudflare's proxy is never registered (Annex B, point 6): 403 behind_proxy by its A or AAAA records, 503 dns_unavailable when they cannot be read, the token kept either way; a project node is never asked", async () => {
+  const h = await boot(openEnv());
+  const t = (await ask(h)).json.token;
+  const asked = [];
+  h.obj.dnsFn = async (name, type) => (asked.push(`${type} ${name}`), fakeDns(name, type));
+  try {
+    dns.set('A juan.example.org', ['104.16.0.1']);
+    const v4 = await register(h, t);
+    assert.deepEqual([v4.status, v4.json.error], [403, 'behind_proxy']);
+    assert.match(v4.json.message, /juan\.example\.org resolves to Cloudflare's proxy/);
+    dns.set('A juan.example.org', ['203.0.113.7']);
+    dns.set('AAAA juan.example.org', ['2606:4700::6810:84e5']);
+    assert.equal((await register(h, t)).json.error, 'behind_proxy', 'an AAAA record too');
+    dns.delete('AAAA juan.example.org');
+    dnsDown.add('juan.example.org');
+    const down = await register(h, t);
+    assert.deepEqual([down.status, down.json.error], [503, 'dns_unavailable']);
+    assert.equal(h.obj.cp.registry.tokenList().find((x) => x.publicHost === 'juan.example.org').usedBy, null, 'the token is not spent');
+    dnsDown.delete('juan.example.org');
+    asked.length = 0;
+    const ok = await register(h, t);
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.deepEqual(asked.sort(), ['A juan.example.org', 'AAAA juan.example.org']);
+    // The project's own servers may sit behind it: never looked up.
+    asked.length = 0;
+    dns.set('A sp9.example.org', ['104.16.0.9']);
+    const pt = (await projectToken(h, { name: 'sp-9', publicHost: 'sp9.example.org' })).json.token;
+    assert.equal((await register(h, pt, { publicUrl: 'wss://sp9.example.org' })).status, 200);
+    assert.deepEqual(asked, []);
+  } finally {
+    dns.clear();
+    dnsDown.clear();
+  }
+});
+
+test("proxyCheck: Cloudflare's addresses (v4, v6, a mapped IPv4 never one), DNS over HTTPS read leniently (NXDOMAIN none, any other failure null), a host behind the proxy by any of its records", async () => {
+  const X = await import('../src/proxyCheck.ts');
+  const inside = ['104.16.0.1', '172.67.10.10', '131.0.75.1', '173.245.63.255', '2606:4700::6810:84e5', '2a06:98c7:ffff::1', '2400:cb00:2049:1::a29f:1804'];
+  const outside = ['1.2.3.4', '104.32.0.1', '173.245.64.0', '203.0.113.7', '2a06:98c8::1', '2001:db8::1', '::ffff:104.16.0.1', 'not an address'];
+  for (const ip of inside) assert.equal(X.inCloudflare(ip), true, ip);
+  for (const ip of outside) assert.equal(X.inCloudflare(ip), false, ip);
+  const seen = [];
+  const answer = (b, status = 200) => new RealResponse(typeof b === 'string' ? b : JSON.stringify(b), { status, headers: { 'content-type': 'application/dns-json' } });
+  // Each a fresh answer: a body is read once.
+  const replies = new Map([
+    ['A ok.example.org', () => answer({ Status: 0, Answer: [{ name: 'ok.example.org.', type: 5, data: 'cdn.example.net.' }, { name: 'cdn.example.net.', type: 1, data: '104.16.0.1' }] })],
+    ['AAAA ok.example.org', () => answer({ Status: 0 })],
+    ['A gone.example.org', () => answer({ Status: 3 })],
+    ['A fail.example.org', () => answer({ Status: 2 })],
+    ['A http.example.org', () => answer({ error: 'x' }, 500)],
+    ['A junk.example.org', () => answer('not json')],
+  ]);
+  const doh = X.dohAnswers(async (url, init) => {
+    const u = new URL(url);
+    seen.push([u.origin + u.pathname, u.searchParams.get('type'), init.headers.accept]);
+    const key = `${u.searchParams.get('type')} ${u.searchParams.get('name')}`;
+    if (key === 'A throw.example.org') throw new Error('network');
+    return replies.get(key)?.() ?? answer({ Status: 0 });
+  });
+  assert.deepEqual(await doh('ok.example.org', 'A'), ['104.16.0.1'], 'the CNAME left out, its target kept');
+  assert.deepEqual(await doh('ok.example.org', 'AAAA'), []);
+  assert.deepEqual(await doh('gone.example.org', 'A'), [], 'NXDOMAIN: no records');
+  for (const name of ['fail', 'http', 'junk', 'throw']) assert.equal(await doh(`${name}.example.org`, 'A'), null, name);
+  assert.deepEqual(seen[0], [X.DOH_URL, 'A', 'application/dns-json']);
+  assert.equal(X.DOH_URL, 'https://cloudflare-dns.com/dns-query');
+  assert.equal(await X.behindCloudflare('ok.example.org', doh), true);
+  assert.equal(await X.behindCloudflare('gone.example.org', doh), false);
+  assert.equal(await X.behindCloudflare('fail.example.org', doh), null);
+});
+
 // ---- blocking an operator -------------------------------------------------------------------------
 
 test('a blocked operator: its sockets closed (4403) and every login refused, no code, no registration, its wallet frozen; unblocked it hosts again; suspend_all; audited with its id and reason', async () => {
@@ -734,7 +818,11 @@ test('the opt-in: an operator outside the project named in the public list only 
   assert.equal((await pub(true, PROJECT)).json.error, 'trusted');
   await pub(true);
   // Its points keep it in the hosts' ranking after its account goes: by its number from then on.
-  h.obj.cp.ledger.record({ matchId: 'e'.repeat(64), nodeId: 'n1', operatorId: JUAN, region: 'SA', mode: '2v2', ranked: false, verified: true, endReason: 'rules', players: ['a', 'b'].map((x) => ({ playerId: x.repeat(16), connectedMs: 600_000, account: true, accountAgeDays: 30 })), tickLagP99Ms: 2, underrunRate: 0, at: clock }, 1);
+  // Recorded as a settled match is (the entry and its totals in SQLite), with Juan in a seat of his own, and a repeat note.
+  const seat = (id) => ({ playerId: id, connectedMs: 600_000, account: true, accountAgeDays: 30 });
+  const entry = h.obj.cp.ledger.record({ matchId: 'e'.repeat(64), nodeId: 'n1', operatorId: JUAN, region: 'SA', mode: '2v2', ranked: false, verified: true, endReason: 'rules', players: ['a'.repeat(16), 'b'.repeat(16), JUAN].map(seat), tickLagP99Ms: 2, underrunRate: 0, at: clock }, 1);
+  h.obj.store.ledgerEntry(entry, clock);
+  h.obj.store.ledgerNote({ operatorId: JUAN, playerIds: ['c'.repeat(16), JUAN], at: clock });
   const hostsNow = async () => (await call(h, 'GET', '/nodes/status')).json.hosts.map((x) => x.name);
   assert.deepEqual(await hostsNow(), ['Juan']);
   const pending = (await ask(h)).json.token;
@@ -753,10 +841,85 @@ test('the opt-in: an operator outside the project named in the public list only 
   assert.deepEqual(rows(h, 'operator_tokens'), []);
   const [audit] = rows(h, 'admin_audit');
   assert.equal(audit.new, 'deleted,deleted');
-  const kept = JSON.stringify([ops, rows(h, 'admin_audit'), [...h.obj.operators.keys()]]);
-  assert.ok(!kept.includes(JUAN) && !kept.includes(ANA), 'no account id left in them');
-  assert.equal(h.obj.cp.registry.tokenList().find((t) => t.operatorId === JUAN && t.usedBy === null).revokedAt, clock, 'its unused code revoked');
+  // Its records stay, banned, with its points (Privacy 12.3, "Si eras anfitrión"), under one opaque key and with no name.
+  const alias = rows(h, 'nodes')[0].operator_id;
+  assert.match(alias, /^deleted:[0-9a-f]{12}$/);
+  assert.notEqual(alias, ops[0].operator_id, "each purged account its own key: Juan's is not Ana's");
+  assert.deepEqual(h.obj.cp.registry.byOperator(alias).map((n) => [n.status, n.operatorName]), [['banned', '']]);
+  const codes = h.obj.cp.registry.tokenList();
+  assert.ok(codes.length === 2 && codes.every((t) => t.operatorId === alias && t.operatorName === ''), JSON.stringify(codes));
+  assert.equal(codes.find((t) => t.usedBy === null).revokedAt, clock, 'its unused code revoked');
+  assert.deepEqual([h.obj.cp.ledger.earned(alias), rows(h, 'ledger_totals').map((r) => [r.operator_id, r.earned])], [entry.points, [[alias, entry.points]]]);
+  assert.deepEqual(rows(h, 'ledger_entries').map((r) => [r.operator_id, JSON.parse(r.data).operatorId, JSON.parse(r.data).players.map((p) => p.playerId)]), [[alias, alias, ['a'.repeat(16), 'b'.repeat(16), alias]]]);
+  assert.deepEqual(rows(h, 'ledger_notes').map((r) => [r.operator_id, JSON.parse(r.players)]), [[alias, ['c'.repeat(16), alias]]]);
+  const kept = JSON.stringify([ops, rows(h, 'admin_audit'), [...h.obj.operators.keys()], rows(h, 'nodes'), rows(h, 'node_tokens'), rows(h, 'ledger_entries'), rows(h, 'ledger_totals'), rows(h, 'ledger_notes'), h.obj.cp.registry.list(), codes, h.obj.cp.ledger.recent(clock)]);
+  assert.ok(!kept.includes(JUAN) && !kept.includes(ANA) && !kept.includes('Juan'), 'no account id and no name left in them');
+  assert.deepEqual(rows(h, 'node_forgotten').map((r) => r.player_id).sort(), [JUAN, ANA].sort(), 'the purged ids alone, nothing else with them');
   assert.equal((await register(h, pending)).json.error, 'token_revoked');
+  // A second call (AccountsDO tells it until it is answered) finds nothing left under the id.
+  const again = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: JUAN } });
+  assert.deepEqual(again.json, { ok: true, banned: 0, forgotten: 0 });
+  assert.deepEqual(rows(h, 'nodes').map((r) => r.operator_id), [alias]);
+});
+
+test("the public list: a host by its account's name as it is now (renamed: the new one, never the old one someone else may take; AccountsDO down: its number), a blocked host's servers off the list; dark before any opt-in, AccountsDO asked only for the names it shows", async () => {
+  const h = await boot(openEnv({ FLAGS: kvOf({ node_operators: `${JUAN},${ANA}` }) }));
+  await liveCommunity(h);
+  await liveCommunity(h, { op: ANA, host: 'ana.example.org' });
+  const accounts = h.env.ACCOUNTS;
+  const status = async () => (await call(h, 'GET', '/nodes/status')).json.nodes.map((n) => n.operator);
+  const asked = () => accounts.calls.filter((c) => c.path === '/usernames');
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2']);
+  assert.deepEqual(asked(), [], 'nobody shows a name: AccountsDO is never asked');
+  await call(h, 'POST', '/nodes/mine/public', { body: { show: true }, headers: { 'x-operator-id': JUAN } });
+  assert.deepEqual(await status(), ['Juan', 'Anfitrión 2']);
+  assert.deepEqual(asked().map((c) => c.body), [{ ids: [JUAN] }], 'only the name it shows');
+  // Kept PUBLIC_NAMES_TTL_MS: a list asked again meanwhile asks nothing.
+  assert.equal(D.PUBLIC_NAMES_TTL_MS, 10_000);
+  await status();
+  assert.equal(asked().length, 1);
+  // Juan renames his account, and Pedro takes "Juan": past the TTL the list says the new name, never the old one.
+  accounts.people.get(JUAN).username = 'Juanito';
+  accounts.people.set('7'.repeat(16), person({ username: 'Juan' }));
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  assert.deepEqual(await status(), ['Juanito', 'Anfitrión 2']);
+  // AccountsDO does not answer: a number (the one it always has), never the name the records or the cache kept.
+  accounts.down = true;
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  const res = await call(h, 'GET', '/nodes/status');
+  assert.equal(res.status, 200, 'the deploy check still gets its list');
+  assert.deepEqual(res.json.nodes.map((n) => n.operator), ['Anfitrión 1', 'Anfitrión 2']);
+  accounts.down = false;
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  assert.deepEqual(await status(), ['Juanito', 'Anfitrión 2']);
+  // The switch off: its number at once.
+  await call(h, 'POST', '/nodes/mine/public', { body: { show: false }, headers: { 'x-operator-id': JUAN } });
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2']);
+  // A host a maintainer blocks: its servers leave the list (Terms 12.4.1), as a blocked server; back once unblocked.
+  await call(h, 'POST', '/nodes/admin/operator', { body: { operatorId: ANA, action: 'block', reason: 'review' }, headers: ADMIN });
+  assert.deepEqual(await status(), ['Anfitrión 1']);
+  await call(h, 'POST', '/nodes/admin/operator', { body: { operatorId: ANA, action: 'unblock' }, headers: ADMIN });
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2']);
+  // A project account goes by its account's name as it is now too, and its records take each new one
+  // (Registry.renameOperator): renamed, with AccountsDO down later and someone else on the old name,
+  // the list shows the name it moved to, never the one it left.
+  accounts.people.set(PROJECT, person({ username: 'Turbogol' }));
+  const { token } = await h.obj.cp.registry.createToken({ id: PROJECT, name: 'Turbogol' }, 'SA', clock, 'sp9', { publicHost: 'sp9.turbo-gol.com' });
+  const p = await register(h, token, { publicUrl: 'wss://sp9.turbo-gol.com' });
+  assert.equal(p.status, 200, JSON.stringify(p.json));
+  h.obj.cp.registry.setStatus(p.node.nodeId, 'active', null);
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2', 'Turbogol']);
+  accounts.people.get(PROJECT).username = 'TurbogolOficial';
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2', 'TurbogolOficial']);
+  assert.equal(h.obj.cp.registry.node(p.node.nodeId).operatorName, 'TurbogolOficial');
+  assert.equal(JSON.parse(rows(h, 'nodes').find((r) => r.node_id === p.node.nodeId).data).operatorName, 'TurbogolOficial', 'written');
+  accounts.people.set('8'.repeat(16), person({ username: 'Turbogol' }));
+  accounts.down = true;
+  clock += D.PUBLIC_NAMES_TTL_MS + 1;
+  assert.deepEqual(await status(), ['Anfitrión 1', 'Anfitrión 2', 'TurbogolOficial']);
+  accounts.down = false;
 });
 
 // ---- the Worker: the gate, the register's continent, GET /api/config ------------------------------
@@ -890,4 +1053,15 @@ test("POST /host-consent: a 'host' row (source node_token) only with adult: true
   const pending = await a.post('/host-consent', { userId: g, version: v, adult: true });
   assert.deepEqual([pending.status, pending.json.error, pending.json.purgeAt], [403, 'deletion_pending', clock + DAY]);
   assert.deepEqual(a.hostRows(g), []);
+});
+
+test("POST /usernames (the public list's names): each account's username as it is now, a renamed one's new name, an unknown or purged id left out; 256 ids at most", async () => {
+  const a = accountsDO(IN_FORCE);
+  const juan = makeAccount(a.obj.store, 'Juan', { email: 'juan@example.org' }).userId;
+  const ana = makeAccount(a.obj.store, 'Ana', { email: 'ana@example.org' }).userId;
+  const r = await a.post('/usernames', { ids: [juan, ana, 'f'.repeat(16), juan] });
+  assert.deepEqual([r.status, r.json], [200, { names: { [juan]: 'Juan', [ana]: 'Ana' } }]);
+  assert.notEqual(a.obj.store.rename(juan, 'Juanito', clock + 40 * DAY), 'taken');
+  assert.deepEqual((await a.post('/usernames', { ids: [juan] })).json, { names: { [juan]: 'Juanito' } }, 'the name of now');
+  for (const ids of [undefined, 'x', [1], Array(257).fill(juan), ['x'.repeat(65)]]) assert.equal((await a.post('/usernames', { ids })).status, 400, JSON.stringify(ids)?.slice(0, 40));
 });

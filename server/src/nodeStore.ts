@@ -914,9 +914,12 @@ export class NodeStore implements RegistryStore, MatchStore {
    * opt-in wrote goes. In admin_audit's values (a canary's ids) the id becomes 'deleted'. The
    * players' reports about its servers stay for their 30 days, under `alias` too; the object takes
    * no new one about them (node_forgotten has the id, its nodes the purge's ban). Its copy of the
-   * rules for hosts it accepted goes (AccountsDO keeps the proof, consent_proofs).
+   * rules for hosts it accepted goes (AccountsDO keeps the proof, consent_proofs). Its ledger rows
+   * go under `alias` as well, as its nodes' records do (Registry.forgetOperator, written by the
+   * caller in the same transaction, `then`): its all-time totals, its entries (its own seat in them
+   * too) and its repeat notes, so its points stay with its nodes and nothing links them to the id.
    */
-  forgetOperator(operatorId: string, alias: string): void {
+  forgetOperator(operatorId: string, alias: string, then: () => void = () => undefined): void {
     this.tx(() => {
       this.sql.exec('DELETE FROM operators WHERE operator_id = ? AND actor IS NULL', operatorId);
       this.sql.exec('UPDATE operators SET operator_id = ?, show_public = 0 WHERE operator_id = ?', alias, operatorId);
@@ -926,6 +929,18 @@ export class NodeStore implements RegistryStore, MatchStore {
       const strip = (v: string | null) => (v === null ? null : v.split(',').map((x) => (x.trim() === operatorId ? 'deleted' : x)).join(','));
       const audits = this.sql.exec<{ id: number; old: string | null; new: string | null }>('SELECT id, old, new FROM admin_audit WHERE instr(old, ?) > 0 OR instr(new, ?) > 0', operatorId, operatorId).toArray();
       for (const r of audits) this.sql.exec('UPDATE admin_audit SET old = ?, new = ? WHERE id = ?', strip(r.old), strip(r.new), r.id);
+      const swap = (id: string) => (id === operatorId ? alias : id);
+      this.sql.exec('UPDATE ledger_totals SET operator_id = ? WHERE operator_id = ?', alias, operatorId);
+      for (const r of this.sql.exec<{ match_id: string; data: string }>('SELECT match_id, data FROM ledger_entries WHERE operator_id = ?', operatorId).toArray()) {
+        const e = JSON.parse(r.data) as LedgerEntry;
+        const data: LedgerEntry = { ...e, operatorId: alias, players: e.players.map((p) => ({ ...p, playerId: swap(p.playerId) })) };
+        this.sql.exec('UPDATE ledger_entries SET operator_id = ?, data = ? WHERE match_id = ?', alias, JSON.stringify(data), r.match_id);
+      }
+      for (const r of this.sql.exec<{ rowid: number; players: string }>('SELECT rowid, players FROM ledger_notes WHERE operator_id = ?', operatorId).toArray()) {
+        const players = (JSON.parse(r.players) as string[]).map(swap);
+        this.sql.exec('UPDATE ledger_notes SET operator_id = ?, players = ? WHERE rowid = ?', alias, JSON.stringify(players), r.rowid);
+      }
+      then();
     });
   }
 

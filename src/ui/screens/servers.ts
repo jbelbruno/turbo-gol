@@ -27,8 +27,9 @@
  *            right above PEDIR CÓDIGO: the switch sends `adult`, the button `acceptHost`), then
  *            the code's install line with COPIAR, its hour and its follow-up to active; on a TV
  *            "Hazlo en tu teléfono o en tu PC" and a QR to /#servers instead (decision 7); TUS
- *            SERVIDORES (state, load against the effective capacity, egress, version against the
- *            channel, last seen, strikes, refusals; DRENAR, RENOMBRAR, RETIRAR held to confirm, never
+ *            SERVIDORES (state, the system's measures in words (serversModel.ts measuresOf: Terms 9.2),
+ *            load against the effective capacity, egress, version against the channel, last seen,
+ *            strikes and when the oldest goes, refusals; DRENAR, RENOMBRAR, RETIRAR held to confirm, never
  *            on a TV); TUS CÓDIGOS (REVOCAR an unused one); PUNTOS DE SERVIDOR (today against the
  *            cap, 30 days, all time, the balance and CANJEAR EN GARAJE); the public list's switch; a
  *            short help (on a TV, where the rules are and the guide's QR: no link leaves the game's tab)
@@ -76,12 +77,14 @@ import {
   acceptAgainWords,
   acceptanceNeeded,
   annexHref,
+  automaticReason,
   closedKeyOf,
   communityAsk,
   followMine,
   hasServersLink,
   hostRulesHref,
   hostingOpen,
+  measuresOf,
   nodeFacts,
   ownRevocable,
   ownerActions,
@@ -90,7 +93,7 @@ import {
   serversViewOf,
   withoutServersLink,
 } from './serversModel';
-import type { CommunityCheck, FollowStep, Requirement, ServersView } from './serversModel';
+import type { CommunityCheck, FollowStep, Measure, Requirement, ServersView } from './serversModel';
 import { duration, language, t } from '../../i18n';
 import type { Key } from '../../i18n';
 import { formatPoints, regionName } from '../names';
@@ -116,6 +119,14 @@ const fact = (label: string, ...value: Child[]): Child[] => [h('dt', null, label
 const regionLabel = (id: string): string => (isRegion(id) ? regionName(id) : id);
 const when = (ms: number): string => new Date(ms).toLocaleString(language(), { dateStyle: 'short', timeStyle: 'short' });
 const ago = (ms: number, now: number): string => t('nodesAdmin.ago', { time: duration(Math.max(0, now - ms)) });
+
+/** An automatic measure on a server in words (serversModel.ts measuresOf), its time in this browser's clock. */
+const measureText = (x: Measure): string =>
+  x.kind === 'verification'
+    ? t('servers.measure.verification')
+    : x.kind === 'strikes'
+      ? t('servers.measure.strikes', { time: when(x.until) }) + (x.probation ? ' ' + t('servers.measure.strikesAgain', { days: x.days }) : '')
+      : t('servers.measure.refusals', { time: when(x.until) });
 
 /** The community guide (the nodes' README, in Spanish for Spanish). */
 const guideUrl = (): string => `${SOURCE_URL}/blob/main/nodes/${language() === 'es' ? 'README.es.md' : 'README.md'}`;
@@ -706,7 +717,9 @@ export function serversScreen(menu: Menu): Screen {
       readOnly('srv-node-' + n.nodeId),
       h('div.mn-prof-node-head', null, icon('server', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, n.name), h('span.mn-prof-node-region', null, regionLabel(n.region)), tag(statusTone(n.status), t(STATE_KEY[n.status]))),
       state,
-      n.statusReason !== null && (n.status === 'suspended' || n.status === 'banned') ? h('p.mn-prof-node-reason', null, n.statusReason) : null,
+      // The system's measures in words (Terms 9.2: seen here), the team's own reason as it wrote it.
+      ...measuresOf(n, now).map((x) => h('p.mn-prof-node-reason', null, measureText(x))),
+      n.statusReason !== null && !automaticReason(n.statusReason) && (n.status === 'suspended' || n.status === 'banned') ? h('p.mn-prof-node-reason', null, n.statusReason) : null,
       n.status === 'pending' && probe !== null && !probe.ok ? h('p', null, h('code.mn-na-raw', null, probe.error ?? ''), ' ', t(hint !== null ? (`nodesShared.hint.${hint}` as Key) : 'nodesShared.hint.unknown')) : null,
       h(
         'dl.mn-prof-node-facts',
@@ -716,7 +729,7 @@ export function serversScreen(menu: Menu): Screen {
         ...fact(t('servers.fact.egress'), f.egress.cap !== null ? `${f.egress.used}/${f.egress.cap} GB` : `${f.egress.used} GB`),
         ...fact(t('servers.fact.version'), n.version, ' · ', t(f.version === 'compatible' ? 'servers.compatible' : 'servers.update')),
         ...fact(t('servers.fact.seen'), f.seen === 'now' ? t('nodesAdmin.seenNow') : f.seen !== null ? ago(f.seen, now) : '—'),
-        ...fact(t('servers.fact.strikes'), t('servers.strikes', { count: f.strikes.count, max: f.strikes.max, days: f.strikes.windowDays })),
+        ...fact(t('servers.fact.strikes'), t('servers.strikes', { count: f.strikes.count, max: f.strikes.max, days: f.strikes.windowDays }), f.strikes.count > 0 && f.strikes.nextExpiry !== null ? ` · ${t('servers.strikesNext', { time: when(f.strikes.nextExpiry) })}` : ''),
         ...fact(t('servers.fact.refused'), `${Math.round(f.refusalRate * 100)} %`, f.outUntil !== null && f.outUntil > now ? ` · ${t('servers.outUntil', { time: when(f.outUntil) })}` : ''),
         ...(n.suspendedUntil !== null ? fact(t('nodesAdmin.detail.until'), when(n.suspendedUntil)) : []),
         ...(points !== undefined ? fact(t('servers.fact.points'), t('servers.pointsOf', { points: formatPoints(points.points), matches: points.matches })) : []),
@@ -904,7 +917,7 @@ export function serversScreen(menu: Menu): Screen {
   const helpView = (): HTMLElement =>
     section(
       t('servers.helpTitle'),
-      ...(['states', 'what', 'few', 'points', 'data'] as const).map((k) => h('p', readOnly('srv-help-' + k), t(`servers.help.${k}` as Key))),
+      ...(['states', 'what', 'few', 'points', 'measures', 'data'] as const).map((k) => h('p', readOnly('srv-help-' + k), t(`servers.help.${k}` as Key))),
       tv()
         ? h('p.mn-note', readOnly('srv-help-rules'), t('servers.helpRulesTv'))
         : h('div.mn-na-tools', null, outLink(hostRulesHref(language()), t('servers.helpRules'), 'srv-help-rules'), outLink(guideUrl(), t('profile.hostServer'), 'srv-help-guide')),
