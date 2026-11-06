@@ -454,7 +454,8 @@ try {
     const own = await page.eval('document.documentElement.dataset.input');
     const pageLang = await page.eval('document.documentElement.lang');
     console.log(`${head} layout ${await page.eval('document.documentElement.dataset.layout')}, input ${own}, language ${pageLang}, the bars' text in ${face}`);
-    if (pageLang !== lang) {
+    // The page's lang is the locale's tag (src/i18n.ts LOCALES): pt-BR for pt.
+    if (String(pageLang).split('-')[0] !== lang) {
       console.log(`${head}: the page is in ${pageLang}, expected ${lang}`);
       failures++;
     }

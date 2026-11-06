@@ -12,6 +12,7 @@
  * The language is fixed for the page's lifetime: a saved choice (localStorage), else the first
  * of navigator.languages we ship (exact tag, then its base: es-AR -> es), else English. Menu
  * screens are built once and cached, so a change reloads the page instead of re-rendering.
+ * Portuguese ships hidden until legal version (c) is in force (PT_LEGAL_VERSION below).
  *
  * Shared with the Cloudflare Worker: src/net/account.ts, rating.ts, protocol.ts, p2p/protocol.ts,
  * game/Match.ts, ai/* and sim/* must never import this module (no DOM there).
@@ -51,6 +52,28 @@ export const LOCALES = {
 
 export type LanguageCode = keyof typeof LOCALES;
 
+/**
+ * Portuguese (Brazil) ships complete but HIDDEN until legal version (c) is in force (the owner,
+ * 6 Nov 2026), together with informative Portuguese translations of the legal texts. While this is
+ * null, Portuguese does not exist for a player: Settings' language list leaves it out, a pt, pt-BR
+ * or pt-PT browser gets what it got before pt.ts existed (the next language of its list we ship,
+ * else English) and a saved 'turbogol.lang' = 'pt' is ignored. pt.ts still loads (the tests read
+ * it, and check the open gate through the `open` arguments below).
+ *
+ * It opens when this is set to that version, and never ahead of it: tests/i18n-pt.test.mjs fails
+ * while it is newer than the TERMS_VERSION of server/wrangler.jsonc (the game is deployed with the
+ * Worker, from the same commit), so it can only be set with or after the change that puts (c) in
+ * force. Which change sets it is the owner's call. A constant in the code, not the version
+ * GET /api/config reports: the language is picked when this module loads, before any request.
+ * Never an env var, a KV flag or a storage key: that would be a way around the legal gate.
+ */
+export const PT_LEGAL_VERSION: string | null = null;
+
+/** Portuguese can be shown: the legal version that opens it is set (by default PT_LEGAL_VERSION). */
+export function portugueseOpen(version: string | null = PT_LEGAL_VERSION): boolean {
+  return version !== null;
+}
+
 const DEFAULT_LANGUAGE: LanguageCode = 'en';
 const LANG_KEY = STORAGE_PREFIX + 'lang';
 
@@ -58,20 +81,31 @@ function isLanguage(code: string): code is LanguageCode {
   return Object.prototype.hasOwnProperty.call(LOCALES, code);
 }
 
+/** A shipped language a player can get: every one, Portuguese only once it is open. */
+function isShown(code: string, open: boolean): code is LanguageCode {
+  return isLanguage(code) && (code !== 'pt' || open);
+}
+
+/** The languages Settings' list offers, in LOCALES order (Portuguese only once it is open). */
+export function shownLanguages(open: boolean = portugueseOpen()): LanguageCode[] {
+  return (Object.keys(LOCALES) as LanguageCode[]).filter((code) => isShown(code, open));
+}
+
 /**
  * The language to use: `saved` when it is a shipped one, else the first entry of `wanted` (a
  * navigator.languages list) shipped as is or by its base language, else English. Case-insensitive.
+ * While Portuguese is closed (`open`, by default portugueseOpen()) it counts as not shipped.
  */
-export function pickLanguage(saved: string | null, wanted: readonly string[]): LanguageCode {
+export function pickLanguage(saved: string | null, wanted: readonly string[], open: boolean = portugueseOpen()): LanguageCode {
   if (saved !== null) {
     const s = saved.toLowerCase();
-    if (isLanguage(s)) return s;
+    if (isShown(s, open)) return s;
   }
   for (const tag of wanted) {
     const t = tag.toLowerCase();
-    if (isLanguage(t)) return t;
+    if (isShown(t, open)) return t;
     const base = t.split('-')[0];
-    if (isLanguage(base)) return base;
+    if (isShown(base, open)) return base;
   }
   return DEFAULT_LANGUAGE;
 }
@@ -123,10 +157,10 @@ export function systemLanguage(): LanguageCode {
   }
 }
 
-/** The saved choice, or null when the language follows the system. */
-export function savedLanguage(): LanguageCode | null {
+/** The saved choice, or null when the language follows the system (a saved 'pt' while Portuguese is closed too). */
+export function savedLanguage(open: boolean = portugueseOpen()): LanguageCode | null {
   const s = readSaved();
-  return s !== null && isLanguage(s) ? s : null;
+  return s !== null && isShown(s, open) ? s : null;
 }
 
 /** Save the choice (null = follow the system again) and reload: the menus are built once per page. */
@@ -145,6 +179,8 @@ const pluralRules = new Map<string, Intl.PluralRules>();
 /**
  * Fill a message for `locale`: a plural picks the form for params.count (falling back to
  * `other`), then each `{name}` takes String(params.name). An unknown placeholder stays visible.
+ * Portuguese counts 0 as `other`: CLDR puts 0 in pt's `one` (with 1), but a Brazilian UI writes
+ * "0 partidas", never "0 partida".
  */
 export function formatMessage(message: string | Plural, params: Params | undefined, locale: string): string {
   let text: string;
@@ -155,7 +191,8 @@ export function formatMessage(message: string | Plural, params: Params | undefin
       rules = new Intl.PluralRules(locale);
       pluralRules.set(locale, rules);
     }
-    const form = rules.select(Number(params?.count ?? 0));
+    const n = Number(params?.count ?? 0);
+    const form = n === 0 && /^pt(?:-|$)/i.test(locale) ? 'other' : rules.select(n);
     text = message[form] ?? message.other;
   }
   if (params === undefined) return text;

@@ -1,12 +1,13 @@
 /**
  * The language sheet (Settings › Game's Idioma): automatic (the system's language) first, then
- * every shipped language by its own name, the saved choice marked and focused, as the region sheet
- * lists its regions. A change reloads the page (src/i18n.ts setLanguage), which the sheet says
- * first; that would drop a search or a lobby, so then it only explains why not. Built on call.
+ * every language a player can get (src/i18n.ts shownLanguages) by its own name, the saved choice
+ * marked and focused, as the region sheet lists its regions. A change reloads the page (src/i18n.ts
+ * setLanguage), which the sheet says first; that would drop a search or a lobby, so then it only
+ * explains why not. Built on call.
  */
 import { h } from '../dom';
 import { icon } from './icons';
-import { LOCALES, savedLanguage, setLanguage, systemLanguage, t } from '../../i18n';
+import { LOCALES, savedLanguage, setLanguage, shownLanguages, systemLanguage, t } from '../../i18n';
 import type { LanguageCode } from '../../i18n';
 import type { Menu } from '../Menu';
 
@@ -38,7 +39,8 @@ export function openLanguagePicker(menu: Menu): void {
       label,
     );
   };
-  const codes = Object.keys(LOCALES) as LanguageCode[];
+  // Every language a player can get (Portuguese stays out until legal version (c), src/i18n.ts).
+  const codes = shownLanguages();
   close = menu.modal({
     title: t('lang.title'),
     body: [h('p', null, t('lang.reloadNote')), h('div.mn-sheet-list', null, option(null, t('lang.auto', { language: LOCALES[systemLanguage()].name })), ...codes.map((c) => option(c, LOCALES[c].name)))],

@@ -107,7 +107,9 @@ language (say French, code `fr`):
    (`one`, `few`, `many`, `other`...); `other` is always required.
 4. Keep texts short: the menus must fit a 375 px wide phone.
 5. Register the language with one line in `LOCALES` in `src/i18n.ts`, using its own name:
-   `fr: { name: 'Français', messages: fr },` (plus the `import fr from './locales/fr';` next to the others).
+   `fr: { name: 'Français', tag: 'fr', messages: fr },` (plus the `import fr from './locales/fr';` next to the others).
+   `tag` is the BCP 47 tag that `Intl` and the page's `lang` attribute use: the language code, with a
+   region only when it matters (Portuguese is `pt-BR`).
 6. Run `npm run typecheck && npm test`, try it with your browser set to that language (or pick it
    in the menu), and open a pull request.
 

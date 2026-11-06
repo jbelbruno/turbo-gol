@@ -151,9 +151,16 @@ All notable changes to Turbogol are documented here. The format follows
   press on its account chooser); level 2 stays the password or a code by mail. Discord, Instagram,
   Facebook, TikTok and Line browsers now get the "open it in your browser" note in LINK and
   "confirm it's you" too, not only on the sign-in tab (`docs/online/ACCOUNTS.md`).
-- Portuguese (Brazil): the whole game in `pt` (tag `pt-BR`), picked from the browser's language or
-  in Settings' language list (Gameplay › Interface). It keeps the game's voice (você, no regional slang) and the copy rules
-  (no shop words, no emoji, the formats named 1v1 / 2v2 / 3v3).
+- Portuguese (Brazil), complete but hidden: every text of the game in `pt` (tag `pt-BR`), the
+  community servers, the node panel, the HUD settings, replay clips and the legal and deletion
+  screens included. It keeps the game's voice (você, no regional slang) and the copy rules (no shop
+  words, no emoji, the formats named 1v1 / 2v2 / 3v3). It stays hidden until legal version (c) is in
+  force, with informative Portuguese translations of the legal texts: until then Settings' language
+  list leaves it out, a Portuguese browser gets what it got before (the next language of its list,
+  else English) and a saved `pt` choice is ignored. It opens when `PT_LEGAL_VERSION` in
+  `src/i18n.ts` is set to that version, never before `TERMS_VERSION` reaches it (a test checks);
+  then it is picked from the browser's language or in Settings' language list. A count of 0 takes
+  the plural in Portuguese ("0 partidas").
 - Replays: stars and your own. A registered account can star a replay (guests see the counts), sort
   the list by the most starred and filter it to "My replays" (the matches its account played, after the
   usual delay). The server keeps who starred, never shows it: only the count. In the player, Esc (or

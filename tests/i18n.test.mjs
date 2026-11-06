@@ -25,12 +25,32 @@ test('pickLanguage: saved choice, then the system list (exact tag, then base), t
   assert.equal(I.pickLanguage('xx', ['es-AR']), 'es', 'an unknown saved choice is ignored');
   assert.equal(I.pickLanguage(null, ['es-AR']), 'es');
   assert.equal(I.pickLanguage(null, ['fr-FR', 'es']), 'es', 'the first shipped language in the list');
-  assert.equal(I.pickLanguage(null, ['pt-BR']), 'pt', 'Brazilian Portuguese, exact tag');
-  assert.equal(I.pickLanguage(null, ['pt-PT']), 'pt', 'any Portuguese falls back to the shipped one');
-  assert.equal(I.pickLanguage(null, ['pt']), 'pt');
   assert.equal(I.pickLanguage(null, []), 'en');
   assert.equal(I.pickLanguage('ES', ['EN-us']), 'es', 'case-insensitive');
   assert.equal(I.pickLanguage(null, ['ES-ar']), 'es');
+});
+
+test('Portuguese is hidden until legal version (c) is in force: a pt browser and a saved pt get what they got before pt.ts', () => {
+  assert.equal(I.PT_LEGAL_VERSION, null, 'closed: set to legal version (c), with or after the change that puts it in force');
+  assert.equal(I.portugueseOpen(), false);
+  assert.deepEqual(I.shownLanguages(), ['en', 'es'], "Settings' list leaves it out");
+  for (const tag of ['pt-BR', 'pt-PT', 'pt', 'PT-br']) assert.equal(I.pickLanguage(null, [tag]), 'en', tag);
+  assert.equal(I.pickLanguage(null, ['pt-BR', 'es-AR']), 'es', 'the next language of the list we ship');
+  assert.equal(I.pickLanguage('pt', ['en-US']), 'en', 'a saved pt is ignored');
+  assert.equal(I.pickLanguage('pt', ['pt-BR', 'es']), 'es');
+  assert.ok('pt' in I.LOCALES, 'pt.ts still loads');
+});
+
+test('Portuguese with the gate open: picked by its exact tag, its base or a saved choice, and listed', () => {
+  assert.equal(I.portugueseOpen('2026-12-01'), true, 'a set version opens it (tests/i18n-pt.test.mjs keeps it from running ahead of TERMS_VERSION)');
+  assert.equal(I.portugueseOpen(null), false);
+  assert.deepEqual(I.shownLanguages(true), ['en', 'es', 'pt']);
+  assert.equal(I.pickLanguage(null, ['pt-BR'], true), 'pt', 'Brazilian Portuguese, exact tag');
+  assert.equal(I.pickLanguage(null, ['pt-PT'], true), 'pt', 'any Portuguese falls back to the shipped one');
+  assert.equal(I.pickLanguage(null, ['pt'], true), 'pt');
+  assert.equal(I.pickLanguage('pt', ['en-US'], true), 'pt', 'a saved choice wins');
+  assert.equal(I.pickLanguage(null, ['es-AR', 'pt-BR'], true), 'es', 'the first shipped language in the list');
+  assert.equal(I.pickLanguage(null, ['pt-BR'], false), 'en');
 });
 
 test('outside a browser the language is English (node shares the OS locale through navigator)', () => {
@@ -48,6 +68,18 @@ test('plurals pick the form with Intl.PluralRules and fall back to other', () =>
   assert.equal(I.formatMessage(esMsg, { count: 1 }, 'es'), '1 sala');
   assert.equal(I.formatMessage(esMsg, { count: 5 }, 'es'), '5 salas');
   assert.equal(I.formatMessage({ other: '{count} x' }, { count: 1 }, 'en'), '1 x', 'missing form -> other');
+});
+
+test("plurals in Portuguese: 0 takes other, though CLDR puts it in pt's one", () => {
+  const ptMsg = { one: '{count} partida', other: '{count} partidas' };
+  assert.equal(new Intl.PluralRules('pt-BR').select(0), 'one', 'why the exception exists');
+  for (const tag of ['pt-BR', 'pt', 'pt-PT']) {
+    assert.equal(I.formatMessage(ptMsg, { count: 0 }, tag), '0 partidas', tag);
+    assert.equal(I.formatMessage(ptMsg, { count: 1 }, tag), '1 partida', tag);
+    assert.equal(I.formatMessage(ptMsg, { count: 2 }, tag), '2 partidas', tag);
+  }
+  assert.equal(I.formatMessage({ one: '{count} x', other: '{count} xs' }, undefined, 'pt-BR'), '{count} xs', 'no count counts as 0');
+  assert.equal(I.formatMessage({ one: '{count} x', other: '{count} xs' }, { count: 0 }, 'en'), '0 xs');
 });
 
 test('placeholders: filled with String(value), an unknown one stays visible', () => {
