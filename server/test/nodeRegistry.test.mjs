@@ -298,9 +298,14 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 /** A NodeRegistryDO on `ctx`, started. An ALERT post's turn comes at once (nodeOps.test.mjs times the turns). */
+/** The DNS a community registration reads (NodeRegistryDO dnsFn): no records for any name, so never Cloudflare's proxy (hosting.test.mjs tests the lookup). */
+const fakeDns = async () => [];
+
 async function boot(env, ctx = new FakeCtx()) {
   const obj = new D.NodeRegistryDO(ctx, env);
   obj.alertSleep = () => Promise.resolve();
+  // A community registration reads its name's DNS records (proxyCheck.ts): never the network here.
+  obj.dnsFn = fakeDns;
   await obj.ready;
   return { obj, ctx, env };
 }
@@ -2029,13 +2034,19 @@ test('a purged operator account (AccountsDO, sign-in PR 12: POST /internal/opera
   assert.deepEqual((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'nope' } })).status, 400);
   const from = alerts().length;
   const r = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: OP } });
-  assert.deepEqual([r.status, r.json], [200, { ok: true, banned: 1 }]);
+  assert.deepEqual([r.status, r.json], [200, { ok: true, banned: 1, forgotten: 1 }]);
   assert.equal(h.obj.cp.registry.node(mine.node.nodeId).status, 'banned');
+  // Its record stays, banned, under an opaque key with no name (Privacy 12.3): nothing of it names the account.
+  const kept = h.obj.cp.registry.node(mine.node.nodeId);
+  assert.match(kept.operatorId, /^deleted:[0-9a-f]{12}$/);
+  assert.equal(kept.operatorName, '');
+  assert.ok(!JSON.stringify(h.ctx.db.prepare('SELECT * FROM nodes').all()).includes(OP), 'nor its row');
   assert.equal(mine.ws.of('status').at(-1)?.status, 'banned', 'told first');
   assert.deepEqual(mine.ws.closed, { code: 4403, reason: 'banned' });
   assert.equal(alerts().slice(from).filter((l) => l.includes(`operator ${OP} deleted their account: 1 node banned`)).length, 1);
   const again = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: OP } });
-  assert.deepEqual(again.json, { ok: true, banned: 0 });
+  assert.deepEqual(again.json, { ok: true, banned: 0, forgotten: 0 });
+  assert.equal(h.obj.cp.registry.node(mine.node.nodeId).operatorId, kept.operatorId, 'its key kept');
   // The project's account is never deleted: nothing is banned for it.
   const t = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: PROJECT } });
   assert.deepEqual([t.status, t.json.error], [409, 'trusted']);

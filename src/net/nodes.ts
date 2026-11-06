@@ -53,7 +53,12 @@ export interface MineNode extends MyNode {
   reachableAt?: number | null;
   lastProbe?: { at: number; ok: boolean; error: string | null } | null;
   needed?: number;
-  strikes?: { count: number; max: number; windowDays: number };
+  /** Its lost matches in their window, and when the oldest of them leaves it (null: none), from the pre-opening change on. */
+  strikes?: { count: number; max: number; windowDays: number; nextExpiry?: number | null };
+  /** Its strike pauses in their window, which during a pause ends where it began (a repeated one sends it back to probation), from the pre-opening change on. */
+  pauses?: { count: number; windowDays: number };
+  /** Where a strike pause leaves it when it lifts (null: it is in none), from the pre-opening change on. */
+  afterPause?: NodeStatus | null;
   refused?: { count: number; rate: number; recent: number; of: number; outUntil: number | null };
   capacityEffective?: number;
 }
@@ -609,6 +614,8 @@ export const NODE_ERROR_CODES = [
   'rtc_not_available',
   'region_mismatch',
   'bad_public_url',
+  'behind_proxy',
+  'dns_unavailable',
   // the owner's actions (A12) and the reports (A16)
   'trusted',
   'banned',
