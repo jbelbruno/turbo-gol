@@ -1133,15 +1133,15 @@ test("a failed verification on a community node freezes its operator's wallet wi
 
 test('cars: a human’s car stays with the match (humans, the rejoin’s cars by slot) and never in the assignment the node gets', async () => {
   const env = await setup({ status: 'active' });
-  const p = await env.place([human('a', { car: 'tero' }), human('b')]);
+  const p = await env.place([human('a', { car: 'magma' }), human('b')]);
   const assign = env.toNode.filter((m) => m.t === 'assign').at(-1).match;
-  assert.ok(!JSON.stringify(assign).includes('tero'));
+  assert.ok(!JSON.stringify(assign).includes('magma'));
   assert.deepEqual(Object.keys(assign.roster[0]).sort(), ['kind', 'name', 'playerId', 'slot', 'team']);
   const m = env.cp.matches.get(p.matchId);
-  assert.equal(m.humans[0].car, 'tero');
+  assert.equal(m.humans[0].car, 'magma');
   const r = await env.cp.rejoin(p.matchId, 'b'.repeat(16));
   assert.equal(r.ok, true);
-  assert.deepEqual(r.cars, ['tero', null]);
+  assert.deepEqual(r.cars, ['magma', null]);
   const plain = await env.place([human('c'), human('d')]);
   assert.equal('cars' in (await env.cp.rejoin(plain.matchId, 'c'.repeat(16))), false);
 });

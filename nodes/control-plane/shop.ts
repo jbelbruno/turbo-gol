@@ -32,7 +32,7 @@ export const ITEM_ID_RE = /^[a-z0-9-]{3,40}$/;
  * typecheck cannot load the game's locales (they are typed against the DOM). The game shows its
  * locale's name and description (nameKey / descKey).
  */
-export const CAR_NAMES: Readonly<Record<CarId, string>> = { dune: 'Dune', pampero: 'Pampero', carpincho: 'Carpincho', condor: 'Cóndor', tero: 'Tero' };
+export const CAR_NAMES: Readonly<Record<CarId, string>> = { dune: 'Dune', cyclone: 'Cyclone', vortex: 'Vortex', sirocco: 'Sirocco', magma: 'Magma' };
 
 /**
  * The catalog. The cars come from src/game/cosmetics.ts (the default car is everyone's: never

@@ -131,24 +131,24 @@ test('AccountStore: a fresh account drives the default car; every sign-in path h
 test('AccountStore: a car is driven only while it is owned: picked after a grant, given up on a revoke', () => {
   const { store, db } = makeStore();
   const a = makeAccount(store, 'Ana', { now: NOW, refresh: H('1') }).userId;
-  assert.equal(store.setCar(a, 'tero', NOW), 'not_owned');
+  assert.equal(store.setCar(a, 'magma', NOW), 'not_owned');
   assert.equal(store.setCar('ffffffffffffffff', DEFAULT_CAR, NOW), 'no_user');
-  assert.deepEqual(store.grant(a, 'tero', NOW), { granted: true, items: ['tero'] }, 'a grant takes any status: the body may still be to come');
-  assert.deepEqual(store.grant(a, 'tero', NOW + 1), { granted: false, items: ['tero'] }, 'idempotent');
+  assert.deepEqual(store.grant(a, 'magma', NOW), { granted: true, items: ['magma'] }, 'a grant takes any status: the body may still be to come');
+  assert.deepEqual(store.grant(a, 'magma', NOW + 1), { granted: false, items: ['magma'] }, 'idempotent');
   assert.equal(store.grant(a, 'car-next-1', NOW), 'unknown_item');
-  assert.equal(store.grant('ffffffffffffffff', 'tero', NOW), 'no_user');
-  const ref = store.setCar(a, 'tero', NOW + 2);
-  assert.deepEqual([ref.userId, ref.username, ref.car, ref.createdAt], [a, 'Ana', 'tero', NOW]);
-  assert.equal(store.signedIn(a, H('2'), NOW + 3).car, 'tero', 'the next session carries it');
-  assert.deepEqual(store.items(a), { items: ['tero'], car: 'tero', cars: ['dune', 'tero'] }, 'cars in menu order');
+  assert.equal(store.grant('ffffffffffffffff', 'magma', NOW), 'no_user');
+  const ref = store.setCar(a, 'magma', NOW + 2);
+  assert.deepEqual([ref.userId, ref.username, ref.car, ref.createdAt], [a, 'Ana', 'magma', NOW]);
+  assert.equal(store.signedIn(a, H('2'), NOW + 3).car, 'magma', 'the next session carries it');
+  assert.deepEqual(store.items(a), { items: ['magma'], car: 'magma', cars: ['dune', 'magma'] }, 'cars in menu order');
   assert.equal(store.wallet(a).spent, 0, 'a grant costs nothing');
-  assert.deepEqual(store.revoke(a, 'tero'), { revoked: true, refunded: 0, items: [] });
-  assert.deepEqual(store.revoke(a, 'tero'), { revoked: false, refunded: 0, items: [] });
+  assert.deepEqual(store.revoke(a, 'magma'), { revoked: true, refunded: 0, items: [] });
+  assert.deepEqual(store.revoke(a, 'magma'), { revoked: false, refunded: 0, items: [] });
   assert.equal(store.equippedCar(a), DEFAULT_CAR, 'a revoked car gives way to the default');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loadout').get().n, 0, 'its pick went with it');
   assert.equal(store.signedIn(a, H('4'), NOW + 4).car, DEFAULT_CAR);
   // A pick the account no longer owns, or junk, reads as the default car.
-  db.prepare('INSERT INTO loadout (user_id, car, updated_at) VALUES (?, ?, ?)').run(a, 'condor', NOW);
+  db.prepare('INSERT INTO loadout (user_id, car, updated_at) VALUES (?, ?, ?)').run(a, 'sirocco', NOW);
   assert.equal(store.equippedCar(a), DEFAULT_CAR);
   db.prepare('UPDATE loadout SET car = ? WHERE user_id = ?').run('not-a-car', a);
   assert.equal(store.equippedCar(a), DEFAULT_CAR);
@@ -160,17 +160,17 @@ test('AccountsDO /equipped (a lobby\'s start): the car each account drives now; 
   const a = makeAccount(store, 'Ana', { now: NOW, refresh: H('1') }).userId;
   const b = makeAccount(store, 'Beto', { now: NOW, refresh: H('2') }).userId;
   const c = makeAccount(store, 'Caro', { now: NOW, refresh: H('3') }).userId;
-  store.grant(a, 'tero', NOW);
-  store.setCar(a, 'tero', NOW);
-  store.grant(b, 'condor', NOW);
-  store.setCar(b, 'condor', NOW);
-  store.revoke(b, 'condor');
+  store.grant(a, 'magma', NOW);
+  store.setCar(a, 'magma', NOW);
+  store.grant(b, 'sirocco', NOW);
+  store.setCar(b, 'sirocco', NOW);
+  store.revoke(b, 'sirocco');
   db.prepare('UPDATE users SET banned = 1 WHERE id = ?').run(c);
   const ask = async (body) => {
     const res = await env.ACCOUNTS.get().fetch('https://accounts/equipped', { method: 'POST', headers: { [INTERNAL_HEADER]: await internalSecret(SECRET), 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return { status: res.status, json: await res.json() };
   };
-  assert.deepEqual(await ask({ userIds: [a, b, c, 'ffffffffffffffff'] }), { status: 200, json: { cars: { [a]: 'tero', [b]: DEFAULT_CAR } } });
+  assert.deepEqual(await ask({ userIds: [a, b, c, 'ffffffffffffffff'] }), { status: 200, json: { cars: { [a]: 'magma', [b]: DEFAULT_CAR } } });
   assert.equal((await ask({ userIds: Array.from({ length: 7 }, () => a) })).status, 400);
   assert.equal((await ask({ userIds: [3] })).status, 400);
   assert.equal((await ask({})).status, 400);
@@ -192,23 +192,23 @@ test('AccountStore wallet: one credit per match, a claim spends its cost once, t
   assert.equal(store.wallet(a).earned, 1000);
   const badge = store.claim(a, 'badge-host', NOW + 1);
   assert.deepEqual([badge.item, badge.claimed, badge.wallet.spent, badge.items], ['badge-host', true, 0, ['badge-host']]);
-  await withStatus('pampero', 'available', () => {
-    assert.equal(store.claim(a, 'pampero', NOW + 2), 'insufficient', '1,000 of 1,500');
+  await withStatus('cyclone', 'available', () => {
+    assert.equal(store.claim(a, 'cyclone', NOW + 2), 'insufficient', '1,000 of 1,500');
     credit(store, a, 600);
-    const r = store.claim(a, 'pampero', NOW + 3);
+    const r = store.claim(a, 'cyclone', NOW + 3);
     assert.equal(r.claimed, true);
     assert.deepEqual(r.wallet, { earned: 1600, spent: 1500, balance: 100, frozen: null });
-    assert.deepEqual(r.items, ['badge-host', 'pampero']);
-    const retry = store.claim(a, 'pampero', NOW + 4);
+    assert.deepEqual(r.items, ['badge-host', 'cyclone']);
+    const retry = store.claim(a, 'cyclone', NOW + 4);
     assert.equal(retry.claimed, false, 'a retried claim spends nothing twice');
     assert.deepEqual(retry.wallet, r.wallet);
-    assert.equal(store.claim(b, 'pampero', NOW), 'insufficient', 'points are the host\'s own: nothing to transfer');
+    assert.equal(store.claim(b, 'cyclone', NOW), 'insufficient', 'points are the host\'s own: nothing to transfer');
   });
-  await withStatus('carpincho', 'soon', () => assert.equal(store.claim(a, 'carpincho', NOW), 'not_available'));
+  await withStatus('vortex', 'soon', () => assert.equal(store.claim(a, 'vortex', NOW), 'not_available'));
   assert.equal(store.claim(a, 'nope-item', NOW), 'unknown_item');
   assert.equal(store.claim('ffffffffffffffff', 'badge-host', NOW), 'no_user');
   // A revoked claim gives its cost back; nothing ever makes the balance negative.
-  assert.deepEqual(store.revoke(a, 'pampero'), { revoked: true, refunded: 1500, items: ['badge-host'] });
+  assert.deepEqual(store.revoke(a, 'cyclone'), { revoked: true, refunded: 1500, items: ['badge-host'] });
   assert.equal(store.wallet(a).balance, 1600);
   db.prepare("INSERT INTO host_claims (user_id, item_id, cost, at, source) VALUES (?, 'goal-next-1', 5000, ?, 'claim')").run(b, NOW);
   assert.equal(store.wallet(b).balance, 0, 'a row that would make it negative (none can be written) still reads 0');
@@ -227,14 +227,14 @@ test('AccountStore freeze: a failed verification pauses claims until a maintaine
   assert.equal(store.frozen(a), 'verification_failed:m1');
   assert.equal(store.hostFreeze(a, 'verification_failed:m2', NOW + 20), false, 'a freeze in force keeps its first reason');
   assert.equal(store.wallet(a).frozen, 'verification_failed:m1');
-  await withStatus('condor', 'available', () => {
-    assert.equal(store.claim(a, 'condor', NOW + 30), 'frozen');
+  await withStatus('sirocco', 'available', () => {
+    assert.equal(store.claim(a, 'sirocco', NOW + 30), 'frozen');
     assert.equal(store.unfreeze(a, NOW + 40), true);
     assert.equal(store.unfreeze(a, NOW + 41), false, 'nothing left to unfreeze');
     assert.equal(store.hostFreeze(a, 'verification_failed:m1', NOW + 10), false, 'the same event delivered again');
     assert.equal(store.hostFreeze(a, 'verification_failed:m2', NOW + 20), false, 'an event from before the review');
     assert.equal(store.frozen(a), null);
-    assert.equal(store.claim(a, 'condor', NOW + 50).claimed, true);
+    assert.equal(store.claim(a, 'sirocco', NOW + 50).claimed, true);
     assert.equal(store.hostFreeze(a, 'verification_failed:m3', NOW + 60), true, 'a new failure freezes again');
     assert.equal(store.shop(a).wallet.frozen, 'verification_failed:m3');
   });
@@ -276,16 +276,16 @@ test('AccountStore shop: the catalog as the account sees it (claimable first), o
   const { store } = makeStore();
   const a = makeAccount(store, 'Ana', { now: NOW, refresh: H('1') }).userId;
   credit(store, a, 1500);
-  await withStatus('tero', 'available', async () => {
-    await withStatus('pampero', 'soon', () => {
-      store.grant(a, 'pampero', NOW);
+  await withStatus('magma', 'available', async () => {
+    await withStatus('cyclone', 'soon', () => {
+      store.grant(a, 'cyclone', NOW);
       const s = store.shop(a);
       assert.deepEqual(s.wallet, { earned: 1500, spent: 0, balance: 1500, frozen: null });
       assert.deepEqual(new Set(s.items.map((i) => i.id)), new Set(CATALOG.map((i) => i.id)));
       assert.ok(!s.items.some((i) => i.id === DEFAULT_CAR));
       const byId = Object.fromEntries(s.items.map((i) => [i.id, i]));
-      assert.deepEqual([byId.tero.claimable, byId.tero.blocked, byId.tero.owned, byId.tero.cost, byId.tero.nameKey], [true, undefined, false, 1500, 'car.tero']);
-      assert.deepEqual([byId.pampero.owned, byId.pampero.claimable, byId.pampero.blocked], [true, false, undefined], 'owned: no reason to show');
+      assert.deepEqual([byId.magma.claimable, byId.magma.blocked, byId.magma.owned, byId.magma.cost, byId.magma.nameKey], [true, undefined, false, 1500, 'car.magma']);
+      assert.deepEqual([byId.cyclone.owned, byId.cyclone.claimable, byId.cyclone.blocked], [true, false, undefined], 'owned: no reason to show');
       assert.equal(byId['boost-next-1'].blocked, 'not_available');
       assert.equal(byId['badge-host'].claimable, true, 'one verified match');
       const firstSoon = s.items.findIndex((i) => i.status !== 'available');
@@ -299,10 +299,10 @@ test('AccountStore shop: the catalog as the account sees it (claimable first), o
 
 test('the session: an account\'s car is signed only when it is not the default, with its creation time; verifySession keeps both only on an account session and a known car', async () => {
   const env = { JWT_SECRET: SECRET };
-  const s = await accountSession(env, { userId: 'a1b2c3d4e5f60718', username: 'Ana', car: 'tero', createdAt: NOW - 10 * DAY }, NOW);
-  assert.equal(s.car, 'tero');
+  const s = await accountSession(env, { userId: 'a1b2c3d4e5f60718', username: 'Ana', car: 'magma', createdAt: NOW - 10 * DAY }, NOW);
+  assert.equal(s.car, 'magma');
   const c = await verifyJwt(SECRET, s.session, Math.floor(NOW / 1000));
-  assert.deepEqual([c.acct, c.car, c.since], [1, 'tero', Math.floor((NOW - 10 * DAY) / 1000)]);
+  assert.deepEqual([c.acct, c.car, c.since], [1, 'magma', Math.floor((NOW - 10 * DAY) / 1000)]);
   const plain = await accountSession(env, { userId: 'a1b2c3d4e5f60718', username: 'Ana', car: DEFAULT_CAR, createdAt: NOW }, NOW);
   assert.equal(plain.car, DEFAULT_CAR, 'the answer says which car');
   assert.equal((await verifyJwt(SECRET, plain.session, Math.floor(NOW / 1000))).car, undefined, 'the token carries only another one');
@@ -310,9 +310,9 @@ test('the session: an account\'s car is signed only when it is not the default, 
   assert.equal(old.car, DEFAULT_CAR, 'a UserRef without a car (an older AccountsDO): the default');
   const iat = Math.floor(Date.now() / 1000);
   const token = (extra) => signJwt(SECRET, { sub: 'a1b2c3d4e5f60718', name: 'Ana', iat, exp: iat + 3600, ...extra });
-  const kept = await verifySession(SECRET, await token({ acct: 1, car: 'pampero', since: 1234 }));
-  assert.deepEqual([kept.car, kept.since], ['pampero', 1234]);
-  for (const extra of [{ car: 'pampero', since: 1234 }, { acct: 1, car: 'car-next-1', since: 'x' }, { acct: 1, car: 7, since: null }]) {
+  const kept = await verifySession(SECRET, await token({ acct: 1, car: 'cyclone', since: 1234 }));
+  assert.deepEqual([kept.car, kept.since], ['cyclone', 1234]);
+  for (const extra of [{ car: 'cyclone', since: 1234 }, { acct: 1, car: 'car-next-1', since: 'x' }, { acct: 1, car: 7, since: null }]) {
     const v = await verifySession(SECRET, await token(extra));
     assert.ok(v, 'the session itself stands');
     assert.deepEqual([v.car, v.since], [undefined, undefined], JSON.stringify(extra));
@@ -373,11 +373,11 @@ const accountToken = (sub, extra = {}) => signJwt(SECRET, { sub, name: 'Ana', ia
 
 const ROUTES = [
   ['GET', '/api/me/items', undefined],
-  ['POST', '/api/me/car', { car: 'tero' }],
+  ['POST', '/api/me/car', { car: 'magma' }],
   ['GET', '/api/me/shop', undefined],
-  ['POST', '/api/me/shop/claim', { item: 'tero' }],
+  ['POST', '/api/me/shop/claim', { item: 'magma' }],
   ['GET', '/nodes/shop', undefined],
-  ['POST', '/nodes/shop/claim', { item: 'tero' }],
+  ['POST', '/nodes/shop/claim', { item: 'magma' }],
 ];
 
 test('Worker: the inventory and shop routes need an account: 401 without a session, 403 account_required for a guest (the /nodes/shop aliases too)', async () => {
@@ -399,18 +399,18 @@ test('Worker: items, then a car picked: 409 until it is owned, then a fresh sess
   assert.equal(r.status, 200);
   assert.deepEqual(r.json, { items: [], car: DEFAULT_CAR, cars: [DEFAULT_CAR] });
   assert.equal(r.headers.get('cache-control'), 'no-store');
-  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'tero' } });
+  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'magma' } });
   assert.deepEqual([r.status, r.json.error], [409, 'not_owned']);
-  for (const bad of [{}, { car: 'Tero' }, { car: 'car-next-1' }, { car: 3 }]) assert.deepEqual([(await call(env, 'POST', '/api/me/car', { token, body: bad })).json.error], ['bad_car'], JSON.stringify(bad));
-  store.grant(id, 'tero', Date.now());
-  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'tero' } });
+  for (const bad of [{}, { car: 'Magma' }, { car: 'car-next-1' }, { car: 3 }]) assert.deepEqual([(await call(env, 'POST', '/api/me/car', { token, body: bad })).json.error], ['bad_car'], JSON.stringify(bad));
+  store.grant(id, 'magma', Date.now());
+  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'magma' } });
   assert.equal(r.status, 200);
-  assert.deepEqual([r.json.kind, r.json.playerId, r.json.name, r.json.car], ['account', id, 'Ana', 'tero']);
+  assert.deepEqual([r.json.kind, r.json.playerId, r.json.name, r.json.car], ['account', id, 'Ana', 'magma']);
   assert.equal(r.headers.get('cache-control'), 'no-store');
   const claims = await verifySession(SECRET, r.json.session);
-  assert.deepEqual([claims.acct, claims.car], [1, 'tero']);
+  assert.deepEqual([claims.acct, claims.car], [1, 'magma']);
   assert.equal(typeof claims.since, 'number', 'with the account\'s age');
-  assert.deepEqual((await call(env, 'GET', '/api/me/items', { token })).json, { items: ['tero'], car: 'tero', cars: ['dune', 'tero'] });
+  assert.deepEqual((await call(env, 'GET', '/api/me/items', { token })).json, { items: ['magma'], car: 'magma', cars: ['dune', 'magma'] });
   r = await call(env, 'POST', '/api/me/car', { token, body: { car: DEFAULT_CAR } });
   assert.equal(r.json.car, DEFAULT_CAR);
   assert.equal((await verifySession(SECRET, r.json.session)).car, undefined);
@@ -421,15 +421,15 @@ test('Worker: a car pick re-signs the session without extending it (a token 60 s
   const id = makeAccount(store, 'Ana', { now: Date.now(), refresh: H('1') }).userId;
   const exp = Math.floor(Date.now() / 1000) + 60;
   const token = await accountToken(id, { exp });
-  store.grant(id, 'tero', Date.now());
-  let r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'tero' } });
+  store.grant(id, 'magma', Date.now());
+  let r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'magma' } });
   assert.equal(r.status, 200);
   assert.equal(r.json.expiresAt, exp * 1000, "the Bearer's exp, not a fresh hour");
   const again = await call(env, 'POST', '/api/me/car', { token: r.json.session, body: { car: DEFAULT_CAR } });
   assert.deepEqual([again.status, (await verifySession(SECRET, again.json.session)).exp], [200, exp], 'and re-signing that one extends nothing either');
   db.prepare('UPDATE users SET banned = 1 WHERE id = ?').run(id);
   db.prepare('DELETE FROM refresh').run();
-  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'tero' } });
+  r = await call(env, 'POST', '/api/me/car', { token, body: { car: 'magma' } });
   assert.deepEqual([r.status, r.json.error, r.json.session], [404, 'no_user', undefined]);
   r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'badge-host' } });
   assert.deepEqual([r.status, r.json.error], [404, 'no_user']);
@@ -440,32 +440,32 @@ test('Worker: the shop and a claim round trip (a retry spends nothing twice); /n
   const id = makeAccount(store, 'Ana', { now: Date.now(), refresh: H('1') }).userId;
   const token = await accountToken(id);
   credit(store, id, 1600);
-  await withStatus('pampero', 'available', async () => {
+  await withStatus('cyclone', 'available', async () => {
     const shop = await call(env, 'GET', '/api/me/shop', { token });
     assert.equal(shop.status, 200);
     assert.equal(shop.headers.get('cache-control'), 'no-store');
     assert.deepEqual(shop.json.wallet, { earned: 1600, spent: 0, balance: 1600, frozen: null });
-    assert.equal(shop.json.items.find((i) => i.id === 'pampero').claimable, true);
+    assert.equal(shop.json.items.find((i) => i.id === 'cyclone').claimable, true);
     const alias = await call(env, 'GET', '/nodes/shop', { token });
     assert.equal(alias.status, 200, 'no NODES binding here: the alias is AccountsDO\'s');
     assert.deepEqual(alias.json, shop.json);
-    let r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'pampero' } });
+    let r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'cyclone' } });
     assert.equal(r.status, 200);
-    assert.deepEqual([r.json.item, r.json.claimed, r.json.wallet.balance, r.json.items], ['pampero', true, 100, ['pampero']]);
-    r = await call(env, 'POST', '/nodes/shop/claim', { token, body: { itemId: 'pampero' } });
+    assert.deepEqual([r.json.item, r.json.claimed, r.json.wallet.balance, r.json.items], ['cyclone', true, 100, ['cyclone']]);
+    r = await call(env, 'POST', '/nodes/shop/claim', { token, body: { itemId: 'cyclone' } });
     assert.deepEqual([r.status, r.json.claimed, r.json.wallet.balance], [200, false, 100], 'the reference server\'s `itemId` too; owned: nothing spent');
-    assert.deepEqual((await call(env, 'GET', '/api/me/items', { token })).json.cars, ['dune', 'pampero']);
+    assert.deepEqual((await call(env, 'GET', '/api/me/items', { token })).json.cars, ['dune', 'cyclone']);
   });
-  await withStatus('condor', 'available', async () => {
-    const r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'condor' } });
+  await withStatus('sirocco', 'available', async () => {
+    const r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'sirocco' } });
     assert.deepEqual([r.status, r.json.error], [409, 'insufficient']);
   });
-  await withStatus('condor', 'soon', async () => assert.deepEqual((await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'condor' } })).json.error, 'not_available'));
+  await withStatus('sirocco', 'soon', async () => assert.deepEqual((await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'sirocco' } })).json.error, 'not_available'));
   let r = await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'no-such-item' } });
   assert.deepEqual([r.status, r.json.error], [404, 'unknown_item']);
   for (const bad of [{}, { item: 'A' }, { item: '../x' }, { item: 7 }]) assert.equal((await call(env, 'POST', '/api/me/shop/claim', { token, body: bad })).json.error, 'bad_item', JSON.stringify(bad));
   store.hostFreeze(id, 'verification_failed:x', Date.now());
-  await withStatus('tero', 'available', async () => assert.equal((await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'tero' } })).json.error, 'frozen'));
+  await withStatus('magma', 'available', async () => assert.equal((await call(env, 'POST', '/api/me/shop/claim', { token, body: { item: 'magma' } })).json.error, 'frozen'));
   r = await call(env, 'GET', '/api/me/shop', { token: await accountToken('ffffffffffffffff') });
   assert.deepEqual([r.status, r.json.error], [404, 'no_user']);
 });
@@ -488,18 +488,18 @@ test('Worker: a queue seats the session\'s car and account age, never a car from
   const { env, mm } = makeEnv();
   const since = Math.floor((Date.now() - 10 * DAY - 60_000) / 1000);
   const joins = () => mm.calls.filter((c) => c.path === '/join').map((c) => c.body);
-  await call(env, 'POST', '/api/queue', { token: await accountToken('a1b2c3d4e5f60718', { car: 'tero', since }), body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
+  await call(env, 'POST', '/api/queue', { token: await accountToken('a1b2c3d4e5f60718', { car: 'magma', since }), body: { api: 2, mode: '1v1', kind: 'server', car: 'sirocco' } });
   let j = joins().at(-1);
-  assert.deepEqual([j.playerId, j.car, j.account, j.accountAgeDays], ['a1b2c3d4e5f60718', 'tero', true, 10]);
-  await call(env, 'POST', '/api/queue', { token: await accountToken('b1b2c3d4e5f60718'), body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
+  assert.deepEqual([j.playerId, j.car, j.account, j.accountAgeDays], ['a1b2c3d4e5f60718', 'magma', true, 10]);
+  await call(env, 'POST', '/api/queue', { token: await accountToken('b1b2c3d4e5f60718'), body: { api: 2, mode: '1v1', kind: 'server', car: 'sirocco' } });
   j = joins().at(-1);
   assert.deepEqual([j.car, j.account, j.accountAgeDays], [undefined, true, undefined], 'an account on the default car (and a token from before `since`)');
   // A guest never reaches the hub (Casual and ranked are for accounts: 403), whatever its token carries.
   const guest = (await createSession(SECRET, '0123456789abcdef', 'Invitado')).token;
   const before = joins().length;
-  const g = await call(env, 'POST', '/api/queue', { token: guest, body: { api: 2, mode: '1v1', kind: 'server', car: 'condor' } });
+  const g = await call(env, 'POST', '/api/queue', { token: guest, body: { api: 2, mode: '1v1', kind: 'server', car: 'sirocco' } });
   assert.deepEqual([g.status, g.json.error], [403, 'account_required']);
-  const forged = await signJwt(SECRET, { sub: '0123456789abcdef', name: 'X', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60, car: 'tero' });
+  const forged = await signJwt(SECRET, { sub: '0123456789abcdef', name: 'X', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60, car: 'magma' });
   assert.equal((await call(env, 'POST', '/api/queue', { token: forged, body: { api: 2, mode: '1v1', kind: 'server' } })).status, 403);
   assert.equal(joins().length, before, 'no guest join reached the matchmaker');
 });
@@ -507,13 +507,13 @@ test('Worker: a queue seats the session\'s car and account age, never a car from
 test('Worker: a lobby\'s host and each admitted member take the car of their session (LobbyDO keeps it with the seat)', async () => {
   const { env, lobby } = makeEnv();
   const settings = { api: 2, name: 'Sala', mode: '2v2', visibility: 'public', net: 'p2p', matchLengthSeconds: 300 };
-  assert.equal((await call(env, 'POST', '/api/lobbies', { token: await accountToken('a1b2c3d4e5f60718', { car: 'tero' }), body: { ...settings, car: 'condor' } })).status, 200);
+  assert.equal((await call(env, 'POST', '/api/lobbies', { token: await accountToken('a1b2c3d4e5f60718', { car: 'magma' }), body: { ...settings, car: 'sirocco' } })).status, 200);
   const create = lobby.calls.find((c) => c.path === '/internal/create');
-  assert.deepEqual([create.body.host.car, create.body.host.guest], ['tero', false]);
-  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: await accountToken('b1b2c3d4e5f60718', { car: 'pampero' }), body: { api: 2, code: 'ABCDEF', car: 'condor' } })).status, 200);
-  assert.equal(lobby.calls.filter((c) => c.path === '/internal/admit').at(-1).body.car, 'pampero');
+  assert.deepEqual([create.body.host.car, create.body.host.guest], ['magma', false]);
+  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: await accountToken('b1b2c3d4e5f60718', { car: 'cyclone' }), body: { api: 2, code: 'ABCDEF', car: 'sirocco' } })).status, 200);
+  assert.equal(lobby.calls.filter((c) => c.path === '/internal/admit').at(-1).body.car, 'cyclone');
   const guest = (await createSession(SECRET, '0123456789abcdef', 'Invitado')).token;
-  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: guest, body: { api: 2, code: 'ABCDEF', car: 'condor' } })).status, 200);
+  assert.equal((await call(env, 'POST', '/api/lobbies/join', { token: guest, body: { api: 2, code: 'ABCDEF', car: 'sirocco' } })).status, 200);
   assert.equal('car' in lobby.calls.filter((c) => c.path === '/internal/admit').at(-1).body, false);
 });
 

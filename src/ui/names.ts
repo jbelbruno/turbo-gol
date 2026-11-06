@@ -62,7 +62,7 @@ export function themeName(id: ThemeId): string {
   return t(`theme.${id}`);
 }
 
-/** A cosmetic car (src/game/cosmetics.ts): 'Dune', 'Pampero'... */
+/** A cosmetic car (src/game/cosmetics.ts): 'Dune', 'Cyclone'... */
 export function carName(id: CarId): string {
   return t(`car.${id}`);
 }
@@ -70,6 +70,11 @@ export function carName(id: CarId): string {
 /** A cosmetic car's one line under its name. */
 export function carDescription(id: CarId): string {
   return t(`car.${id}Desc`);
+}
+
+/** A cosmetic car's story: two sentences about the name, in the garage's detail card. */
+export function carStory(id: CarId): string {
+  return t(`car.${id}Story`);
 }
 
 const ROMAN = ['I', 'II', 'III'];

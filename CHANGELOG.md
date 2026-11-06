@@ -7,6 +7,10 @@ All notable changes to Turbogol are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Each car has a legend: the Dune is the beginning and the others are Cyclone (the edge), Vortex (the untamed),
+  Sirocco (the unreachable) and Magma (the fire within), with a one-line tagline and a short story in the second
+  person, shown in the garage's detail card where there is room (PC, tablet, a tall phone upright). The cars
+  have global English names of wild nature, and their ids follow them (`cyclone`, `vortex`, `sirocco`, `magma`).
 - Clips and links in the replay viewer (`replay.html`): a **Clip / Share** button opens a clip editor, a
   video editor's layout. The goals are on the left, the player is in the middle (the canvas in the
   clip's shape with the scorebug, the goal caption and the watermark drawn over it as they will be
@@ -163,8 +167,8 @@ All notable changes to Turbogol are documented here. The format follows
   each car's camera. The match is re-simulated from the recording, so the viewer says when a match
   was played on another version of the game, or from when it stops matching the recording. Only
   the names the game's servers assigned are shown, never account or server ids (`docs/replays.md`).
-- Four new cars: Pampero (a low, sharp wedge), Carpincho (a round, sturdy off-roader), Cóndor (a long
-  jet racer with a tail fin) and Tero (a compact rally hatch), beside the Dune, which stays free
+- Four new cars: Cyclone (a low, sharp wedge), Vortex (a round, sturdy off-roader), Sirocco (a long
+  jet racer with a tail fin) and Magma (a compact rally hatch), beside the Dune, which stays free
   for everyone. Every car drives the same: same handling, same hitbox, only the look changes, so
   ranked and every counted match are untouched. Other players see your car online, in server
   matches and in lobbies.
@@ -182,7 +186,7 @@ All notable changes to Turbogol are documented here. The format follows
   show in the top bar in GARAGE and PROFILE.
 - STADIUMS in GARAGE: Night harbour, Red canyon and Alpine valley, the same list as MODES › VS AI's
   Stadium row; the one you pick is used in your offline matches, in training and behind the menus.
-- The player plate on PLAY shows the car you drive (GARAGE · Pampero).
+- The player plate on PLAY shows the car you drive (GARAGE · Cyclone).
 - Music, made entirely in code (no audio files). A calm theme plays in the menus and an
   electronic track plays during a match. The track builds up, breaks down after every goal and
   drops back in at kickoff. It gets more intense in the last 30 seconds and in overtime, and it

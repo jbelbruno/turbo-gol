@@ -1,10 +1,10 @@
 /**
- * The Carpincho ('carpincho'): a friendly armoured off-road brute, chunky and calm like the
- * capybara. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
+ * The Vortex ('vortex'): a friendly armoured off-road brute, chunky and calm, the untamed:
+ * nothing in its way stops it. A barrel-sided body with a studded armour plate bolted on each door, under a high cab
  * (a cream roof cap, a dark visor round the split windshield) whose roof rolls down into a round
- * rump; a tall, blunt, square muzzle with two oval nostril intakes and its round headlamps set high
- * in pods on the bonnet's front corners, half-lidded (the sleepy eyes), and big round mirrors high
- * on the pillars for ears; huge round pontoon fenders whose outer roll wraps down over fat knobby
+ * rump; a tall, blunt, square nose with two oval intakes and its round headlamps set high
+ * in pods on the bonnet's front corners, half-hooded, and big round mirrors high
+ * on the pillars; huge round pontoon fenders whose outer roll wraps down over fat knobby
  * tyres on dark deep-dish beadlock rims (one size all round), their ends rounded off; a light steel
  * tubular bull bar with round amber fog lamps; a roof rack with a light bar, a spare wheel, a
  * rolled canvas swag and a team light across its back, a snorkel with a ram head up the right
@@ -14,7 +14,7 @@
  *
  * Designed in the build frame on the default hitbox (kit.hl / hh / hw 58.75 / 17.83 / 41.85; the
  * floor at y -37.8, the wheels at rest at x 37.4 and -47.6, y -22.8, radius 15, tyres |z| 18.8 to
- * 39.5). Side view: body -15..3 (two-tone line -9), bonnet 5, the muzzle's face 0.6 high at x
+ * 39.5). Side view: body -15..3 (two-tone line -9), bonnet 5, the nose's face 0.6 high at x
  * 55.3, the cab's belt 2.5 and roof 14.8 from the windshield (x 20 at the belt) back to x -12, then
  * the rump rolls down to the body at x -36.3; rack, light bar and swag to 17.7; door plates x
  * -21.5..11.5, y -7.7..-1.4. Top view: bonnet |z| 28.6, cab 28.4, door barrel 32.2, plates 32.7,
@@ -66,7 +66,7 @@ const CAN_LO: Surface = { ...EXHAUST, color: 0x30343c, metal: 0.55, rough: 0.45 
  * wheel budget.
  */
 export const CARPINCHO_WHEEL: WheelStyle = {
-  id: 'carpincho-beadlock',
+  id: 'vortex-beadlock',
   tyre: 'knobby',
   spokes: 6,
   spokeWidth: 0.13,
@@ -342,7 +342,7 @@ function wsX(y: number): number {
 type Station = readonly [number, number, number];
 /**
  * The cab behind the windshield, front to back: the roof runs flat to x -12, then the rump: the
- * roof drops 4 uu over the next 19 and rolls down into the body (the capybara's back), its rear
+ * roof drops 4 uu over the next 19 and rolls down into the body, its rear
  * corners rounded (radius 5 in plan). Low detail keeps six.
  */
 const RUMP: readonly Station[] = [
@@ -436,7 +436,7 @@ function build(k: BodyKit): void {
   const satin: Surface = { color: k.glass.color, metal: 0, rough: 0.34, emissive: 0, kind: CAR_KIND.TRIM };
 
   // Body: barrel-sided doors (round in section, widest at y -1) between the axles, a raised bonnet
-  // over the front wheels ending in the muzzle: a tall, blunt block with a radius-5 fillet over its
+  // over the front wheels ending in the nose: a tall, blunt block with a radius-5 fillet over its
   // flat face and rounded corners in plan; behind the cab it rolls down to the keel's deck.
   const body: Ring[] = [
     shoulder(-40.6, 25.5, 1.2, -5.2, 3),
@@ -633,7 +633,7 @@ function build(k: BodyKit): void {
     k.box(BRACKET, 9, 2.2, 6, nx + 8, -5.6, z);
   }
 
-  // The face. Muzzle: two oval nostril intakes on the flat front, a raised lip round a dark,
+  // The front. Nose: two oval intakes on the flat front, a raised lip round a dark,
   // recessed inside.
   const faceX = 55.3;
   const ns = hi ? 10 : 8;
@@ -642,8 +642,8 @@ function build(k: BodyKit): void {
     const rings = [ellipse(faceX - 0.6, cy, cz, 4.7, 2.5, ns), ellipse(faceX + 0.9, cy, cz, 4.5, 2.35, ns), ellipse(faceX + 1.05, cy, cz, 3.4, 1.8, ns), ellipse(faceX + 0.15, cy, cz, 3.1, 1.6, ns)];
     k.pushBy(ringLoft(hi ? rings : [rings[0], rings[2], rings[3]]), (_x, y, z) => (Math.hypot((z - cz) / 4.7, (y - cy) / 2.5) < 0.75 ? RUBBER : paint));
   }
-  // Eyes: the round headlamps high on the bonnet's front corners, in tapered pods (team paint, a
-  // cream bezel face), half covered by heavy lids drooping outward: calm, sleepy.
+  // Headlamps: the round lamps high on the bonnet's front corners, in tapered pods (team paint, a
+  // cream bezel face), half covered by heavy hoods drooping outward: a calm, half-shut look.
   const ls = hi ? 12 : 10;
   const [eyeY, eyeZ, eyeR] = [5.2, 17.6, 4];
   for (const side of [-1, 1]) {
@@ -660,10 +660,10 @@ function build(k: BodyKit): void {
     }
     k.push(ringLoft([lid.map(([lz, ly]): V3 => [53.6, ly, lz]), lid.map(([lz, ly]): V3 => [55.25, ly, lz])]), paint);
   }
-  // Skid plate under the muzzle (high detail).
+  // Skid plate under the nose (high detail).
   if (hi) k.box(GRAPHITE, 5, 1.2, 26, 53.2, -15.6, 0);
 
-  // Tubular bull bar: a bumper tube across the nose, two uprights to the face under the nostrils,
+  // Tubular bull bar: a bumper tube across the nose, two uprights to the face under the intakes,
   // round amber fog lamps on it.
   const barX = hl - 1.55;
   k.push(tube(barX, -11, -29.5, barX, -11, 29.5, 1.45, hi ? 8 : 6), BAR);
@@ -708,7 +708,7 @@ function build(k: BodyKit): void {
   head.translate(17.7, 15.5, 29);
   k.push(head, TRIM);
 
-  // Ears: big round mirrors on stalks high on the A-pillars, at the roof's front corners, flattened
+  // Mirrors: big round, on stalks high on the A-pillars, at the roof's front corners, flattened
   // ovals leaning back and out, team paint outside, a dark glass inside.
   for (const side of [-1, 1]) {
     k.push(tube(14.4, 10.4, side * 26, 13.6, 12.2, side * 30.2, 0.5, hi ? 4 : 3), BRACKET);
@@ -796,8 +796,8 @@ function build(k: BodyKit): void {
   k.box(TRIM, 2.2, 3, 30, -hl + 1.3, -11.6, 0);
 }
 
-export const CARPINCHO: CarBodySpec = {
-  id: 'carpincho',
+export const VORTEX: CarBodySpec = {
+  id: 'vortex',
   build,
   // One wheel size all round (radius 15 at rest: 1.2 x the front's physics radius, 1.0 x the
   // rear's), fat (1.15 x 18 uu), their outer faces just inside the fenders' wrapped-down roll.
@@ -808,7 +808,7 @@ export const CARPINCHO: CarBodySpec = {
     twoToneY: 11.76,
     pinstripe: 0.4,
     accent: CREAM,
-    // One bold cream chevron on the flat of the bonnet between the eyes, its tip just behind them
+    // One bold cream chevron on the flat of the bonnet between the headlamps, its tip just behind them
     // (build x 34.9..47.2, |z| < 8): one stripe of the period-14 pattern (phase 56), clear of the
     // fillet, the seam and the grime.
     chevrons: { x0: 48.8, x1: 61.04, halfWidth: 8, period: 14 },

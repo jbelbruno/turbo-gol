@@ -222,8 +222,8 @@ src/render/
   cars/                 the car bodies (docs/cars.md): types.ts (CarBodySpec, the contract),
                         kit.ts (surfaces, lofts, the BodyKit, resolveWheels, buildBody and its
                         containment guard), wheels.ts (wheel styles: knobby, slick), one module
-                        per catalog car (dune.ts, the dune runner, the default car; pampero.ts,
-                        carpincho.ts, condor.ts, tero.ts), index.ts (the registry),
+                        per catalog car (dune.ts, the dune runner, the default car; cyclone.ts,
+                        vortex.ts, sirocco.ts, magma.ts), index.ts (the registry),
                         cache.ts (geometry shared per body / team / detail, reference-counted)
   Ball.ts               procedural panelled ball (truncated icosahedron: pearl hexagons, graphite
                         pentagons with lime glow rings, stitched seams; BALL_COLORS), blob shadow,

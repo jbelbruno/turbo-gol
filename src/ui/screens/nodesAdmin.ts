@@ -1478,7 +1478,7 @@ export function nodesAdminScreen(menu: Menu): Screen {
       tab = (ADMIN_TABS as readonly string[]).includes(kind) ? (kind as AdminTab) : 'summary';
       if (kind === 'points') {
         frozen = { frozen: [{ account: '0a1b2c3d4e5f6071', reason: 'verification_failed:' + 'c'.repeat(64), at: Date.now() - 3_600_000 }], more: false };
-        lookup = { account: '0a1b2c3d4e5f6071', wallet: { account: '0a1b2c3d4e5f6071', wallet: { earned: 12500, spent: 3000, balance: 9500, frozen: 'verification_failed:' + 'c'.repeat(64) }, items: ['badge-host', 'pampero'], car: 'pampero' }, error: null };
+        lookup = { account: '0a1b2c3d4e5f6071', wallet: { account: '0a1b2c3d4e5f6071', wallet: { earned: 12500, spent: 3000, balance: 9500, frozen: 'verification_failed:' + 'c'.repeat(64) }, items: ['badge-host', 'cyclone'], car: 'cyclone' }, error: null };
       }
       if (kind === 'stats') stats = { accounts: { total: 18342, banned: 3, verifiedEmail: 9120, emailHint: 410, active30d: 5230, operators: 12, byWays: { password: 6000, 'password+google': 4100, discord: 2200 }, passwordOnly: { total: 1200, active30d: 90 } }, days: sampleDays(), error: null, loading: false };
       if (kind === 'operators') operators = { list: sampleOperators(sample), error: null, loading: false };

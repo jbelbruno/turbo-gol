@@ -382,7 +382,7 @@ test("GARAJE: ▲ in the list goes to the row above, and from its first row to t
   f.focus(rows[0]);
   f.move('up');
   assert.equal(focused(), tabCars, 'the spatial pick alone: a tie, AUTOS first (its focus would switch the list to the cars)');
-  // AUTOS scrolled (CH+ back on Condor): Carpincho at the list's top, Pampero half under its edge,
+  // AUTOS scrolled (CH+ back on Sirocco): Vortex at the list's top, Cyclone half under its edge,
   // its centre no nearer than the tabs'.
   const carsTab = el(NAVI, R(653, 105, 140, 48));
   const stadiumsTab = el(NAVI, R(801, 105, 140, 48));
@@ -393,7 +393,7 @@ test("GARAJE: ▲ in the list goes to the row above, and from its first row to t
   const g = new NAV.FocusNav(() => [{ name: 'stage', el: page2, main: true }]);
   g.focus(cars[2]);
   g.move('up');
-  assert.ok(focused() === carsTab || focused() === stadiumsTab, 'the spatial pick alone: up to the tabs, past Pampero');
+  assert.ok(focused() === carsTab || focused() === stadiumsTab, 'the spatial pick alone: up to the tabs, past Cyclone');
   // garage.ts updateSides: a row's ▲ is the row before it in the list, the first row's the tab selected.
   for (const [list_, selected] of [
     [rows, tabStadiums],

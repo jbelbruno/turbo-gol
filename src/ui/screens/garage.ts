@@ -24,7 +24,7 @@
  * on the row picked goes to its action. EQUIPAR: Garage.equip (an account through POST
  * /api/me/car, so its next seats drive it). CANJEAR (a car that can be redeemed): the sheet with
  * the balance after it, CANCELAR focused and MANTÉN PARA CONFIRMAR held REDEEM_HOLD_MS
- * (components/hold.ts) → Garage.claim (one server transaction) → "Pampero es tuyo" with EQUIPAR
+ * (components/hold.ts) → Garage.claim (one server transaction) → "Cyclone es tuyo" with EQUIPAR
  * AHORA; a failure spends nothing and offers REINTENTAR. A car out of reach keeps CANJEAR, never
  * lime, with the reason; its press explains (sign in, the guide, PERFIL's MI SERVIDOR). Points come
  * only from hosting (nodes/docs/RECOMPENSAS.md): never a rate, nothing is paid.
@@ -41,7 +41,7 @@ import { h, setChildren } from '../dom';
 import type { Child } from '../dom';
 import { language, t } from '../../i18n';
 import type { Params } from '../../i18n';
-import { carDescription, carName, formatPoints, themeName } from '../names';
+import { carDescription, carName, carStory, formatPoints, themeName } from '../names';
 import type { Menu, Screen } from '../Menu';
 import { CARS, type CarId } from '../../game/cosmetics';
 import { garageView, previewNotice, type GarageCarView, type GarageView, type ShowroomFrame } from '../../game/garage';
@@ -181,13 +181,14 @@ export function garageScreen(menu: Menu): Screen {
 
   const detName = h('b.mn-gar-det-name');
   const detPrice = h('span.mn-gar-det-price');
+  const detStory = h('p.mn-gar-story');
   const detReason = h('p.mn-gar-det-reason');
   // The action names its car (or stadium) on a line of its own where the card's head is hidden (a
   // phone held sideways, garage.css): the list may show one row there, the action says whose it is.
   const detActFor = h('span.mn-gar-act-for');
   const detActText = h('span.mn-gar-act-text');
   const detAction = h('button.mn-btn.mn-gar-act', { type: 'button', 'data-nav': true, 'data-nav-line': true, 'data-key': 'garage-act', onclick: () => act() }, detActFor, detActText);
-  const detail = h('div.mn-gar-detail', null, h('div.mn-gar-det-head', null, detName, detPrice), detReason, detAction);
+  const detail = h('div.mn-gar-detail', null, h('div.mn-gar-det-head', null, detName, detPrice), detStory, detReason, detAction);
   const right = h('section.mn-gar-right', null, compact, tabs, list, detail);
 
   const el = h('div.mn-garage', { 'data-tab': tab }, left, stage, right);
@@ -334,6 +335,8 @@ export function garageScreen(menu: Menu): Screen {
     const s = v.selected;
     const d = detailView(s, v);
     detName.textContent = carName(s.id);
+    detStory.hidden = false;
+    detStory.textContent = carStory(s.id);
     setChildren(detPrice, ...(s.price > 0 ? price(s.price) : [h('span.mn-gar-pts-unit', null, t('garage.freeTag'))]));
     writeReason(d.reason !== null ? lineText(d.reason) : '', d.tone);
     detAction.hidden = d.button === null;
@@ -354,6 +357,7 @@ export function garageScreen(menu: Menu): Screen {
       else row.el.removeAttribute('aria-current');
     }
     detName.textContent = themeName(stadium);
+    detStory.hidden = true;
     setChildren(detPrice);
     writeReason(t('garage.stadiumNote'), 'plain');
     detAction.hidden = stadium === host.theme;
@@ -623,7 +627,7 @@ export function garageScreen(menu: Menu): Screen {
       closeSheet?.();
       sample = kind === null ? null : sampleShop(kind);
       tab = kind === 'stadiums' ? 'stadiums' : 'cars';
-      selected = kind === 'owned' ? 'pampero' : kind === 'points' || kind === 'redeem' ? 'carpincho' : null;
+      selected = kind === 'owned' ? 'cyclone' : kind === 'points' || kind === 'redeem' ? 'vortex' : null;
       if (shown) render();
       if (kind === 'redeem') openRedeem(view().selected);
       if (kind === 'guide') openGuide();
@@ -681,7 +685,7 @@ export function garageScreen(menu: Menu): Screen {
 /** Sample shop answers (window.__garage): 0 points, enough for one car, a car owned, claims paused. */
 function sampleShop(kind: SampleKind): { kind: SampleKind; shop: ShopAnswer; owned: string[] } {
   const balance = kind === 'points' || kind === 'redeem' ? 2100 : kind === 'owned' ? 600 : kind === 'paused' ? 1800 : 0;
-  const owned = kind === 'owned' ? ['pampero'] : [];
+  const owned = kind === 'owned' ? ['cyclone'] : [];
   const items = CARS.filter((c) => c.price > 0).map((c) => {
     const own = owned.includes(c.id);
     const claimable = !own && kind !== 'paused' && balance >= c.price;

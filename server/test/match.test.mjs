@@ -363,19 +363,19 @@ test('MatchDO /internal/leave: socket closed 1000 left, slot flagged (rejoin + u
 });
 
 test("MatchDO: the welcome's roster carries each seat's car (src/net/cosmetics.ts), a rejoin's too; a car the catalog does not know is dropped; a left seat's bot keeps the car", async () => {
-  const h = await makeMatch([{ ...A, car: 'tero' }, { ...B, car: 'bugatti' }]);
+  const h = await makeMatch([{ ...A, car: 'magma' }, { ...B, car: 'bugatti' }]);
   try {
-    assert.deepEqual(h.mdo.record.roster.map((e) => e.car ?? null), ['tero', null], 'stored field by field');
+    assert.deepEqual(h.mdo.record.roster.map((e) => e.car ?? null), ['magma', null], 'stored field by field');
     assert.equal('car' in h.mdo.record.roster[1], false);
     const wsA = await h.join(0);
     const w = wsA.json(P.MsgType.Welcome)[0];
-    assert.deepEqual(w.roster.map((e) => e.car ?? null), ['tero', null]);
+    assert.deepEqual(w.roster.map((e) => e.car ?? null), ['magma', null]);
     assert.equal('playerId' in w.roster[0], false, 'still no playerId');
     await h.join(1);
     assert.equal((await h.internal('/internal/leave', { playerId: 'pa' })).status, 200);
     const wsB2 = await h.join(1);
     const again = wsB2.json(P.MsgType.Welcome)[0];
-    assert.deepEqual(again.roster.map((e) => [e.kind, e.car ?? null]), [['bot', 'tero'], ['player', null]], 'the bot drives the same body');
+    assert.deepEqual(again.roster.map((e) => [e.kind, e.car ?? null]), [['bot', 'magma'], ['player', null]], 'the bot drives the same body');
   } finally {
     await h.shutdown();
   }
