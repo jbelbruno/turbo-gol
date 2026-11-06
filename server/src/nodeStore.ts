@@ -61,6 +61,12 @@
  *                 the reason. ADMIN_AUDIT_DAYS
  *   operator_tokens one row per community node token minted (the operator, when): the day's cap
  *                 counts them across deploys. A day, then pruned; a purged account's go at once
+ *   host_rules    one row per operator outside the project: the version of the rules for hosts it
+ *                 accepted last (its newest 'host' consents row, AccountsDO's: the object's copy,
+ *                 written when it writes one and whenever GET /me says another), and when the
+ *                 object learned it. Placement reads it (no new match without the rules in force:
+ *                 hostPolicy.ts hostRulesVersion). No deadline, like the operators rows; a purged
+ *                 account's goes at once (forgetOperator)
  *   node_reports  a player's report of a community server it played on (Prompt 2, A16): the match,
  *                 the node and its operator, the reason picked from a closed list, the client's ping
  *                 and position corrections, and the account that reported (one row per match and
@@ -367,6 +373,8 @@ export class NodeStore implements RegistryStore, MatchStore {
     s.exec('CREATE INDEX IF NOT EXISTS node_reports_at ON node_reports (at)');
     s.exec('CREATE INDEX IF NOT EXISTS node_reports_reporter ON node_reports (reporter_id, at)');
     s.exec('CREATE INDEX IF NOT EXISTS node_reports_operator ON node_reports (operator_id, at)');
+    // The rules for hosts each operator holds (Terms 12.2, a new version accepted again): a new table, the state version unchanged.
+    s.exec('CREATE TABLE IF NOT EXISTS host_rules (operator_id TEXT PRIMARY KEY, version TEXT NOT NULL, at INTEGER NOT NULL)');
     const v = s.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'state_version'").toArray()[0]?.v;
     if (v === undefined) {
       s.exec("INSERT INTO meta (k, v) VALUES ('state_version', ?)", String(STATE_VERSION));
@@ -884,6 +892,20 @@ export class NodeStore implements RegistryStore, MatchStore {
     this.sql.exec('INSERT INTO operators (operator_id, status, at, show_public) VALUES (?, ?, ?, ?) ON CONFLICT(operator_id) DO UPDATE SET show_public = excluded.show_public', operatorId, 'ok', at, show ? 1 : 0);
   }
 
+  /** Every host_rules row: the version of the rules for hosts each operator accepted last (the object keeps them in memory: placement reads them). */
+  hostRulesRows(): Array<{ operatorId: string; version: string }> {
+    return this.sql
+      .exec<{ operator_id: string; version: string }>('SELECT operator_id, version FROM host_rules')
+      .toArray()
+      .map((r) => ({ operatorId: r.operator_id, version: r.version }));
+  }
+
+  /** The rules for hosts `operatorId` accepted last, as AccountsDO holds them: `version`, or none (null: its row goes). */
+  setHostRules(operatorId: string, version: string | null, at: number): void {
+    if (version === null) this.sql.exec('DELETE FROM host_rules WHERE operator_id = ?', operatorId);
+    else this.sql.exec('INSERT INTO host_rules (operator_id, version, at) VALUES (?, ?, ?) ON CONFLICT(operator_id) DO UPDATE SET version = excluded.version, at = excluded.at', operatorId, version, at);
+  }
+
   /**
    * A purged account (/internal/operator-deleted): the account id leaves this object's hosting rows
    * (decisions.md: the chosen name and the account id go with the account). Its name choice goes
@@ -891,13 +913,15 @@ export class NodeStore implements RegistryStore, MatchStore {
    * but under `alias` (an opaque key), with its status, reason, actor and date; a row only the
    * opt-in wrote goes. In admin_audit's values (a canary's ids) the id becomes 'deleted'. The
    * players' reports about its servers stay for their 30 days, under `alias` too; the object takes
-   * no new one about them (node_forgotten has the id, its nodes the purge's ban).
+   * no new one about them (node_forgotten has the id, its nodes the purge's ban). Its copy of the
+   * rules for hosts it accepted goes (AccountsDO keeps the proof, consent_proofs).
    */
   forgetOperator(operatorId: string, alias: string): void {
     this.tx(() => {
       this.sql.exec('DELETE FROM operators WHERE operator_id = ? AND actor IS NULL', operatorId);
       this.sql.exec('UPDATE operators SET operator_id = ?, show_public = 0 WHERE operator_id = ?', alias, operatorId);
       this.sql.exec('DELETE FROM operator_tokens WHERE operator_id = ?', operatorId);
+      this.sql.exec('DELETE FROM host_rules WHERE operator_id = ?', operatorId);
       this.sql.exec('UPDATE node_reports SET operator_id = ? WHERE operator_id = ?', alias, operatorId);
       const strip = (v: string | null) => (v === null ? null : v.split(',').map((x) => (x.trim() === operatorId ? 'deleted' : x)).join(','));
       const audits = this.sql.exec<{ id: number; old: string | null; new: string | null }>('SELECT id, old, new FROM admin_audit WHERE instr(old, ?) > 0 OR instr(new, ?) > 0', operatorId, operatorId).toArray();

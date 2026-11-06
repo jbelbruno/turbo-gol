@@ -115,8 +115,10 @@
  *   POST /shop/claim      { userId, item }                           -> ClaimAnswer | 404 unknown_item | 409 <ClaimRefusal> | 404
  *   POST /host-credit     HostCredit (the NodeRegistryDO's outbox)    -> { ok, applied } (once per matchId)
  *   POST /host-freeze     { userId, reason, at } (the outbox)        -> { ok, applied }
- *   POST /host-consent    { userId, version, adult } (the NodeRegistryDO's community token, Prompt 2 A3) -> { hostTerms }:
- *                                                                     a 'host' consents row (source 'node_token': the rules
+ *   POST /host-consent    { userId, version, adult, again? } (the NodeRegistryDO's community token, Prompt 2 A3; again:
+ *                                                                     its POST /nodes/mine/accept) -> { hostTerms }:
+ *                                                                     a 'host' consents row (source 'node_token', or
+ *                                                                     'host_reaccept' with again: true: the rules
  *                                                                     for hosts of the version in force accepted and 18 or
  *                                                                     older declared), one per version at most | 400
  *                                                                     bad_consent (no terms, or none that describe hosting:
@@ -2354,7 +2356,8 @@ export class AccountsDO extends DurableObject<Env> {
         // The account's own refusals are 403, as the token's (PR 2A's contract); a version that is not in force, 409.
         if (b.adult !== true) return error(403, 'adult_required', 'Declara que tienes 18 años o más');
         if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
-        const r = s.acceptHost(b.userId, current, now);
+        // again: the rules of a new version accepted again in MIS SERVIDORES (POST /nodes/mine/accept), the row's source says so.
+        const r = s.acceptHost(b.userId, current, now, b.again === true ? 'host_reaccept' : 'node_token');
         if (r === 'no_user') return error(404, 'no_user');
         if (r === 'deletion_pending') return json({ error: 'deletion_pending', message: 'Esta cuenta tiene un borrado pendiente', purgeAt: s.deletionAt(b.userId) }, 403);
         if (r === 'terms_required') return json({ error: 'terms_required', message: 'Primero acepta los términos vigentes', version: current }, 403);

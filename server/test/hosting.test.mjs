@@ -335,8 +335,24 @@ async function register(h, token, { publicUrl = 'wss://juan.example.org', contin
   return { ...r, node };
 }
 
-/** A community node registered (a token the registry mints, as nodeRegistry.test.mjs's communityNode), logged in and on probation. */
-async function liveCommunity(h, { op = JUAN, host = 'juan.example.org', name } = {}) {
+/**
+ * `op` holds the rules for hosts in force, as its first code leaves it (hostGate's writeHostRules):
+ * AccountsDO's 'host' row (GET /me's hostTerms) and the object's copy (host_rules), which placement reads.
+ */
+function holdRules(h, op = JUAN) {
+  const v = P.hostRulesVersion(h.env);
+  const p = h.env.ACCOUNTS.people.get(op);
+  if (p) p.hostTerms = v;
+  h.obj.noteHostRules(op, v);
+}
+
+/**
+ * A community node registered (a token the registry mints, as nodeRegistry.test.mjs's communityNode),
+ * logged in and on probation; its operator holds the rules for hosts as its first code left them
+ * (`rules` false: it never accepted any).
+ */
+async function liveCommunity(h, { op = JUAN, host = 'juan.example.org', name, rules = true } = {}) {
+  if (rules) holdRules(h, op);
   const { token } = await h.obj.cp.registry.createToken({ id: op, name: 'Juan' }, 'SA', clock, name, { publicHost: host });
   const r = await register(h, token, { publicUrl: `wss://${host}` });
   assert.equal(r.status, 200, JSON.stringify(r.json));
@@ -382,6 +398,22 @@ test('terms versions in order; hosting in force only from NODE_HOSTING_TERMS on,
   assert.deepEqual([ENV.communityRanked({}), ENV.communityRanked({ NODE_COMMUNITY_RANKED: '1' })], [false, true]);
 });
 
+test('the rules for hosts in force (hostPolicy.ts, Terms 12.2): the TERMS_VERSION in force once the terms describe hosting, moving with it, never the flag; none before; where each operator accepts them', () => {
+  assert.equal(P.hostRulesVersion({ TERMS_VERSION: '2026-11-05' }), null, 'NODE_HOSTING_TERMS unset');
+  assert.equal(P.hostRulesVersion({ TERMS_VERSION: '2026-11-05', NODE_HOSTING_TERMS: '2026-11-16' }), null, 'older than its minimum');
+  assert.equal(P.hostRulesVersion(IN_FORCE), '2026-11-16');
+  assert.equal(P.hostRulesVersion({ ...IN_FORCE, TERMS_VERSION: '2026-12-01' }), '2026-12-01', 'a new version: the rules move with it');
+  assert.equal(P.hostRulesVersion({ ...IN_FORCE, FLAGS: kvOf({ node_operators: '0' }) }), '2026-11-16', 'the flag closed again changes nothing');
+  assert.deepEqual(
+    [P.hostRulesHeld('2026-11-16', '2026-11-16'), P.hostRulesHeld('2026-11-16', '2026-12-01'), P.hostRulesHeld(null, '2026-11-16'), P.hostRulesHeld(null, null), P.hostRulesHeld('2026-11-05', null)],
+    [true, false, false, false, false],
+  );
+  assert.equal(P.hostRulesStep('2026-12-01', '2026-12-01', 2), 'held');
+  assert.equal(P.hostRulesStep(null, '2026-12-01', 0), 'first', 'never accepted, no server: with its first code');
+  assert.equal(P.hostRulesStep('2026-11-16', '2026-12-01', 0), 'again', 'an earlier version: again, with no server left too');
+  assert.equal(P.hostRulesStep(null, '2026-12-01', 1), 'again', 'a server without any (an account that left the project): again');
+});
+
 test('closed while TERMS_VERSION < NODE_HOSTING_TERMS even with node_operators 1: no community token, no AccountsDO call, no consent row, no new row; the project works as before', async () => {
   const dark = [
     ['NODE_HOSTING_TERMS unset', { TERMS_VERSION: '2026-11-05', FLAGS: kvOf({ node_operators: '1' }) }],
@@ -397,8 +429,10 @@ test('closed while TERMS_VERSION < NODE_HOSTING_TERMS even with node_operators 1
     const pub = await call(h, 'POST', '/nodes/mine/public', { body: { show: true }, headers: { 'x-operator-id': JUAN } });
     assert.deepEqual([pub.status, pub.json.error], [403, 'hosting_closed'], why);
     assert.equal((await call(h, 'POST', '/nodes/mine/public', { body: { show: false }, headers: { 'x-operator-id': JUAN } })).status, 200, 'withdrawing is always taken');
+    const again = await call(h, 'POST', '/nodes/mine/accept', { body: { acceptHost: true, adult: true }, headers: { 'x-operator-id': JUAN } });
+    assert.deepEqual([again.status, again.json.error], [403, 'hosting_closed'], `${why}: no acceptance in Mis servidores either`);
     assert.deepEqual(h.env.ACCOUNTS.calls, [], `${why}: AccountsDO never asked, no consent row`);
-    assert.deepEqual([rows(h, 'operator_tokens'), rows(h, 'operators'), rows(h, 'admin_audit'), rows(h, 'node_tokens')], [[], [], [], []], why);
+    assert.deepEqual([rows(h, 'operator_tokens'), rows(h, 'operators'), rows(h, 'admin_audit'), rows(h, 'node_tokens'), rows(h, 'host_rules')], [[], [], [], [], []], why);
     assert.equal(h.obj.cp.registry.tokenList().length, 0, why);
     const t = await projectToken(h, { name: 'sao-paulo-1' });
     assert.equal(t.status, 200, `${why}: the project's token`);
@@ -836,6 +870,19 @@ test("POST /host-consent: a 'host' row (source node_token) only with adult: true
   assert.deepEqual((await a.post('/host-consent', { userId: id, version: v, adult: true })).json, { hostTerms: v });
   assert.deepEqual(a.hostRows(id), [{ version: v, granted: 1, source: 'node_token' }], 'one row per version');
   assert.equal((await a.me(id)).hostTerms, v);
+  // The rules of a new version accepted again in Mis servidores (again: true, POST /nodes/mine/accept):
+  // the same row, its source saying where, once per version too; the terms of that version first.
+  const next = '2026-12-01';
+  a.obj.env.TERMS_VERSION = next;
+  assert.equal((await a.post('/host-consent', { userId: id, version: next, adult: true, again: true })).json.error, 'terms_required');
+  a.obj.store.acceptTerms(id, next, clock);
+  assert.equal((await a.post('/host-consent', { userId: id, version: next, again: true })).json.error, 'adult_required', 'never without the declaration, again neither');
+  const again = await a.post('/host-consent', { userId: id, version: next, adult: true, again: true });
+  assert.deepEqual([again.status, again.json], [200, { hostTerms: next }]);
+  assert.deepEqual((await a.post('/host-consent', { userId: id, version: next, adult: true, again: true })).json, { hostTerms: next });
+  assert.deepEqual(a.hostRows(id), [{ version: v, granted: 1, source: 'node_token' }, { version: next, granted: 1, source: 'host_reaccept' }]);
+  assert.equal((await a.me(id)).hostTerms, next);
+  a.obj.env.TERMS_VERSION = v;
   // A deletion pending writes nothing.
   const g = makeAccount(a.obj.store, 'Seva', { email: 'seva@example.org' }).userId;
   a.obj.store.acceptTerms(g, v, clock);

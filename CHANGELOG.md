@@ -77,6 +77,16 @@ All notable changes to Turbogol are documented here. The format follows
   opening's flag. Ajustes › JUEGO gets "Solo servidores del proyecto" once hosting is open, sent
   with every search while it is on (and kept shown while it is, so it can always be turned off);
   CONTROL DE NODOS gets an Operadores tab and the opening's control in RESUMEN.
+- Community nodes: the rules for hosts accepted again when the Terms change version (Terms 12.2),
+  shipped closed with the rest of hosting. The rules are a part of the Terms, so the version a host
+  must hold is the `TERMS_VERSION` in force once the terms describe hosting (`server/src/hostPolicy.ts`
+  `hostRulesVersion`). A host that holds those of an earlier version asks for no code
+  (`reaccept_required`) and its servers get no new match (the matches they run finish) until it
+  accepts them again in "Mis servidores": a banner, then the first code's acceptance (the rules for
+  hosts and Annex B with the 18-or-older switch) with VOLVER A ACEPTAR (`POST /nodes/mine/accept`,
+  the code's own checks, a `host` consent row of source `host_reaccept`). While the terms do not
+  describe hosting, a server outside the project gets no match at all. The project's accounts are
+  never held to the rules. CONTROL DE NODOS' Operadores tab says which rules each host holds.
 - Name tags over the cars in every match (against the AI, Casual and Competitive on the servers, the
   P2P lobbies; 1v1 to 3v3), so you always know where every rival and teammate is: each player's name
   in the display face, lit in its team's neon with a line and a post on its goal's side, smaller and

@@ -45,7 +45,8 @@
 // its samples (window.__nodesAdmin: each tab, a node's detail, the manual review, the wizard's three
 // steps, and the history's PARTIDAS with a match's detail, HISTORIAL and ALERTAS, PR 4, and OPERADORES, Prompt 2;
 // on a TV only its note); "Mis servidores" (Prompt 2, P2-3: window.__servers) runs the account outside a canary
-// ('closed'), what it lacks ('requirements'), the acceptance above PEDIR CÓDIGO ('terms'), a host with three
+// ('closed'), what it lacks ('requirements'), the acceptance above PEDIR CÓDIGO ('terms'), the rules for
+// hosts of a new terms version to accept again ('again'), a host with three
 // servers ('operator'), a code's install line and follow-up ('token') and a TV's QR ('tv'). 'summary': a
 // pack's summary over the training HUD (TrainingHud.showSummary, sample results), which fails it
 // off screen, text out of its box or under 14 px on a phone (12 elsewhere), a button something
@@ -142,7 +143,7 @@ const SIZES = [
   { name: '820x1180', w: 820, h: 1180, mobile: true, layout: 'tablet' },
 ].filter((s) => typeof args.sizes !== 'string' || args.sizes.split(',').some((x) => s.name.startsWith(x)));
 // MODOS by its tabs: 'modes:<tab>' opens it on that tab (Menu.open's tab).
-const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'nodes-admin', 'nodes-admin:nodes', 'nodes-admin:tokens', 'nodes-admin:regions', 'nodes-admin:release', 'nodes-admin:points', 'nodes-admin:stats', 'nodes-admin:detail', 'nodes-admin:review', 'nodes-admin:wizard', 'nodes-admin:checklist', 'nodes-admin:token', 'nodes-admin:matches', 'nodes-admin:match', 'nodes-admin:lone', 'nodes-admin:history', 'nodes-admin:alerts', 'nodes-admin:operators', 'servers:closed', 'servers:requirements', 'servers:terms', 'servers:operator', 'servers:token', 'servers:tv', 'final', 'touch', 'sala', 'tv'];
+const SCREENS = typeof args.screens === 'string' ? args.screens.split(',') : ['home', 'modes:casual', 'modes:ranked', 'modes:lobbies', 'modes:ai', 'training', 'training:lab', 'summary', 'garage', 'garage:account', 'garage:points', 'garage:owned', 'garage:stadiums', 'garage:redeem', 'garage:guide', 'garage:paused', 'leaderboard', 'leaderboard:rows', 'leaderboard:below', 'leaderboard:guest', 'profile', 'profile:account', 'profile:operator', 'profile:grace', 'nodes-admin', 'nodes-admin:nodes', 'nodes-admin:tokens', 'nodes-admin:regions', 'nodes-admin:release', 'nodes-admin:points', 'nodes-admin:stats', 'nodes-admin:detail', 'nodes-admin:review', 'nodes-admin:wizard', 'nodes-admin:checklist', 'nodes-admin:token', 'nodes-admin:matches', 'nodes-admin:match', 'nodes-admin:lone', 'nodes-admin:history', 'nodes-admin:alerts', 'nodes-admin:operators', 'servers:closed', 'servers:requirements', 'servers:terms', 'servers:again', 'servers:operator', 'servers:token', 'servers:tv', 'final', 'touch', 'sala', 'tv'];
 // The Salas' samples (window.__sala, plan PR 12): [kind, members]; 'qr' on a TV only.
 const SALA_KINDS = [['members', 1], ['members', 2], ['members', 3], ['members', 4], ['members', 5], ['members', 6], ['reconnecting', 4], ['qr', 4], ['codecells', 0], ['join', 4], ['pill', 4], ['lost', 0]];
 // PR 14's samples (window.__tvSignIn): the keypad's where no fine pointer, 'tv*' on a TV, the rest everywhere.

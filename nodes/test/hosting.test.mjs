@@ -398,6 +398,30 @@ test('a blocked operator: none of its nodes is placed', async () => {
   assert.equal(await w.place(), null);
 });
 
+test('an operator without the rules for hosts in force (Terms 12.2): no new match on its nodes, its running ones go on, the region counts no host; back once it holds them; the project never asked', async () => {
+  const held = new Set(['op1']);
+  const w = await world([{ status: 'active' }], { ...COMMUNITY_POLICY, ranked: false, rulesHeld: (id) => held.has(id) });
+  const [juan] = w.nodes;
+  assert.equal((await w.place())?.nodeId, juan.nodeId, 'it holds them: placed');
+  assert.equal(w.cp.hostsOnline('SA'), 1);
+  held.delete('op1');
+  assert.equal(await w.place(), null, 'no new match');
+  assert.equal(juan.taken, 1, 'no assign sent to it');
+  assert.equal(w.cp.operatorRunning('op1'), 1, 'its running match goes on');
+  assert.equal(w.cp.hostsOnline('SA'), 0, 'its node is no host the matchmaker waits for: the region backs off');
+  assert.equal(w.cp.regionView('SA').unplaced, 0, 'no unmet demand: it cannot raise its own factor');
+  held.add('op1');
+  assert.equal((await w.place())?.nodeId, juan.nodeId, 'back once it holds them');
+  assert.equal(w.cp.hostsOnline('SA'), 1);
+  // A project node: never asked about the rules.
+  const project = await world([{ op: 'project' }], { ...COMMUNITY_POLICY, ranked: false, rulesHeld: () => false });
+  assert.ok(await project.place());
+  assert.equal(project.cp.hostsOnline('SA'), 1);
+  // Without the policy (the reference server), nobody is asked.
+  const plain = await world([{ status: 'active' }]);
+  assert.ok(await plain.place());
+});
+
 /** A match waiting for its verification, as the queue holds it (only what pump and the brake read). */
 const queued = (id, over = {}) => ({ assign: { matchId: id.padStart(64, '0'), region: 'SA', ranked: false }, nodeId: 'x', state: 'verifying', build: BUILD, queuedAt: 0, verifyRate: 1, inFlight: false, lastTry: 0, ...over });
 

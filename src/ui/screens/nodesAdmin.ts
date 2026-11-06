@@ -499,6 +499,8 @@ export function nodesAdminScreen(menu: Menu): Screen {
         'dl.mn-prof-node-facts',
         null,
         ...fact(t('nodesAdmin.op.account'), h('code.mn-na-raw', null, op.operatorId)),
+        // The rules for hosts it holds (Terms 12.2): without those in force its servers get no new match.
+        ...fact(t('nodesAdmin.op.rules'), op.rules.accepted === null ? t('nodesAdmin.op.rulesNone') : t(op.rules.held ? 'nodesAdmin.op.rulesHeld' : 'nodesAdmin.op.rulesOld', { version: op.rules.accepted })),
         ...(op.reason !== null ? fact(t('nodesAdmin.detail.reason'), h('span', null, op.reason), op.actor !== null ? h('span', null, ` · ${op.actor}`) : '') : []),
         ...fact(t('nodesAdmin.op.nodes'), op.nodes.length > 0 ? op.nodes.map((n) => `${n.name} (${regionLabel(n.region)}, ${t(STATE_KEY[n.status], { count: 0, total: 20 })}, ${n.capacityEffective}/${n.capacity}, ${n.refused}/${n.assigned + n.refused})`).join(' · ') : '—'),
         ...fact(t('nodesAdmin.op.refusals'), pct(op.refusalRate)),
@@ -1694,6 +1696,7 @@ function sampleOperators(o: Overview): OperatorView[] {
     actor: null,
     at: null,
     showPublic: false,
+    rules: { accepted: '2026-11-13', held: true },
     nodes: [],
     refusalRate: 0,
     tokens: { today: 0, unused: 0 },
@@ -1712,7 +1715,7 @@ function sampleOperators(o: Overview): OperatorView[] {
       points: { today: 212, cap: 300, d30: 3120, matches30d: 64, earned: 4100, concentration: 0.42 },
       reports: { days: 7, count: 3, accounts: 2, byReason: { unresponsive: 0, lag: 2, disconnected: 1, other: 0 }, byNode: [{ nodeId: ana.nodeId, reports: 3, accounts: 2 }], recent: [{ at: now - 600_000, reporterId: 'b2b2b2b2b2b2b2b2', matchId: 'a'.repeat(64), nodeId: ana.nodeId, reason: 'lag', ping: 182, corrections: 40 }] },
     }),
-    base('1b2c3d4e5f607182', 'Constantinopla_9', { status: 'blocked', reason: 'a modified node program', actor: 'Turbogol (f0e1d2c3b4a59687)', at: now - 86_400_000 }),
+    base('1b2c3d4e5f607182', 'Constantinopla_9', { status: 'blocked', reason: 'a modified node program', actor: 'Turbogol (f0e1d2c3b4a59687)', at: now - 86_400_000, rules: { accepted: '2026-11-05', held: false } }),
   ];
 }
 

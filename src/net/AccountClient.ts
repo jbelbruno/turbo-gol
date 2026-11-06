@@ -1065,6 +1065,17 @@ export class AccountClient {
     await this.ownCall('/nodes/tokens/revoke', { id });
   }
 
+  /**
+   * POST /nodes/mine/accept { acceptHost, adult }: the rules for hosts of a new terms version accepted
+   * again and 18 or older declared again (Terms 12.2), without a code; never from a TV, at level 2
+   * within 15 minutes as a code (403 reauth_required). `already`: it held them (nothing written). The
+   * refusals reject with their code (409 first_code: never a first acceptance, that one goes with a code).
+   */
+  async nodesAcceptAgain(adult: boolean): Promise<{ hostTerms: string | null; already: boolean }> {
+    const r = (await this.ownCall('/nodes/mine/accept', { acceptHost: true, adult })) as { hostTerms?: unknown; already?: unknown } | null;
+    return { hostTerms: typeof r?.hostTerms === 'string' ? r.hostTerms : null, already: r?.already === true };
+  }
+
   /** POST /nodes/mine/public { show }: the operator's name in the public list (its consent, A14), or "Anfitrión <n>"; resolves the server's state after it. */
   async nodesShowPublic(show: boolean): Promise<boolean> {
     return ((await this.ownCall('/nodes/mine/public', { show })) as { showPublic?: unknown } | null)?.showPublic === true;

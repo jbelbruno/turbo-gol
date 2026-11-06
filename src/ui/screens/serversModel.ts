@@ -105,10 +105,13 @@ export function closedKeyOf(stage: unknown): 'servers.closed' | 'servers.closedN
   return stage === 'canary' ? 'servers.closed' : 'servers.closedNow';
 }
 
-/** What a host may still lack (GET /nodes/mine `requirements.missing`, the token's refusals in their order). */
-export type Requirement = 'operator_blocked' | 'email_required' | 'deletion_pending' | 'account_too_new' | 'terms_required';
+/**
+ * What a host may still lack (GET /nodes/mine `requirements.missing`, the token's refusals in their
+ * order): last, the rules for hosts of a new terms version to accept again (Terms 12.2).
+ */
+export type Requirement = 'operator_blocked' | 'email_required' | 'deletion_pending' | 'account_too_new' | 'terms_required' | 'reaccept_required';
 
-const REQUIREMENTS: readonly Requirement[] = ['operator_blocked', 'email_required', 'deletion_pending', 'account_too_new', 'terms_required'];
+const REQUIREMENTS: readonly Requirement[] = ['operator_blocked', 'email_required', 'deletion_pending', 'account_too_new', 'terms_required', 'reaccept_required'];
 
 /** The requirements the account lacks, the ones this client knows, in the server's order. */
 export function requirementsOf(mine: MineAnswer | null): Requirement[] {
@@ -119,10 +122,38 @@ export function requirementsOf(mine: MineAnswer | null): Requirement[] {
 /**
  * The acceptance step shows (the rules for hosts of the terms in force and the 18-or-older
  * declaration, above PEDIR CÓDIGO): the account holds no acceptance for that version, or the server
- * could not say (null: the request then carries it, and the server writes it once).
+ * could not say (null: the request then carries it, and the server writes it once). Never for a host
+ * that accepts them again (`again`): that one is VOLVER A ACEPTAR's, before any code (acceptAgainPending).
  */
 export function acceptanceNeeded(mine: MineAnswer | null): boolean {
-  return mine?.terms?.accepted !== true;
+  return mine?.terms?.accepted !== true && mine?.terms?.again !== true;
+}
+
+/**
+ * The banner of a new terms version (Terms 12.2, last paragraph): the host accepted the rules of an
+ * earlier one (or has a server without any) and accepts them again in this screen, with the first
+ * code's acceptance and VOLVER A ACEPTAR (POST /nodes/mine/accept); until then its servers may get no
+ * new match and it asks for no code. Not for a blocked host: its servers are out of the network anyway.
+ */
+export function acceptAgainPending(mine: MineAnswer | null): boolean {
+  return mine?.terms?.again === true && !requirementsOf(mine).includes('operator_blocked');
+}
+
+/**
+ * The words of that banner, its sheet and its requirement line. A host that accepted the rules of an
+ * earlier version: the Terms have a new one, VOLVER A ACEPTAR. One with servers that never accepted
+ * any (`acceptedVersion` null: an account that left the project's): nothing changed version for it,
+ * so it is only told to accept them, ACEPTAR.
+ */
+export function acceptAgainWords(mine: MineAnswer | null): {
+  title: 'servers.againTitle' | 'servers.rulesTitle';
+  note: 'servers.againNote' | 'servers.rulesNote';
+  req: 'servers.req.reaccept_required' | 'servers.rulesReq';
+  button: 'servers.againBtn' | 'servers.rulesBtn';
+} {
+  return mine?.terms?.acceptedVersion === null
+    ? { title: 'servers.rulesTitle', note: 'servers.rulesNote', req: 'servers.rulesReq', button: 'servers.rulesBtn' }
+    : { title: 'servers.againTitle', note: 'servers.againNote', req: 'servers.req.reaccept_required', button: 'servers.againBtn' };
 }
 
 /**
