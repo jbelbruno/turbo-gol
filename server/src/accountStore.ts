@@ -91,7 +91,8 @@
  *   deleted_nodes    purged ids whose nodes the NodeRegistryDO has not banned yet (the alarm asks again)
  *   consent_proofs   what the purge keeps of the consent log: each row's kind, version, granted or
  *                    withdrawn and time, by the tombstoned id (no source, address or name), for
- *                    CONSENT_PROOF_KEEP_MS from the purge, so a past consent or withdrawal can be shown
+ *                    CONSENT_PROOF_KEEP_MS from the purge (a 'host' row, HOST_CONSENT_PROOF_KEEP_MS),
+ *                    so a past consent or withdrawal can be shown
  *
  * The news consent (sign-in PR 13, the design's §2.11 and §3.14; no news is sent yet): the consent
  * log only grows and its newest news row is the state. The switch at sign-up and at the confirm
@@ -268,6 +269,13 @@ export const DELETION_CONSENT_SOURCE: ConsentSource = 'deletion';
  * A placeholder until the lawyer answers.
  */
 export const CONSENT_PROOF_KEEP_MS = 2 * 365 * DAY_MS;
+/**
+ * The proof of the rules for hosts (consents kind 'host': Terms section 12 and Annex B, with the
+ * 18-or-older declaration) stays 3 years from the purge (Privacy §6, the "Prueba mínima" row, §11
+ * and §12.3 of version (b)): it shows the host took on Annex B, the processor's clauses, for as
+ * long as a player's claim for damages may come (3 years).
+ */
+export const HOST_CONSENT_PROOF_KEEP_MS = 3 * 365 * DAY_MS;
 
 /** A sanction mark's kind (sanction_marks.key, §1.3): 'e' an email canon (its own, its hint's, a held one), 'g' a Google sub, 'd' a Discord id. */
 export type MarkKind = 'e' | 'g' | 'd';
@@ -940,10 +948,11 @@ export class AccountStore {
           marks++;
         }
       }
-      // The proof of what it consented to and withdrew outlives it: no source, address or name, only the tombstoned id.
+      // The proof of what it consented to and withdrew outlives it: no source, address or name, only
+      // the tombstoned id; the rules for hosts' a year longer than the rest.
       this.sql.exec(
-        'INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, ? FROM consents WHERE user_id = ? ORDER BY id',
-        now + CONSENT_PROOF_KEEP_MS, userId,
+        "INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, CASE WHEN kind = 'host' THEN ? ELSE ? END FROM consents WHERE user_id = ? ORDER BY id",
+        now + HOST_CONSENT_PROOF_KEEP_MS, now + CONSENT_PROOF_KEEP_MS, userId,
       );
       for (const table of PURGE_TABLES) this.sql.exec(`DELETE FROM ${table} WHERE user_id = ?`, userId);
       // Its mailed proofs: its own rows, and the sign-up rows it was made from (used_by).
@@ -2401,6 +2410,20 @@ export class AccountStore {
       return u !== null && this.replayNameHidden(str(u.id));
     });
     return { ids: hidIds, names: hidNames };
+  }
+
+  /**
+   * The usernames of the accounts among `ids` as they are now (POST /usernames: the public list of
+   * community servers names a host that chose it by its name of today, never one a record kept,
+   * which another account may hold after a rename). A purged or unknown id is left out.
+   */
+  usernames(ids: readonly string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of new Set(ids)) {
+      const u = this.userById(id);
+      if (u !== null) out[id] = str(u.username);
+    }
+    return out;
   }
 
   // ---- cars and the hosts' shop -------------------------------------------------------------------

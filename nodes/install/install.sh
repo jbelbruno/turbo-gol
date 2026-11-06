@@ -15,8 +15,13 @@
 #   --public-host <name>: a DNS name for this machine, required to register a wss host. Before the
 #                    token is spent, its A record must lead to this machine (the public IPv4 the
 #                    control plane sees, or one on its network interfaces), and so must its AAAA
-#                    record if it has one; --allow-proxied also accepts Cloudflare's proxy in front
-#                    of it (SSL mode "Full (strict)").
+#                    record if it has one.
+#   --allow-proxied: also accepts Cloudflare's proxy in front of the name (SSL mode "Full
+#                    (strict)"), for the project's own servers only: a name under turbo-gol.com. A
+#                    community server is reached by its players directly, never through a proxy
+#                    that would see their connections (Terms, Annex B, point 6), so for any other
+#                    name the installer stops before it installs anything (the control plane
+#                    refuses such a registration too).
 #   --allow-ip:      registers on an IP address given in --public-host, which must be one of this
 #                    machine's: only for a development control plane. The project's registers a wss
 #                    host only under a DNS name (its reachability check cannot fetch an IP address),
@@ -49,17 +54,25 @@
 #                    address: anywhere else, register again.
 #
 # What it does (and nothing else):
-#   1. Node.js 26 (or the --node-version one, NodeSource, held for a major and minor or an exact
-#      version) and Caddy (official repo) if missing
+#   1. the packages curl, ca-certificates, gnupg and openssl; Node.js 26 (or the --node-version one,
+#      NodeSource, held for a major and minor or an exact version) and Caddy (official repo) if missing
 #   2. user 'turbogol', /opt/turbogol-node (launcher), /var/lib/turbogol-node (keys, releases, state)
 #   3. downloads the launcher and checks its Ed25519 signature against the release key below
 #   4. Caddy: HTTPS on this machine's name (or the IP address an identity was registered on),
 #      reverse proxy to the node on 127.0.0.1:7350, with a Let's Encrypt certificate it renews by
-#      itself (90 days for a name; an IP gets the 6-day profile). The config and ports 80/443 are
-#      checked before the token is spent
+#      itself (90 days for a name; an IP gets the 6-day profile). Its log lines (an error, such as a
+#      502 while the node restarts) keep no player's IP address, port or request headers: the
+#      player's ticket, with their name and account id, travels in one. No access log is turned
+#      on. The config and ports 80/443 are checked before the token is spent
 #   5. registers the machine with the one-time token (the node key is generated here and stays
 #      here), or installs the --restore identity, or keeps the one it has
-#   6. systemd service 'turbogol-node' (the launcher: auto-update, drain, rollback), firewall 80/443
+#   6. systemd service 'turbogol-node' (the launcher: auto-update, drain, rollback), and ports 80/443
+#      opened in ufw when ufw is active
+#   7. the system journal (journald) kept 7 days at most, as the rules for hosts ask of any log with
+#      a player's IP address (Terms 12.3.2): /etc/systemd/journald.conf.d/60-turbogol-retention.conf
+#      (its retention only, never a size), and systemd-journald restarted when that file changed. A
+#      drop-in named after it (zz-local.conf, say) wins over it, if the law makes you keep more. Other
+#      logs (rsyslog's /var/log/syslog, kern.log, ufw.log on Ubuntu) are left as they are: check them
 #
 # Stop:      systemctl stop turbogol-node   the node takes no new matches and stops when the running
 #            ones end (up to 30 min; nobody is cut). To cut them, while it waits: systemctl kill
@@ -69,7 +82,9 @@
 # Uninstall: systemctl disable --now turbogol-node (the same wait); rm -rf /opt/turbogol-node
 #            /var/lib/turbogol-node /etc/systemd/system/turbogol-node.service; userdel turbogol;
 #            apt-get purge caddy (or keep it and write your own /etc/caddy/Caddyfile); apt-mark
-#            unhold nodejs if a --node-version held it
+#            unhold nodejs if a --node-version held it. Keep
+#            /etc/systemd/journald.conf.d/60-turbogol-retention.conf 7 days after the last match, then
+#            remove it if you like (systemctl restart systemd-journald)
 set -euo pipefail
 
 # Filled in by scripts/build-node.mjs from the release key (never fetched from the network).
@@ -92,6 +107,12 @@ NODE_MIN=26
 # The operator guide a run ends with: the page the game's "host a server" links open
 # (src/ui/screens/garage.ts, guideUrl).
 GUIDE=https://github.com/DonJaimeHash/turbo-gol/blob/main/nodes/README.md
+# The project's domain (the Worker's RESERVED_HOST_DOMAIN, server/src/hostPolicy.ts): the control
+# plane never registers a community server under it, at its token, its registration or any hello,
+# so a name under it is one of the project's own servers. --allow-proxied is for those alone.
+PROJECT_DOMAIN=turbo-gol.com
+# journald's drop-in for the system journal's retention (journald_conf).
+JOURNALD_CONF=/etc/systemd/journald.conf.d/60-turbogol-retention.conf
 
 die() { echo "turbogol-node install: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
@@ -182,6 +203,14 @@ is_cloudflare_v4() { in_v4_nets "$1" "$CLOUDFLARE_V4"; }
 is_cloudflare() {
   if is_ipv4 "$1"; then is_cloudflare_v4 "$1"; else is_ipv6 "$1" && in_v6_nets "$1" "$CLOUDFLARE_V6"; fi
 }
+# 0 when the name $1 is PROJECT_DOMAIN or under it (any case, a final dot or not): a project server's.
+project_name() {
+  local h=${1,,}
+  h=${h%.}
+  [ "$h" = "$PROJECT_DOMAIN" ] || [[ "$h" == *."$PROJECT_DOMAIN" ]]
+}
+# Why --allow-proxied is refused on any other name (one line, for die).
+PROXY_REFUSED="--allow-proxied is only for the project's own servers (a name under $PROJECT_DOMAIN): a community server is reached by its players directly, never through a proxy that sees their connections (Terms, Annex B, point 6). Set the DNS record to 'DNS only' and leave --allow-proxied out"
 # Not reachable from the internet: a DNS record must not lead to these even when this machine has one.
 PRIVATE_V4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16"
 
@@ -216,7 +245,7 @@ dns_leads_here() {
     return 1
   fi
   if [ -n "$proxied" ] && [ "$3" != 1 ]; then
-    echo "it resolves to Cloudflare's proxy (${proxied# }), not to this machine ($here): set the record to 'DNS only', or pass --allow-proxied if the proxy is meant to stay (SSL mode 'Full (strict)')"
+    echo "it resolves to Cloudflare's proxy (${proxied# }), not to this machine ($here): set the record to 'DNS only' (a project server under $PROJECT_DOMAIN may keep the proxy with --allow-proxied, SSL mode 'Full (strict)')"
     return 1
   fi
 }
@@ -269,6 +298,23 @@ caddyfile() {
 	servers {
 		protocols h1 h2
 	}
+	# The default logger, which every line goes through, the errors too (a 502 while the node
+	# restarts, a WebSocket cut): no player's IP address, port or request headers. The player's
+	# ticket, with their name and account id, travels in a header (Sec-WebSocket-Protocol); the
+	# URL carries none. No access log is turned on. Written for Caddy 2.7 to 2.10 (the installer
+	# asks for 2.7 or newer): the filter encoder with wrap and a fields block is Caddy 2.6's
+	# syntax, which the later versions still read.
+	log {
+		format filter {
+			wrap console
+			fields {
+				request>remote_ip delete
+				request>remote_port delete
+				request>client_ip delete
+				request>headers delete
+			}
+		}
+	}
 EOF
   if is_ip "$1"; then
     cat <<EOF
@@ -289,6 +335,24 @@ $site {
 		stream_close_delay 30m
 	}
 }
+EOF
+}
+
+# The journald drop-in (JOURNALD_CONF): the system journal, where Caddy, the firewall and the node
+# write, kept 7 days at most (Terms 12.3.2 and Annex B, point 9: any log with a player's IP
+# address). journald deletes an archived file once its first line is older than MaxRetentionSec,
+# when it next rotates; with a file a day (MaxFileSec), it rotates every day, so no line is kept
+# more than 6 + 1 days. A file of its own name, with no size key: the size limits stay the
+# machine's (another drop-in's SystemMaxUse, say), and a drop-in named after it wins over it.
+journald_conf() {
+  cat <<'EOF'
+# Generated by the Turbogol node installer, which rewrites it on every run.
+# The system journal kept 7 days at most: the rules for hosts (Terms 12.3.2) ask it of any log
+# with a player's IP address. A file a day, each deleted once its first line is 6 days old. To
+# keep more (if the law makes you), set MaxRetentionSec in a drop-in named after this one.
+[Journal]
+MaxRetentionSec=6day
+MaxFileSec=1day
 EOF
 }
 
@@ -389,6 +453,9 @@ PUBLIC_HOST=${PUBLIC_HOST#\[}; PUBLIC_HOST=${PUBLIC_HOST%\]}
 HOST_FORM="a DNS name or an IP address"
 if [ "$REGISTER" = 1 ]; then HOST_FORM="a DNS name (an IP address only with --allow-ip)"; fi
 [ -z "$PUBLIC_HOST" ] || is_ip "$PUBLIC_HOST" || is_dns_name "$PUBLIC_HOST" || die "--public-host: $HOST_FORM, with no port or scheme"
+# Before anything is installed: Cloudflare's proxy in front is for the project's servers alone. A
+# re-run or a --restore is checked again on the identity's own name, below.
+if [ "$ALLOW_PROXIED" = 1 ] && [ -n "$PUBLIC_HOST" ] && ! project_name "$PUBLIC_HOST"; then die "$PROXY_REFUSED"; fi
 # A new wss host registers under a DNS name: the project's control plane checks from a Worker that
 # it reaches the node there, and a Worker cannot fetch an IP address, so it refuses one
 # (ip_not_supported, control-plane/registry.ts). This stops before anything is installed. A re-run
@@ -512,6 +579,8 @@ if [ "$WSS" = 1 ]; then
   # never this machine's IPv4 by default, which the control plane would refuse.
   [ -n "$PUBLIC_HOST" ] || die "${IDFILE:-node.json} names no public address for its wss transport: pass --public-host <name>"
   is_ip "$PUBLIC_HOST" || is_dns_name "$PUBLIC_HOST" || die "the public address $PUBLIC_HOST is not an IP address or a DNS name"
+  # The name a re-run or a --restore keeps (node.json's): a community identity is never under the project's domain.
+  if [ "$ALLOW_PROXIED" = 1 ] && ! project_name "$PUBLIC_HOST"; then die "$PROXY_REFUSED"; fi
   if is_ip "$PUBLIC_HOST"; then
     # An address must be this machine's. A restored identity, or a re-run after the provider
     # changed the address, would otherwise keep sending players (and Let's Encrypt) to the old one.
@@ -579,6 +648,16 @@ KEY_NEW=$(mktemp)
 printf '%s' "$RELEASE_KEY_B64URL" > "$KEY_NEW"
 if put_file "$KEY_NEW" "$DATA/release-key.pub" 644 turbogol; then CHANGED=1; fi
 printf '%s\n' "$RELEASE_KEY_PEM" > "$APP/release-key.pem"
+
+say "system journal: kept 7 days at most"
+mkdir -p "${JOURNALD_CONF%/*}"
+NEW_JOURNALD=$(mktemp)
+journald_conf > "$NEW_JOURNALD"
+if put_file "$NEW_JOURNALD" "$JOURNALD_CONF" 644; then
+  # journald reads its configuration when it starts. A restart keeps the services' log streams
+  # (systemd keeps them in its fd store), the node's and Caddy's.
+  systemctl restart systemd-journald || die "systemd-journald did not restart with $JOURNALD_CONF: journalctl -u systemd-journald"
+fi
 
 say "launcher (signature check)"
 curl -fsSL "$CONTROL/nodes/releases/launcher.mjs" -o "$APP/launcher.mjs.new"

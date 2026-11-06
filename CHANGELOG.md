@@ -874,6 +874,14 @@ All notable changes to Turbogol are documented here. The format follows
 - Node releases are signed in a job that installs nothing and uploaded from a separate `releases-r2`
   environment that re-checks them and can be re-run; the deploy gate also checks the channel's
   minimum release and that releases come from main.
+- Community nodes, before the opening: the node installer's Caddy keeps no player's IP address, port
+  or request headers in its log (the ticket, with the player's name and account id, travels in one),
+  and the machine's system journal is kept 7 days at most (a journald drop-in). Cloudflare's proxy may sit
+  in front of the project's own servers only: the installer takes `--allow-proxied` for a name under
+  turbo-gol.com alone, and the control plane refuses a community server whose name resolves to the
+  proxy. When a host deletes their account, their servers' records keep neither their name nor
+  their account id, the public list leaves out a blocked host's servers and names a host only by
+  their account's name as it is now, and MIS SERVIDORES shows the automatic measures on each server.
 
 ## [0.1.0] - 2026-10-15
 

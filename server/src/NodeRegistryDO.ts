@@ -7,7 +7,9 @@
  *   POST /nodes/register         RegisterRequest (at most 4 KB read), x-client-ip, x-client-continent -> RegisterAnswer
  *                                (403 <code> when refused); 5 per address per hour, an IPv6 address counted by its /64.
  *                                A community operator's node under the registry's CommunityRules (wss on 443 behind a
- *                                DNS name, in its token's continent, a name of its own), never a blocked operator's
+ *                                DNS name, in its token's continent, a name of its own, never one that resolves to
+ *                                Cloudflare's proxy: 403 behind_proxy, 503 dns_unavailable when its records could not be
+ *                                read, the token unspent either way), never a blocked operator's
  *   GET  /nodes/connect          WebSocket upgrade: a node's control link (Hibernation API), x-client-ip; the
  *                                sockets still to log in are capped per address, prefix and pool (PENDING_*)
  *   PUT  /nodes/replays/<id>     the hosting node's replay upload, signed (x-node-id / -ts / -sig, x-replay-sha256): the
@@ -161,8 +163,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { COMMUNITY_POLICY, ControlPlane, MAX_UNAUTHENTICATED, NodeRefused } from '../../nodes/control-plane/controlPlane';
 import type { NodeLink, PlaceRequest, Session } from '../../nodes/control-plane/controlPlane';
 import { Ledger } from '../../nodes/control-plane/ledger';
-import { PUBLIC_HOST_LABEL, publicStatus } from '../../nodes/control-plane/publicList';
-import { MAX_CAPACITY, Registry, TOKEN_TTL_MS, hostOf, isRetired, tokenState, trustedNodeCap, validPublicHost } from '../../nodes/control-plane/registry';
+import { PUBLIC_HOST_LABEL, publicNamesWanted, publicStatus } from '../../nodes/control-plane/publicList';
+import { DELETED_OPERATOR_PREFIX, MAX_CAPACITY, Registry, TOKEN_TTL_MS, hostOf, isDeletedOperator, isRetired, tokenState, trustedNodeCap, validPublicHost } from '../../nodes/control-plane/registry';
 import type { NodeEventKind, NodeRecord, RegistryOptions } from '../../nodes/control-plane/registry';
 import { compareVersions } from '../../nodes/shared/controlProtocol';
 import type { HeartbeatData, NodeRole, NodeStatus, RegisterAnswer, RegisterRequest, ReleaseChannel } from '../../nodes/shared/controlProtocol';
@@ -213,6 +215,8 @@ import { DELIVERY_TIMEOUT_MS, deliverCall } from './nodeOutcome';
 import { HISTORY_DAYS, NodeStore, REPORT_REASONS } from './nodeStore';
 import type { AlertRow, HistoryCursor, HistoryRow, OperatorRow, ReplayCursor, ReplayRow, ReportReason } from './nodeStore';
 import type { ServerMark } from '../../src/net/queueWait';
+import { behindCloudflare, dohAnswers } from './proxyCheck';
+import type { DnsAnswers } from './proxyCheck';
 import { publicItem } from './replayIndex';
 import type { ReplaySeat } from './replayIndex';
 import { GUEST_NAME_RE } from '../../src/net/guestName';
@@ -265,6 +269,14 @@ const REPLAY_CURSOR = /^(\d{1,10})\.([0-9a-f]{64})$/;
  */
 export const REPLAY_NAMES_TTL_MS = 60_000;
 const REPLAY_NAMES_MAX = 20_000;
+/**
+ * How long the public list keeps an account's name as AccountsDO said it (publicNamesOf): a rename
+ * reaches the list this much later at most, plus the Worker's own 10 s (nodeRoutes.ts status). As
+ * short as that cache, so an old name, which someone else may take, is never shown much longer.
+ */
+export const PUBLIC_NAMES_TTL_MS = 10_000;
+/** How long the public list waits for those names: past it, the list goes out without them (its hosts by their number). */
+const PUBLIC_NAMES_WAIT_MS = 2_000;
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 /** What a maintainer may set (pending is the control plane's: a node not proven reachable yet). */
 const ADMIN_STATUSES: readonly NodeStatus[] = ['probation', 'active', 'suspended', 'banned'];
@@ -494,6 +506,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
   healthzTimeoutMs = HEALTHZ_TIMEOUT_MS;
   /** What the object fetches the ALERT webhook and the nodes' /healthz with (tests hand in a fake). */
   fetchFn: FetchFn = (url, init) => fetch(url, init);
+  /** How the object reads a community server's DNS records at its registration (proxyCheck.ts: DNS over HTTPS through fetchFn; tests hand in a fake). */
+  dnsFn: DnsAnswers = dohAnswers((url, init) => this.fetchFn(url, init));
   /** How an ALERT post waits for its turn on the webhook (nodeAlerts.ts; tests hand in one that does not wait). */
   alertSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   /** The control key pair matches (controlKeysMatch): tickets the nodes can check. */
@@ -564,6 +578,10 @@ export class NodeRegistryDO extends DurableObject<Env> {
   private readonly hostAccounts = new Map<string, { at: number; account: HostAccount }>();
   /** The community accounts whose token request is under way (token): one at a time each, so two never pass the caps together. */
   private readonly tokenAsks = new Set<string>();
+  /** The public list's account names (publicNamesOf: AccountsDO /usernames), PUBLIC_NAMES_TTL_MS each; null: no such account any more. */
+  private readonly publicNames = new Map<string, { name: string | null; at: number }>();
+  /** The /usernames ask under way, if any (one at a time). */
+  private publicNamesAsk: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -787,8 +805,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
           maxTrustedNodes: trustedNodeCap(env.NODE_TRUSTED_MAX_NODES),
           // A Worker's fetch cannot probe an IP address; a node on this machine under wrangler dev may use one.
           refuseIpUrls: !this.loopbackOk,
-          // A community node (Prompt 2, A5, A6, A13): a VPS by wss on 443, never under the project's domain, in its token's continent.
-          community: { reservedDomains: [RESERVED_HOST_DOMAIN], regionCheck: true },
+          // A community node (Prompt 2, A5, A6, A13): a VPS by wss on 443, never under the project's domain, in its token's continent,
+          // and reached directly, never through Cloudflare's proxy (proxyCheck.ts: Annex B, point 6).
+          community: { reservedDomains: [RESERVED_HOST_DOMAIN], regionCheck: true, behindProxy: (host) => behindCloudflare(host, this.dnsFn) },
           operatorBlocked: (id) => this.blocked(id),
         },
         (n) => {
@@ -1135,7 +1154,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       const replay = REPLAY_ROUTE.exec(path);
       if (replay && method === 'PUT') return await this.putReplay(request, cp, replay[1]);
       if (replay && method === 'GET') return await this.getReplay(request, cp, replay[1]);
-      if (method === 'GET' && path === '/nodes/status') return this.status(cp);
+      if (method === 'GET' && path === '/nodes/status') return await this.status(cp);
       if (method === 'POST' && path === '/nodes/tokens') return await this.token(request, cp, env);
       if (method === 'GET' && path === '/nodes/mine') return await this.mine(request, cp);
       if (method === 'POST' && path === '/nodes/mine/public') return await this.minePublic(request, cp);
@@ -1144,7 +1163,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (method === 'POST' && path === '/nodes/report') return await this.report(request, cp);
       // The account counts (nodeRoutes.ts): who operates a node, never an address; the ids go on to AccountsDO only.
       // A retired node operates nothing: an account whose nodes are all retired is no operator.
-      if (method === 'GET' && path === OPERATORS_ROUTE) return json({ operators: [...new Set(cp.registry.list().filter((n) => !isRetired(n)).map((n) => n.operatorId))] }, 200, { 'cache-control': 'no-store' });
+      if (method === 'GET' && path === OPERATORS_ROUTE) return json({ operators: [...new Set(cp.registry.list().filter((n) => !isRetired(n) && !isDeletedOperator(n.operatorId)).map((n) => n.operatorId))] }, 200, { 'cache-control': 'no-store' });
       if (method === 'POST' && path === OPERATOR_DELETED_ROUTE) return await this.operatorDeleted(request, cp);
       if (method === 'POST' && path === READ_AUDIT_ROUTE) return await this.workerRead(request, cp);
       if (path.startsWith('/nodes/admin/')) return await this.admin(request, cp, path.slice('/nodes/admin/'.length));
@@ -1306,7 +1325,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
     // community node's must be its token's region (A6), a project node's is kept for the panel.
     const continent = request.headers.get('x-client-continent');
     const r = await cp.registry.register(body, Date.now(), continent !== null ? { continent: continent.slice(0, 8) } : {});
-    if (!r.ok) return error(403, r.code, r.message);
+    // A DNS lookup that failed is ours to retry (the token stays good); every other refusal is the request's.
+    if (!r.ok) return error(r.code === 'dns_unavailable' ? 503 : 403, r.code, r.message);
     const n = r.node;
     const line = `registered node ${n.name} (${n.nodeId}) for ${n.operatorName}, roles ${n.roles.join('+')}, transports ${n.transports.join('+') || '-'}${n.trusted ? ', trusted' : ''}`;
     // Each community registration is the one community line the team's channel gets (A10): who, where, which host.
@@ -1489,12 +1509,60 @@ export class NodeRegistryDO extends DurableObject<Env> {
 
   /**
    * The public list (publicList.ts, as the reference server builds it): the nodes in service only,
-   * and no address, node id or operator id; an operator outside the project by its name only when
-   * it chose to (operators.show_public, A14). Always a 200 with { build, nodes, hosts } while the
-   * object is up, an empty list too: the deploy's check asks for it (scripts/deploy-check.mjs).
+   * never a blocked operator's (Terms 12.4.1), and no address, node id or operator id; an operator
+   * outside the project by its name only when it chose to (operators.show_public, A14), and by its
+   * account's name as it is now (publicNamesOf), never the one its records kept: renamed, its old
+   * name may be someone else's. Always a 200 with { build, nodes, hosts } while the object is up, an
+   * empty list too: the deploy's check asks for it (scripts/deploy-check.mjs).
    */
-  private status(cp: ControlPlane): Response {
-    return json(publicStatus(cp, Date.now(), (id) => this.operators.get(id)?.showPublic === true));
+  private async status(cp: ControlPlane): Promise<Response> {
+    const now = Date.now();
+    const o = { shows: (id: string) => this.operators.get(id)?.showPublic === true, blocked: (id: string) => this.blocked(id) };
+    await this.publicNamesOf(cp, publicNamesWanted(cp, now, o), now);
+    const current = (id: string): string | null | undefined => {
+      const c = this.publicNames.get(id);
+      return c && now - c.at <= PUBLIC_NAMES_TTL_MS ? c.name : undefined;
+    };
+    return json(publicStatus(cp, now, { ...o, current }));
+  }
+
+  /**
+   * The account names of `ids` as they are now (AccountsDO /usernames, in batches of what it takes),
+   * each kept PUBLIC_NAMES_TTL_MS, one ask at a time (a list asked meanwhile waits for it). A project
+   * account's records take its name as it is now (Registry.renameOperator), so the name they keep is
+   * the last one AccountsDO said, never one the account left. When AccountsDO does not answer, they
+   * stay unknown: the operators that chose to show their name go by their number, and the project by
+   * that name its records kept.
+   */
+  private publicNamesOf(cp: ControlPlane, ids: readonly string[], now: number): Promise<void> {
+    const ask = ids.filter((id) => {
+      const c = this.publicNames.get(id);
+      return !c || now - c.at > PUBLIC_NAMES_TTL_MS;
+    });
+    if (ask.length === 0) return Promise.resolve();
+    this.publicNamesAsk ??= (async () => {
+      try {
+        for (let i = 0; i < ask.length; i += REPLAY_HIDDEN_MAX) {
+          const part = ask.slice(i, i + REPLAY_HIDDEN_MAX);
+          const res = await withTimeout(accountsCall(this.env, '/usernames', { ids: part }), Math.min(this.timeoutMs, PUBLIC_NAMES_WAIT_MS));
+          if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 120)}`);
+          const got = (await res.json()) as { names?: unknown };
+          const names = (typeof got.names === 'object' && got.names !== null ? got.names : {}) as Record<string, unknown>;
+          for (const id of part) {
+            const name = names[id];
+            this.publicNames.delete(id);
+            if (this.publicNames.size >= HOST_ACCOUNTS_MAX) this.publicNames.delete(this.publicNames.keys().next().value as string);
+            this.publicNames.set(id, { name: typeof name === 'string' ? name : null, at: now });
+            if (typeof name === 'string' && name.trim().length > 0 && cp.registry.isTrusted(id)) cp.registry.renameOperator(id, name);
+          }
+        }
+      } catch (e) {
+        this.log(`the public list's names not read from AccountsDO, its hosts by their number: ${String(e)}`);
+      } finally {
+        this.publicNamesAsk = null;
+      }
+    })();
+    return this.publicNamesAsk;
   }
 
   /**
@@ -1706,7 +1774,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
         nodes: cp.registry
           .byOperator(id)
           .filter((n) => !isRetired(n))
-          .map((n) => mineNodeView(cp, n)),
+          .map((n) => mineNodeView(cp, n, now)),
         // The ledger's view (30 days, all time): the wallet to spend it is the account's (GET /api/me/shop).
         rewards: { ...cp.ledger.summary(id, now), pointsToday: trusted ? 0 : cp.ledger.pointsToday(id, now), capToday: trusted ? null : cp.ledger.capPerDay() },
         hosting: open ? { open: true } : { open: false, reason: 'hosting_closed' },
@@ -1884,9 +1952,10 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const n = nodeId === null ? undefined : cp.registry.node(nodeId);
     if (!n) return error(404, 'no_match', 'no match of yours has that id');
     if (n.trusted) return error(409, 'project_server', 'a project server is not reported: only a community server is');
-    // Its host's account is purged: node_forgotten keeps the id HISTORY_DAYS from the purge, and the
-    // purge's ban reason stays on a server that could still settle a match after it (one held then).
-    if (n.statusReason === PURGED_BAN || store.forgotten([n.operatorId]).has(n.operatorId)) return error(409, 'host_deleted', 'the host of that server deleted its account: its servers are out of the network');
+    // Its host's account is purged: its records are under the purge's opaque key (one held then
+    // settles there too), and the purge's ban reason stays on a server that could still settle a
+    // match after it; node_forgotten keeps the id HISTORY_DAYS from the purge.
+    if (isDeletedOperator(n.operatorId) || n.statusReason === PURGED_BAN || store.forgotten([n.operatorId]).has(n.operatorId)) return error(409, 'host_deleted', 'the host of that server deleted its account: its servers are out of the network');
     const now = Date.now();
     if (store.reportsBy(id, now) >= REPORTS_PER_DAY) return error(429, 'too_many_reports', `at most ${REPORTS_PER_DAY} reports a day`);
     const written = store.report({ at: now, reporterId: id, matchId, nodeId: n.nodeId, operatorId: n.operatorId, reason: b.reason as ReportReason, ping, corrections });
@@ -2631,10 +2700,14 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * every seat of the maintainers' history (NodeStore.forgetPlayer), the seat of a match it is still
    * in when that match settles, and the open matches' list. An operator's name choice goes for good
    * (the public list calls it "Anfitrión <n>" from now on), its token counts with it, its unused
-   * tokens are revoked, a maintainer's status row stays under an opaque key instead of the id, and
-   * the id leaves the opening's audit (NodeStore.forgetOperator; decisions.md: the chosen name and
-   * the account id go with the account). A NODE_TRUSTED_OPERATORS id (the project's account is
-   * never deleted) changes nothing: 409 trusted.
+   * tokens are revoked, and the id leaves the opening's audit. Its records stay (its nodes stay
+   * banned, its points with them), but none of them keeps the account: its nodes and tokens with no
+   * name, a maintainer's status row, the players' reports and its ledger rows all go under one opaque
+   * key (DELETED_OPERATOR_PREFIX and random hex) instead of the id, in one transaction
+   * (NodeStore.forgetOperator, Registry.forgetOperator, Ledger.forgetOperator; decisions.md: the
+   * chosen name and the account id go with the account; Privacy 12.3). Only node_forgotten keeps the
+   * id, HISTORY_DAYS, with nothing else. A NODE_TRUSTED_OPERATORS id (the project's account is never
+   * deleted) changes nothing: 409 trusted.
    */
   private async operatorDeleted(request: Request, cp: ControlPlane): Promise<Response> {
     const b = await readJson<{ userId?: unknown }>(request);
@@ -2648,12 +2721,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
     // and the reports it made of community servers go (A16: 30 days, or until the account goes).
     this.store?.forgetPlayer(id);
     this.store?.forgetReporter(id);
-    const row = this.operators.get(id);
-    const alias = `deleted:${randomHex(6)}`;
-    this.store?.forgetOperator(id, alias);
-    this.operators.delete(id);
-    if (row && row.actor !== null) this.operators.set(alias, { ...row, operatorId: alias, showPublic: false });
     this.hostAccounts.delete(id);
+    this.publicNames.delete(id);
     // A code it asked for and never used registers nothing now: the account is gone.
     const now = Date.now();
     for (const t of cp.registry.tokenList()) if (t.operatorId === id && tokenState(t, now) === 'unused') cp.registry.revokeToken(t.hash, now);
@@ -2665,12 +2734,23 @@ export class NodeRegistryDO extends DurableObject<Env> {
       this.watch.statusSet(n);
       banned++;
     }
+    // Then its records leave the account (Privacy 12.3, "Si eras anfitrión"): its nodes, tokens,
+    // status row, reports and points under one opaque key, the same in each, with no name. A call
+    // again (AccountsDO tells it until it is answered) finds nothing under the id: nothing changes.
+    const row = this.operators.get(id);
+    const alias = DELETED_OPERATOR_PREFIX + randomHex(6);
+    let forgotten = 0;
+    if (this.store) this.store.forgetOperator(id, alias, () => (forgotten = cp.registry.forgetOperator(id, alias)));
+    else forgotten = cp.registry.forgetOperator(id, alias);
+    cp.ledger.forgetOperator(id, alias);
+    this.operators.delete(id);
+    if (row && row.actor !== null) this.operators.set(alias, { ...row, operatorId: alias, showPublic: false });
     if (banned > 0) {
       this.audit(`ALERT operator ${id} deleted their account: ${banned} node${banned === 1 ? '' : 's'} banned`);
       this.keepOffline();
       if (this.busy()) await this.ensureAlarm();
     }
-    return json({ ok: true, banned }, 200, { 'cache-control': 'no-store' });
+    return json({ ok: true, banned, forgotten }, 200, { 'cache-control': 'no-store' });
   }
 
   /**

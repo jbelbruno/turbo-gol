@@ -229,6 +229,18 @@ export function confirmNeeds(a: ConfirmAction): { reason: boolean; typeName: boo
   return { reason, typeName };
 }
 
+/**
+ * The reason reaches the server's host: a status change (a ban and a forced active too, and an
+ * operator's suspend-all: each server's status reason, in MIS SERVIDORES), a retirement, an
+ * operator's block (its wallet's freeze reason) and a drain (its node writes it to its machine's
+ * log: node/runtime.ts). Its sheet says so under the reason, and never to name a player there
+ * (Privacy 4.4 of (b): "que también ve su anfitrión y por eso nunca nombra ni identifica a un
+ * jugador"). Not an unblock: that reason stays the team's (the operator's row and its ALERT).
+ */
+export function hostSeesReason(a: ConfirmAction): boolean {
+  return a === 'status' || a === 'ban' || a === 'force' || a === 'retire' || a === 'drain' || a === 'block' || a === 'suspendAll';
+}
+
 // ---- the opening's flag (RESUMEN, Prompt 2 A1) and OPERADORES (A4) ------------------------------------
 
 /** The opening's three stages as the panel sets them: closed ('0'), a canary list of account ids, every account ('1'). */

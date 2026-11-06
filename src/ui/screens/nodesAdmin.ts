@@ -88,6 +88,7 @@ import {
   flagCommands,
   flagValueOf,
   followOf,
+  hostSeesReason,
   kpisOf,
   matchActions,
   matchRows,
@@ -663,7 +664,13 @@ export function nodesAdminScreen(menu: Menu): Screen {
     const note = a === 'drain' ? 'nodesAdmin.confirm.drainNote' : a === 'retire' ? 'nodesAdmin.confirm.retireNote' : a === 'ban' ? 'nodesAdmin.confirm.banNote' : a === 'force' ? 'nodesAdmin.confirm.forceNote' : a === 'update' ? 'nodesAdmin.confirm.updateNote' : a === 'unfreeze' ? 'nodesAdmin.confirm.unfreezeNote' : a === 'delist' ? 'nodesAdmin.confirm.delistNote' : a === 'voidMatch' ? 'nodesAdmin.confirm.voidNote' : a === 'voidStrike' ? 'nodesAdmin.confirm.voidStrikeNote' : a === 'download' ? 'nodesAdmin.confirm.downloadNote' : a === 'flag' ? 'nodesAdmin.confirm.flagNote' : a === 'block' ? 'nodesAdmin.confirm.blockNote' : a === 'unblock' ? 'nodesAdmin.confirm.unblockNote' : a === 'suspendAll' ? 'nodesAdmin.confirm.suspendAllNote' : 'nodesAdmin.confirm.note';
     menu.modal({
       title: t('nodesAdmin.confirm.title', { action: label, name }),
-      body: [h('p.mn-note', null, t(note as Key)), a === 'update' || a === 'revokeToken' || a === 'download' ? null : reason.el, typed?.el ?? null],
+      body: [
+        h('p.mn-note', null, t(note as Key)),
+        a === 'update' || a === 'revokeToken' || a === 'download' ? null : reason.el,
+        // Under the reason, when its host reads it too (hostSeesReason): never a player's name there.
+        hostSeesReason(a) ? h('p.mn-note', null, t('nodesAdmin.confirm.hostSees')) : null,
+        typed?.el ?? null,
+      ],
       actions: [
         {
           label,
