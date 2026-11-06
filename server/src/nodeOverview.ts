@@ -342,6 +342,8 @@ export interface OperatorInput {
   tokensToday: number;
   /** The players' reports about its servers of the last REPORTS_SHOWN_DAYS, newest first (NodeStore.reportsAbout); none: an object of before them. */
   reports?: ReportRow[];
+  /** The rules for hosts it accepted last (the object's copy, host_rules) and whether it holds those in force: without them its servers get no new match. */
+  rules?: { accepted: string | null; held: boolean };
 }
 
 /** The days of reports the Operadores tab shows (A16: a week), and how many of them at most. */
@@ -373,8 +375,10 @@ export function reportsView(rows: readonly ReportRow[]) {
 
 /**
  * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A16, A17):
- * its status and opt-in, its nodes with their refusals and effective capacity, its tokens, the
- * matches it runs against OPERATOR_MATCHES_MAX, its points (today against the daily cap, 30 days,
+ * its status and opt-in, the rules for hosts it accepted last and whether they are the ones in
+ * force (Terms 12.2: else its servers get no new match), its nodes with their refusals and
+ * effective capacity, its tokens, the matches it runs against OPERATOR_MATCHES_MAX, its points
+ * (today against the daily cap, 30 days,
  * all time, and how much of them the 3 accounts that played most on its nodes brought) and the
  * players' reports of the last week (reportsView). Its wallet is GET /nodes/admin/wallet's.
  */
@@ -397,6 +401,7 @@ export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorIn
     actor: i.row?.actor ?? null,
     at: i.row?.at ?? null,
     showPublic: i.row?.showPublic === true,
+    rules: i.rules ?? { accepted: null, held: false },
     nodes: nodes.map((n) => ({
       nodeId: n.nodeId,
       name: n.name,

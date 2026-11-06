@@ -639,11 +639,17 @@ const at = (hms) => Date.parse('2026-10-21T' + hms + 'Z');
 for (const trusted of [true, false]) {
   test(`a stalled control link, the 2026-10-21 timeline on a ${trusted ? 'project' : 'community'} node: the beats held from x1.7 to x26.7 arrive at once, the link and the match stay, and placement skips the node until then`, async () => {
     clock = at('00:00:40.000');
-    const h = await boot(makeEnv());
+    // A community node is placed only under terms that describe hosting, its operator holding their
+    // rules for hosts (Terms 12.2, hosting-mine.test.mjs): as its first code leaves it.
+    const rules = { TERMS_VERSION: '2026-11-16', NODE_HOSTING_TERMS: '2026-11-16' };
+    const h = await boot(makeEnv(trusted ? {} : rules));
     clock = at('00:00:50.000');
     const { ws, node } = await liveNode(h);
     // Stage 1 registers only the project's nodes: a community one is the same record, untrusted.
-    if (!trusted) h.obj.cp.registry.node(node.nodeId).trusted = false;
+    if (!trusted) {
+      h.obj.cp.registry.node(node.nodeId).trusted = false;
+      h.obj.noteHostRules(h.obj.cp.registry.node(node.nodeId).operatorId, rules.TERMS_VERSION);
+    }
     const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
     assert.ok(placement, 'placed');
     const place = async () => (await call(h, 'POST', '/internal/place', { body: placeBody({ humans: humans(STRANGER) }) })).json;

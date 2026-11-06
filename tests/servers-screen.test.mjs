@@ -254,6 +254,62 @@ test('the acceptance step uses PR 2A\'s screen strings verbatim (es and en), the
   assert.match(line, /outLink\(legalPaths\(lang\)\.privacy, t\('legal\.privacyLink'\)/);
 });
 
+test('a new terms version (Terms 12.2): the banner while the host accepts the rules again, the first code\'s acceptance in its sheet with VOLVER A ACEPTAR (POST /nodes/mine/accept), never with a code; never on a TV, never for a blocked host', () => {
+  const again = mineAnswer({ requirements: { missing: ['reaccept_required'], daysLeft: 0 }, terms: { version: '2026-12-01', accepted: false, acceptedVersion: '2026-11-13', again: true } });
+  assert.equal(SM.acceptAgainPending(again), true);
+  assert.deepEqual(SM.requirementsOf(again), ['reaccept_required'], 'the add flow waits for it');
+  assert.equal(SM.acceptanceNeeded(again), false, 'no acceptance with a code: the server answers reaccept_required');
+  assert.equal(SM.acceptAgainPending(mineAnswer()), false, 'held');
+  assert.equal(SM.acceptAgainPending(mineAnswer({ terms: { version: '2026-11-13', accepted: false, acceptedVersion: null, again: false } })), false, 'a first acceptance is the code\'s');
+  assert.equal(SM.acceptanceNeeded(mineAnswer({ terms: { version: '2026-11-13', accepted: false, acceptedVersion: null, again: false } })), true);
+  assert.equal(SM.acceptAgainPending(mineAnswer({ terms: { version: '2026-11-13', accepted: false } })), false, 'an older server: as before');
+  assert.equal(SM.acceptAgainPending({ ...again, requirements: { missing: ['operator_blocked', 'reaccept_required'], daysLeft: 0 } }), false, 'blocked: its servers are out anyway');
+  assert.equal(SM.acceptAgainPending(null), false);
+  // The words: the Terms' new version (12.2's trigger, never "the rules changed"); a host with servers
+  // that never accepted any (an account that left the project's) is only told to accept them.
+  assert.deepEqual(SM.acceptAgainWords(again), { title: 'servers.againTitle', note: 'servers.againNote', req: 'servers.req.reaccept_required', button: 'servers.againBtn' });
+  const never = { ...again, terms: { ...again.terms, acceptedVersion: null } };
+  assert.equal(SM.acceptAgainPending(never), true);
+  assert.deepEqual(SM.acceptAgainWords(never), { title: 'servers.rulesTitle', note: 'servers.rulesNote', req: 'servers.rulesReq', button: 'servers.rulesBtn' });
+  assert.equal(SM.acceptAgainWords({ ...again, terms: { version: '2026-12-01', accepted: false, again: true } }).title, 'servers.againTitle', 'an older server: a new version');
+  // es in tú, en its mirror; the button the line names.
+  for (const k of ['servers.againTitle', 'servers.againNote', 'servers.againBtn', 'servers.againDone', 'servers.req.reaccept_required', 'servers.rulesReq', 'servers.rulesTitle', 'servers.rulesNote', 'servers.rulesBtn', 'nodesShared.err.reaccept_required', 'nodesShared.err.first_code', 'nodesAdmin.op.rules', 'nodesAdmin.op.rulesHeld', 'nodesAdmin.op.rulesOld', 'nodesAdmin.op.rulesNone']) {
+    assert.equal(typeof es[k], 'string', 'es ' + k);
+    assert.notEqual(es[k], en[k], k);
+  }
+  assert.equal(es['servers.againBtn'], 'VOLVER A ACEPTAR');
+  assert.equal(es['servers.againTitle'], 'Los Términos tienen una versión nueva');
+  assert.match(es['nodesShared.err.reaccept_required'], /^Los Términos tienen una versión nueva: /);
+  for (const k of ['servers.againTitle', 'servers.againNote', 'servers.rulesTitle', 'servers.rulesNote', 'nodesShared.err.reaccept_required']) assert.doesNotMatch(es[k] + en[k], /reglas para anfitriones cambiaron|rules for hosts changed/, k);
+  assert.doesNotMatch(es['servers.rulesTitle'] + es['servers.rulesNote'] + es['servers.rulesReq'] + es['servers.rulesBtn'], /versión|volver|vuelvas/, 'nothing changed version for it');
+  assert.match(es['servers.againNote'], /pueden no recibir partidas nuevas/);
+  assert.match(en['servers.againNote'], /may get no new matches/);
+  assert.match(es['servers.rulesNote'], /pueden no recibir partidas nuevas/);
+  for (const code of ['reaccept_required', 'first_code']) assert.ok(N.NODE_ERROR_CODES.includes(code), code);
+  // The sheet: the first code's acceptance as it is (summary, switch, the line right above the button), its own button.
+  const sheet = fnOf(SERVERS, 'acceptAgainSheet');
+  assert.match(sheet, /const words = acceptAgainWords\(answer\(\)\);\s*const button = t\(words\.button\);\s*menu\.modal\(\{\s*title: t\(words\.title\),/);
+  assert.match(sheet, /body: \[h\('p', readOnly\('srv-again-summary'\), t\('servers\.acceptSummary'\)\), setRow\(t\('servers\.adult'\), sw\.el, t\('servers\.adultHint'\)\), adultErr, acceptLine\(button\)\],\s*actions: \[\s*\{\s*label: button,\s*primary: true,/);
+  assert.match(sheet, /if \(!adult\) \{\s*adultErr\.textContent = t\('nodesShared\.err\.adult_required'\);/, 'the switch off: nothing sent');
+  assert.match(fnOf(SERVERS, 'acceptAgain'), /await acc\.nodesAcceptAgain\(true\);/);
+  assert.match(fnOf(SERVERS, 'acceptAgain'), /if \(code === 'reauth_required' \|\| code === 'password_required'\) \{\s*queueMicrotask\(\(\) => confirmItsYou\(menu, \(\) => void acceptAgain\(\), 2, true\)\);/);
+  assert.equal([...SERVERS.matchAll(/acc\.nodesAcceptAgain\(/g)].length, 1, 'sent from the sheet only');
+  // The banner: before everything else of a host; on a TV where to do it, never the sheet.
+  const banner = fnOf(SERVERS, 'paintAgain');
+  assert.match(banner, /const pending = acceptAgainPending\(m\);\s*const words = acceptAgainWords\(m\);/);
+  assert.match(banner, /h\('b', null, t\(words\.title\)\)\), h\('p', null, t\(words\.note\)\)/);
+  assert.match(fnOf(SERVERS, 'requirementLine'), /r === 'reaccept_required' \? t\(acceptAgainWords\(m\)\.req\)/);
+  assert.match(banner, /tv\(\) \? h\('p\.mn-note', readOnly\('srv-again-tv'\), t\('nodesShared\.tvNote'\)\) : h\('div\.mn-na-tools', null, primary\(t\('servers\.termsBtn'\), acceptAgainSheet,/);
+  assert.match(SERVERS, /const hostView = \(\): Child\[\] => \[\s*parts\.again,\s*parts\.frozen,/);
+  assert.match(fnOf(SERVERS, 'requirementLine'), /r === 'reaccept_required'\s*\? secondary\(t\('servers\.termsBtn'\), acceptAgainSheet, \{ 'data-key': 'srv-req-again' \}\)/);
+  // A code refused for it routes to the sheet.
+  assert.match(fnOf(SERVERS, 'mint'), /if \(code === 'reaccept_required'\) \{[\s\S]{0,300}?acceptAgainSheet\(\);\s*if \(el\.isConnected\) paint\(\);\s*return;/);
+  // The panel's Operadores tab says which rules each host holds.
+  assert.match(fnOf(ADMIN, 'operatorCard'), /fact\(t\('nodesAdmin\.op\.rules'\), op\.rules\.accepted === null \? t\('nodesAdmin\.op\.rulesNone'\) : t\(op\.rules\.held \? 'nodesAdmin\.op\.rulesHeld' : 'nodesAdmin\.op\.rulesOld', \{ version: op\.rules\.accepted \}\)\)/);
+  const ops = N.operatorsOf({ operators: [{ operatorId: '0a1b2c3d4e5f6071', rules: { accepted: '2026-11-13', held: true } }, { operatorId: '1b2c3d4e5f607182' }] }).operators;
+  assert.deepEqual(ops.map((o) => o.rules), [{ accepted: '2026-11-13', held: true }, { accepted: null, held: false }], 'a server of before: none held');
+});
+
 test("a code's follow-up from /nodes/mine alone: waiting, expired, revoked, then its server to active; gone when no longer listed", () => {
   const now = 1_000_000;
   const tk = (o = {}) => ({ id: 'abcdef123456', region: 'SA', name: 'juan-1', publicHost: 'j1.example.com', createdAt: now - 1, expiresAt: now + 60_000, state: 'unused', nodeId: null, ...o });
@@ -509,6 +565,11 @@ test("AccountClient: the owner's actions, a code's revoke, the public switch, a 
   assert.deepEqual(c.calls.at(-1).body, { region: 'SA', publicHost: 'a.example.com', acceptHost: true, adult: true });
   const d = client({ '/nodes/tokens': () => res(403, { error: 'terms_required', version: '2026-11-13' }) });
   await assert.rejects(d.a.nodesToken({ region: 'SA' }), (e) => e.code === 'terms_required' && e.detail.version === '2026-11-13');
+  // The rules for hosts accepted again: both, as a code's; its refusals reject with their code.
+  const g = client({ '/nodes/mine/accept': (init) => (JSON.parse(init.body).adult === true ? res(200, { hostTerms: '2026-12-01', already: false }) : res(403, { error: 'adult_required' })) });
+  assert.deepEqual(await g.a.nodesAcceptAgain(true), { hostTerms: '2026-12-01', already: false });
+  assert.deepEqual(g.calls.at(-1), { path: '/nodes/mine/accept', method: 'POST', body: { acceptHost: true, adult: true }, auth: 'Bearer jwt-1' });
+  await assert.rejects(g.a.nodesAcceptAgain(false), (e) => e instanceof AC.AccountError && e.code === 'adult_required');
   for (const x of c.calls) assert.ok(x.path.startsWith('/nodes/'), 'same origin, /nodes/* only: ' + x.path);
 });
 

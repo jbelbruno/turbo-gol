@@ -27,14 +27,21 @@
  *                                publicHost pins the node to that DNS name. 409 too_many_nodes, before any token, when
  *                                the operator has every node it may have. A project account: 10 per day. Any other
  *                                (hostGate): not blocked, the requirements of hostPolicy.ts, the rules for hosts of
- *                                the terms in force (its 'host' consents row, written here when it sends acceptHost
- *                                and adult), a public host of its own, COMMUNITY_TOKENS_PER_DAY and COMMUNITY_OUTSTANDING
+ *                                the terms in force (its 'host' consents row, written here when its first code's request
+ *                                sends acceptHost and adult; those of an earlier version: 403 reaccept_required, accepted
+ *                                again first), a public host of its own, COMMUNITY_TOKENS_PER_DAY and COMMUNITY_OUTSTANDING
  *   GET  /nodes/mine             x-operator-id (and x-operator-since) -> that operator's nodes in full (never a retired
  *                                one: nodeOverview.ts mineNodeView), its rewards (Ledger.summary, today's points
  *                                against the daily cap), its own tokens, its slots and code limits, whether hosting is
  *                                open for it, and, only while it is (A11): what it still lacks (hostPolicy.ts, from
- *                                AccountsDO's GET /me) and whether it accepted the rules for hosts in force; its
+ *                                AccountsDO's GET /me) and whether it holds the rules for hosts in force (terms: the
+ *                                version, accepted, the version it accepted last, again: to accept them again); its
  *                                opt-in and the release channel. Never the players' reports: those are the team's
+ *   POST /nodes/mine/accept      { acceptHost, adult } with x-operator-id (and x-operator-since): the rules for hosts of
+ *                                a new terms version accepted again and 18 or older declared again (Terms 12.2, last
+ *                                paragraph), without a code: the first code's gate (hosting open for it, not blocked,
+ *                                hostPolicy.ts's requirements) and its 'host' row (source host_reaccept); only a host
+ *                                (an earlier version accepted, or a server on its books: 409 first_code otherwise)
  *   POST /nodes/mine/public      { show } with x-operator-id: an operator outside the project shows its name in the
  *                                public list, or stops (the opt-in, operators.show_public); turning it on only while
  *                                hosting is open for it (403 hosting_closed), off always; a project account 409 trusted
@@ -101,7 +108,8 @@
  *   POST /internal/place | /internal/rejoin | /internal/leave, GET /internal/status: the matchmaker's (nodeApi.ts);
  *                                a placement and a rejoin carry the players' mark of the server (A15, markOf): a
  *                                community node's always, a project node's once the terms in force describe hosting;
- *                                projectOnly places on the project's nodes alone
+ *                                projectOnly places on the project's nodes alone; a community node whose operator does
+ *                                not hold the rules for hosts in force (rulesHeld) gets no new match
  *   POST /internal/health        the cron's (index.ts scheduled, every 5 minutes): /healthz of every trusted wss
  *                                node online, or in service and seen by the object in the last hour, 5 s each
  *                                (nodeWatch.ts healthzTargets); the public replays past 30 days pruned, with
@@ -202,8 +210,8 @@ import {
   withTimeout,
 } from './env';
 import type { Env, NodesEnv } from './env';
-import { COMMUNITY_OUTSTANDING, COMMUNITY_TOKENS_PER_DAY, HOST_ACCOUNT_TTL_MS, RESERVED_HOST_DOMAIN, hostAccountOf, hostRequirements, hostingWords, underReservedDomain } from './hostPolicy';
-import type { HostAccount } from './hostPolicy';
+import { COMMUNITY_OUTSTANDING, COMMUNITY_TOKENS_PER_DAY, HOST_ACCOUNT_TTL_MS, RESERVED_HOST_DOMAIN, hostAccountOf, hostRequirements, hostRulesHeld, hostRulesStep, hostRulesVersion, hostingWords, underReservedDomain } from './hostPolicy';
+import type { HostAccount, HostRequirement } from './hostPolicy';
 import { widePrefix } from './limits';
 import { ALERT_DEDUPE_MS, AlertHook, alertKey } from './nodeAlerts';
 import type { FetchFn } from './nodeAlerts';
@@ -574,9 +582,17 @@ export class NodeRegistryDO extends DurableObject<Env> {
   private readonly communityHook: AlertHook;
   /** The operators outside the project the object keeps a row of (operators: a block, the opt-in), read at the start. */
   private operators = new Map<string, OperatorRow>();
+  /** The version of the rules for hosts each operator outside the project accepted last (host_rules), read at the start: placement reads it (rulesHeld). */
+  private hostRules = new Map<string, string>();
   /** GET /me answers for the token's checks (hostGate), HOST_ACCOUNT_TTL_MS each, oldest first. */
   private readonly hostAccounts = new Map<string, { at: number; account: HostAccount }>();
-  /** The community accounts whose token request is under way (token): one at a time each, so two never pass the caps together. */
+  /**
+   * The GET /me reads of hostAccount under way, by account. A write of its rules for hosts meanwhile
+   * (writeHostRules, the purge) makes each `late`: its answer may be older than that write, so it is
+   * neither kept nor copied (overtakeHostReads).
+   */
+  private readonly hostReads = new Map<string, Set<{ late: boolean }>>();
+  /** The community accounts whose token request, or acceptance in MIS SERVIDORES (mineAccept), is under way: one at a time each, so two never pass the caps together. */
   private readonly tokenAsks = new Set<string>();
   /** The public list's account names (publicNamesOf: AccountsDO /usernames), PUBLIC_NAMES_TTL_MS each; null: no such account any more. */
   private readonly publicNames = new Map<string, { name: string | null; at: number }>();
@@ -698,6 +714,45 @@ export class NodeRegistryDO extends DurableObject<Env> {
   }
 
   /**
+   * This operator outside the project holds the rules for hosts in force (hostPolicy.ts
+   * hostRulesVersion), as the object's copy says (host_rules): else none of its nodes gets a new
+   * match (Terms 12.2, last paragraph). Never while the terms in force do not describe hosting.
+   */
+  private rulesHeld(operatorId: string): boolean {
+    return hostRulesHeld(this.hostRules.get(operatorId) ?? null, hostRulesVersion(this.env));
+  }
+
+  /**
+   * The object's copy of the rules for hosts `operatorId` accepted last (AccountsDO's newest 'host'
+   * row: GET /me's hostTerms, or the row the object just wrote), kept in host_rules when it is
+   * another, and only then in memory. Never for a purged account (node_forgotten): a write that lands
+   * after the purge keeps nothing. Never throws: a row that fails leaves the copy as it was, and it is
+   * written again at the account's next read.
+   */
+  private noteHostRules(operatorId: string, version: string | null): void {
+    if ((this.hostRules.get(operatorId) ?? null) === version) return;
+    try {
+      if (version !== null && this.store?.forgotten([operatorId]).has(operatorId)) return;
+      this.store?.setHostRules(operatorId, version, Date.now());
+    } catch (e) {
+      this.log(`the rules for hosts of ${operatorId} not kept: ${String(e)}`);
+      return;
+    }
+    if (version === null) this.hostRules.delete(operatorId);
+    else this.hostRules.set(operatorId, version);
+  }
+
+  /** `operatorId`'s rules for hosts were written, or its account purged: a GET /me read under way may answer what was before (hostReads). */
+  private overtakeHostReads(operatorId: string): void {
+    for (const r of this.hostReads.get(operatorId) ?? []) r.late = true;
+  }
+
+  /** The servers on an operator's books (a retired one left out): hostPolicy.ts hostRulesStep. */
+  private serversOf(cp: ControlPlane, operatorId: string): number {
+    return cp.registry.byOperator(operatorId).filter((n) => !isRetired(n)).length;
+  }
+
+  /**
    * An ALERT of the start (a control key that is not its pair, a start that failed): as log(), but
    * to the channel and the ring at most once per ALERT_DEDUPE_MS across starts, as one object's hook
    * would. An object nothing keeps awake is evicted between the cron's runs (the health check, or
@@ -788,6 +843,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       this.loginAddrs = loginAddrsOf(store.meta(LOGIN_ADDRS_KEY), Date.now());
       this.readAudits = readAuditsOf(store.meta(READ_AUDITS_KEY), Date.now());
       this.operators = new Map(store.operatorRows().map((r) => [r.operatorId, r]));
+      this.hostRules = new Map(store.hostRulesRows().map((r) => [r.operatorId, r.version]));
       this.watch = new NodeWatch(idsOf(this.offlineRow));
       // Each of the registry's ALERTs is an account's action: a token or a node of a trusted operator,
       // or the trust an operator lost (NODE_TRUSTED_OPERATORS changed).
@@ -845,8 +901,9 @@ export class NodeRegistryDO extends DurableObject<Env> {
         now: () => Date.now(),
         log,
         events,
-        // The community nodes' rules (A7, A8, A8 bis, A9, A17e); none of them touches a project node.
-        community: { ...COMMUNITY_POLICY, ranked: communityRanked(env), blocked: (id) => this.blocked(id), log: (m) => this.communityAlert(m) },
+        // The community nodes' rules (A7, A8, A8 bis, A9, A17e, and the rules for hosts in force,
+        // Terms 12.2); none of them touches a project node.
+        community: { ...COMMUNITY_POLICY, ranked: communityRanked(env), blocked: (id) => this.blocked(id), rulesHeld: (id) => this.rulesHeld(id), log: (m) => this.communityAlert(m) },
       });
       // A deploy drops every socket; a hibernation keeps them (they are adopted below).
       const sockets = this.ctx.getWebSockets();
@@ -1158,6 +1215,7 @@ export class NodeRegistryDO extends DurableObject<Env> {
       if (method === 'POST' && path === '/nodes/tokens') return await this.token(request, cp, env);
       if (method === 'GET' && path === '/nodes/mine') return await this.mine(request, cp);
       if (method === 'POST' && path === '/nodes/mine/public') return await this.minePublic(request, cp);
+      if (method === 'POST' && path === '/nodes/mine/accept') return await this.mineAccept(request, cp);
       if (method === 'POST' && (path === '/nodes/mine/drain' || path === '/nodes/mine/rename' || path === '/nodes/mine/retire')) return await this.mineAction(request, cp, path.slice('/nodes/mine/'.length) as 'drain' | 'rename' | 'retire');
       if (method === 'POST' && path === '/nodes/tokens/revoke') return await this.mineRevokeToken(request, cp);
       if (method === 'POST' && path === '/nodes/report') return await this.report(request, cp);
@@ -1625,29 +1683,30 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * The gate of an account outside the project, once hosting is open for it (Prompt 2: A2, A3, A4),
    * in the order its refusals come: blocked (403 operator_blocked); what hostPolicy.ts asks of the
    * account, read from AccountsDO's GET /me (403 email_required, deletion_pending, account_too_new
-   * with daysLeft, terms_required with the version); the rules for hosts of the terms in force (its
-   * 'host' consents row: without one, 403 terms_required unless the request carries acceptHost, and
+   * with daysLeft, terms_required with the version); the rules for hosts of the terms in force
+   * (hostRulesVersion; its 'host' consents row: those of an earlier version, or a server on its
+   * books without any, 403 reaccept_required with the version, accepted again in MIS SERVIDORES
+   * first, Terms 12.2; without any, 403 terms_required unless the request carries acceptHost, and
    * then 403 adult_required unless it carries adult); its node cap (409 too_many_nodes), its tokens
    * of the last 24 hours and its unused ones (409 too_many_tokens); a name no node of the region
-   * holds (409 name_taken). Only then, the request's acceptance is written (AccountsDO /host-consent:
-   * one 'host' row per version, never without the declaration). null: the token may be minted.
+   * holds (409 name_taken). Only then, the request's acceptance is written (writeHostRules: one
+   * 'host' row per version, never without the declaration). null: the token may be minted.
    * `name`: the account's, for the line on the community nodes' channel at its node cap.
    */
   private async hostGate(request: Request, cp: ControlPlane, id: string, name: string, b: TokenAsk, ask: InstallAsk): Promise<Response | null> {
     const now = Date.now();
-    const version = termsVersion(this.env);
+    const version = hostRulesVersion(this.env);
     if (version === null) return error(403, 'hosting_closed', HOSTING_CLOSED); // hostingMode is closed then: never here
     if (this.blocked(id)) return error(403, 'operator_blocked', 'this account may not host servers');
     const account = await this.hostAccount(id, now);
     if (account instanceof Response) return account;
     const since = Number(request.headers.get('x-operator-since'));
-    const r = hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version });
-    const first = r.missing[0];
-    if (first === 'email_required') return error(403, first, 'the account needs a verified email address first');
-    if (first === 'deletion_pending') return error(403, first, 'the account has a deletion pending: call it off first');
-    if (first === 'account_too_new') return json({ error: first, message: `the account is too new: ${r.daysLeft} more days`, daysLeft: r.daysLeft }, 403);
-    if (first === 'terms_required') return json({ error: first, message: 'accept the terms in force first', version }, 403);
-    const consent = account.hostTerms !== version;
+    const lacks = requirementRefusal(hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version }), version);
+    if (lacks) return lacks;
+    const step = hostRulesStep(account.hostTerms, version, this.serversOf(cp, id));
+    // A new version of the rules (Terms 12.2): "para pedir otro código tienes que volver a aceptar" them, in MIS SERVIDORES.
+    if (step === 'again') return json({ error: 'reaccept_required', message: 'the terms have a new version: accept the rules for hosts again in Mis servidores first', version }, 403);
+    const consent = step === 'first';
     if (consent && b.acceptHost !== true) return json({ error: 'terms_required', message: 'accept the rules for hosts (Terms section 12 and Annex B) with the request', version }, 403);
     if (consent && b.adult !== true) return error(403, 'adult_required', 'declare you are 18 or older with the request');
     const slots = cp.registry.slots(id);
@@ -1660,37 +1719,66 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const unused = cp.registry.tokenList().filter((t) => t.operatorId === id && tokenState(t, now) === 'unused').length;
     if (unused >= COMMUNITY_OUTSTANDING) return error(409, 'too_many_tokens', `at most ${COMMUNITY_OUTSTANDING} unused codes at once: use or revoke one`);
     if (ask.name !== null && cp.registry.nameTaken(b.region as string, ask.name)) return error(409, 'name_taken', `a server of the region is already called ${ask.name}`);
-    if (consent) {
-      const w = await accountsCall(this.env, '/host-consent', { userId: id, version, adult: true });
-      this.hostAccounts.delete(id);
-      if (!w.ok) {
-        const got = (await w.json().catch(() => null)) as { error?: unknown; purgeAt?: unknown } | null;
-        if (got?.error === 'terms_changed' || got?.error === 'terms_required') return json({ error: 'terms_required', message: 'the terms changed: read them again', version: termsVersion(this.env) }, 403);
-        if (got?.error === 'deletion_pending') return error(403, 'deletion_pending', 'the account has a deletion pending: call it off first');
-        this.log(`host consent of ${id} not written (${w.status} ${String(got?.error ?? '')}): no token`);
-        return error(503, 'nodes_unavailable', UNAVAILABLE);
-      }
-      await w.body?.cancel().catch(() => undefined);
-      this.log(`community operator ${id} accepted the rules for hosts of ${version} and declared 18 or older`);
-    }
+    if (consent) return this.writeHostRules(id, version, false);
     return null;
   }
 
-  /** An account as the token's checks read it (AccountsDO GET /me, kept HOST_ACCOUNT_TTL_MS), or the refusal. */
+  /**
+   * The rules for hosts of `version` accepted and 18 or older declared (AccountsDO /host-consent:
+   * one 'host' row per version, never without the declaration; `again`: those of a new version
+   * accepted again in MIS SERVIDORES, source host_reaccept), then the object's copy of it
+   * (noteHostRules: placement reads it). null once written; else the refusal, nothing kept: 403
+   * terms_required when the terms changed meanwhile, deletion_pending, or 503.
+   */
+  private async writeHostRules(id: string, version: string, again: boolean): Promise<Response | null> {
+    const w = await accountsCall(this.env, '/host-consent', { userId: id, version, adult: true, ...(again ? { again: true } : {}) });
+    this.hostAccounts.delete(id);
+    if (!w.ok) {
+      const got = (await w.json().catch(() => null)) as { error?: unknown; purgeAt?: unknown } | null;
+      if (got?.error === 'terms_changed' || got?.error === 'terms_required') return json({ error: 'terms_required', message: 'the terms changed: read them again', version: termsVersion(this.env) }, 403);
+      if (got?.error === 'deletion_pending') return error(403, 'deletion_pending', 'the account has a deletion pending: call it off first');
+      this.log(`host consent of ${id} not written (${w.status} ${String(got?.error ?? '')}): ${again ? 'not accepted again' : 'no token'}`);
+      return error(503, 'nodes_unavailable', UNAVAILABLE);
+    }
+    await w.body?.cancel().catch(() => undefined);
+    this.overtakeHostReads(id);
+    this.noteHostRules(id, version);
+    this.log(`community operator ${id} ${again ? 'accepted again' : 'accepted'} the rules for hosts of ${version} and declared 18 or older`);
+    return null;
+  }
+
+  /**
+   * An account as the token's checks read it (AccountsDO GET /me, kept HOST_ACCOUNT_TTL_MS), or the
+   * refusal. Each read also brings the object's copy of the rules for hosts it holds up to date
+   * (noteHostRules): a row the object missed is written at the account's next visit. A read its
+   * rules were written during, or its account purged (overtakeHostReads), goes to its caller as it
+   * came, neither kept nor copied: its answer may be older than that write.
+   */
   private async hostAccount(id: string, now: number): Promise<HostAccount | Response> {
     const kept = this.hostAccounts.get(id);
     if (kept && now - kept.at < HOST_ACCOUNT_TTL_MS) return kept.account;
-    const res = await accountsCall(this.env, '/me?userId=' + id);
-    if (res.status === 404) {
-      await res.body?.cancel();
-      return error(403, 'account_required', 'no such account');
+    const read = { late: false };
+    const reads = this.hostReads.get(id) ?? new Set<{ late: boolean }>();
+    this.hostReads.set(id, reads.add(read));
+    let account: HostAccount | null;
+    try {
+      const res = await accountsCall(this.env, '/me?userId=' + id);
+      if (res.status === 404) {
+        await res.body?.cancel();
+        return error(403, 'account_required', 'no such account');
+      }
+      account = res.ok ? hostAccountOf(await res.json().catch(() => null)) : null;
+      if (!res.ok) await res.body?.cancel();
+    } finally {
+      reads.delete(read);
+      if (reads.size === 0 && this.hostReads.get(id) === reads) this.hostReads.delete(id);
     }
-    const account = res.ok ? hostAccountOf(await res.json().catch(() => null)) : null;
-    if (!res.ok) await res.body?.cancel();
     if (account === null) return error(503, 'nodes_unavailable', UNAVAILABLE);
+    if (read.late) return account;
     this.hostAccounts.delete(id);
     if (this.hostAccounts.size >= HOST_ACCOUNTS_MAX) this.hostAccounts.delete(this.hostAccounts.keys().next().value as string);
     this.hostAccounts.set(id, { at: now, account });
+    this.noteHostRules(id, account.hostTerms);
     return account;
   }
 
@@ -1743,9 +1831,12 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * points against the daily cap (the project's earn nothing, and have no cap), its own tokens, its
    * slots and code limits, whether hosting is open for it, its opt-in and the release channel (an
    * "update pending" is a node below its minimum). What it still lacks (`requirements`: hostPolicy.ts
-   * and a block, in the token's order) and whether it accepted the rules for hosts in force (`terms`)
-   * come from AccountsDO's GET /me (hostAccount: kept a minute), read only while hosting is open for
-   * it: before, AccountsDO is never asked and both are null. A project account lacks nothing.
+   * and a block, in the token's order, then reaccept_required) and whether it holds the rules for
+   * hosts in force (`terms`: their version, `accepted` it holds them, `acceptedVersion` the ones it
+   * accepted last, `again` it accepts them again in MIS SERVIDORES before another code, its servers
+   * meanwhile without new matches: hostRulesStep) come from AccountsDO's GET /me (hostAccount: kept
+   * a minute), read only while hosting is open for it: before, AccountsDO is never asked and both
+   * are null. A project account lacks nothing and is never held to the rules.
    */
   private async mine(request: Request, cp: ControlPlane): Promise<Response> {
     const id = request.headers.get('x-operator-id') ?? '';
@@ -1754,14 +1845,16 @@ export class NodeRegistryDO extends DurableObject<Env> {
     const version = termsVersion(this.env);
     const open = trusted || hostingOpenFor(await hostingMode(this.env), id);
     let requirements: { missing: string[]; daysLeft: number } | null = trusted ? { missing: [], daysLeft: 0 } : null;
-    let terms: { version: string | null; accepted: boolean } | null = trusted ? { version, accepted: true } : null;
-    if (!trusted && open && version !== null) {
+    let terms: { version: string | null; accepted: boolean; acceptedVersion: string | null; again: boolean } | null = trusted ? { version, accepted: true, acceptedVersion: null, again: false } : null;
+    const rules = hostRulesVersion(this.env);
+    if (!trusted && open && rules !== null) {
       const account = await this.hostAccount(id, now);
       if (!(account instanceof Response)) {
         const since = Number(request.headers.get('x-operator-since'));
-        const r = hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version });
-        requirements = { missing: [...(this.blocked(id) ? ['operator_blocked'] : []), ...r.missing], daysLeft: r.daysLeft };
-        terms = { version, accepted: account.hostTerms === version };
+        const r = hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: rules });
+        const step = hostRulesStep(account.hostTerms, rules, this.serversOf(cp, id));
+        requirements = { missing: [...(this.blocked(id) ? ['operator_blocked'] : []), ...r.missing, ...(step === 'again' ? ['reaccept_required'] : [])], daysLeft: r.daysLeft };
+        terms = { version: rules, accepted: step === 'held', acceptedVersion: account.hostTerms, again: step === 'again' };
       }
     }
     const slots = cp.registry.slots(id);
@@ -1795,6 +1888,56 @@ export class NodeRegistryDO extends DurableObject<Env> {
       200,
       { 'cache-control': 'no-store' },
     );
+  }
+
+  /**
+   * POST /nodes/mine/accept { acceptHost, adult } (Terms 12.2, last paragraph): once the terms changed
+   * version, an operator outside the project accepts again the rules for hosts of the terms in force
+   * (section 12 and Annex B) and declares again that it is 18 or older, without a code. The first
+   * code's gate and row, in its order: hosting open for it (403 hosting_closed: nothing read),
+   * not blocked (403 operator_blocked), what hostPolicy.ts asks of the account (requirementRefusal,
+   * from a fresh GET /me), then the rules: held already 200 { already: true } with nothing written;
+   * an account that never accepted any and has no server accepts them with its first code (409
+   * first_code: "con el botón que pide el código"); else acceptHost (403 terms_required) and adult
+   * (403 adult_required), and AccountsDO's 'host' row (writeHostRules, source host_reaccept). From
+   * then on its servers get new matches again (rulesHeld). One request of the account at a time (429
+   * rate_limited, as a code's). A project account 409 trusted: never held to the rules. A log line,
+   * never an ALERT.
+   */
+  private async mineAccept(request: Request, cp: ControlPlane): Promise<Response> {
+    const id = request.headers.get('x-operator-id') ?? '';
+    if (!ACCOUNT_ID_RE.test(id)) return error(400, 'bad_request');
+    if (cp.registry.isTrusted(id)) return error(409, 'trusted', 'a project account is never held to the rules for hosts');
+    const version = hostRulesVersion(this.env);
+    if (version === null || !hostingOpenFor(await hostingMode(this.env), id)) {
+      await request.body?.cancel().catch(() => undefined);
+      return error(403, 'hosting_closed', HOSTING_CLOSED);
+    }
+    const b = await readJson<{ acceptHost?: unknown; adult?: unknown }>(request);
+    if (!b || typeof b !== 'object') return error(400, 'bad_request', 'acceptHost and adult: true');
+    if (this.blocked(id)) return error(403, 'operator_blocked', 'this account may not host servers');
+    if (this.tokenAsks.has(id)) return error(429, 'rate_limited', 'a request of this account is under way already: try again in a moment');
+    this.tokenAsks.add(id);
+    try {
+      // Read again: the acceptance is decided on the account as it is now, never a minute's copy.
+      const now = Date.now();
+      this.hostAccounts.delete(id);
+      const account = await this.hostAccount(id, now);
+      if (account instanceof Response) return account;
+      const since = Number(request.headers.get('x-operator-since'));
+      const lacks = requirementRefusal(hostRequirements(account, { now, since: Number.isFinite(since) && since > 0 ? since : null, terms: version }), version);
+      if (lacks) return lacks;
+      const step = hostRulesStep(account.hostTerms, version, this.serversOf(cp, id));
+      if (step === 'held') return json({ hostTerms: version, already: true }, 200, { 'cache-control': 'no-store' });
+      if (step === 'first') return error(409, 'first_code', 'the rules for hosts are accepted with the button that asks for your first code');
+      if (b.acceptHost !== true) return json({ error: 'terms_required', message: 'accept the rules for hosts (Terms section 12 and Annex B) with the request', version }, 403);
+      if (b.adult !== true) return error(403, 'adult_required', 'declare you are 18 or older with the request');
+      const refused = await this.writeHostRules(id, version, true);
+      if (refused) return refused;
+      return json({ hostTerms: version, already: false }, 200, { 'cache-control': 'no-store' });
+    } finally {
+      this.tokenAsks.delete(id);
+    }
   }
 
   /**
@@ -2356,7 +2499,16 @@ export class NodeRegistryDO extends DurableObject<Env> {
     // The players' reports of the last week (A16), an operator they name included.
     const since = now - REPORTS_SHOWN_DAYS * DAY_MS;
     for (const k of this.store?.reportedOperators(since) ?? []) if (!cp.registry.isTrusted(k)) ids.add(k);
-    const operators = [...ids].map((op) => operatorView(cp, op, { now, row: this.operators.get(op) ?? null, tokensToday: this.store?.tokensToday(op, now) ?? 0, reports: this.store?.reportsAbout(op, since, REPORTS_COUNTED_MAX) ?? [] }));
+    const operators = [...ids].map((op) =>
+      operatorView(cp, op, {
+        now,
+        row: this.operators.get(op) ?? null,
+        tokensToday: this.store?.tokensToday(op, now) ?? 0,
+        reports: this.store?.reportsAbout(op, since, REPORTS_COUNTED_MAX) ?? [],
+        // The rules for hosts it accepted last, as the object's copy says, and whether they are the ones in force (its servers' new matches).
+        rules: { accepted: this.hostRules.get(op) ?? null, held: this.rulesHeld(op) },
+      }),
+    );
     this.readAudit(id, actor, `the community operators (${operators.length})`);
     return json({ at: now, operators }, 200, { 'cache-control': 'no-store' });
   }
@@ -2700,7 +2852,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
    * every seat of the maintainers' history (NodeStore.forgetPlayer), the seat of a match it is still
    * in when that match settles, and the open matches' list. An operator's name choice goes for good
    * (the public list calls it "Anfitrión <n>" from now on), its token counts with it, its unused
-   * tokens are revoked, and the id leaves the opening's audit. Its records stay (its nodes stay
+   * tokens are revoked, its copy of the rules for hosts it accepted goes (AccountsDO keeps the proof),
+   * and the id leaves the opening's audit. Its records stay (its nodes stay
    * banned, its points with them), but none of them keeps the account: its nodes and tokens with no
    * name, a maintainer's status row, the players' reports and its ledger rows all go under one opaque
    * key (DELETED_OPERATOR_PREFIX and random hex) instead of the id, in one transaction
@@ -2722,6 +2875,8 @@ export class NodeRegistryDO extends DurableObject<Env> {
     this.store?.forgetPlayer(id);
     this.store?.forgetReporter(id);
     this.hostAccounts.delete(id);
+    this.hostRules.delete(id);
+    this.overtakeHostReads(id);
     this.publicNames.delete(id);
     // A code it asked for and never used registers nothing now: the account is gone.
     const now = Date.now();
@@ -2850,6 +3005,20 @@ export class NodeRegistryDO extends DurableObject<Env> {
 
 function publicBase(env: NodesEnv): string {
   return env.NODES_PUBLIC_BASE.replace(/\/+$/, '');
+}
+
+/**
+ * The first of what hostPolicy.ts asks of an account outside the project that it lacks, as a code's
+ * request and an acceptance in MIS SERVIDORES are refused (403 email_required, deletion_pending,
+ * account_too_new with daysLeft, terms_required with the version); null when it lacks none of them.
+ */
+function requirementRefusal(r: { missing: HostRequirement[]; daysLeft: number }, version: string): Response | null {
+  const first = r.missing[0];
+  if (first === 'email_required') return error(403, first, 'the account needs a verified email address first');
+  if (first === 'deletion_pending') return error(403, first, 'the account has a deletion pending: call it off first');
+  if (first === 'account_too_new') return json({ error: first, message: `the account is too new: ${r.daysLeft} more days`, daysLeft: r.daysLeft }, 403);
+  if (first === 'terms_required') return json({ error: first, message: 'accept the terms in force first', version }, 403);
+  return null;
 }
 
 /** POST /nodes/tokens as it comes. */

@@ -61,6 +61,11 @@
  *                                     reauth_required { level: 2 }. The session's `since` goes on (x-operator-since)
  *   GET      /nodes/mine              Bearer account session -> the caller's own hosting in full (the object's A11
  *                                     view; the session's `since` goes on, x-operator-since)
+ *   POST     /nodes/mine/accept       { acceptHost, adult }, Bearer account session: the rules for hosts of a new terms
+ *                                     version accepted again and 18 or older declared again (Terms 12.2), without a
+ *                                     code; the first code's steps exactly (the hosting policy, never a TV's session,
+ *                                     level 2 within MAINTAINER_FRESH_S, the session's `since` on), 10 a minute per
+ *                                     account; the object decides the rest (NodeRegistryDO mineAccept)
  *   POST     /nodes/mine/public       { show }, Bearer account session, never a TV's: its name in the public list or
  *                                     not (the object's opt-in), 10 a minute per account
  *   POST     /nodes/mine/drain        { nodeId }, /rename { nodeId, name }, /retire { nodeId }, and
@@ -131,7 +136,7 @@
  * The object trusts what the Worker forwards: only the headers a node sends get through
  * (FORWARDED), and x-client-ip, x-client-continent (registration), x-operator-id, x-operator-name
  * and x-operator-since (tokens and mine, when the session has it) are only ever set here. CORS only on
- * tokens, mine (its public switch and the owner's actions too), the report, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
+ * tokens, mine (its public switch, its acceptance and the owner's actions too), the report, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
  * here are per isolate (index.ts rateLimited), per minute except two: registrations per address
  * per hour and tokens per account per day, the object's own limits, which only the object holds
  * across isolates (a day's tokens are the ones minted: a refused request is a try of the minute's).
@@ -192,6 +197,8 @@ const LIMIT_MINE_PER_ACCOUNT = 30;
 const LIMIT_PUBLIC_PER_ACCOUNT = 10;
 /** The owner's actions (drain, rename, retire, a code revoked) per account per minute, together. */
 const LIMIT_OWN_PER_ACCOUNT = 10;
+/** POST /nodes/mine/accept per account per minute (one press per new terms version: a few at most). */
+const LIMIT_ACCEPT_PER_ACCOUNT = 10;
 /** Reports of community servers per account per minute (the object's own limit is a day's). */
 const LIMIT_REPORT_PER_ACCOUNT = 10;
 /** The owner's actions on its own servers (A12): the object's routes of the same path. */
@@ -259,7 +266,7 @@ const REPLAY_OWN_PATH = /^\/nodes\/replays\/(top|mine|stars)$/;
 /** An account's star and own-list calls per minute (per isolate). */
 const LIMIT_REPLAY_OWN_PER_ACCOUNT = 30;
 const REPLAY_TOP_TTL_MS = 30_000;
-const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/mine/public', ...OWN_ROUTES, '/nodes/report', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
+const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/mine/public', '/nodes/mine/accept', ...OWN_ROUTES, '/nodes/report', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
 /** Request headers the object may see from a caller (the WebSocket upgrade's, a node's signed upload). */
 const FORWARDED = new Set([
   'content-type',
@@ -378,6 +385,17 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     if (s instanceof Response) return s;
     if (c.limited('nmine:' + s.sub, LIMIT_MINE_PER_ACCOUNT)) return error(429, 'rate_limited');
     // The session's `since` too: the object tells a community account how many days it still lacks.
+    return toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
+  }
+  if (method === 'POST' && path === '/nodes/mine/accept') {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // The rules for hosts accepted again (Terms 12.2): the first acceptance's steps, as POST /nodes/tokens takes them.
+    const s = requirePrimary({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (!trustedOperatorIds(env).has(s.sub) && !hostingOpenFor(await hostingMode(env), s.sub)) return error(403, 'hosting_closed', 'hosting a server is not open to this account');
+    const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
+    if (fresh instanceof Response) return fresh;
+    if (c.limited('nacc:' + s.sub, LIMIT_ACCEPT_PER_ACCOUNT)) return error(429, 'rate_limited');
     return toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
   }
   if (method === 'POST' && path === '/nodes/mine/public') {

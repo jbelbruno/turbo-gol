@@ -182,14 +182,16 @@ export const NEWS_CONSENT_VERSION = 'news-v1';
 /**
  * consents.source: the switch at email sign-up and at the OAuth confirm step's create, PERFIL's
  * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe), a deletion
- * request (sign-in PR 12), the terms' re-accept, and a community node token's request
- * ('node_token': the NodeRegistryDO's POST /host-consent, kind 'host').
+ * request (sign-in PR 12), the terms' re-accept, a community node token's request ('node_token':
+ * the NodeRegistryDO's POST /host-consent, kind 'host') and the rules for hosts of a new version
+ * accepted again in MIS SERVIDORES ('host_reaccept': POST /nodes/mine/accept, kind 'host' too).
  */
-export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept' | 'node_token';
+export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept' | 'node_token' | 'host_reaccept';
 /**
  * consents.kind: the news opt-in, the terms of a version, and 'host': the rules for hosts of a
  * version (Terms section 12 and Annex B) accepted AND 18 or older declared, both with the request
- * of a community node token. A 'host' row is never written without both (acceptHost).
+ * of a community node token, or both again in MIS SERVIDORES once the terms changed version. A
+ * 'host' row is never written without both (acceptHost).
  */
 export type ConsentKind = 'news' | 'terms' | 'host';
 /** users.unsub_id: 16 random bytes as base64url, no padding (randomToken). It carries nothing of the account (review point S-L1). */
@@ -2042,18 +2044,19 @@ export class AccountStore {
    * Prompt 2 A3), one transaction: a 'host' row of `version` (the one in force: the AccountsDO
    * checks it, and that hosting is in it), granted, source 'node_token', meaning the rules for hosts
    * of that version (Terms section 12 and Annex B) accepted and 18 or older declared; the caller
-   * writes it only with both. Unless the newest 'host' row already is that version: one row per
-   * version at most. Refused: no such account, a deletion pending, or the terms of that version not
-   * accepted ('terms_required': the host rules are part of them). The purge copies the row to
-   * consent_proofs like any other.
+   * writes it only with both. `source` 'host_reaccept' when they come again from MIS SERVIDORES for
+   * a new version (POST /nodes/mine/accept), the same row otherwise. Unless the newest 'host' row
+   * already is that version: one row per version at most. Refused: no such account, a deletion
+   * pending, or the terms of that version not accepted ('terms_required': the host rules are part
+   * of them). The purge copies the row to consent_proofs like any other.
    */
-  acceptHost(userId: string, version: string, now: number): { hostTerms: string } | 'no_user' | 'deletion_pending' | 'terms_required' {
+  acceptHost(userId: string, version: string, now: number, source: 'node_token' | 'host_reaccept' = 'node_token'): { hostTerms: string } | 'no_user' | 'deletion_pending' | 'terms_required' {
     return this.tx(() => {
       const u = this.userById(userId);
       if (u === null) return 'no_user' as const;
       if (this.pendingDeletion(u)) return 'deletion_pending' as const;
       if (this.consentState(userId).terms !== version) return 'terms_required' as const;
-      if (this.hostTerms(userId) !== version) this.consentIn(userId, 'host', version, true, 'node_token', now);
+      if (this.hostTerms(userId) !== version) this.consentIn(userId, 'host', version, true, source, now);
       return { hostTerms: version };
     });
   }
