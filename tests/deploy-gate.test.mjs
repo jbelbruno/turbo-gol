@@ -82,7 +82,7 @@ function makeRepo(t, releaseRaw) {
 /** Publish a release into the fake bucket, as the release workflow would after build + sign. */
 function publish(store, key, { version, commit, wasmSha256, protocol = 7, inputs = INPUTS }) {
   const inputsBytes = Buffer.from(JSON.stringify({ version, files: inputs }, null, 2));
-  const manifest = { name: 'turbogol-node', version, protocol, wasmSha256, nodeMajor: 24, entry: 'node.mjs', createdAt: '2026-10-19T00:00:00Z', commit, inputsSha256: sha(inputsBytes), files: [{ path: 'node.mjs', sha256: 'a'.repeat(64), size: 1 }] };
+  const manifest = { name: 'turbogol-node', version, protocol, wasmSha256, nodeMajor: 26, entry: 'node.mjs', createdAt: '2026-10-19T00:00:00Z', commit, inputsSha256: sha(inputsBytes), files: [{ path: 'node.mjs', sha256: 'a'.repeat(64), size: 1 }] };
   const mb = Buffer.from(JSON.stringify(manifest, null, 2));
   store.set(`${version}/manifest.json`, mb);
   store.set(`${version}/manifest.sig`, Buffer.from(signB64(mb, key.privateKey)));

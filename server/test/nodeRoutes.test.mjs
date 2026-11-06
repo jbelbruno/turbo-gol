@@ -456,7 +456,7 @@ test('replays: a 64-hex id; the node’s signed headers and the body go through;
   assert.equal(env.NODES.seen.length, forwarded, 'stopped before the object');
 });
 
-test('tokens: 401 without a session, 403 for a guest, 403 not_trusted for another account, forwarded for a trusted one with the operator headers overwritten; CORS on every answer', async () => {
+test('tokens: 401 without a session, 403 for a guest, 403 hosting_closed for another account while hosting is closed, forwarded for a trusted one with the operator headers overwritten; CORS on every answer', async () => {
   const env = makeEnv();
   env.NODES.handler = () => new RealResponse('{"token":"tgn1_x"}', { headers: { 'content-type': 'application/json' } });
   const body = JSON.stringify({ region: 'SA' });
@@ -466,7 +466,7 @@ test('tokens: 401 without a session, 403 for a guest, 403 not_trusted for anothe
     [null, 401, 'unauthorized'],
     ['not.a.jwt', 401, 'unauthorized'],
     [guest, 403, 'account_required'],
-    [await accountToken(PLAYER, 'Jugador'), 403, 'not_trusted'],
+    [await accountToken(PLAYER, 'Jugador'), 403, 'hosting_closed'],
   ];
   for (const [auth, status, code] of cases) {
     const res = await ask(auth);

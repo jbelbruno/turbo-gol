@@ -55,8 +55,10 @@ import {
   If,
   acesFilmicToneMapping,
   agxToneMapping,
+  dot,
   emissive,
   float,
+  fract,
   length,
   luminance,
   mix,
@@ -68,8 +70,11 @@ import {
   pow,
   renderOutput,
   rtt,
+  screenCoordinate,
   screenUV,
+  sin,
   smoothstep,
+  time,
   uniform,
   vec2,
   vec3,
@@ -305,7 +310,18 @@ function buildHdr(gpu: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.P
   // or Inf texel written by a material becomes 0 / HDR_MAX here instead of poisoning the bloom
   // blur (one NaN at a coarse mip upsamples to a big black rectangle) or the tone map.
   const sanitize = (c: Node<'vec4'>): Vec3Node => c.rgb.max(0.0).min(HDR_MAX);
-  let hdr: Vec3Node = sanitize(scenePass.getTextureNode('output'));
+  const sceneTex = scenePass.getTextureNode('output');
+  let hdr: Vec3Node = sanitize(sceneTex);
+  if (spec.sharpen > 0) {
+    // Unsharp mask from the 4 neighbours of the scene colour, limited to half the pixel's own value
+    // so a bright emitter does not ring: the picture stays crisp when the grain and the soft edges
+    // would otherwise make it read as blurred.
+    const px = vec2(1.0).div(sceneTex.size(float(0)) as unknown as Node<'vec2'>);
+    const at = (dx: number, dy: number): Vec3Node => sanitize(sceneTex.sample(screenUV.add(vec2(px.x.mul(dx), px.y.mul(dy)))));
+    const around = at(1, 0).add(at(-1, 0)).add(at(0, 1)).add(at(0, -1)).mul(0.25);
+    const lim = hdr.max(0.02).mul(0.5);
+    hdr = hdr.add(hdr.sub(around).min(lim).max(lim.negate()).mul(spec.sharpen));
+  }
   let bloomPass: BloomPass | null = null;
   if (spec.bloom) {
     // Bloom reads the emissive MRT target (cleared to black), so only tagged emitters glow.
@@ -340,6 +356,11 @@ function buildHdr(gpu: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.P
   // none) and frees it in dispose().
   const ldrTarget = spec.msaa > 0 ? null : rtt(ldr, null, null, { depthBuffer: false });
   pipeline.outputNode = ldrTarget === null ? ldr : fxaa(ldrTarget);
+  if (spec.grain > 0) {
+    // Film grain: a hash of the pixel and the clock (it changes every frame at 60 fps), added to the final image.
+    const g = fract(sin(dot(screenCoordinate.add(time.mul(60.0).floor().mul(17.0)), vec2(12.9898, 78.233))).mul(43758.5453)).sub(0.5);
+    pipeline.outputNode = vec4((pipeline.outputNode as unknown as Node<'vec4'>).rgb.add(g.mul(spec.grain)), 1.0);
+  }
 
   return {
     output: 'post',

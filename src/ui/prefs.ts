@@ -41,13 +41,20 @@ export interface MenuPrefs {
   lobbyMode: GameMode | null;
   /** The last pick of "While you search" (the sheet's focus). */
   waitChoice: WaitChoice;
+  /**
+   * "Solo servidores del proyecto" (Ajustes › JUEGO, Prompt 2 A15): the player's matches never go to
+   * a community server. Off until the player turns it on, which its row allows only once GET
+   * /api/config says hosting is open (screens/serversModel.ts projectOnlyShown); then sent with the
+   * search whenever it is on, and its row kept while it is.
+   */
+  projectOnly: boolean;
 }
 
 /** The same key as before: an older object reads with these defaults for what it lacks, no migration step. */
 export const PREFS_KEY = STORAGE_PREFIX + 'menu.v1';
 
 /** A first visit: Casual preferring 2v2 against the server's bots level in the automatic region (the connection's continent), bots while waiting. */
-export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualPrefer: '2v2', casualBots: null, rankedModes: ['2v2'], leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' };
+export const DEFAULT_PREFS: Readonly<MenuPrefs> = { region: null, casualPrefer: '2v2', casualBots: null, rankedModes: ['2v2'], leaderboardPlaylist: '2v2', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots', projectOnly: false };
 
 const isMode = (v: unknown): v is GameMode => v === '1v1' || v === '2v2' || v === '3v3';
 const isLevel = (v: unknown): v is Difficulty => v === 'easy' || v === 'medium' || v === 'hard';
@@ -77,5 +84,6 @@ export function parsePrefs(raw: string | null): MenuPrefs {
     lastQueue: o.lastQueue === 'ranked' ? 'ranked' : 'casual',
     lobbyMode: isMode(o.lobbyMode) ? o.lobbyMode : null,
     waitChoice: o.waitChoice === 'training' || o.waitChoice === 'menu' ? o.waitChoice : 'bots',
+    projectOnly: o.projectOnly === true,
   };
 }

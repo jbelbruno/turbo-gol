@@ -34,7 +34,9 @@ const KNOWN = {
 // The owner's own words, kept as drawn (plan PR 8, the Garage's PUNTOS DE SERVIDOR card): "Nunca se
 // venden" (never sold) trips the shop rule's vend\w* while saying what the rule is for. One key and
 // one rule each, never a pattern; a text that no longer trips it fails below (delete its line).
-const ALLOWED = new Set(['es:points.only:shop']);
+// "Mis servidores"' 18-or-older switch (Prompt 2, P2-3) says "no lo comprobamos" (we do not check it),
+// the owner's approved legal wording of PR 2A used verbatim, which trips compr\w*.
+const ALLOWED = new Set(['es:points.only:shop', 'es:servers.adultHint:shop']);
 
 const values = (v) => (typeof v === 'string' ? [v] : Object.values(v));
 

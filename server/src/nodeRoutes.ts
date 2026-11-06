@@ -13,7 +13,8 @@
  *                                     its first copy) or a root file such as launcher.mjs or install.sh
  *                                     (revalidated by ETag, without a body read); never a listing.
  *                                     Every release route: 1,200 a minute per network (limits.ts nodeReleases)
- *   POST     /nodes/register          RegisterRequest -> the object, with the caller's address (x-client-ip); 413
+ *   POST     /nodes/register          RegisterRequest -> the object, with the caller's address (x-client-ip) and the
+ *                                     continent Cloudflare sees it from (x-client-continent, '' for none); 413
  *                                     over 4 KB declared (the object reads at most that much of any body)
  *   GET      /nodes/connect           a node's control WebSocket -> the object, with the caller's address
  *                                     (x-client-ip: the object caps the sockets still to log in per address and
@@ -44,16 +45,38 @@
  *                                     replaySite count only the edge-cache misses
  *     Both carry X-Robots-Tag: noindex, and the KV flag replays_off turns both off (404, cached copies
  *     too, the object never asked) and nothing else.
- *   POST     /nodes/tokens            { region, name?, publicHost?, roles?, matches?, egressCapGB? }, Bearer account
- *                                     session of a NODE_TRUSTED_OPERATORS account -> a one-time registration token
- *                                     and the Linux install line, composed by the object (409 too_many_nodes before
- *                                     any token when the account has its NODE_TRUSTED_MAX_NODES nodes); 413 over 4 KB;
- *                                     10 tokens minted a day per account and 30 tries a minute, refused ones included.
- *                                     Like every maintainer route: never a TV's session (403 tv_session), and one
- *                                     whose device proved a credential at level 2 (a typed password: a sign-in or
- *                                     PERFIL's "confirm it's you"; a provider's press is level 1) in the last
- *                                     MAINTAINER_FRESH_S; else 403 reauth_required { level: 2 }
- *   GET      /nodes/mine              Bearer account session -> the caller's own nodes
+ *   POST     /nodes/tokens            { region, name?, publicHost?, roles?, matches?, egressCapGB?, acceptHost?, adult? },
+ *                                     Bearer account session -> a one-time registration token and the Linux install
+ *                                     line, composed by the object (409 too_many_nodes before any token when the
+ *                                     account has every node it may have); 413 over 4 KB; 10 tokens minted a day per
+ *                                     account and 30 tries a minute, refused ones included. The policy (Prompt 2, A1):
+ *                                     a NODE_TRUSTED_OPERATORS account always, any other only while hosting is open
+ *                                     for it (env.ts hostingMode: the terms in force describe it, NODE_HOSTING_TERMS,
+ *                                     and the KV flag node_operators names it), else 403 hosting_closed; such an
+ *                                     account then meets the object's gate (NodeRegistryDO hostGate). For both:
+ *                                     never a TV's session (403 tv_session), and one whose device proved a credential
+ *                                     at level 2 (a typed password: a sign-in or PERFIL's "confirm it's you"; a code
+ *                                     from the account's mailbox for an account that is not a maintainer; a
+ *                                     provider's press is level 1) in the last MAINTAINER_FRESH_S; else 403
+ *                                     reauth_required { level: 2 }. The session's `since` goes on (x-operator-since)
+ *   GET      /nodes/mine              Bearer account session -> the caller's own hosting in full (the object's A11
+ *                                     view; the session's `since` goes on, x-operator-since)
+ *   POST     /nodes/mine/accept       { acceptHost, adult }, Bearer account session: the rules for hosts of a new terms
+ *                                     version accepted again and 18 or older declared again (Terms 12.2), without a
+ *                                     code; the first code's steps exactly (the hosting policy, never a TV's session,
+ *                                     level 2 within MAINTAINER_FRESH_S, the session's `since` on), 10 a minute per
+ *                                     account; the object decides the rest (NodeRegistryDO mineAccept)
+ *   POST     /nodes/mine/public       { show }, Bearer account session, never a TV's: its name in the public list or
+ *                                     not (the object's opt-in), 10 a minute per account
+ *   POST     /nodes/mine/drain        { nodeId }, /rename { nodeId, name }, /retire { nodeId }, and
+ *   POST     /nodes/tokens/revoke     { id }: the owner's actions on its own servers and codes (A12), Bearer account
+ *                                     session, never a TV's; 10 a minute per account together; the object decides
+ *                                     the rest (a project account's are the panel's: 409 trusted)
+ *   POST     /nodes/report            { matchId, reason, ping?, corrections? }, Bearer account session (a TV's too:
+ *                                     its player played the match): a community server reported (A16), 10 a minute
+ *                                     per account; 403 hosting_closed while the terms in force do not describe
+ *                                     hosting (env.ts hostingTermsInForce, no KV read: never the flag), the object
+ *                                     never asked
  *   GET      /nodes/status            the public list of nodes, cached 10 s
  *   GET      /nodes/admin/nodes       the maintainers' routes (ADMIN_ROUTES), Bearer account session of a
  *   GET      /nodes/admin/overview    NODE_TRUSTED_OPERATORS account through the maintainer gate below, 30 a minute
@@ -78,10 +101,15 @@
  *   GET      /nodes/admin/replay      replay (TGR1, application/octet-stream, an ALERT every time, 404 once
  *   POST     /nodes/admin/match/void  delisted or pruned); { matchId, reason, strike? }: an unsettled match void
  *   POST     /nodes/admin/match/verify  (no strike unless asked); { matchId }: its queued verification now
- *     The maintainer gate, in this order, for every one of them (and for tokens, account-stats and
+ *   POST     /nodes/admin/flags       { name: 'node_operators', value, reason }: the opening of hosting, the only KV
+ *                                     flag this Worker writes (NodeRegistryDO adminFlags)
+ *   POST     /nodes/admin/operator    { operatorId, action: block | unblock | suspend_all, reason }: a community operator
+ *   GET      /nodes/admin/operators   the community operators (the Operadores tab)
+ *     The maintainer gate, in this order, for every one of them (and for account-stats and
  *     queue-stats): 413 over 4 KB; requirePrimary (401, 403 account_required, 403 tv_session); 403
  *     not_trusted; requireFresh(2, MAINTAINER_FRESH_S) (403 reauth_required { level: 2 }); the limit;
- *     then the object (503 nodes_off when the flag is set).
+ *     then the object (503 nodes_off when the flag is set). Tokens go through the same steps with
+ *     the hosting policy (403 hosting_closed) in place of not_trusted.
  *   GET      /nodes/shop              aliases of GET /api/me/shop and POST /api/me/shop/claim (accountRoutes.ts,
  *   POST     /nodes/shop/claim        AccountsDO): answered with or without the node settings
  *   GET      /nodes/admin/account-stats  the owner's account counts (AccountsDO, accountStore.ts AccountStats): counts
@@ -106,8 +134,9 @@
  * fork, local dev) every route that needs the object is a 404 too.
  *
  * The object trusts what the Worker forwards: only the headers a node sends get through
- * (FORWARDED), and x-client-ip, x-operator-id and x-operator-name are always set here. CORS only on
- * tokens, mine, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
+ * (FORWARDED), and x-client-ip, x-client-continent (registration), x-operator-id, x-operator-name
+ * and x-operator-since (tokens and mine, when the session has it) are only ever set here. CORS only on
+ * tokens, mine (its public switch, its acceptance and the owner's actions too), the report, status, the shop and the replay list, the routes a page calls; the rest is for nodes and curl. The limits
  * here are per isolate (index.ts rateLimited), per minute except two: registrations per address
  * per hour and tokens per account per day, the object's own limits, which only the object holds
  * across isolates (a day's tokens are the ones minted: a refused request is a try of the minute's).
@@ -122,7 +151,7 @@ import { accountsCall, requireAccount, requireFresh, requirePrimary, shopClaim, 
 import { STATS_OPERATORS_MAX, STATS_TRUSTED_MAX } from './AccountsDO';
 import type { SessionClaims } from './auth';
 import { INTERNAL_HEADER, internalSecret } from './auth';
-import { JSON_MAX_BYTES, error, flag, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
+import { JSON_MAX_BYTES, error, flag, hostingMode, hostingOpenFor, hostingTermsInForce, isHex, json, limitKey, nodesConfigured, queueHubOf, trustedOperatorIds, withTimeout } from './env';
 import type { Env, NodesEnv } from './env';
 import { NODE_ROUTES, OPERATORS_ROUTE, PRUNE_ROUTE, READ_AUDIT_ROUTE, nodesStub } from './nodeApi';
 import { accountGate, edgeCache, overLimit, sitePrefix, subjectsOf, widePrefix } from './limits';
@@ -164,6 +193,16 @@ const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
 const LIMIT_STATUS_PER_IP = 60;
 const LIMIT_MINE_PER_ACCOUNT = 30;
+/** POST /nodes/mine/public per account per minute (a switch: a few presses at most). */
+const LIMIT_PUBLIC_PER_ACCOUNT = 10;
+/** The owner's actions (drain, rename, retire, a code revoked) per account per minute, together. */
+const LIMIT_OWN_PER_ACCOUNT = 10;
+/** POST /nodes/mine/accept per account per minute (one press per new terms version: a few at most). */
+const LIMIT_ACCEPT_PER_ACCOUNT = 10;
+/** Reports of community servers per account per minute (the object's own limit is a day's). */
+const LIMIT_REPORT_PER_ACCOUNT = 10;
+/** The owner's actions on its own servers (A12): the object's routes of the same path. */
+const OWN_ROUTES = new Set(['/nodes/mine/drain', '/nodes/mine/rename', '/nodes/mine/retire', '/nodes/tokens/revoke']);
 const LIMIT_ADMIN_PER_ACCOUNT = 30;
 /**
  * A maintainer's session must come from a password proof (a sign-in or a re-authentication, level 2
@@ -208,6 +247,9 @@ const ADMIN_ROUTES: Readonly<Record<string, 'GET' | 'POST'>> = {
   revoke: 'POST',
   unfreeze: 'POST',
   delist: 'POST',
+  flags: 'POST',
+  operator: 'POST',
+  operators: 'GET',
 };
 
 /**
@@ -224,7 +266,7 @@ const REPLAY_OWN_PATH = /^\/nodes\/replays\/(top|mine|stars)$/;
 /** An account's star and own-list calls per minute (per isolate). */
 const LIMIT_REPLAY_OWN_PER_ACCOUNT = 30;
 const REPLAY_TOP_TTL_MS = 30_000;
-const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
+const CORS_PATHS = new Set(['/nodes/tokens', '/nodes/mine', '/nodes/mine/public', '/nodes/mine/accept', ...OWN_ROUTES, '/nodes/report', '/nodes/status', '/nodes/shop', '/nodes/shop/claim', '/nodes/replays']);
 /** Request headers the object may see from a caller (the WebSocket upgrade's, a node's signed upload). */
 const FORWARDED = new Set([
   'content-type',
@@ -300,7 +342,8 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
   if (method === 'POST' && path === '/nodes/register') {
     if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
     if (c.limited('nreg:' + who, LIMIT_REGISTER_PER_IP, HOUR_MS)) return error(429, 'rate_limited');
-    return toRegistry(env, c.request, path, { 'x-client-ip': c.ip });
+    // Where Cloudflare sees the machine from: a community node's must be its token's region (REGION_CHECK).
+    return toRegistry(env, c.request, path, { 'x-client-ip': c.ip, 'x-client-continent': continentOf(c.request) });
   }
   if (method === 'GET' && path === '/nodes/connect') {
     if (c.request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return error(426, 'upgrade_required');
@@ -323,14 +366,17 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
     const s = requirePrimary({ session: await c.session() });
     if (s instanceof Response) return s;
-    if (!trustedOperatorIds(env).has(s.sub)) return error(403, 'not_trusted', 'only the project creates node tokens for now');
+    // The policy (A1): a project account always; any other only while hosting is open for it (the
+    // terms in force describe it and the KV flag node_operators names it). The object decides again.
+    if (!trustedOperatorIds(env).has(s.sub) && !hostingOpenFor(await hostingMode(env), s.sub)) return error(403, 'hosting_closed', 'hosting a server is not open to this account');
     const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
     if (fresh instanceof Response) return fresh;
     // The day's tokens are the ones minted, counted after the object's 200 (its own limit counts only
     // those too): a refusal (a typo in the panel's form, the cap) makes no token and costs one of the
     // minute's tries instead, so a few of them never stop the next good request.
     if (c.spent('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT) || c.limited('ntry:' + s.sub, LIMIT_TOKEN_TRIES_PER_ACCOUNT)) return error(429, 'rate_limited');
-    const res = await toRegistry(env, c.request, path, operator(s));
+    // The session's `since` too: the object checks a community account's age against it and AccountsDO's.
+    const res = await toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
     if (res.ok) c.limited('ntok:' + s.sub, LIMIT_TOKENS_PER_ACCOUNT, DAY_MS);
     return res;
   }
@@ -338,6 +384,46 @@ async function route(c: NodeRouteContext, path: string): Promise<Response> {
     const s = requireAccount({ session: await c.session() });
     if (s instanceof Response) return s;
     if (c.limited('nmine:' + s.sub, LIMIT_MINE_PER_ACCOUNT)) return error(429, 'rate_limited');
+    // The session's `since` too: the object tells a community account how many days it still lacks.
+    return toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
+  }
+  if (method === 'POST' && path === '/nodes/mine/accept') {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // The rules for hosts accepted again (Terms 12.2): the first acceptance's steps, as POST /nodes/tokens takes them.
+    const s = requirePrimary({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (!trustedOperatorIds(env).has(s.sub) && !hostingOpenFor(await hostingMode(env), s.sub)) return error(403, 'hosting_closed', 'hosting a server is not open to this account');
+    const fresh = requireFresh({ session: s }, 2, MAINTAINER_FRESH_S);
+    if (fresh instanceof Response) return fresh;
+    if (c.limited('nacc:' + s.sub, LIMIT_ACCEPT_PER_ACCOUNT)) return error(429, 'rate_limited');
+    return toRegistry(env, c.request, path, { ...operator(s), ...(s.since !== undefined ? { 'x-operator-since': String(s.since) } : {}) });
+  }
+  if (method === 'POST' && path === '/nodes/mine/public') {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // An owner's choice about its name, never from a TV (the owners' actions are requirePrimary's).
+    const s = requirePrimary({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (c.limited('npub:' + s.sub, LIMIT_PUBLIC_PER_ACCOUNT)) return error(429, 'rate_limited');
+    return toRegistry(env, c.request, path, operator(s));
+  }
+  if (method === 'POST' && OWN_ROUTES.has(path)) {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // The owner's actions on its own servers (A12): never from a TV.
+    const s = requirePrimary({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (c.limited('nown:' + s.sub, LIMIT_OWN_PER_ACCOUNT)) return error(429, 'rate_limited');
+    return toRegistry(env, c.request, path, operator(s));
+  }
+  if (method === 'POST' && path === '/nodes/report') {
+    if (declared(c.request) > JSON_MAX_BYTES) return error(413, 'too_large');
+    // A player's report (A16), an account's (a TV's too: its player played the match there).
+    const s = requireAccount({ session: await c.session() });
+    if (s instanceof Response) return s;
+    if (c.limited('nrep:' + s.sub, LIMIT_REPORT_PER_ACCOUNT)) return error(429, 'rate_limited');
+    // Dark until the terms in force describe hosting (decisions.md: no reports before): the object is
+    // not asked and stores nothing; it checks again. Never the KV flag: closing it again after the
+    // opening, or a failed read, must not stop the reports of community servers that still host.
+    if (!hostingTermsInForce(env)) return error(403, 'hosting_closed', 'reports of community servers are not open yet');
     return toRegistry(env, c.request, path, operator(s));
   }
   if (method === 'GET' && path === '/nodes/status') return status(c, env, who);
@@ -478,6 +564,12 @@ function declared(request: Request): number {
 /** Who asks, as the object reads it: the session's id and name (URL-encoded: header values are Latin-1). */
 function operator(s: SessionClaims): Record<string, string> {
   return { 'x-operator-id': s.sub, 'x-operator-name': encodeURIComponent(s.name) };
+}
+
+/** The continent Cloudflare sees the request from (a two-letter code), '' when it says none (wrangler dev, the tests). */
+function continentOf(request: Request): string {
+  const c = (request as { cf?: { continent?: unknown } }).cf?.continent;
+  return typeof c === 'string' ? c : '';
 }
 
 /**

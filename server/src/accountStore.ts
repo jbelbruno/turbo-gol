@@ -63,7 +63,7 @@
  * lives, or its undo):
  *   mail_tokens      one mailed proof (a link and maybe a code), by its token's hash
  *   email_holds      an old canon held during an email change's 7-day undo (counts as taken)
- *   consents         append-only: the state is the newest row per (user, kind)
+ *   consents         append-only: the state is the newest row per (user, kind: news, terms, host)
  *   auth_throttle    durable failure counters; mail_rate, mail_day: the mail caps and the day's lanes
  *   deleted_ids      ids of purged accounts: freshId never hands one out again (nodes are keyed by it)
  *   sanction_marks   a ban or abandon penalty that outlives a purge; protected_skel: names to protect
@@ -91,7 +91,8 @@
  *   deleted_nodes    purged ids whose nodes the NodeRegistryDO has not banned yet (the alarm asks again)
  *   consent_proofs   what the purge keeps of the consent log: each row's kind, version, granted or
  *                    withdrawn and time, by the tombstoned id (no source, address or name), for
- *                    CONSENT_PROOF_KEEP_MS from the purge, so a past consent or withdrawal can be shown
+ *                    CONSENT_PROOF_KEEP_MS from the purge (a 'host' row, HOST_CONSENT_PROOF_KEEP_MS),
+ *                    so a past consent or withdrawal can be shown
  *
  * The news consent (sign-in PR 13, the design's §2.11 and §3.14; no news is sent yet): the consent
  * log only grows and its newest news row is the state. The switch at sign-up and at the confirm
@@ -180,10 +181,19 @@ export const NEWS_CONSENT_VERSION = 'news-v1';
 
 /**
  * consents.source: the switch at email sign-up and at the OAuth confirm step's create, PERFIL's
- * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe) and a
- * deletion request (sign-in PR 12).
+ * switch (POST /api/me/consent), the mail's unsubscribe (POST /api/news/unsubscribe), a deletion
+ * request (sign-in PR 12), the terms' re-accept, a community node token's request ('node_token':
+ * the NodeRegistryDO's POST /host-consent, kind 'host') and the rules for hosts of a new version
+ * accepted again in MIS SERVIDORES ('host_reaccept': POST /nodes/mine/accept, kind 'host' too).
  */
-export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept';
+export type ConsentSource = 'signup' | 'oauth_signup' | 'perfil' | 'unsubscribe' | 'deletion' | 'reaccept' | 'node_token' | 'host_reaccept';
+/**
+ * consents.kind: the news opt-in, the terms of a version, and 'host': the rules for hosts of a
+ * version (Terms section 12 and Annex B) accepted AND 18 or older declared, both with the request
+ * of a community node token, or both again in MIS SERVIDORES once the terms changed version. A
+ * 'host' row is never written without both (acceptHost).
+ */
+export type ConsentKind = 'news' | 'terms' | 'host';
 /** users.unsub_id: 16 random bytes as base64url, no padding (randomToken). It carries nothing of the account (review point S-L1). */
 export const UNSUB_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 /** What POST /api/me/consent answers: the newest row of each kind wins (news granted; the terms version granted, null for none). */
@@ -261,6 +271,13 @@ export const DELETION_CONSENT_SOURCE: ConsentSource = 'deletion';
  * A placeholder until the lawyer answers.
  */
 export const CONSENT_PROOF_KEEP_MS = 2 * 365 * DAY_MS;
+/**
+ * The proof of the rules for hosts (consents kind 'host': Terms section 12 and Annex B, with the
+ * 18-or-older declaration) stays 3 years from the purge (Privacy §6, the "Prueba mínima" row, §11
+ * and §12.3 of version (b)): it shows the host took on Annex B, the processor's clauses, for as
+ * long as a player's claim for damages may come (3 years).
+ */
+export const HOST_CONSENT_PROOF_KEEP_MS = 3 * 365 * DAY_MS;
 
 /** A sanction mark's kind (sanction_marks.key, §1.3): 'e' an email canon (its own, its hint's, a held one), 'g' a Google sub, 'd' a Discord id. */
 export type MarkKind = 'e' | 'g' | 'd';
@@ -933,10 +950,11 @@ export class AccountStore {
           marks++;
         }
       }
-      // The proof of what it consented to and withdrew outlives it: no source, address or name, only the tombstoned id.
+      // The proof of what it consented to and withdrew outlives it: no source, address or name, only
+      // the tombstoned id; the rules for hosts' a year longer than the rest.
       this.sql.exec(
-        'INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, ? FROM consents WHERE user_id = ? ORDER BY id',
-        now + CONSENT_PROOF_KEEP_MS, userId,
+        "INSERT INTO consent_proofs (deleted_id, kind, version, granted, at, until) SELECT user_id, kind, version, granted, at, CASE WHEN kind = 'host' THEN ? ELSE ? END FROM consents WHERE user_id = ? ORDER BY id",
+        now + HOST_CONSENT_PROOF_KEEP_MS, now + CONSENT_PROOF_KEEP_MS, userId,
       );
       for (const table of PURGE_TABLES) this.sql.exec(`DELETE FROM ${table} WHERE user_id = ?`, userId);
       // Its mailed proofs: its own rows, and the sign-up rows it was made from (used_by).
@@ -1922,7 +1940,7 @@ export class AccountStore {
   // ---- the news consent and unsubscribing (sign-in PR 13: the design's §2.11, §3.14) --------------
 
   /** The newest consent row of `kind` (the one that counts), null when the account has none. */
-  private newestConsent(userId: string, kind: 'news' | 'terms'): { granted: boolean; version: string } | null {
+  private newestConsent(userId: string, kind: ConsentKind): { granted: boolean; version: string } | null {
     const r = this.sql.exec('SELECT granted, version FROM consents WHERE user_id = ? AND kind = ? ORDER BY id DESC LIMIT 1', userId, kind).toArray()[0];
     return r === undefined ? null : { granted: num(r.granted) === 1, version: str(r.version) };
   }
@@ -1932,7 +1950,7 @@ export class AccountStore {
    * updates or deletes a row but the purge). A news grant mints the account's unsubscribe id when it
    * has none (§2.11), so every account that may get news has one.
    */
-  private consentIn(userId: string, kind: 'news' | 'terms', version: string, granted: boolean, source: ConsentSource, now: number): void {
+  private consentIn(userId: string, kind: ConsentKind, version: string, granted: boolean, source: ConsentSource, now: number): void {
     this.sql.exec('INSERT INTO consents (user_id, kind, version, granted, source, at) VALUES (?, ?, ?, ?, ?, ?)', userId, kind, version, granted ? 1 : 0, source, now);
     if (kind === 'news' && granted) this.sql.exec('UPDATE users SET unsub_id = ? WHERE id = ? AND unsub_id IS NULL', randomToken(), userId);
   }
@@ -2015,6 +2033,34 @@ export class AccountStore {
     });
   }
 
+  /** The version of the account's newest 'host' row when it is a grant (the rules for hosts it accepted last), else null. */
+  hostTerms(userId: string): string | null {
+    const last = this.newestConsent(userId, 'host');
+    return last !== null && last.granted ? last.version : null;
+  }
+
+  /**
+   * A community node token's acceptance (AccountsDO POST /host-consent, from the NodeRegistryDO,
+   * Prompt 2 A3), one transaction: a 'host' row of `version` (the one in force: the AccountsDO
+   * checks it, and that hosting is in it), granted, source 'node_token', meaning the rules for hosts
+   * of that version (Terms section 12 and Annex B) accepted and 18 or older declared; the caller
+   * writes it only with both. `source` 'host_reaccept' when they come again from MIS SERVIDORES for
+   * a new version (POST /nodes/mine/accept), the same row otherwise. Unless the newest 'host' row
+   * already is that version: one row per version at most. Refused: no such account, a deletion
+   * pending, or the terms of that version not accepted ('terms_required': the host rules are part
+   * of them). The purge copies the row to consent_proofs like any other.
+   */
+  acceptHost(userId: string, version: string, now: number, source: 'node_token' | 'host_reaccept' = 'node_token'): { hostTerms: string } | 'no_user' | 'deletion_pending' | 'terms_required' {
+    return this.tx(() => {
+      const u = this.userById(userId);
+      if (u === null) return 'no_user' as const;
+      if (this.pendingDeletion(u)) return 'deletion_pending' as const;
+      if (this.consentState(userId).terms !== version) return 'terms_required' as const;
+      if (this.hostTerms(userId) !== version) this.consentIn(userId, 'host', version, true, source, now);
+      return { hostTerms: version };
+    });
+  }
+
   /**
    * The mail's unsubscribe (POST /api/news/unsubscribe, §2.11), one transaction: the account whose
    * unsub_id this is gets a news withdrawal (source 'unsubscribe') and a new random id, so the link
@@ -2073,6 +2119,8 @@ export class AccountStore {
       news: this.newsGranted(userId),
       // The terms version the account accepted last (the legal draft's P1, P33): the game asks again when TERMS_VERSION is another.
       terms: this.consentState(userId).terms,
+      // The rules for hosts it accepted last (a 'host' row), null for none: every account's before the opening.
+      hostTerms: this.hostTerms(userId),
       deletionAt: num(u.delete_purge_at),
       waysIn,
       // PERFIL's checklist (§3.12 step 5), for the project's maintainer accounts only: booleans and a count.
@@ -2365,6 +2413,20 @@ export class AccountStore {
       return u !== null && this.replayNameHidden(str(u.id));
     });
     return { ids: hidIds, names: hidNames };
+  }
+
+  /**
+   * The usernames of the accounts among `ids` as they are now (POST /usernames: the public list of
+   * community servers names a host that chose it by its name of today, never one a record kept,
+   * which another account may hold after a rename). A purged or unknown id is left out.
+   */
+  usernames(ids: readonly string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of new Set(ids)) {
+      const u = this.userById(id);
+      if (u !== null) out[id] = str(u.username);
+    }
+    return out;
   }
 
   // ---- cars and the hosts' shop -------------------------------------------------------------------

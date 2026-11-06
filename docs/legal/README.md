@@ -117,7 +117,12 @@ The switch is one Worker var, `TERMS_VERSION` in `server/wrangler.jsonc` (`2026-
   - an account's acceptance is a `consents` row of kind `terms` with the version (source `signup`,
     `oauth_signup`, or `reaccept`);
   - a new value is a new version: every account that has not accepted it gets a sheet to accept it
-    before it plays online again, and every guest gets the guest sheet again.
+    before it plays online again, and every guest gets the guest sheet again;
+  - once the terms describe hosting (`NODE_HOSTING_TERMS`), a new value also makes every host
+    outside the project accept the rules for hosts again (VOLVER A ACEPTAR in MIS SERVIDORES, Terms
+    12.2), and until it does none of its servers gets a new match (`server/src/hostPolicy.ts`
+    `hostRulesVersion`). Every community server drops out of placement at once, even for a small
+    correction: tell the hosts before the deploy.
 
 The texts are bundled with the Worker (a deploy changes them). Publish a new text and its version
 in the same deploy.

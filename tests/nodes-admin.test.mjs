@@ -173,6 +173,28 @@ test('mineAnswerOf and overviewOf read a server of before leniently: every list 
   assert.deepEqual(o.operator, { id: '', name: '', slotsUsed: 0, slotsMax: 0 });
 });
 
+test("mineAnswerOf keeps A11's fields when they came (null for requirements, terms and channel too), drops junk, and adds none for a server of before", () => {
+  const full = {
+    operator: { id: 'a', trusted: false },
+    nodes: [],
+    rewards: { points30d: 1, pointsToday: 0, capToday: 300 },
+    hosting: { open: false, reason: 'hosting_closed' },
+    requirements: { missing: ['email_required'], daysLeft: 3 },
+    terms: { version: '2026-11-16', accepted: false },
+    limits: { nodes: 1, maxNodes: 3, tokensToday: 0, tokensLeftToday: 3, outstanding: 1, maxOutstanding: 2 },
+    tokens: [{ id: 'abcdef123456', region: 'SA', name: 'juan-2', publicHost: 'j2.example.com', createdAt: 1, expiresAt: 2, state: 'unused', nodeId: null }],
+    showPublic: true,
+    channel: { stable: '0.2.0', minimum: '0.2.0' },
+  };
+  assert.deepEqual(N.mineAnswerOf(full), full, 'every field as it came');
+  const closed = N.mineAnswerOf({ ...full, requirements: null, terms: null, channel: null, showPublic: false });
+  assert.deepEqual([closed.requirements, closed.terms, closed.channel, closed.showPublic], [null, null, null, false], 'null and false are answers too');
+  const junk = N.mineAnswerOf({ nodes: [], hosting: 'open', requirements: 'none', terms: 1, limits: [], tokens: 'x', showPublic: 'yes', channel: 'stable' });
+  for (const k of ['hosting', 'requirements', 'terms', 'limits', 'tokens', 'showPublic', 'channel']) assert.equal(k in junk, false, k);
+  const before = N.mineAnswerOf({ operator: { id: 'a', trusted: true }, nodes: [], rewards: { points30d: 1 } });
+  assert.deepEqual(Object.keys(before).sort(), ['nodes', 'operator', 'rewards'], 'an older server: the answer as before');
+});
+
 // ---- the panel's model ---------------------------------------------------------------------------
 
 test('the refresh: every 15 s; held by reauth_required until the password (never retried), a minute apart while paused, slower after each 429; a hidden page waits', () => {
@@ -313,6 +335,16 @@ test('the confirmations: a reason for a retirement, a ban, a drain, a delist, a 
   assert.equal(M.nameTyped('Frankfurt-1', 'frankfurt-1'), false);
 });
 
+test("under the reason a host reads (a server's status, its retirement or drain, a host's block or suspend-all), the sheet says never to name a player there (Privacy 4.4 of (b)); an unblock's stays the team's", () => {
+  for (const a of ['status', 'ban', 'force', 'retire', 'drain', 'block', 'suspendAll']) assert.equal(M.hostSeesReason(a), true, a);
+  for (const a of ['unblock', 'reprobe', 'revokeToken', 'update', 'grant', 'revoke', 'unfreeze', 'delist', 'voidMatch', 'voidStrike', 'download', 'flag']) assert.equal(M.hostSeesReason(a), false, a);
+  assert.equal(es['nodesAdmin.confirm.hostSees'], 'El anfitrión ve este motivo: no nombres ni identifiques a ningún jugador.');
+  assert.equal(en['nodesAdmin.confirm.hostSees'], 'The host sees this reason: do not name or identify any player.');
+  const ui = readFileSync(new URL('../src/ui/screens/nodesAdmin.ts', import.meta.url), 'utf8');
+  const sheet = ui.slice(ui.indexOf('const confirmSheet = '), ui.indexOf('// ---- TOKENS'));
+  assert.match(sheet, /: reason\.el,\s*\/\/[^\n]*\n\s*hostSeesReason\(a\) \? h\('p\.mn-note', null, t\('nodesAdmin\.confirm\.hostSees'\)\) : null,/, 'right under the reason');
+});
+
 test('the wizard\'s follow-up: its token by the short id, then its node by usedBy, to active; expired, revoked, stopped and gone said apart', () => {
   const tk = (o = {}) => ({ id: '3f9a1c2b7d4e', operatorId: 'f', operatorName: 'T', region: 'EU', name: 'frankfurt-1', publicHost: 'node-1.example.com', roles: ['host', 'verify'], createdAt: 0, expiresAt: 3_600_000, usedBy: null, revokedAt: null, state: 'unused', ...o });
   const at = (tokens, nodes = []) => M.followOf(overview({ tokens, nodes }), '3f9a1c2b7d4e', 1000).step;
@@ -353,7 +385,7 @@ test('CUENTAS Y COLAS: counts as numbers only (ids, lists and booleans left out)
   assert.deepEqual(M.countRows({ total: 3, byWays: { password: 2, 'password+google': 1 }, trusted: [{ found: true }], operators: null, name: 'x' }), [['total', 3], ['byWays.password', 2], ['byWays.password+google', 1]]);
   assert.deepEqual(M.queueDayRow({ date: '2026-11-04', searches: { casual: 3, ranked: 1 }, cancelled: { casual: 1 }, dropped: {}, formed: { casual: { 1: 2, 2: 1 }, ranked: { 2: 1 } }, onNode: 2, onCloud: 2, crossRegion: 1 }), { date: '2026-11-04', searches: 4, cancelled: 1, dropped: 0, formed: 4, onNode: 2, onCloud: 2, crossRegion: 1 });
   assert.equal(M.queueDayRow({ searches: {} }), null);
-  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts']);
+  assert.deepEqual(M.ADMIN_TABS, ['summary', 'nodes', 'operators', 'tokens', 'regions', 'release', 'points', 'stats', 'matches', 'history', 'alerts']);
 });
 
 // ---- AccountClient's /nodes/* calls ---------------------------------------------------------------

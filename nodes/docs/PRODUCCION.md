@@ -1,9 +1,12 @@
 # Camino a producción
 
-> Estado al 19/10/2026. El prototipo vive en `nodes/` del repo y funciona como demo local: las pruebas
-> automáticas pasan y corren en el CI de cada PR, y la demo de
-> punta a punta funciona (`node --import ./dev/ts-resolve.mjs scripts/demo.mjs --once`). **No está
-> listo para jugadores reales.** Este documento lista todo lo que falta, en orden, para cada etapa.
+> Estado al 05/11/2026. Los nodos viven en `nodes/` del repo: las pruebas automáticas corren en el CI
+> de cada PR, y la demo de punta a punta funciona
+> (`node --import ./dev/ts-resolve.mjs scripts/demo.mjs --once`). **Desde el 21/10/2026 el
+> matchmaker manda partidas a los nodos,** todavía solo a los del proyecto: hoy uno por región
+> (São Paulo, Alemania y Malasia alojan y verifican y, por ahora, también hay en Sudáfrica,
+> Australia y Estados Unidos, que solo alojan). El alta de la comunidad sigue cerrada. Este
+> documento lista todo lo que falta, en orden, para cada etapa.
 > Las rutas de archivos son del repo (`server/`, `src/`, `docs/online/`) o de `nodes/`
 > (`control-plane/`, `node/`, `shared/`, `client/`, `install/`). Los esfuerzos son estimaciones
 > para una persona. Lo revisaron dos agentes independientes contra el código y las fuentes.
@@ -343,8 +346,8 @@ configurados ni siquiera se lee KV).
   Competitivo pide primero un nodo de su región anfitriona (la de la mayoría de sus humanos),
   nunca uno de otra región; si ninguno la toma, va a un `MatchDO` cerca de esa región. Con
   `do_disabled`, primero un nodo de su región y después uno de SA, nunca un `MatchDO`. Una región
-  sin nodos (NA, OC y AF hoy) responde `hosts: 0` y se le pregunta una vez por minuto. La
-  liberación de una partida de nodo va siempre a la cola central (`mm:SA`), y
+  sin nodos responde `hosts: 0` y se le pregunta una vez por minuto (hoy las seis tienen uno del
+  proyecto). La liberación de una partida de nodo va siempre a la cola central (`mm:SA`), y
   `ranked_matches.region` es la región anfitriona, en `MatchDO` y en nodo.
 - [x] **P23. `/api/rejoin` y `/api/leave` para partidas de nodo:** `rejoin` libera el lock si
   la partida no existe, terminó o el jugador no estaba, y lo mantiene si salió (`left`) o el nodo
@@ -398,7 +401,7 @@ quedan en el log.
 | M12 | **Hecho (20/10/2026)**: `node.json` copiado a la carpeta privada de la PC del mantenedor, para pasarlo al gestor de contraseñas. Falta, si se quiere, una instantánea del VPS en el panel del proveedor | — | — |
 | M13 | **Hecho (20/10/2026)**: el canal `#node-alerts` de Discord, solo del equipo (creado desde `private/discord`), y su webhook en el secreto `NODE_ALERT_WEBHOOK` | — | El canary |
 | M14 | **Hecho (20/10/2026)**: [7] y [8] desplegados con el flag apagado | — | El canary |
-| M15 | **Hecho (21/10/2026)**: canary con la cuenta del proyecto (una casual contra bots) y con dos invitados (una casual contra bots y una 1v1 entre los dos), todas en `node:sao-paulo-1`, sin cortes ni strikes; a las 00:32 UTC, `nodes_on` en `1`. `vm_disabled` queda como interruptor. **Falta** una ranked de verdad en el nodo, con dos cuentas que no sean la del proyecto (ver abajo) | — | La apertura |
+| M15 | **Hecho (21/10/2026)**: canary con la cuenta del proyecto (una casual contra bots) y con dos invitados (una casual contra bots y una 1v1 entre los dos), todas en `node:sao-paulo-1`, sin cortes ni strikes; a las 00:32 UTC, `nodes_on` en `1`. `vm_disabled` queda como interruptor. La primera ranked de verdad en `sao-paulo-1` la jugó el mantenedor ese mismo día, a las 00:40 UTC, con dos cuentas que no son de operador: la verificó el mismo VPS y quedó calificada, sin strikes (ver abajo) | — | La apertura |
 
 ### Pruebas antes de abrir la beta
 
@@ -410,8 +413,9 @@ aviso.
   con la cuenta del proyecto y con un invitado, y una 1v1 entre dos invitados. El panel de red
   dice `host node:sao-paulo-1`. Latencia desde la PC del mantenedor: 41 ms, jitter de 0,8 ms, ninguna
   desincronización.
-- [ ] **Una ranked desde un navegador,** con dos cuentas que no sean la del proyecto, viendo el
-  resultado en la pantalla de fin de partida (la verificación la hace el mismo VPS).
+- [x] **Una ranked desde un navegador** (21/10/2026), en `node:sao-paulo-1`, con dos cuentas que
+  no son la del proyecto: la jugó el mantenedor, la verificó el mismo VPS y quedó calificada,
+  sin strikes.
 - [ ] Una salida y un forfeit. La salida de una casual ya se probó (21/10/2026): el nodo cierra la
   partida y libera el lock, también si el jugador sale antes de conectarse.
 - [ ] Cerrar la pestaña en una ranked: cuenta como abandono, como en `MatchDO` (P7).
@@ -435,8 +439,9 @@ aviso.
   honestas fallan como `bad_takeover` o `no_replay`.
 - **Un agujero negro silencioso.** Un nodo que deja de ser alcanzable sigue recibiendo partidas
   hasta P6 y P26.
-- **Un solo verificador.** Si el VPS se cae, las ranked vuelven a `MatchDO`
-  (`control-plane/controlPlane.ts:637`) y las terminadas esperan hasta 6 horas (`:81`).
+- **Pocos verificadores.** Son tres, los del proyecto en São Paulo, Alemania y Malasia. Si ninguno
+  está en línea con la versión del nodo, las ranked no van a nodos y se juegan en `MatchDO`
+  (`control-plane/controlPlane.ts:1201`), y las terminadas esperan hasta 6 horas (`:111`).
 - **Instaladores sin firma.** El token de R2 puede cambiar los scripts que las instalaciones nuevas
   corren como root: va en su propio entorno (`releases-r2`), con la misma aprobación que la clave
   de firma, y la subida solo acepta los instaladores de `nodes/install/` con la clave del repo.
@@ -587,8 +592,12 @@ aviso.
 
 - [ ] **Términos para operadores** y un **aviso de privacidad para jugadores:** qué datos ve un
   operador (nombre, id de jugador, inputs y, sin relay, la IP), uso de ancho de banda, reglas de
-  los proveedores de internet sobre servidores hogareños, suspensiones y apelaciones. Hoy no hay
-  términos ni política de privacidad en el repo.
+  los proveedores de internet sobre servidores hogareños, suspensiones y apelaciones. Los términos
+  y la política de privacidad ya están en `docs/legal/` (desde el PR #96; hoy rige la versión
+  2026-11-05) y traen las reglas para anfitriones (sección 12 de los Términos y su Anexo A), pero
+  dicen que solo el proyecto tiene servidores y que esas reglas valen recién desde la apertura. La
+  aceptación de anfitrión, la declaración de 18 años y el Anexo B llegan con la versión de la
+  apertura.
 - [ ] **Revisión de un abogado.** Esto no es asesoramiento legal. Puntos a mirar:
   - **La IP como dato personal:** el GDPR la nombra (considerando 30). En Argentina, la Ley 25.326
     no la nombra y hay fallos en contra; en Brasil, la LGPD protege datos de personas
@@ -613,14 +622,16 @@ aviso.
 ### Confianza y disponibilidad
 
 - [ ] **Un nombre para cada VPS comunitario.** El chequeo de alcance corre en el Worker, que no
-  puede pedir una IP, y el instalador hoy usa la IP por defecto (el `/nodes/whoami` de `install/install.sh`). Un
-  VPS registrado por IP nunca pasa de pendiente. Opciones: que el operador traiga su dominio
-  (`--public-host`), que el plano de control le dé un subdominio del proyecto con la API de DNS de
-  Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el verificador.
-  Esfuerzo: medio.
-- [ ] **Un segundo verificador de confianza.** Con uno solo, si el VPS de São Paulo se cae, los
-  resultados esperan hasta 6 horas y después se anulan. `docs/online/DECISIONS.md` ya lo pone en
-  Hetzner (Ashburn o Falkenstein), con su presupuesto.
+  puede pedir una IP: el plano de control rechaza una IP (`ip_not_supported`), y el instalador
+  pide un nombre (`--public-host`) para un nodo nuevo por wss y se detiene con una IP, salvo con
+  `--allow-ip`, que es para un plano de control de desarrollo. Hoy el operador trae su dominio.
+  Opciones para no pedírselo: que el plano de control le dé un subdominio del proyecto con la API
+  de DNS de Cloudflare, o hacer el chequeo desde una máquina fuera de Workers, como el
+  verificador. Esfuerzo: medio.
+- [x] **Un segundo verificador de confianza** (noviembre de 2026). Alemania y Malasia, del
+  proyecto, alojan y verifican como São Paulo (`VPS-PROYECTO.md`; su costo va en el presupuesto de
+  `docs/online/DECISIONS.md`). Si uno se cae, verifican los otros dos: los resultados esperan hasta
+  6 horas, y después se anulan, solo si no queda ninguno.
 - [ ] **Verificar en un worker thread,** para que un VPS que hostea y verifica use sus dos
   núcleos.
 - [ ] **Un canal canary que funcione.** El campo existe en el protocolo, pero el lanzador no lo
@@ -639,8 +650,9 @@ aviso.
 
 ### El primer auto de la tienda
 
-- [ ] **El auto:** un segundo modelo, solo estético, con el mismo hitbox, para que el wasm y el
-  verificador no cambien. Precio decidido: 1.500 puntos.
+- [x] **Los autos:** cuatro modelos solo estéticos (Pampero, Carpincho, Cóndor y Tero, en
+  `src/game/cosmetics.ts`), con el mismo hitbox, así que el wasm y el verificador no cambian. Cuestan
+  1.500 puntos cada uno, el precio decidido, y ya se canjean en GARAJE.
 - [x] **El inventario:** `GET /api/me/items`, con las tablas de `AccountsDO`.
 - [x] **El protocolo:** no hace falta subir `PROTOCOL_VERSION` ni `P2P_PROTOCOL_VERSION`. El auto
   viaja con el asiento, como el nombre (`src/net/cosmetics.ts`, fuera del bundle de los nodos): en
@@ -804,5 +816,7 @@ Sin número D: no frenan la etapa 1.
 - **Casuales en nodos comunitarios:** decidido 2026-11-04 (ver "El casual por defecto es P2P" en
   Decisiones de producto): Casual siempre en servidor, ~~el nodo primero cuando el host es SA~~ un
   nodo de la región anfitriona primero (colocación regional, PR 0 del prompt 1).
-- **Segundo verificador:** cuándo se levanta el de Hetzner.
-- **El primer auto:** cuál es. El precio ya está decidido en 1.500 puntos.
+- **Segundo verificador:** ~~cuándo se levanta el de Hetzner~~ decidido 2026-11-04: Alemania y
+  Malasia, del proyecto, también verifican.
+- **El primer auto:** ~~cuál es~~ decidido: los cuatro de `src/game/cosmetics.ts` (Pampero,
+  Carpincho, Cóndor y Tero), a 1.500 puntos cada uno.

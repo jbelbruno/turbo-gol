@@ -92,6 +92,9 @@
  *   POST /replay-name/set { userId, hidden }                         -> { hidden } | 404
  *   POST /replay-hidden   { ids, names } (the NodeRegistryDO)        -> { ids, names }: those of an account that hides
  *                                                                     its name in the public replays (256 each at most)
+ *   POST /usernames       { ids } (the NodeRegistryDO's public list) -> { names: { <id>: username } }: each account's name
+ *                                                                     as it is now, a purged or unknown id left out (256
+ *                                                                     at most)
  *   POST /tv-start        { ip, secret, where?, checked? }           -> { code, expiresAt } | 503 busy (the table, or the
  *                                                                     caller's /48 or /24, is full; `checked` false: started
  *                                                                     without a solved check, tvCodes.ts TV_OPEN_* too)
@@ -115,6 +118,17 @@
  *   POST /shop/claim      { userId, item }                           -> ClaimAnswer | 404 unknown_item | 409 <ClaimRefusal> | 404
  *   POST /host-credit     HostCredit (the NodeRegistryDO's outbox)    -> { ok, applied } (once per matchId)
  *   POST /host-freeze     { userId, reason, at } (the outbox)        -> { ok, applied }
+ *   POST /host-consent    { userId, version, adult, again? } (the NodeRegistryDO's community token, Prompt 2 A3; again:
+ *                                                                     its POST /nodes/mine/accept) -> { hostTerms }:
+ *                                                                     a 'host' consents row (source 'node_token', or
+ *                                                                     'host_reaccept' with again: true: the rules
+ *                                                                     for hosts of the version in force accepted and 18 or
+ *                                                                     older declared), one per version at most | 400
+ *                                                                     bad_consent (no terms, or none that describe hosting:
+ *                                                                     env.ts hostingTermsInForce) | 403 adult_required (no
+ *                                                                     adult: true) | 409 terms_changed { version } (not the
+ *                                                                     version in force) | 403 terms_required { version } (that
+ *                                                                     version's terms not accepted) | 403 deletion_pending | 404
  *   POST /host-grant      { userId, item } (a maintainer, through the NodeRegistryDO) -> { granted, items } | 404
  *   POST /host-revoke     { userId, item }                           -> { revoked, refunded, items }
  *   POST /host-unfreeze   { userId }                                 -> { unfrozen }
@@ -212,7 +226,7 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
-import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
+import { EXPERIMENTAL_REFUSED, carriesPhysics, deleteGraceMs, error, hostingTermsInForce, json, limitKey, nodesConfigured, termsVersion, trustedOperatorIds } from './env';
 import { base64urlEncode, checkInternal } from './auth';
 import { AccountStore, DEV_NAME_PROBLEM } from './accountStore';
 import { CODE_TRIES, LEGACY_CLOSED, LEGACY_REMIND_MS, legacyDateOf, markSlot, providerMark } from './accountStore';
@@ -2302,6 +2316,11 @@ export class AccountsDO extends DurableObject<Env> {
         if (!list(b.ids) || !list(b.names)) return error(400, 'bad_request');
         return json(s.replayHidden(b.ids, b.names));
       }
+      case '/usernames': {
+        const ids = b.ids;
+        if (!Array.isArray(ids) || ids.length > REPLAY_HIDDEN_MAX || !ids.every((x): x is string => typeof x === 'string' && x.length <= 64)) return error(400, 'bad_request');
+        return json({ names: s.usernames(ids) });
+      }
       case '/presets/delete': {
         if (typeof b.userId !== 'string') return error(400, 'bad_request');
         if (typeof b.id !== 'string' || !PRESET_ID_RE.test(b.id)) return error(400, 'bad_preset');
@@ -2336,6 +2355,21 @@ export class AccountsDO extends DurableObject<Env> {
       case '/host-freeze': {
         if (!isHex(b.userId, 16) || typeof b.reason !== 'string' || typeof b.at !== 'number' || !(b.at > 0)) return error(400, 'bad_request');
         return json({ ok: true, applied: s.hostFreeze(b.userId, b.reason.slice(0, 120), b.at) });
+      }
+      case '/host-consent': {
+        if (!isHex(b.userId, 16) || typeof b.version !== 'string' || b.version.length > 64) return error(400, 'bad_consent', 'Consentimiento inválido');
+        const current = termsVersion(this.env);
+        // No terms published, or none that describe hosting yet (NODE_HOSTING_TERMS): no 'host' row, ever.
+        if (current === null || !hostingTermsInForce(this.env)) return error(400, 'bad_consent', 'Consentimiento inválido');
+        // The account's own refusals are 403, as the token's (PR 2A's contract); a version that is not in force, 409.
+        if (b.adult !== true) return error(403, 'adult_required', 'Declara que tienes 18 años o más');
+        if (b.version !== current) return json({ error: 'terms_changed', message: 'Los términos cambiaron: vuelve a leerlos', version: current }, 409);
+        // again: the rules of a new version accepted again in MIS SERVIDORES (POST /nodes/mine/accept), the row's source says so.
+        const r = s.acceptHost(b.userId, current, now, b.again === true ? 'host_reaccept' : 'node_token');
+        if (r === 'no_user') return error(404, 'no_user');
+        if (r === 'deletion_pending') return json({ error: 'deletion_pending', message: 'Esta cuenta tiene un borrado pendiente', purgeAt: s.deletionAt(b.userId) }, 403);
+        if (r === 'terms_required') return json({ error: 'terms_required', message: 'Primero acepta los términos vigentes', version: current }, 403);
+        return json(r);
       }
       case '/host-grant': {
         if (typeof b.userId !== 'string' || typeof b.item !== 'string') return error(400, 'bad_request');

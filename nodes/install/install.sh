@@ -4,21 +4,39 @@
 #   curl -fsSL <control>/nodes/releases/install.sh | sudo bash -s -- --control <url> --token <tgn1_...>
 #        [--name <name>] [--roles host|verify|host,verify] [--transport wss|rtc]
 #   (verify: only the project's own nodes may verify matches for now; a community token is refused)
-#        [--public-host <ip or name>] [--allow-proxied] [--uplink-mbps <n>] [--egress-cap-gb <n>]
-#        [--matches <n>|auto]
+#        [--public-host <name>] [--allow-proxied] [--allow-ip] [--uplink-mbps <n>]
+#        [--egress-cap-gb <n>] [--matches <n>|auto] [--node-version <version>]
 #
-#   --transport wss (default): players connect to this machine over HTTPS (ports 80/443), on its
-#                    public IP or on the name given with --public-host.
+#   --transport wss (default): players connect to this machine over HTTPS (ports 80/443), under the
+#                    name given with --public-host.
 #   --transport rtc: a server that cannot open ports; players connect over WebRTC (outbound UDP and
 #                    TURN), no Caddy, no firewall changes. Home PCs use install-windows.ps1 or
 #                    install-desktop.sh instead.
-#   --public-host <name>: a DNS name for this machine. Before the token is spent, its A record must
-#                    lead to this machine (the public IPv4 the control plane sees, or one on its
-#                    network interfaces), and so must its AAAA record if it has one; --allow-proxied
-#                    also accepts Cloudflare's proxy in front of it (SSL mode "Full (strict)"). An
-#                    IP address given here must be one of this machine's.
+#   --public-host <name>: a DNS name for this machine, required to register a wss host. Before the
+#                    token is spent, its A record must lead to this machine (the public IPv4 the
+#                    control plane sees, or one on its network interfaces), and so must its AAAA
+#                    record if it has one.
+#   --allow-proxied: also accepts Cloudflare's proxy in front of the name (SSL mode "Full
+#                    (strict)"), for the project's own servers only: a name under turbo-gol.com. A
+#                    community server is reached by its players directly, never through a proxy
+#                    that would see their connections (Terms, Annex B, point 6), so for any other
+#                    name the installer stops before it installs anything (the control plane
+#                    refuses such a registration too).
+#   --allow-ip:      registers on an IP address given in --public-host, which must be one of this
+#                    machine's: only for a development control plane. The project's registers a wss
+#                    host only under a DNS name (its reachability check cannot fetch an IP address),
+#                    so without this flag the installer stops on an IP address before it installs
+#                    anything. A node registered on an IP address needs no flag to run this again or
+#                    to --restore.
 #   --matches <n>:   how many matches at a time, instead of the CPU benchmark's estimate; auto
 #                    goes back to the benchmark.
+#   --node-version <version>: the Node.js the node runs (/usr/bin/node), a major (26), a major
+#                    and minor (26.13) or an exact version (26.13.0), from NodeSource. Installed when
+#                    the one there does not match, a downgrade or one held with apt-mark hold
+#                    included; on a re-run the node then restarts on it once its running matches
+#                    end. A major and minor or an exact version is then held (apt-mark hold
+#                    nodejs), so that an apt upgrade does not move it to the newest of its major; a
+#                    major alone is not. Left out: Node.js 26 when there is none or it is older.
 #
 # Caddy is the node's own: the installer replaces /etc/caddy/Caddyfile on every run, and stops
 # before the token is spent when that file is one it did not write (other than the Caddy
@@ -29,22 +47,32 @@
 # that changed anything, the node restarts once its running matches end. --matches,
 # --egress-cap-gb and --uplink-mbps change their values; left out, they keep the installed ones.
 # The roles, the transport and the public address were fixed at registration and come from
-# node.json.
+# node.json: a node moves to another name only by registering again, with a new token.
 #   --restore <node.json>: install a backed-up identity (a new machine, or a reinstalled one)
 #                    instead of registering. No token; a DNS name must point to the new machine.
 #                    An identity registered on an IP address works only on a machine with that
 #                    address: anywhere else, register again.
 #
 # What it does (and nothing else):
-#   1. Node.js 24 (NodeSource) and Caddy (official repo) if missing
+#   1. the packages curl, ca-certificates, gnupg and openssl; Node.js 26 (or the --node-version one,
+#      NodeSource, held for a major and minor or an exact version) and Caddy (official repo) if missing
 #   2. user 'turbogol', /opt/turbogol-node (launcher), /var/lib/turbogol-node (keys, releases, state)
 #   3. downloads the launcher and checks its Ed25519 signature against the release key below
-#   4. Caddy: HTTPS on this machine's public IP or name, reverse proxy to the node on 127.0.0.1:7350,
-#      with a Let's Encrypt certificate it renews by itself (90 days for a name; an IP gets the
-#      6-day profile). The config and ports 80/443 are checked before the token is spent
+#   4. Caddy: HTTPS on this machine's name (or the IP address an identity was registered on),
+#      reverse proxy to the node on 127.0.0.1:7350, with a Let's Encrypt certificate it renews by
+#      itself (90 days for a name; an IP gets the 6-day profile). Its log lines (an error, such as a
+#      502 while the node restarts) keep no player's IP address, port or request headers: the
+#      player's ticket, with their name and account id, travels in one. No access log is turned
+#      on. The config and ports 80/443 are checked before the token is spent
 #   5. registers the machine with the one-time token (the node key is generated here and stays
 #      here), or installs the --restore identity, or keeps the one it has
-#   6. systemd service 'turbogol-node' (the launcher: auto-update, drain, rollback), firewall 80/443
+#   6. systemd service 'turbogol-node' (the launcher: auto-update, drain, rollback), and ports 80/443
+#      opened in ufw when ufw is active
+#   7. the system journal (journald) kept 7 days at most, as the rules for hosts ask of any log with
+#      a player's IP address (Terms 12.3.2): /etc/systemd/journald.conf.d/60-turbogol-retention.conf
+#      (its retention only, never a size), and systemd-journald restarted when that file changed. A
+#      drop-in named after it (zz-local.conf, say) wins over it, if the law makes you keep more. Other
+#      logs (rsyslog's /var/log/syslog, kern.log, ufw.log on Ubuntu) are left as they are: check them
 #
 # Stop:      systemctl stop turbogol-node   the node takes no new matches and stops when the running
 #            ones end (up to 30 min; nobody is cut). To cut them, while it waits: systemctl kill
@@ -53,7 +81,10 @@
 # Back up:   /var/lib/turbogol-node/node.json (the node's key) somewhere safe, for --restore.
 # Uninstall: systemctl disable --now turbogol-node (the same wait); rm -rf /opt/turbogol-node
 #            /var/lib/turbogol-node /etc/systemd/system/turbogol-node.service; userdel turbogol;
-#            apt-get purge caddy (or keep it and write your own /etc/caddy/Caddyfile)
+#            apt-get purge caddy (or keep it and write your own /etc/caddy/Caddyfile); apt-mark
+#            unhold nodejs if a --node-version held it. Keep
+#            /etc/systemd/journald.conf.d/60-turbogol-retention.conf 7 days after the last match, then
+#            remove it if you like (systemctl restart systemd-journald)
 set -euo pipefail
 
 # Filled in by scripts/build-node.mjs from the release key (never fetched from the network).
@@ -61,11 +92,27 @@ RELEASE_KEY_B64URL="__RELEASE_PUBLIC_KEY_B64URL__"
 RELEASE_KEY_PEM="__RELEASE_PUBLIC_KEY_PEM__"
 
 CONTROL=""; TOKEN=""; NAME=""; ROLES=""; TRANSPORT=""; PUBLIC_HOST=""; UPLINK=""; EGRESS=""; MATCHES=""
-RESTORE=""; ALLOW_PROXIED=0
+RESTORE=""; ALLOW_PROXIED=0; ALLOW_IP=0; NODE_VERSION=""
 PORT=7350
 APP=/opt/turbogol-node
 DATA=/var/lib/turbogol-node
 UNIT=/etc/systemd/system/turbogol-node.service
+# The Node.js the service runs (ExecStart) and registers with: NodeSource's nodejs package and the
+# distribution's both install it here. Its version is the one checked, not that of the first node
+# on root's PATH.
+NODE_BIN=/usr/bin/node
+# The oldest Node.js major a node runs on (the release manifest's nodeMajor, scripts/build-node.mjs),
+# and the one installed when there is none or it is older.
+NODE_MIN=26
+# The operator guide a run ends with: the page the game's "host a server" links open
+# (src/ui/screens/garage.ts, guideUrl).
+GUIDE=https://github.com/DonJaimeHash/turbo-gol/blob/main/nodes/README.md
+# The project's domain (the Worker's RESERVED_HOST_DOMAIN, server/src/hostPolicy.ts): the control
+# plane never registers a community server under it, at its token, its registration or any hello,
+# so a name under it is one of the project's own servers. --allow-proxied is for those alone.
+PROJECT_DOMAIN=turbo-gol.com
+# journald's drop-in for the system journal's retention (journald_conf).
+JOURNALD_CONF=/etc/systemd/journald.conf.d/60-turbogol-retention.conf
 
 die() { echo "turbogol-node install: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
@@ -156,6 +203,14 @@ is_cloudflare_v4() { in_v4_nets "$1" "$CLOUDFLARE_V4"; }
 is_cloudflare() {
   if is_ipv4 "$1"; then is_cloudflare_v4 "$1"; else is_ipv6 "$1" && in_v6_nets "$1" "$CLOUDFLARE_V6"; fi
 }
+# 0 when the name $1 is PROJECT_DOMAIN or under it (any case, a final dot or not): a project server's.
+project_name() {
+  local h=${1,,}
+  h=${h%.}
+  [ "$h" = "$PROJECT_DOMAIN" ] || [[ "$h" == *."$PROJECT_DOMAIN" ]]
+}
+# Why --allow-proxied is refused on any other name (one line, for die).
+PROXY_REFUSED="--allow-proxied is only for the project's own servers (a name under $PROJECT_DOMAIN): a community server is reached by its players directly, never through a proxy that sees their connections (Terms, Annex B, point 6). Set the DNS record to 'DNS only' and leave --allow-proxied out"
 # Not reachable from the internet: a DNS record must not lead to these even when this machine has one.
 PRIVATE_V4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16"
 
@@ -190,7 +245,7 @@ dns_leads_here() {
     return 1
   fi
   if [ -n "$proxied" ] && [ "$3" != 1 ]; then
-    echo "it resolves to Cloudflare's proxy (${proxied# }), not to this machine ($here): set the record to 'DNS only', or pass --allow-proxied if the proxy is meant to stay (SSL mode 'Full (strict)')"
+    echo "it resolves to Cloudflare's proxy (${proxied# }), not to this machine ($here): set the record to 'DNS only' (a project server under $PROJECT_DOMAIN may keep the proxy with --allow-proxied, SSL mode 'Full (strict)')"
     return 1
   fi
 }
@@ -212,6 +267,24 @@ version_at_least() {
   [ "$major" -gt "$2" ] || { [ "$major" -eq "$2" ] && [ "$minor" -ge "$3" ]; }
 }
 
+# 0 when the Node.js version $1 (24.14.0) is one --node-version $2 asks for: the same major (24),
+# major and minor (24.14) or exact version (24.14.0).
+node_is() { [ "$1" = "$2" ] || [[ "$1" == "$2".* ]]; }
+
+# NodeSource's apt repository for the Node.js major $1 (its setup script runs apt-get update too).
+nodesource_setup() {
+  curl -fsSL "https://deb.nodesource.com/setup_$1.x" | bash - >/dev/null || die "could not set up NodeSource's repository for Node.js $1 (https://deb.nodesource.com/setup_$1.x)"
+}
+
+# The NodeSource package version of nodejs that --node-version $1 asks for (24.14.0-1nodesource1),
+# the newest when several fit; nothing when the repositories have none. Never the distribution's
+# own nodejs (24.14.0+dfsg-1ubuntu1).
+nodesource_package() {
+  { apt-cache madison nodejs 2>/dev/null || true; } \
+    | awk -v v="$1" 'index($3, "nodesource") && index($3, v) == 1 && substr($3, length(v) + 1, 1) ~ /[.-]/ { print $3 }' \
+    | sort -V | tail -n 1
+}
+
 # The Caddyfile for a wss host: HTTPS on $1 (an IP address or a DNS name) to the node on
 # 127.0.0.1:$2. Printed: the caller validates it before it replaces /etc/caddy/Caddyfile.
 caddyfile() {
@@ -224,6 +297,23 @@ caddyfile() {
 	# would still offer it to every browser.
 	servers {
 		protocols h1 h2
+	}
+	# The default logger, which every line goes through, the errors too (a 502 while the node
+	# restarts, a WebSocket cut): no player's IP address, port or request headers. The player's
+	# ticket, with their name and account id, travels in a header (Sec-WebSocket-Protocol); the
+	# URL carries none. No access log is turned on. Written for Caddy 2.7 to 2.10 (the installer
+	# asks for 2.7 or newer): the filter encoder with wrap and a fields block is Caddy 2.6's
+	# syntax, which the later versions still read.
+	log {
+		format filter {
+			wrap console
+			fields {
+				request>remote_ip delete
+				request>remote_port delete
+				request>client_ip delete
+				request>headers delete
+			}
+		}
 	}
 EOF
   if is_ip "$1"; then
@@ -245,6 +335,24 @@ $site {
 		stream_close_delay 30m
 	}
 }
+EOF
+}
+
+# The journald drop-in (JOURNALD_CONF): the system journal, where Caddy, the firewall and the node
+# write, kept 7 days at most (Terms 12.3.2 and Annex B, point 9: any log with a player's IP
+# address). journald deletes an archived file once its first line is older than MaxRetentionSec,
+# when it next rotates; with a file a day (MaxFileSec), it rotates every day, so no line is kept
+# more than 6 + 1 days. A file of its own name, with no size key: the size limits stay the
+# machine's (another drop-in's SystemMaxUse, say), and a drop-in named after it wins over it.
+journald_conf() {
+  cat <<'EOF'
+# Generated by the Turbogol node installer, which rewrites it on every run.
+# The system journal kept 7 days at most: the rules for hosts (Terms 12.3.2) ask it of any log
+# with a player's IP address. A file a day, each deleted once its first line is 6 days old. To
+# keep more (if the law makes you), set MaxRetentionSec in a drop-in named after this one.
+[Journal]
+MaxRetentionSec=6day
+MaxFileSec=1day
 EOF
 }
 
@@ -304,9 +412,11 @@ while [ $# -gt 0 ]; do
     --transport) TRANSPORT="$2"; shift 2 ;;
     --public-host) PUBLIC_HOST="$2"; shift 2 ;;
     --allow-proxied) ALLOW_PROXIED=1; shift ;;
+    --allow-ip) ALLOW_IP=1; shift ;;
     --uplink-mbps) UPLINK="$2"; shift 2 ;;
     --egress-cap-gb) EGRESS="$2"; shift 2 ;;
     --matches) MATCHES="$2"; shift 2 ;;
+    --node-version) NODE_VERSION="$2"; shift 2 ;;
     --restore) RESTORE="$2"; shift 2 ;;
     *) die "unknown option $1" ;;
   esac
@@ -337,8 +447,25 @@ fi
 [ -z "$MATCHES" ] || [ "$MATCHES" = auto ] || { [[ "$MATCHES" =~ ^[0-9]{1,3}$ ]] && [ "$MATCHES" -ge 1 ] && [ "$MATCHES" -le 200 ]; } || die "--matches: a whole number from 1 to 200, or auto (the CPU benchmark's estimate)"
 [ -z "$UPLINK" ] || [[ "$UPLINK" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--uplink-mbps: a number"
 [ -z "$EGRESS" ] || [[ "$EGRESS" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "--egress-cap-gb: a number"
+[ -z "$NODE_VERSION" ] || { [[ "$NODE_VERSION" =~ ^([1-9][0-9])(\.(0|[1-9][0-9]{0,3})){0,2}$ ]] && [ "${BASH_REMATCH[1]}" -ge "$NODE_MIN" ]; } || die "--node-version: Node.js $NODE_MIN or newer, as a major ($NODE_MIN), a major and minor (26.13) or an exact version (26.13.0)"
 PUBLIC_HOST=${PUBLIC_HOST#\[}; PUBLIC_HOST=${PUBLIC_HOST%\]}
-[ -z "$PUBLIC_HOST" ] || is_ip "$PUBLIC_HOST" || is_dns_name "$PUBLIC_HOST" || die "--public-host: an IP address or a DNS name, with no port or scheme"
+# --allow-ip only matters to a new registration: a re-run or a restore keeps the identity's address.
+HOST_FORM="a DNS name or an IP address"
+if [ "$REGISTER" = 1 ]; then HOST_FORM="a DNS name (an IP address only with --allow-ip)"; fi
+[ -z "$PUBLIC_HOST" ] || is_ip "$PUBLIC_HOST" || is_dns_name "$PUBLIC_HOST" || die "--public-host: $HOST_FORM, with no port or scheme"
+# Before anything is installed: Cloudflare's proxy in front is for the project's servers alone. A
+# re-run or a --restore is checked again on the identity's own name, below.
+if [ "$ALLOW_PROXIED" = 1 ] && [ -n "$PUBLIC_HOST" ] && ! project_name "$PUBLIC_HOST"; then die "$PROXY_REFUSED"; fi
+# A new wss host registers under a DNS name: the project's control plane checks from a Worker that
+# it reaches the node there, and a Worker cannot fetch an IP address, so it refuses one
+# (ip_not_supported, control-plane/registry.ts). This stops before anything is installed. A re-run
+# or a --restore keeps the identity's address, an IP address too.
+if [ "$REGISTER" = 1 ] && [[ ",${ROLES:-host}," == *,host,* ]] && [ "${TRANSPORT:-wss}" = wss ]; then
+  [ -n "$PUBLIC_HOST" ] || die "--public-host <name> is required: players reach this server over wss under a DNS name whose A record leads to this machine (or pass --transport rtc, for a server that cannot open ports)"
+  if is_ip "$PUBLIC_HOST" && [ "$ALLOW_IP" != 1 ]; then
+    die "--public-host $PUBLIC_HOST is an IP address, and the control plane registers a wss server only under a DNS name (it cannot check an IP address): point a name's A record to this machine and pass that name (--allow-ip is only for a development control plane that takes IP addresses)"
+  fi
+fi
 # Only the placeholder's own prefix: a real base64url key may well start with "__".
 case "$RELEASE_KEY_B64URL" in __RELEASE_*) die "this install.sh has no release key (use the one a release publishes, or build it with scripts/build-node.mjs)" ;; esac
 case "$RELEASE_KEY_PEM" in __RELEASE_*) die "this install.sh has no release key (use the one a release publishes, or build it with scripts/build-node.mjs)" ;; esac
@@ -354,12 +481,48 @@ say "packages"
 apt_update
 apt_get install -y -qq curl ca-certificates gnupg openssl >/dev/null
 
-NODE_MAJOR=0
-if command -v node >/dev/null; then NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]'); fi
-if [ "$NODE_MAJOR" -lt 24 ]; then
-  say "Node.js 24 (NodeSource)"
-  curl -fsSL https://deb.nodesource.com/setup_24.x | bash - >/dev/null
+NODE_HAVE=$("$NODE_BIN" -p process.versions.node 2>/dev/null || true)
+NODE_MAJOR=${NODE_HAVE%%.*}
+NODE_SERIES=${NODE_VERSION%%.*}
+NODE_PKG=""
+# NODE_CHANGED: the service runs on another Node.js from now on (a re-run restarts it).
+NODE_CHANGED=0
+if [ -n "$NODE_VERSION" ]; then
+  if ! node_is "$NODE_HAVE" "$NODE_VERSION"; then
+    say "Node.js $NODE_VERSION (NodeSource)"
+    nodesource_setup "$NODE_SERIES"
+    NODE_PKG=$(nodesource_package "$NODE_VERSION")
+    if [ -z "$NODE_PKG" ]; then
+      # The setup above has already moved NodeSource's repository to that major, which the next
+      # apt upgrade follows.
+      NODE_REPO=""
+      if [ -n "$NODE_HAVE" ] && [ "$NODE_MAJOR" != "$NODE_SERIES" ]; then
+        NODE_REPO=". This machine's NodeSource repository is now the one for Node.js $NODE_SERIES, and an apt upgrade would move Node.js $NODE_HAVE to it unless nodejs is held: run this again with a version that repository has, or with --node-version $NODE_HAVE, which holds the one here"
+      fi
+      die "Node.js $NODE_VERSION is not in NodeSource's repository for this system (apt-cache madison nodejs lists the versions it has)$NODE_REPO"
+    fi
+    # Asked for by its version: installed even over a newer one or a held one (apt-mark hold).
+    apt_get install -y -qq --allow-downgrades --allow-change-held-packages "nodejs=$NODE_PKG" >/dev/null
+    NODE_CHANGED=1
+  fi
+elif [ "${NODE_MAJOR:-0}" -lt "$NODE_MIN" ]; then
+  say "Node.js $NODE_MIN (NodeSource)"
+  nodesource_setup "$NODE_MIN"
   apt_get install -y -qq nodejs >/dev/null
+  NODE_CHANGED=1
+fi
+if [ "$NODE_CHANGED" = 1 ]; then
+  NODE_HAVE=$("$NODE_BIN" -p process.versions.node 2>/dev/null || true)
+  node_is "$NODE_HAVE" "${NODE_VERSION:-$NODE_MIN}" || die "NodeSource's nodejs${NODE_PKG:+ $NODE_PKG} is installed, but $NODE_BIN, the Node.js the service runs, is ${NODE_HAVE:+Node.js }${NODE_HAVE:-missing}: something other than that package provides it (dpkg -S $NODE_BIN)"
+fi
+if [ -n "$NODE_VERSION" ]; then
+  # A major and minor or an exact version stays the one asked for: NodeSource's repository offers
+  # the newest of its major to every apt upgrade, so it is held. A major alone is not.
+  NODE_HELD=""
+  case "$NODE_VERSION" in
+    *.*) apt-mark hold nodejs >/dev/null || die "could not hold nodejs at Node.js $NODE_HAVE (apt-mark hold nodejs)"; NODE_HELD="; held with apt-mark hold" ;;
+  esac
+  say "Node.js $NODE_HAVE (--node-version $NODE_VERSION$NODE_HELD)"
 fi
 if is_ipv6 "$PUBLIC_HOST"; then PUBLIC_HOST=$(canon_ipv6 "$PUBLIC_HOST"); fi
 
@@ -412,11 +575,12 @@ if [ "$WSS" = 1 ]; then
   # back, while players and the A record use IPv4.
   MY_IPV4=$(curl -4 -fsS --max-time 20 "$CONTROL/nodes/whoami" 2>/dev/null | sed -n 's/.*"ip" *: *"\([^"]*\)".*/\1/p' || true)
   is_ipv4 "$MY_IPV4" || MY_IPV4=""
-  if [ -z "$PUBLIC_HOST" ]; then
-    [ -n "$MY_IPV4" ] || die "could not detect the public IPv4 ($CONTROL/nodes/whoami): pass --public-host"
-    PUBLIC_HOST=$MY_IPV4
-  fi
+  # A new registration has its --public-host (checked above), a re-run or a restore the identity's:
+  # never this machine's IPv4 by default, which the control plane would refuse.
+  [ -n "$PUBLIC_HOST" ] || die "${IDFILE:-node.json} names no public address for its wss transport: pass --public-host <name>"
   is_ip "$PUBLIC_HOST" || is_dns_name "$PUBLIC_HOST" || die "the public address $PUBLIC_HOST is not an IP address or a DNS name"
+  # The name a re-run or a --restore keeps (node.json's): a community identity is never under the project's domain.
+  if [ "$ALLOW_PROXIED" = 1 ] && ! project_name "$PUBLIC_HOST"; then die "$PROXY_REFUSED"; fi
   if is_ip "$PUBLIC_HOST"; then
     # An address must be this machine's. A restored identity, or a re-run after the provider
     # changed the address, would otherwise keep sending players (and Let's Encrypt) to the old one.
@@ -475,8 +639,8 @@ id turbogol >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin
 mkdir -p "$APP" "$DATA"
 chown turbogol:turbogol "$DATA"
 chmod 700 "$DATA"
-# CHANGED: something the running service uses was replaced, so a re-run restarts it.
-CHANGED=0
+# CHANGED: something the running service uses was replaced (Node.js too), so a re-run restarts it.
+CHANGED=$NODE_CHANGED
 # Written outside $DATA, then put in place by install(1). $DATA belongs to the node's user: a
 # redirect into it as root would follow a link planted there by a compromised node (to
 # /etc/passwd, say) and overwrite its target.
@@ -484,6 +648,16 @@ KEY_NEW=$(mktemp)
 printf '%s' "$RELEASE_KEY_B64URL" > "$KEY_NEW"
 if put_file "$KEY_NEW" "$DATA/release-key.pub" 644 turbogol; then CHANGED=1; fi
 printf '%s\n' "$RELEASE_KEY_PEM" > "$APP/release-key.pem"
+
+say "system journal: kept 7 days at most"
+mkdir -p "${JOURNALD_CONF%/*}"
+NEW_JOURNALD=$(mktemp)
+journald_conf > "$NEW_JOURNALD"
+if put_file "$NEW_JOURNALD" "$JOURNALD_CONF" 644; then
+  # journald reads its configuration when it starts. A restart keeps the services' log streams
+  # (systemd keeps them in its fd store), the node's and Caddy's.
+  systemctl restart systemd-journald || die "systemd-journald did not restart with $JOURNALD_CONF: journalctl -u systemd-journald"
+fi
 
 say "launcher (signature check)"
 curl -fsSL "$CONTROL/nodes/releases/launcher.mjs" -o "$APP/launcher.mjs.new"
@@ -528,7 +702,7 @@ if [ "$REGISTER" = 1 ]; then
   [ -n "$UPLINK" ] && REG_ARGS+=(--uplink-mbps "$UPLINK")
   [ -n "$MATCHES" ] && REG_ARGS+=(--matches "$MATCHES")
   RC=0
-  runuser -u turbogol -- node "$APP/launcher.mjs" register "${REG_ARGS[@]}" || RC=$?
+  runuser -u turbogol -- "$NODE_BIN" "$APP/launcher.mjs" register "${REG_ARGS[@]}" || RC=$?
   # 3: the launcher could not get or verify the node program, or it needs a newer Node.js. Nothing
   # reached the control plane, so the token is still good.
   [ "$RC" != 3 ] || die "the node program could not be prepared (see above). The token was not used: run this again with it once that is fixed (a token expires an hour after it was created)"
@@ -550,7 +724,7 @@ Wants=network-online.target
 [Service]
 User=turbogol
 Group=turbogol
-ExecStart=/usr/bin/node $APP/launcher.mjs run --control $CONTROL --data $DATA -- $RUN_ARGS
+ExecStart=$NODE_BIN $APP/launcher.mjs run --control $CONTROL --data $DATA -- $RUN_ARGS
 # The launcher exits 0 only when it was asked to stop and the node has finished: no restart then
 # (a 'systemctl kill' or a stop.request stays a stop). A crash or a failure restarts it.
 Restart=on-failure
@@ -583,9 +757,10 @@ elif [ "$CHANGED" = 1 ]; then
   # A restart is a stop first: the node finishes its running matches (no new ones meanwhile), so
   # do not wait for it here.
   systemctl restart --no-block turbogol-node
-  say "the node restarts with the new launcher and settings once its running matches end (up to 30 min)"
+  say "the node restarts with the new Node.js, launcher or settings once its running matches end (up to 30 min)"
 else
   say "the node is running and nothing changed: not restarted"
 fi
 
-say "done. Logs: journalctl -u turbogol-node -f    Status on the website: 'Mis servidores'."
+say "done. Logs: journalctl -u turbogol-node -f    Status on the website, in 'Mis servidores': $CONTROL/#servers"
+say "Operator guide: $GUIDE"

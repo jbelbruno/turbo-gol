@@ -1,6 +1,7 @@
 /**
  * NodeWatch: what the NodeRegistryDO watches in its nodes on top of the control plane's own checks,
- * and the ALERT lines it raises (nodeAlerts.ts posts them to the team's channel). Each condition
+ * and the ALERT lines it raises (nodeAlerts.ts posts them to the team's channel; a community
+ * node's, marked `community`, to the community nodes' staff-only channel instead). Each condition
  * raises one ALERT when it starts and stays quiet while it lasts; when it ends there is a plain log
  * line, and the next time it starts there is a new ALERT. Kept in memory, but for the offline
  * ALERTs that went out (the object keeps those in meta): a restart (a deploy) raises the rest of
@@ -52,7 +53,7 @@ export const HEALTHZ_MAX_BYTES = 16 * 1024;
 // ---- what a node may have the object fetch ---------------------------------------------------------
 
 /** The four bytes of a dotted IPv4 address (the URL parser already turned every other IPv4 form into one), or null. */
-function ipv4Bytes(host: string): number[] | null {
+export function ipv4Bytes(host: string): number[] | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (!m) return null;
   const b = m.slice(1).map(Number);
@@ -72,7 +73,7 @@ function publicV4([a, b, c]: number[]): boolean {
 }
 
 /** The eight 16-bit groups of an IPv6 address (an embedded IPv4 tail included), or null. */
-function ipv6Words(h: string): number[] | null {
+export function ipv6Words(h: string): number[] | null {
   let s = h.toLowerCase();
   const tail = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(s);
   if (tail) {
@@ -133,10 +134,20 @@ export async function readJsonCapped(res: Response, max: number = HEALTHZ_MAX_BY
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-/** A line for the object's log; one that starts with ALERT is posted under `key` (alertKey of the line when absent). */
+/**
+ * A line for the object's log; one that starts with ALERT is posted under `key` (alertKey of the
+ * line when absent). `community`: it is about a node outside the project, so it goes to the
+ * community nodes' staff-only channel, never the team's (NodeRegistryDO communityAlert).
+ */
 export interface WatchNote {
   line: string;
   key?: string;
+  community?: true;
+}
+
+/** `note`, marked as a community node's when `n` is one. */
+function about(n: Pick<NodeRecord, 'trusted'>, note: WatchNote): WatchNote {
+  return n.trusted ? note : { ...note, community: true };
 }
 
 /** What the probe of a node's /healthz found. */
@@ -283,14 +294,14 @@ export class NodeWatch {
   beat(n: NodeRecord): WatchNote | null {
     if (n.tickLagP99Ms <= LAG_ALERT_MS) {
       this.lagBeats.delete(n.nodeId);
-      if (this.lagging.delete(n.nodeId)) return { line: `node ${label(n)}: tick lag p99 back to ${n.tickLagP99Ms.toFixed(1)} ms` };
+      if (this.lagging.delete(n.nodeId)) return about(n, { line: `node ${label(n)}: tick lag p99 back to ${n.tickLagP99Ms.toFixed(1)} ms` });
       return null;
     }
     const beats = (this.lagBeats.get(n.nodeId) ?? 0) + 1;
     this.lagBeats.set(n.nodeId, beats);
     if (beats < LAG_ALERT_BEATS || this.lagging.has(n.nodeId)) return null;
     this.lagging.add(n.nodeId);
-    return { line: `ALERT node ${label(n)}: tick lag p99 ${n.tickLagP99Ms.toFixed(1)} ms in ${beats} heartbeats in a row (over ${LAG_ALERT_MS} ms: its matches stutter)`, key: `lag:${n.nodeId}` };
+    return about(n, { line: `ALERT node ${label(n)}: tick lag p99 ${n.tickLagP99Ms.toFixed(1)} ms in ${beats} heartbeats in a row (over ${LAG_ALERT_MS} ms: its matches stutter)`, key: `lag:${n.nodeId}` });
   }
 
   /**
@@ -317,11 +328,11 @@ export class NodeWatch {
         if (!this.egress.has(id)) {
           this.egress.add(id);
           const pct = Math.round((n.egressGB / cap) * 100);
-          out.push({ line: `ALERT node ${label(n)} has sent ${n.egressGB.toFixed(1)} GB of its ${cap} GB monthly cap (${pct} %): at the cap it takes no more matches`, key: `egress:${id}` });
+          out.push(about(n, { line: `ALERT node ${label(n)} has sent ${n.egressGB.toFixed(1)} GB of its ${cap} GB monthly cap (${pct} %): at the cap it takes no more matches`, key: `egress:${id}` }));
         }
       } else if (n.online && this.egress.delete(id)) {
         const of = cap !== null && cap > 0 ? `of its ${cap} GB monthly cap` : 'of its monthly cap (none now)';
-        out.push({ line: `node ${label(n)} under ${Math.round(EGRESS_ALERT_SHARE * 100)} % ${of} again: ${n.egressGB.toFixed(1)} GB` });
+        out.push(about(n, { line: `node ${label(n)} under ${Math.round(EGRESS_ALERT_SHARE * 100)} % ${of} again: ${n.egressGB.toFixed(1)} GB` }));
       }
       if (n.online && minimum !== null) {
         if (compareVersions(n.build.version, minimum) < 0) {
@@ -329,14 +340,16 @@ export class NodeWatch {
           this.belowSince.set(id, since);
           if (now - since > UPDATE_ALERT_MS && !this.belowAlerted.has(id)) {
             this.belowAlerted.add(id);
-            out.push({
-              line: `ALERT node ${label(n)} still on ${clip(n.build.version, 32)}, below the channel's minimum ${minimum}, for ${Math.floor((now - since) / 3_600_000)} h: its update is deferred or it does not take it`,
-              key: `update:${id}`,
-            });
+            out.push(
+              about(n, {
+                line: `ALERT node ${label(n)} still on ${clip(n.build.version, 32)}, below the channel's minimum ${minimum}, for ${Math.floor((now - since) / 3_600_000)} h: its update is deferred or it does not take it`,
+                key: `update:${id}`,
+              }),
+            );
           }
         } else {
           this.belowSince.delete(id);
-          if (this.belowAlerted.delete(id)) out.push({ line: `node ${label(n)} now on ${clip(n.build.version, 32)}, no longer below the channel's minimum ${minimum}` });
+          if (this.belowAlerted.delete(id)) out.push(about(n, { line: `node ${label(n)} now on ${clip(n.build.version, 32)}, no longer below the channel's minimum ${minimum}` }));
         }
       }
     }

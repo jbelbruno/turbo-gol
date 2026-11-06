@@ -87,8 +87,12 @@ test('parsePrefs: defaults for nothing or junk, lastQueue kept only as ranked; a
   for (const c of ['bots', 'training', 'menu']) assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: c })).waitChoice, c);
   assert.equal(P.parsePrefs(JSON.stringify({ waitChoice: 'x' })).waitChoice, 'bots');
   const old = P.parsePrefs(JSON.stringify({ region: 'EU', casualModes: ['1v1'], rankedModes: ['3v3'], net: 'server', leaderboardPlaylist: '3v3' }));
-  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', casualBots: null, rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots' });
+  assert.deepEqual(old, { region: 'EU', casualPrefer: '1v1', casualBots: null, rankedModes: ['3v3'], leaderboardPlaylist: '3v3', lastQueue: 'casual', lobbyMode: null, waitChoice: 'bots', projectOnly: false });
   assert.equal(P.PREFS_KEY, 'turbogol.menu.v1', 'the same key: no migration');
+  // "Solo servidores del proyecto" (Prompt 2, A15): off until the player turns it on, and only a true is kept.
+  assert.equal(P.DEFAULT_PREFS.projectOnly, false);
+  assert.equal(P.parsePrefs(JSON.stringify({ projectOnly: true })).projectOnly, true);
+  for (const v of ['true', 1, null]) assert.equal(P.parsePrefs(JSON.stringify({ projectOnly: v })).projectOnly, false, JSON.stringify(v));
   // Each parse is a fresh object: a change to one never reaches the defaults.
   P.parsePrefs(null).rankedModes.push('3v3');
   assert.deepEqual(P.parsePrefs(null).rankedModes, ['2v2']);

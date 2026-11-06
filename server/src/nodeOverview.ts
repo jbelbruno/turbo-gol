@@ -1,17 +1,25 @@
 /**
  * What the maintainers' panel reads of the control plane (GET /nodes/admin/overview, refreshed every
- * 15 s, and GET /nodes/admin/nodes): built from the NodeRegistryDO's ControlPlane through its public
- * getters only, plus the few things the object itself holds (the channel, the outbox, the KV flags,
- * whether the ALERT webhook is set). Maintainers only: it carries the nodes' addresses, the operators'
- * account ids and the tokens' short ids (never a token), none of which goes into /nodes/status.
+ * 15 s, GET /nodes/admin/nodes and GET /nodes/admin/operators): built from the NodeRegistryDO's
+ * ControlPlane through its public getters only, plus the few things the object itself holds (the
+ * channel, the outbox, the KV flags, the opening's flag and its changes, the operators' rows,
+ * whether the ALERT webhooks are set, the players' reports). Maintainers only: it carries the nodes'
+ * addresses, the operators' account ids and the tokens' short ids (never a token), none of which goes
+ * into /nodes/status. GET /nodes/mine's views (mineView, mineNodeView, mineTokenViews) are an
+ * operator's own: its own nodes and codes only, never another's, and never a report.
  */
+import { OPERATOR_MATCHES_MAX } from '../../nodes/control-plane/controlPlane';
 import type { ControlPlane, ProbeResult, RegionView } from '../../nodes/control-plane/controlPlane';
-import { isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
+import { MAX_STRIKES, PROBATION_MATCHES, REPEAT_PAUSE_WINDOW_MS, STRIKE_COOLDOWN_MS, STRIKE_WINDOW_MS, isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
 import type { NodeRecord, TokenState } from '../../nodes/control-plane/registry';
 import type { BuildId, NodeRole } from '../../nodes/shared/controlProtocol';
 import { REGIONS } from '../../src/net/account';
 import { KV_FLAGS } from './env';
 import type { KvFlag } from './env';
+import { REPORT_REASONS } from './nodeStore';
+import type { AdminAuditRow, OperatorRow, ReportReason, ReportRow } from './nodeStore';
+
+const DAY_MS = 24 * 60 * 60_000;
 
 /** GET /nodes/mine: one of the operator's own nodes, its address and counters included. */
 export function mineView(cp: ControlPlane, n: NodeRecord) {
@@ -35,6 +43,45 @@ export function mineView(cp: ControlPlane, n: NodeRecord) {
     counters: n.counters,
     version: n.build.version,
     compatible: cp.sameBuildAs(n.build),
+  };
+}
+
+/**
+ * GET /nodes/mine's node in full (Prompt 2, A11), for its own operator: mineView, plus its dates and
+ * service state, the last probe of its address, its progress to active (`needed`), its strikes in
+ * their window, its refusals (all time and their rate, and the last window's: A8 bis) and the
+ * matches placement lets it run (capacityEffective). Never the players' reports: those are the
+ * team's (the privacy policy: "lo ve el equipo, no el anfitrión").
+ */
+export function mineNodeView(cp: ControlPlane, n: NodeRecord, now: number = Date.now()) {
+  const probe: ProbeResult | null = cp.probeOf(n.nodeId);
+  const refused = n.counters.refused ?? 0;
+  const tries = n.counters.assigned + refused;
+  // The automatic measures as the host sees them (Terms 9.2 and 12.6.1: "MIS SERVIDORES te muestra
+  // tus faltas"): its lost matches still in their window and when the oldest leaves it, its strike
+  // pauses in theirs, and where a pause leaves it once it lifts (probation after a repeated one: its
+  // verified matches start over). During a pause, its window ends where that pause began, as
+  // Registry.onLost counted it then: an older pause leaving the window meanwhile does not undo the
+  // demotion. A failed verification is the status and its reason; the hour out after refusals,
+  // `refused.outUntil`.
+  const strikes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
+  const paused = n.status === 'suspended' && n.suspendedUntil !== null;
+  const pausedAt = paused ? (n.suspendedUntil as number) - STRIKE_COOLDOWN_MS : now;
+  const pauses = (n.pauseTimes ?? []).filter((t) => t <= pausedAt && pausedAt - t < REPEAT_PAUSE_WINDOW_MS);
+  return {
+    ...mineView(cp, n),
+    createdAt: n.createdAt,
+    lastSeen: n.lastSeen > 0 ? n.lastSeen : (n.seenAt ?? null),
+    draining: n.draining,
+    egressCapGB: n.egressCapGB,
+    reachableAt: n.reachableAt,
+    lastProbe: probe ? { at: probe.at, ok: probe.ok, error: probe.error } : null,
+    needed: PROBATION_MATCHES,
+    strikes: { count: strikes.length, max: MAX_STRIKES, windowDays: STRIKE_WINDOW_MS / DAY_MS, nextExpiry: strikes.length > 0 ? Math.min(...strikes) + STRIKE_WINDOW_MS : null },
+    pauses: { count: pauses.length, windowDays: REPEAT_PAUSE_WINDOW_MS / DAY_MS },
+    afterPause: paused ? n.statusBeforeSuspension : null,
+    refused: { count: refused, rate: tries > 0 ? Math.round((refused / tries) * 1000) / 1000 : 0, ...cp.refusalsOf(n.nodeId) },
+    capacityEffective: cp.effectiveCapacity(n),
   };
 }
 
@@ -75,6 +122,10 @@ export function overviewNode(cp: ControlPlane, n: NodeRecord, open: ReadonlyMap<
     build: n.build,
     specs: n.specs,
     capacityMax: n.capacityMax,
+    // What placement counts (a community node's capped: ControlPlane.effectiveCapacity), its refusals, and where Cloudflare saw it register from.
+    capacityEffective: cp.effectiveCapacity(n),
+    refusals: cp.refusalsOf(n.nodeId),
+    seenContinent: n.seenContinent ?? null,
     reachableAt: n.reachableAt,
     lastProbe: probe ? { at: probe.at, ok: probe.ok, error: probe.error } : null,
     probeFailures: cp.probeStreak(n.nodeId),
@@ -102,6 +153,13 @@ export interface TokenView {
   usedBy: string | null;
   revokedAt: number | null;
   state: TokenState;
+}
+
+/** GET /nodes/mine's tokens: the operator's own, by their short id, and the node each one registered (A11). */
+export function mineTokenViews(cp: ControlPlane, operatorId: string, now: number) {
+  return tokenViews(cp, now)
+    .filter((t) => t.operatorId === operatorId)
+    .map((t) => ({ id: t.id, region: t.region, name: t.name, publicHost: t.publicHost, createdAt: t.createdAt, expiresAt: t.expiresAt, state: t.state, nodeId: t.usedBy }));
 }
 
 export function tokenViews(cp: ControlPlane, now: number): TokenView[] {
@@ -189,6 +247,22 @@ export function warningsOf(nodes: readonly NodeRecord[], channel: { stable: stri
   return out;
 }
 
+/**
+ * The opening of hosting as the panel shows it (Prompt 2, A1): the KV flag node_operators as it is
+ * (a canary's account ids included: maintainers only), its stage, whether the terms in force allow
+ * it (NODE_HOSTING_TERMS: closed below it whatever the flag says), and its latest changes.
+ */
+export interface HostingView {
+  flag: string;
+  raw: string | null;
+  stage: 'closed' | 'canary' | 'all';
+  /** The terms in force describe hosting (env.ts hostingTermsInForce): `version` in force, `needed` the first that does (null: unset). */
+  terms: { inForce: boolean; version: string | null; needed: string | null };
+  changes: AdminAuditRow[];
+  /** The community nodes' staff-only channel's webhook is set (NODE_COMMUNITY_WEBHOOK): else their ALERTs reach only the panel. */
+  communityWebhook: boolean;
+}
+
 /** What the object hands in beside its control plane. */
 export interface OverviewInput {
   now: number;
@@ -201,6 +275,19 @@ export interface OverviewInput {
   webhook: boolean;
   /** The voids of the last 24 h by node and reason (the history, NodeStore.voidsSince); none before it existed. */
   voids?: Array<{ nodeId: string; reason: string; count: number }>;
+  /** The opening of hosting; absent (an object of before it): not in the answer. */
+  hosting?: HostingView;
+}
+
+/**
+ * The project's nodes registered from another continent than their region (A6: a community node
+ * never registers so, REGION_CHECK; a project node only shows here). Apart from `warnings`, whose
+ * kinds the panel words one by one.
+ */
+export function regionMismatches(nodes: readonly NodeRecord[]): Array<{ nodeId: string; name: string; region: string; seen: string }> {
+  return nodes
+    .filter((n) => n.trusted && !isRetired(n) && n.seenContinent !== undefined && n.seenContinent !== null && n.seenContinent !== n.region)
+    .map((n) => ({ nodeId: n.nodeId, name: n.name, region: n.region, seen: n.seenContinent as string }));
 }
 
 /** GET /nodes/admin/overview. */
@@ -232,7 +319,8 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     verifiers: nodes
       .filter((n) => n.trusted && n.roles.includes('verify') && !isRetired(n))
       .map((n) => ({ nodeId: n.nodeId, name: n.name, region: n.region, version: n.build.version, node: String(n.specs?.node ?? ''), status: n.status, online: cp.isOnline(n.nodeId), verifying: cp.verifyingOn(n.nodeId) })),
-    verifyQueue: [...queue.values()].map((q) => ({ version: q.build.version, protocol: q.build.protocol, wasmSha256: q.build.wasmSha256, depth: q.depth, oldestAt: q.oldestAt })),
+    // `braked`: no new match on a community node on probation of that build until it drains (ControlPlane.verifyBraked).
+    verifyQueue: [...queue.values()].map((q) => ({ version: q.build.version, protocol: q.build.protocol, wasmSha256: q.build.wasmSha256, depth: q.depth, oldestAt: q.oldestAt, braked: cp.verifyBraked(q.build, i.now) })),
     outbox: { rows: i.outbox.reduce((s, r) => s + r.rows, 0), byPath: i.outbox },
     // The ledger's view of each operator that earned in the window (30 days; all time as `earned`).
     points: cp.ledger.leaderboard(i.now).map((e) => ({ ...cp.ledger.summary(e.operatorId, i.now), name: names.get(e.operatorId) ?? null })),
@@ -241,5 +329,107 @@ export function overviewOf(cp: ControlPlane, i: OverviewInput) {
     warnings: warningsOf(nodes, i.channel, i.webhook),
     // node_offline, empty, unverified, a strike's lost:*...: which node's matches went void, and why.
     voids24h: (i.voids ?? []).map((v) => ({ ...v, name: nodes.find((n) => n.nodeId === v.nodeId)?.name ?? null })),
+    regionMismatches: regionMismatches(nodes),
+    ...(i.hosting ? { hosting: i.hosting } : {}),
+  };
+}
+
+/** What the Operadores tab reads of one operator outside the project, beside what the object keeps of it. */
+export interface OperatorInput {
+  now: number;
+  row: OperatorRow | null;
+  /** Its community node tokens minted in the last 24 hours (NodeStore.tokensToday). */
+  tokensToday: number;
+  /** The players' reports about its servers of the last REPORTS_SHOWN_DAYS, newest first (NodeStore.reportsAbout); none: an object of before them. */
+  reports?: ReportRow[];
+  /** The rules for hosts it accepted last (the object's copy, host_rules) and whether it holds those in force: without them its servers get no new match. */
+  rules?: { accepted: string | null; held: boolean };
+}
+
+/** The days of reports the Operadores tab shows (A16: a week), and how many of them at most. */
+export const REPORTS_SHOWN_DAYS = 7;
+export const REPORTS_SHOWN_MAX = 100;
+
+/**
+ * An operator's reports as the maintainers read them (A16): how many, from how many accounts (the
+ * signal: several accounts about one server, never one report alone), by reason and by node, and
+ * the reports themselves (the match opens its replay or its history row; the reporter's account id
+ * is for the team only).
+ */
+export function reportsView(rows: readonly ReportRow[]) {
+  const byReason = Object.fromEntries(REPORT_REASONS.map((r) => [r, 0])) as Record<ReportReason, number>;
+  const byNode = new Map<string, Set<string>>();
+  for (const r of rows) {
+    byReason[r.reason]++;
+    byNode.set(r.nodeId, (byNode.get(r.nodeId) ?? new Set()).add(r.reporterId));
+  }
+  return {
+    days: REPORTS_SHOWN_DAYS,
+    count: rows.length,
+    accounts: new Set(rows.map((r) => r.reporterId)).size,
+    byReason,
+    byNode: [...byNode].map(([nodeId, who]) => ({ nodeId, reports: rows.filter((r) => r.nodeId === nodeId).length, accounts: who.size })),
+    recent: rows.slice(0, REPORTS_SHOWN_MAX),
+  };
+}
+
+/**
+ * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A16, A17):
+ * its status and opt-in, the rules for hosts it accepted last and whether they are the ones in
+ * force (Terms 12.2: else its servers get no new match), its nodes with their refusals and
+ * effective capacity, its tokens, the matches it runs against OPERATOR_MATCHES_MAX, its points
+ * (today against the daily cap, 30 days,
+ * all time, and how much of them the 3 accounts that played most on its nodes brought) and the
+ * players' reports of the last week (reportsView). Its wallet is GET /nodes/admin/wallet's.
+ */
+export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorInput) {
+  const nodes = cp.registry.byOperator(operatorId);
+  const newest = nodes.reduce<NodeRecord | null>((a, n) => (a === null || n.createdAt >= a.createdAt ? n : a), null);
+  const summary = cp.ledger.summary(operatorId, i.now);
+  let assigned = 0;
+  let refused = 0;
+  for (const n of nodes) {
+    assigned += n.counters.assigned;
+    refused += n.counters.refused ?? 0;
+  }
+  return {
+    operatorId,
+    // A purged account's records have no name (Registry.forgetOperator): null, as for an operator with no node.
+    name: newest?.operatorName || null,
+    status: i.row?.status ?? 'ok',
+    reason: i.row?.reason ?? null,
+    actor: i.row?.actor ?? null,
+    at: i.row?.at ?? null,
+    showPublic: i.row?.showPublic === true,
+    rules: i.rules ?? { accepted: null, held: false },
+    nodes: nodes.map((n) => ({
+      nodeId: n.nodeId,
+      name: n.name,
+      region: n.region,
+      status: n.status,
+      online: n.online,
+      retired: isRetired(n),
+      capacity: n.capacity.matches,
+      capacityEffective: cp.effectiveCapacity(n),
+      assigned: n.counters.assigned,
+      refused: n.counters.refused ?? 0,
+      refusals: cp.refusalsOf(n.nodeId),
+      seenContinent: n.seenContinent ?? null,
+    })),
+    refusalRate: assigned + refused > 0 ? Math.round((refused / (assigned + refused)) * 1000) / 1000 : 0,
+    tokens: {
+      today: i.tokensToday,
+      unused: cp.registry.tokenList().filter((t) => t.operatorId === operatorId && tokenState(t, i.now) === 'unused').length,
+    },
+    running: { matches: cp.operatorRunning(operatorId), max: OPERATOR_MATCHES_MAX },
+    points: {
+      today: cp.ledger.pointsToday(operatorId, i.now),
+      cap: cp.ledger.capPerDay(),
+      d30: summary.points30d,
+      matches30d: summary.matches30d,
+      earned: summary.earned,
+      concentration: cp.ledger.concentration(operatorId, i.now),
+    },
+    reports: reportsView(i.reports ?? []),
   };
 }

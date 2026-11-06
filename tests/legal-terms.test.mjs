@@ -444,7 +444,8 @@ test('P12 on the home page: Inicio\'s footer links the terms and the privacy pol
     assert.equal('terms' in parseServerConfig(legal === undefined ? {} : { legal }), false, JSON.stringify(legal));
   }
   // The Game hands it to the Menu, whose config load gives it to the hint bar (every page, the TV's too).
-  assert.match(GAME, /botFillMs: c\.botFillMs \?\? null, terms: c\.terms \?\? null \}/);
+  // (and, after it, the opening of hosting: Prompt 2, P2-3)
+  assert.match(GAME, /botFillMs: c\.botFillMs \?\? null, terms: c\.terms \?\? null, hosting: c\.hosting \?\? null \}/);
   const load = MENU.slice(MENU.indexOf('private loadConfig(): void {'), MENU.indexOf('private onRegionPill(): void {'));
   assert.match(load, /\.then\(\(c\) => \{\s*this\.cfg = c;[^}]*this\.hintBar\.legal\(c\.terms \?\? null\);/);
   assert.doesNotMatch(load, /legalState|authConfig/, 'no second GET /api/config at load');

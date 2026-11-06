@@ -10,7 +10,12 @@
  *   reachability  'wss': GET <publicUrl>/healthz?nonce= signed by the node, again every 5 minutes
  *                 (failing three times in a row takes wss out of placement, with an ALERT); 'rtc':
  *                 the node's WebRTC self-test through TURN. pending -> probation (trusted -> active)
- *   placement     scheduler.pickNode -> 'assign' -> EdDSA tickets + the URL for the transport
+ *   placement     scheduler.pickNode -> 'assign' -> EdDSA tickets + the URL for the transport. With
+ *                 the community policy (CommunityPolicy, the NodeRegistryDO's): a community node's
+ *                 capacity capped, no ranked match on one, its operator's matches capped, an hour
+ *                 out of placement after its unexcused refusals, none on probation while its
+ *                 build's verification queue is braked, and none for an operator blocked or without
+ *                 the rules for hosts in force; a project node is placed as before
  *   signaling     a player's WebRTC offer relayed to an rtc node (ticket checked on both ends)
  *   leaves        a player's explicit quit relayed to the node (MatchDO /internal/leave semantics);
  *                 the verifier only accepts takeovers of players whose leave went through here
@@ -168,6 +173,64 @@ export const LINK_TIMEOUT_MS = 30_000;
  */
 export const NODE_OFFLINE_MS = 60_000;
 
+/** A community node's matches at a time while it is on probation, whatever it declares (the owner's PROBATION_CAPACITY_MAX). */
+export const PROBATION_CAPACITY_MAX = 4;
+/** A community node's matches at a time once active (COMMUNITY_CAPACITY_MAX; it may declare up to MAX_CAPACITY). */
+export const COMMUNITY_CAPACITY_MAX = 16;
+/** One community operator's matches at a time over all its nodes (OPERATOR_MATCHES_MAX: 2 x COMMUNITY_CAPACITY_MAX). */
+export const OPERATOR_MATCHES_MAX = 32;
+/** Unexcused refusals among a community node's last REFUSAL_WINDOW assignments that take it out of placement (REFUSAL_LIMIT). */
+export const REFUSAL_LIMIT = 3;
+export const REFUSAL_WINDOW = 10;
+/** How long such a node stays out of placement. */
+export const REFUSAL_OUT_MS = 60 * 60_000;
+/** A build's verification queue past this many matches, or with its oldest waiting this long, gets no new match on a community node on probation (VERIFY_BACKPRESSURE). */
+export const VERIFY_BRAKE_DEPTH = 20;
+export const VERIFY_BRAKE_AGE_MS = 10 * 60_000;
+
+/**
+ * The rules the control plane holds community nodes (an operator outside the project) to, the
+ * owner's opening parameters (Prompt 2: A7, A8, A8 bis, A9, A17e). The NodeRegistryDO sets them
+ * (COMMUNITY_POLICY); without them (the reference server, most tests) a community node is placed
+ * as before. None of it ever touches a project node.
+ */
+export interface CommunityPolicy {
+  /** Effective capacity on probation and once active: min(declared, these), in the 'full' check, pickNode's bands and the region's supply. */
+  probationCapacity: number;
+  activeCapacity: number;
+  /** Matches at a time over all of one operator's nodes. */
+  operatorMatches: number;
+  /** Ranked matches may go to an active community node (NODE_COMMUNITY_RANKED; false: the project's only). */
+  ranked: boolean;
+  /** `limit` unexcused refusals in the last `window` assignments take the node out of placement for `outMs`. */
+  refusals: { limit: number; window: number; outMs: number };
+  /** No new match on a community node on probation while its build's queue is past `depth`, or its oldest waits `ageMs`. */
+  verifyBrake: { depth: number; ageMs: number };
+  /** A match of one human against bots earns its community host 0 points (SOLO_BOTS_POINTS = 0). */
+  soloBotsZero: boolean;
+  /** The operator may not host (a maintainer blocked it): none of its nodes is placed. */
+  blocked?: (operatorId: string) => boolean;
+  /**
+   * The operator holds the rules for hosts in force (the NodeRegistryDO's copy of its 'host'
+   * acceptance, server/src/hostPolicy.ts hostRulesVersion: a new Terms version is accepted again,
+   * Terms 12.2). false: none of its nodes gets a new match, its matches running finish. Absent:
+   * every operator does (the reference server).
+   */
+  rulesHeld?: (operatorId: string) => boolean;
+  /** Where the ALERT lines about community nodes go (the community nodes' staff-only channel), never the team's `log`; absent: `log`. */
+  log?: (msg: string) => void;
+}
+
+/** The owner's values (2026-11-04 and 2026-11-05); `ranked` comes from NODE_COMMUNITY_RANKED. */
+export const COMMUNITY_POLICY: Omit<CommunityPolicy, 'ranked' | 'blocked' | 'rulesHeld' | 'log'> = {
+  probationCapacity: PROBATION_CAPACITY_MAX,
+  activeCapacity: COMMUNITY_CAPACITY_MAX,
+  operatorMatches: OPERATOR_MATCHES_MAX,
+  refusals: { limit: REFUSAL_LIMIT, window: REFUSAL_WINDOW, outMs: REFUSAL_OUT_MS },
+  verifyBrake: { depth: VERIFY_BRAKE_DEPTH, ageMs: VERIFY_BRAKE_AGE_MS },
+  soloBotsZero: true,
+};
+
 /** A request to a node without its correlation id (distributive Omit over the request variants). */
 type RpcRequest = Extract<ToNode, { rid: string }> extends infer U ? (U extends unknown ? Omit<U, 'rid'> : never) : never;
 
@@ -211,6 +274,13 @@ export interface PlaceRequest {
   kickoffCountdownSeconds?: number;
   goalPauseSeconds?: number;
   joinTimeoutMs?: number;
+  /**
+   * A player of the match chose "Solo servidores del proyecto" (Prompt 2, A15): only a project
+   * (trusted) node may take it, never a community one; no node of the project free, null: the
+   * matchmaker then creates a MatchDO, or with do_disabled asks SA's project nodes and waits.
+   * Absent: any node.
+   */
+  projectOnly?: boolean;
 }
 
 export interface PlayerTicket {
@@ -224,6 +294,8 @@ export interface Placement {
   matchId: string;
   nodeId: string;
   nodeName: string;
+  /** The node is the project's (its operator is trusted): the players' server mark says a community server otherwise (A15). */
+  trusted: boolean;
   transport: NodeTransport;
   /** wss: the node itself; rtc: <site>/nodes/rtc/<node>/<match>, which the WebRTC socket adapter recognises. */
   wsUrl: string;
@@ -385,6 +457,8 @@ export interface ControlPlaneOptions {
   log?: (msg: string) => void;
   /** A node's events, for the maintainers' history (registry.ts NodeEventSink; none: not kept). */
   events?: NodeEventSink;
+  /** The community nodes' rules (CommunityPolicy); none: placed as the project's, the reference server's way. */
+  community?: CommunityPolicy;
 }
 
 interface Pending {
@@ -558,6 +632,16 @@ export class ControlPlane {
   /** The last valid release channel, and whether a bad one was already alerted. */
   private goodChannel: ReleaseChannel | null = null;
   private channelAlerted = false;
+  /** Each community node's last assignments, oldest first (true: refused with no excuse); memory only (CommunityPolicy.refusals). */
+  private readonly assigns = new Map<string, boolean[]>();
+  /** Community nodes out of placement for their refusals, until when. */
+  private readonly refusedOut = new Map<string, number>();
+  /**
+   * The assigns place() sent to each node and has not made a match of yet (the node's answer, then
+   * its tickets): a burst of place() calls overlaps (the hub forms each Casual group without waiting
+   * for the last), and under the community policy they count as running (loadOn, runningByOperator).
+   */
+  private readonly assigning = new Map<string, number>();
 
   constructor(o: ControlPlaneOptions) {
     this.o = o;
@@ -976,9 +1060,15 @@ export class ControlPlane {
     this.probeFailures.delete(nodeId);
     this.registry.markUnreachable(nodeId);
     this.unreachable.add(nodeId);
-    this.log(`ALERT node ${n.name} unreachable at ${url}: ${error}`);
+    this.logAbout(n, `ALERT node ${n.name} unreachable at ${url}: ${error}`);
     this.event(nodeId, 'unreachable', error);
     return false;
+  }
+
+  /** A line about `n`: a community node's go to the community's log (CommunityPolicy.log) when there is one, never the team's. */
+  private logAbout(n: NodeRecord | undefined, msg: string): void {
+    const community = n && !n.trusted ? this.o.community?.log : undefined;
+    (community ?? this.log)(msg);
   }
 
   /** GET <url>/healthz?nonce= and check the node signed the nonce: null when it did, or what went wrong. */
@@ -1106,9 +1196,147 @@ export class ControlPlane {
   }
 
   /**
+   * The load placement balances `n` on, by the control plane's own count: its running matches and,
+   * for a community node under the policy, the assigns still on their way to it (assigning), so a
+   * burst never passes its effective capacity. A project node's is runningOn, as before.
+   */
+  private loadOn(n: NodeRecord): number {
+    const running = this.runningOn(n.nodeId);
+    return this.o.community && !n.trusted ? running + (this.assigning.get(n.nodeId) ?? 0) : running;
+  }
+
+  /** One assign of place() done with (refused, or made a match of): out of `assigning`. */
+  private assignDone(nodeId: string): void {
+    const k = (this.assigning.get(nodeId) ?? 1) - 1;
+    if (k > 0) this.assigning.set(nodeId, k);
+    else this.assigning.delete(nodeId);
+  }
+
+  /** Matches the control plane counts as running on each operator's nodes, and the assigns on their way to them (OPERATOR_MATCHES_MAX counts these). */
+  private runningByOperator(): Map<string, number> {
+    const out = new Map<string, number>();
+    const add = (nodeId: string, k: number) => {
+      const op = this.registry.node(nodeId)?.operatorId;
+      if (op !== undefined) out.set(op, (out.get(op) ?? 0) + k);
+    };
+    for (const m of this.matches.values()) if (m.state === 'assigned' || m.state === 'reporting') add(m.nodeId, 1);
+    for (const [nodeId, k] of this.assigning) add(nodeId, k);
+    return out;
+  }
+
+  /** The matches running on `operatorId`'s nodes, by the control plane's count. */
+  operatorRunning(operatorId: string): number {
+    return this.runningByOperator().get(operatorId) ?? 0;
+  }
+
+  /**
+   * The matches `n` may run at a time (A8): what it declares, and for a community node under the
+   * policy at most its probation or active cap, so declaring 200 neither takes a region's matches
+   * nor lowers its factor. What placement's 'full' check and load bands, and the region's slots, use.
+   */
+  effectiveCapacity(n: NodeRecord): number {
+    const p = this.o.community;
+    const declared = n.capacity.matches;
+    if (!p || n.trusted) return declared;
+    if (n.status === 'probation') return Math.min(declared, p.probationCapacity);
+    if (n.status === 'active') return Math.min(declared, p.activeCapacity);
+    return declared;
+  }
+
+  /**
+   * What a host adds to its region's supply: the larger of what it declares now and the most it ever
+   * declared (lowering it later cannot raise the factor), for a community node each under its cap:
+   * max(min(capacity, cap), min(capacityMax, cap)). The project's nodes count in full, as before.
+   */
+  private supplyOf(n: NodeRecord): number {
+    const most = Math.max(n.capacity.matches, n.capacityMax ?? 0);
+    const p = this.o.community;
+    if (!p || n.trusted) return most;
+    return Math.min(most, n.status === 'probation' ? p.probationCapacity : p.activeCapacity);
+  }
+
+  /**
+   * A build's verification queue is past the brake (A9, CommunityPolicy.verifyBrake: more than
+   * `depth` matches waiting, or the oldest waiting longer than `ageMs`): no new match goes to a
+   * community node on probation of that build, whose every match must be verified, until it drains.
+   */
+  verifyBraked(build: BuildId, now: number = this.now()): boolean {
+    const p = this.o.community;
+    if (!p) return false;
+    let depth = 0;
+    let oldest = Infinity;
+    for (const m of this.matches.values()) {
+      if (m.state !== 'verifying' || !sameSimulation(m.build, build)) continue;
+      depth++;
+      oldest = Math.min(oldest, m.queuedAt);
+    }
+    return depth > p.verifyBrake.depth || (depth > 0 && now - oldest > p.verifyBrake.ageMs);
+  }
+
+  /** A community node's refusals as the panel shows them: the unexcused ones among its last assignments, and until when they keep it out of placement (null: they do not). */
+  refusalsOf(nodeId: string): { recent: number; of: number; outUntil: number | null } {
+    const last = this.assigns.get(nodeId) ?? [];
+    const until = this.refusedOut.get(nodeId) ?? null;
+    return { recent: last.filter(Boolean).length, of: last.length, outUntil: until !== null && until > this.now() ? until : null };
+  }
+
+  /** One more assignment of a community node, refused with no excuse or not: its last `window` (CommunityPolicy.refusals). */
+  private noteAssign(nodeId: string, refused: boolean, window: number): boolean[] {
+    const last = [...(this.assigns.get(nodeId) ?? []), refused].slice(-window);
+    this.assigns.set(nodeId, last);
+    return last;
+  }
+
+  /**
+   * Whether a refusal of an assign sent to `n` now has an excuse (A8 bis): it is offline, draining,
+   * full by the control plane's own count (loadOn against its effective capacity) or near its egress
+   * cap, as the control plane sees it at the send. Placement's own rules, so a node place() picked
+   * has none; judged before the send, so nothing the node says while the assign is out (a heartbeat
+   * that says draining, a hello with less capacity, its link dropping) excuses its refusal.
+   */
+  private refusalExcused(n: NodeRecord): boolean {
+    return !this.isOnline(n.nodeId) || n.draining || this.loadOn(n) >= this.effectiveCapacity(n) || (n.egressCapGB !== null && n.egressGB >= n.egressCapGB * 0.95);
+  }
+
+  /**
+   * A community node refused an assignment, timed out on it, dropped its link with it out, or
+   * answered it wrong (A8 bis), with no excuse when it was sent (`excused`: refusalExcused then). It
+   * counts (counters.refused), and `limit` of them in its last `window` assignments take it out of
+   * placement for `outMs`, with an ALERT for the community nodes' channel. A project node's never count.
+   */
+  private assignRefused(n: NodeRecord, excused: boolean): void {
+    const p = this.o.community;
+    if (!p || n.trusted || excused) return;
+    this.registry.onRefused(n.nodeId);
+    const last = this.noteAssign(n.nodeId, true, p.refusals.window);
+    const refusals = last.filter(Boolean).length;
+    if (refusals < p.refusals.limit) return;
+    this.refusedOut.set(n.nodeId, this.now() + p.refusals.outMs);
+    this.assigns.delete(n.nodeId);
+    this.logAbout(n, `ALERT node ${n.name} (${n.nodeId}) refused ${refusals} of its last ${last.length} assignments with no reason: out of placement for ${Math.round(p.refusals.outMs / 60_000)} min`);
+  }
+
+  /** A community node's operator may get new matches under the policy: not blocked, and holding the rules for hosts in force. */
+  private operatorPlaceable(n: NodeRecord, p: CommunityPolicy): boolean {
+    return !p.blocked?.(n.operatorId) && (p.rulesHeld === undefined || p.rulesHeld(n.operatorId));
+  }
+
+  /**
+   * A community node the policy lets take a match now (beside the scheduler's rules): its operator
+   * not blocked, holding the rules for hosts in force and not at OPERATOR_MATCHES_MAX, the node not
+   * out for its refusals, and on probation only while its build's verification queue is not braked.
+   */
+  private communityPlaceable(n: NodeRecord, p: CommunityPolicy, now: number, running: ReadonlyMap<string, number>, braked: (b: BuildId) => boolean): boolean {
+    if (!this.operatorPlaceable(n, p)) return false;
+    if ((this.refusedOut.get(n.nodeId) ?? 0) > now) return false;
+    if ((running.get(n.operatorId) ?? 0) >= p.operatorMatches) return false;
+    return !(n.status === 'probation' && braked(n.build));
+  }
+
+  /**
    * Region factor for a match placed now: (matches running on the region's nodes + this one +
    * matches the region's nodes could not take lately) / match slots the region's online hosts
-   * offer, through ledger.regionFactor (0.5 .. 3).
+   * offer (supplyOf), through ledger.regionFactor (0.5 .. 3).
    */
   regionFactorAt(region: string): number {
     const now = this.now();
@@ -1116,7 +1344,7 @@ export class ControlPlane {
     for (const m of this.matches.values()) if (m.assign.region === region && (m.state === 'assigned' || m.state === 'reporting')) demand++;
     for (const u of this.unplaced) if (u.region === region && now - u.at < UNPLACED_WINDOW_MS) demand++;
     let supply = 0;
-    for (const n of this.registry.list()) if (n.region === region && this.mayHost(n)) supply += Math.max(n.capacity.matches, n.capacityMax ?? 0);
+    for (const n of this.registry.list()) if (n.region === region && this.mayHost(n)) supply += this.supplyOf(n);
     return regionFactor(demand, supply);
   }
 
@@ -1142,9 +1370,10 @@ export class ControlPlane {
     for (const n of this.registry.list()) {
       if (n.region !== region || !this.mayHost(n)) continue;
       hostsOnline++;
-      slots += n.capacity.matches;
-      active += Math.max(n.active, this.runningOn(n.nodeId));
-      if (!rankedReady && n.status === 'active' && this.verifiable(n.build)) rankedReady = true;
+      slots += this.effectiveCapacity(n);
+      active += Math.max(n.active, this.loadOn(n));
+      const rankedHost = n.trusted || this.o.community?.ranked !== false;
+      if (!rankedReady && rankedHost && n.status === 'active' && this.verifiable(n.build)) rankedReady = true;
     }
     let matches = 0;
     for (const m of this.matches.values()) if (m.assign.region === region && (m.state === 'assigned' || m.state === 'reporting')) matches++;
@@ -1161,16 +1390,18 @@ export class ControlPlane {
    * No node took the match. It counts as unmet demand (it raises the region factor) only when the
    * region had no host at all, or its hosts were out only for load: full, at their egress cap or
    * offline. Requests no node could take by rule (transport, build, status, the operator playing)
-   * and refusals of 'assign' do not count: a node must not be able to raise its own factor.
+   * and refusals of 'assign' do not count: a node must not be able to raise its own factor. Nor do
+   * the project-only ones (projectOnly): no community node could ever take them, so they must not
+   * raise the factor its points are counted with.
    */
   private noPlace(req: PlaceRequest, refused: boolean, transports: NodeTransport[]): null {
     const now = this.now();
     this.unplaced = this.unplaced.filter((u) => now - u.at < UNPLACED_WINDOW_MS);
-    if (refused || this.unplaced.length >= 10_000) return null;
-    const preq = { region: req.region, mode: req.mode, ranked: req.ranked, playerIds: req.humans.map((h) => h.playerId), build: this.o.build(), transports, now };
+    if (refused || req.projectOnly === true || this.unplaced.length >= 10_000) return null;
+    const preq = { region: req.region, mode: req.mode, ranked: req.ranked, playerIds: req.humans.map((h) => h.playerId), build: this.o.build(), transports, now, communityRanked: this.o.community?.ranked };
     const hosts = this.registry.list().filter((n) => n.region === req.region && n.roles.includes('host'));
     const loadOnly = hosts.every((n) => {
-      const why = ineligibility({ ...n, online: n.online && this.isOnline(n.nodeId), active: Math.max(n.active, this.runningOn(n.nodeId)) }, preq);
+      const why = ineligibility({ ...n, online: n.online && this.isOnline(n.nodeId), active: Math.max(n.active, this.loadOn(n)), capacity: { ...n.capacity, matches: this.effectiveCapacity(n) } }, preq);
       return why === 'full' || why === 'egress_cap' || why === 'offline';
     });
     if (loadOnly) this.unplaced.push({ region: req.region, at: now });
@@ -1180,7 +1411,8 @@ export class ControlPlane {
   /**
    * Put a match on a community node: pick, assign (the node pre-warms the arena), mint one EdDSA
    * ticket per human. null when no node is eligible or the chosen one refused: the matchmaker then
-   * creates a MatchDO exactly as today (and the region counts it as unmet demand).
+   * creates a MatchDO exactly as today (and the region counts it as unmet demand). With
+   * `projectOnly` only the project's nodes are candidates (A15).
    */
   async place(req: PlaceRequest, tries = 2): Promise<Placement | null> {
     const perTeam = MODES[req.mode];
@@ -1189,18 +1421,32 @@ export class ControlPlane {
     const roster = req.teams ? buildTeamRoster(perTeam, req.humans, req.teams) : buildRoster(perTeam, req.humans);
     const tried = new Set<string>();
     let refused = false;
+    const policy = this.o.community;
     for (let attempt = 0; attempt < tries; attempt++) {
       const now = this.now();
-      // The load the scheduler balances on: never below what the control plane itself placed there.
-      // Only nodes whose matches can be verified when they must be: a ranked match, and every
-      // match of a node on probation, needs a verifier on the node's exact release. And none for a
-      // trusted verifier whose update waits until the matches on its release are done.
+      // Under the community policy (A8, A8 bis, A9): a community node within its operator's matches,
+      // not out for its refusals, on probation only while its build's verifications keep up.
+      const running = policy ? this.runningByOperator() : new Map<string, number>();
+      const brakes = new Map<string, boolean>();
+      const braked = (b: BuildId) => {
+        const k = `${b.version}|${b.protocol}|${b.wasmSha256}`;
+        if (!brakes.has(k)) brakes.set(k, this.verifyBraked(b, now));
+        return brakes.get(k) === true;
+      };
+      // The load the scheduler balances on: never below what the control plane itself placed there
+      // (and, on a community node, is placing: loadOn), against the effective capacity. Only nodes
+      // whose matches can be verified when they must be:
+      // a ranked match, and every match of a node on probation, needs a verifier on the node's exact
+      // release. And none for a trusted verifier whose update waits until the matches on its release are done.
       const candidates = this.registry
         .list()
         .filter((n) => !tried.has(n.nodeId) && this.isOnline(n.nodeId) && !this.deferredUpdates.has(n.nodeId))
+        // "Solo servidores del proyecto": never a community node, whatever the policy says.
+        .filter((n) => req.projectOnly !== true || n.trusted)
         .filter((n) => !(req.ranked || n.status === 'probation') || this.verifiable(n.build))
-        .map((n) => ({ ...n, active: Math.max(n.active, this.runningOn(n.nodeId)) }));
-      const picked = pickNode(candidates, { region: req.region, mode: req.mode, ranked: req.ranked, playerIds: req.humans.map((h) => h.playerId), build: this.o.build(), transports, now });
+        .filter((n) => !policy || n.trusted || this.communityPlaceable(n, policy, now, running, braked))
+        .map((n) => ({ ...n, active: Math.max(n.active, this.loadOn(n)), capacity: { ...n.capacity, matches: this.effectiveCapacity(n) } }));
+      const picked = pickNode(candidates, { region: req.region, mode: req.mode, ranked: req.ranked, playerIds: req.humans.map((h) => h.playerId), build: this.o.build(), transports, now, communityRanked: policy?.ranked });
       const node = picked ? this.registry.node(picked.nodeId) : undefined;
       if (!node) return this.noPlace(req, refused, transports);
       tried.add(node.nodeId);
@@ -1223,60 +1469,71 @@ export class ControlPlane {
         ...(req.joinTimeoutMs !== undefined ? { joinTimeoutMs: req.joinTimeoutMs } : {}),
       };
       const factor = this.regionFactorAt(req.region);
-      let answer: AssignAnswer;
+      // A refusal's excuse is the node as the control plane sees it now, at the send (A8 bis). The
+      // assign counts against its caps from here until it is a match or refused (assigning).
+      const excused = this.refusalExcused(node);
+      this.assigning.set(node.nodeId, (this.assigning.get(node.nodeId) ?? 0) + 1);
       try {
-        answer = await this.call<AssignAnswer>(node.nodeId, { t: 'assign', match: assign });
-      } catch (e) {
-        this.log(`assign on ${node.name} refused: ${e instanceof NodeRefused ? e.code : String(e)}`);
-        refused = true;
-        continue;
+        let answer: AssignAnswer;
+        try {
+          answer = await this.call<AssignAnswer>(node.nodeId, { t: 'assign', match: assign });
+        } catch (e) {
+          this.log(`assign on ${node.name} refused: ${e instanceof NodeRefused ? e.code : String(e)}`);
+          refused = true;
+          this.assignRefused(node, excused);
+          continue;
+        }
+        if (transport === 'wss' && answer?.wsUrl !== `${node.publicUrl}/m/${assign.matchId}`) {
+          this.log(`assign on ${node.name}: unexpected wsUrl ${String(answer?.wsUrl)}`);
+          refused = true;
+          this.assignRefused(node, excused);
+          continue;
+        }
+        if (policy && !node.trusted) this.noteAssign(node.nodeId, false, policy.refusals.window);
+        this.registry.onAssigned(node.nodeId);
+        const key = await this.key;
+        const tickets: PlayerTicket[] = [];
+        for (const e of roster) {
+          if (e.kind !== 'player' || !e.playerId) continue;
+          const ticket = await createNodeTicket(key, { sub: e.playerId, mid: assign.matchId, team: e.team, slot: e.slot, name: e.name, nodeId: node.nodeId }, now);
+          tickets.push({ playerId: e.playerId, slot: e.slot, team: e.team, ticket });
+        }
+        const length = req.matchLengthSeconds > 0 ? req.matchLengthSeconds : 600;
+        const m: MatchEntry = {
+          assign,
+          nodeId: node.nodeId,
+          transport,
+          humans: req.humans,
+          build: { ...node.build },
+          bootId: node.bootId,
+          state: 'assigned',
+          leaves: new Set(),
+          leaveAt: new Map(),
+          neverJoined: new Set(),
+          startedSeen: false,
+          left: new Set(),
+          offered: new Set(),
+          regionFactor: factor,
+          replaySha: null,
+          verifyRate: 1,
+          report: null,
+          reportedAt: 0,
+          verdict: null,
+          verifiedBy: null,
+          outcome: null,
+          ledger: null,
+          deadline: now + length * 1000 + TTL_AFTER_MATCH_SECONDS * 1000 + REPORT_GRACE_MS,
+          queuedAt: 0,
+          lastTry: 0,
+          inFlight: false,
+          doneAt: 0,
+        };
+        this.matches.set(assign.matchId, m);
+        this.save(m); // before the tickets go out: a restart must still know the match their players join
+        return { matchId: assign.matchId, nodeId: node.nodeId, nodeName: node.name, trusted: node.trusted, transport, wsUrl: this.urlFor(node, transport, assign.matchId), tickets };
+      } finally {
+        this.assignDone(node.nodeId);
       }
-      if (transport === 'wss' && answer?.wsUrl !== `${node.publicUrl}/m/${assign.matchId}`) {
-        this.log(`assign on ${node.name}: unexpected wsUrl ${String(answer?.wsUrl)}`);
-        refused = true;
-        continue;
-      }
-      this.registry.onAssigned(node.nodeId);
-      const key = await this.key;
-      const tickets: PlayerTicket[] = [];
-      for (const e of roster) {
-        if (e.kind !== 'player' || !e.playerId) continue;
-        const ticket = await createNodeTicket(key, { sub: e.playerId, mid: assign.matchId, team: e.team, slot: e.slot, name: e.name, nodeId: node.nodeId }, now);
-        tickets.push({ playerId: e.playerId, slot: e.slot, team: e.team, ticket });
-      }
-      const length = req.matchLengthSeconds > 0 ? req.matchLengthSeconds : 600;
-      const m: MatchEntry = {
-        assign,
-        nodeId: node.nodeId,
-        transport,
-        humans: req.humans,
-        build: { ...node.build },
-        bootId: node.bootId,
-        state: 'assigned',
-        leaves: new Set(),
-        leaveAt: new Map(),
-        neverJoined: new Set(),
-        startedSeen: false,
-        left: new Set(),
-        offered: new Set(),
-        regionFactor: factor,
-        replaySha: null,
-        verifyRate: 1,
-        report: null,
-        reportedAt: 0,
-        verdict: null,
-        verifiedBy: null,
-        outcome: null,
-        ledger: null,
-        deadline: now + length * 1000 + TTL_AFTER_MATCH_SECONDS * 1000 + REPORT_GRACE_MS,
-        queuedAt: 0,
-        lastTry: 0,
-        inFlight: false,
-        doneAt: 0,
-      };
-      this.matches.set(assign.matchId, m);
-      this.save(m); // before the tickets go out: a restart must still know the match their players join
-      return { matchId: assign.matchId, nodeId: node.nodeId, nodeName: node.name, transport, wsUrl: this.urlFor(node, transport, assign.matchId), tickets };
     }
     return this.noPlace(req, refused, transports);
   }
@@ -1323,10 +1580,14 @@ export class ControlPlane {
   /**
    * Host nodes online in `region` that may take matches (probation or active, reachable): the
    * `hosts` of POST /internal/place. While it is 0 the matchmaker stops asking for a while.
+   * `projectOnly`: the project's only (a project-only placement's own back-off, A15). Under the
+   * community policy, never a node whose operator gets no new match (blocked, or without the rules
+   * for hosts in force): a region with only those backs off as one with none.
    */
-  hostsOnline(region: string): number {
+  hostsOnline(region: string, projectOnly = false): number {
+    const p = this.o.community;
     let n = 0;
-    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x)) n++;
+    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x) && (!projectOnly || x.trusted) && (!p || x.trusted || this.operatorPlaceable(x, p))) n++;
     return n;
   }
 
@@ -1595,11 +1856,18 @@ export class ControlPlane {
     return true;
   }
 
-  /** Dispatch every queued verification that can go now (called on reports, verifier hellos and sweeps). */
+  /**
+   * Dispatch every queued verification that can go now (called on reports, verifier hellos and
+   * sweeps), in the order the free verifiers should take them (A9): the ranked matches first (a
+   * rating waits on each), then the matches of nodes on probation (every one is verified: their way
+   * to active), then the active community nodes' samples, the oldest first within each.
+   */
   pump(force = false): void {
     const now = this.now();
     const grace = this.inGrace();
-    for (const m of this.matches.values()) {
+    const rank = (m: MatchEntry) => (m.assign.ranked ? 0 : m.verifyRate >= 1 ? 1 : 2);
+    const queue = [...this.matches.values()].filter((m) => m.state === 'verifying').sort((a, b) => rank(a) - rank(b) || a.queuedAt - b.queuedAt);
+    for (const m of queue) {
       if (m.state !== 'verifying' || m.inFlight) continue;
       if (!force && m.lastTry !== 0 && now - m.lastTry < VERIFY_RETRY_MS) continue;
       // After a restart the verifier needs its reconnect too: try, but give up on nothing yet.
@@ -1780,7 +2048,7 @@ export class ControlPlane {
     const changed = this.registry.onVerified(m.nodeId, m.assign.ranked, ok);
     if (changed) this.notifyStatus(m.nodeId, changed);
     if (!ok) {
-      this.log(`ALERT match ${matchId} on ${host.name}: verification ${why} ${verdict.message ?? ''}`);
+      this.logAbout(host, `ALERT match ${matchId} on ${host.name}: verification ${why} ${verdict.message ?? ''}`);
       this.event(m.nodeId, 'verify_failed', `match ${matchId}: ${why}`);
       if (!host.trusted) {
         m.freeze = { operatorId: host.operatorId, reason: `verification_failed:${matchId}` };
@@ -1789,8 +2057,10 @@ export class ControlPlane {
       return this.voidMatch(m, 'verification_failed:' + why);
     }
     const reason = verdict.endReason ?? res.endReason;
-    // Rewards: verified minutes (the project's own machines earn nothing).
-    if (!host.trusted) {
+    const rateable = m.assign.ranked && (reason === 'rules' || reason === 'forfeit' || (reason === 'ttl' && m.assign.matchLengthSeconds > 0));
+    // Rewards: verified minutes (the project's own machines earn nothing), and never for a match
+    // that is settled void below (a ranked one that cannot be rated): a void credits nothing.
+    if (!host.trusted && (!m.assign.ranked || rateable)) {
       const present = verdict.presentTicks ?? [];
       const seen = new Set<number>();
       const players: LedgerPlayer[] = [];
@@ -1819,11 +2089,12 @@ export class ControlPlane {
           underrunRate: underruns / Math.max(1, verdict.ticks * Math.max(1, players.length)),
           at: this.now(),
           sampleRate: m.verifyRate,
+          // One human's seat in the roster: the lone player's match against bots (A17e), decided here, never by the node or a client.
+          ...(this.o.community?.soloBotsZero === true && this.playerIds(m).length === 1 ? { soloBots: true } : {}),
         },
         m.regionFactor,
       );
     }
-    const rateable = m.assign.ranked && (reason === 'rules' || reason === 'forfeit' || (reason === 'ttl' && m.assign.matchLengthSeconds > 0));
     if (rateable) {
       const leftSlots = new Set(verdict.leftSlots ?? []);
       const roster = m.assign.roster.filter((e) => e.kind === 'player' && e.playerId);

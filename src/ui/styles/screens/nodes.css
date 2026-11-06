@@ -28,6 +28,12 @@
   font-size: var(--t-label);
 }
 
+/* "Mis servidores" (Prompt 2), the first of these screens with buttons on a TV: its buttons and links
+   in the Heading role, as on PERFIL (a .mn-btn's 15 px is under a TV's floor). */
+.mn-srv .mn-btn {
+  font-size: var(--t-heading);
+}
+
 .mn-na-alert {
   display: flex;
   gap: 0.5rem;

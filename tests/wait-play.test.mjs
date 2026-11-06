@@ -144,6 +144,41 @@ test('OnlineSession.onFound fires as the queue answers with a match (no frame ne
   assert.equal(s.wait, null, 'no wait once it left the queue');
 });
 
+test("the matched answer's server mark (Prompt 2, A15) is lastMatched.server only when well formed: a project server's never a community one, junk none, a long name cut to 64", async () => {
+  const marks = [];
+  const client = new NetClient({
+    storage: null,
+    fetchFn: async (url) => {
+      if (url === '/api/config') return jsonResponse(200, { turnstileSiteKey: null, protocol: 0 });
+      if (url === '/api/guest') return jsonResponse(200, { playerId: 'p1', name: 'T', session: 's', expiresAt: Date.now() + 864e5 });
+      if (url === '/api/queue') return jsonResponse(200, { status: 'matched', matchId: 'm1', ticket: 't', wsUrl: 'wss://n.example.org/m/m1', node: true, mode: '2v2', host: 'SA', humans: 2, ...marks.shift() });
+      return jsonResponse(404, {});
+    },
+    webSocketFactory: () => ({ binaryType: 'blob', readyState: 0, protocol: '', onopen: null, onmessage: null, onclose: null, onerror: null, send() {}, close() {} }),
+    pingIntervalMs: 1e9,
+    visible: () => true,
+  });
+  const cases = [
+    [{ server: { name: 'sao-paulo-1', community: false } }, { name: 'sao-paulo-1', community: false }],
+    [{ server: { name: 'casa-juan', community: true } }, { name: 'casa-juan', community: true }],
+    [{ server: { name: 'n'.repeat(100), community: true } }, { name: 'n'.repeat(64), community: true }],
+    [{ server: { name: '', community: false } }, undefined],
+    [{ server: { name: 'casa-juan', community: 'yes' } }, undefined],
+    [{ server: { name: 'casa-juan' } }, undefined],
+    [{ server: { name: 7, community: true } }, undefined],
+    [{ server: 'casa-juan' }, undefined],
+    [{ server: null }, undefined],
+    [{}, undefined],
+  ];
+  for (const [extra, want] of cases) {
+    marks.push(extra);
+    await client.queue('2v2', 'server');
+    assert.deepEqual(client.lastMatched.server, want, JSON.stringify(extra));
+    assert.equal('server' in client.lastMatched, want !== undefined, 'no key for junk');
+    assert.deepEqual([client.lastMatched.mode, client.lastMatched.host, client.lastMatched.humans], ['2v2', 'SA', 2], 'the rest as before');
+  }
+});
+
 test("the Game's wiring (Game.ts cannot load under node): onFound plays the cue and sets the tab's title; the band stays in the frame", async () => {
   const game = await readFile(new URL('../src/game/Game.ts', import.meta.url), 'utf8');
   assert.match(game, /online\.onFound = \(\) => this\.foundNotify\(\);/);

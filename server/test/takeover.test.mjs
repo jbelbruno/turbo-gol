@@ -741,10 +741,10 @@ test('auth-11 / econ-2: a maintainer\'s 1-hour Bearer or refresh cookie alone gr
   assert.equal(claims(fresh.json.session).aal, 2);
   for (const [method, path, body] of calls) assert.equal((await req(env, method, path, { ip: ip(0), bearer: fresh.json.session, body })).status, 200, `${method} ${path} fresh`);
   assert.equal(seen.length, calls.length);
-  // A non-maintainer still hears not_trusted, fresh or not.
+  // A non-maintainer hears hosting_closed while hosting is closed, fresh or not.
   const other = await oauth(env, 'discord', 'd-other', { ip: ip(1) });
   const o = await refresh(env, other.rt, ip(1));
-  assert.equal((await req(env, 'POST', '/nodes/tokens', { ip: ip(1), bearer: o.json.session, body: { region: 'SA' } })).json.error, 'not_trusted');
+  assert.equal((await req(env, 'POST', '/nodes/tokens', { ip: ip(1), bearer: o.json.session, body: { region: 'SA' } })).json.error, 'hosting_closed');
   // Twenty minutes after that sign-in, the routes ask again.
   const later = await AUTH.signJwt(SECRET, { ...claims(fresh.json.session), aat: Math.floor(Date.now() / 1000) - 16 * 60 });
   assert.equal((await req(env, 'GET', '/nodes/admin/nodes', { ip: ip(0), bearer: later })).json.error, 'reauth_required');

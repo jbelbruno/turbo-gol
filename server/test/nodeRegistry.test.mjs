@@ -298,9 +298,14 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 /** A NodeRegistryDO on `ctx`, started. An ALERT post's turn comes at once (nodeOps.test.mjs times the turns). */
+/** The DNS a community registration reads (NodeRegistryDO dnsFn): no records for any name, so never Cloudflare's proxy (hosting.test.mjs tests the lookup). */
+const fakeDns = async () => [];
+
 async function boot(env, ctx = new FakeCtx()) {
   const obj = new D.NodeRegistryDO(ctx, env);
   obj.alertSleep = () => Promise.resolve();
+  // A community registration reads its name's DNS records (proxyCheck.ts): never the network here.
+  obj.dnsFn = fakeDns;
   await obj.ready;
   return { obj, ctx, env };
 }
@@ -438,9 +443,9 @@ test('without the node settings the object serves nothing; every route needs the
 
 // ---- tokens, registration ------------------------------------------------------------------------
 
-test('tokens: a trusted operator only, a known region, 10 a day; the answer carries the install line', async () => {
+test('tokens: a trusted operator only while hosting is closed, a known region, 10 a day; the answer carries the install line', async () => {
   const h = await boot(makeEnv());
-  assert.deepEqual((await tokenFor(h, STRANGER)).json.error, 'not_trusted');
+  assert.deepEqual((await tokenFor(h, STRANGER)).json.error, 'hosting_closed');
   assert.equal((await tokenFor(h, STRANGER)).status, 403);
   assert.equal((await tokenFor(h, PROJECT, 'XX')).status, 400);
   const t = await tokenFor(h);
@@ -634,11 +639,17 @@ const at = (hms) => Date.parse('2026-10-21T' + hms + 'Z');
 for (const trusted of [true, false]) {
   test(`a stalled control link, the 2026-10-21 timeline on a ${trusted ? 'project' : 'community'} node: the beats held from x1.7 to x26.7 arrive at once, the link and the match stay, and placement skips the node until then`, async () => {
     clock = at('00:00:40.000');
-    const h = await boot(makeEnv());
+    // A community node is placed only under terms that describe hosting, its operator holding their
+    // rules for hosts (Terms 12.2, hosting-mine.test.mjs): as its first code leaves it.
+    const rules = { TERMS_VERSION: '2026-11-16', NODE_HOSTING_TERMS: '2026-11-16' };
+    const h = await boot(makeEnv(trusted ? {} : rules));
     clock = at('00:00:50.000');
     const { ws, node } = await liveNode(h);
     // Stage 1 registers only the project's nodes: a community one is the same record, untrusted.
-    if (!trusted) h.obj.cp.registry.node(node.nodeId).trusted = false;
+    if (!trusted) {
+      h.obj.cp.registry.node(node.nodeId).trusted = false;
+      h.obj.noteHostRules(h.obj.cp.registry.node(node.nodeId).operatorId, rules.TERMS_VERSION);
+    }
     const { placement } = (await call(h, 'POST', '/internal/place', { body: placeBody() })).json;
     assert.ok(placement, 'placed');
     const place = async () => (await call(h, 'POST', '/internal/place', { body: placeBody({ humans: humans(STRANGER) }) })).json;
@@ -1546,11 +1557,15 @@ const ACTOR = 'admin Proyecto Señor (a1b2c3d4e5f60718)';
 const { REGIONS } = await import('../../src/net/account.ts');
 const { KV_FLAGS } = await import('../src/env.ts');
 
-/** A community operator's node (STRANGER's), registered with a token the registry mints directly: the token route is the project's. */
+/**
+ * A community operator's node (STRANGER's), registered with a token the registry mints directly:
+ * the token route stays the project's while hosting is closed. Seen from its token's continent, as
+ * a community node must be (hosting.test.mjs checks the rule).
+ */
 async function communityNode(h, { ip = '198.51.100.40', publicUrl = 'wss://juan.turbo-gol.test' } = {}) {
   const { token } = await h.obj.cp.registry.createToken({ id: STRANGER, name: 'Juan' }, 'SA', clock);
   const keys = await generateEd25519();
-  const r = await call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': ip } });
+  const r = await call(h, 'POST', '/nodes/register', { body: { token, publicKey: keys.publicKey, roles: ['host'], publicUrl, build: NODE_BUILD, specs: SPECS, capacity: CAP }, headers: { 'x-client-ip': ip, 'x-client-continent': 'SA' } });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return { ...r.json, key: await importPrivateKey(keys.privateKey), publicUrl };
 }
@@ -1817,13 +1832,15 @@ test('the overview: every node in full (specs, last probe, link cuts, pins), the
   assert.deepEqual(o.alerts, { webhook: true });
   assert.deepEqual(o.warnings.map((w) => w.kind).sort(), ['trusted_off_channel', 'trusted_off_channel', 'verifier_node_versions']);
   assert.deepEqual(o.warnings.find((w) => w.kind === 'verifier_node_versions').nodes.map((x) => x.node).sort(), ['22', '24']);
-  // Ten reads in five minutes: one line in the channel, ten in the logs; the flags read once a minute.
-  assert.equal(kvReads, KV_FLAGS.length);
+  // Ten reads in five minutes: one line in the channel, ten in the logs; the flags read once a minute
+  // (the eight and the opening's, node_operators, which the overview shows apart: closed, the terms not in force).
+  assert.equal(kvReads, KV_FLAGS.length + 1);
+  assert.deepEqual([o.hosting.flag, o.hosting.raw, o.hosting.stage, o.hosting.terms.inForce, o.hosting.changes], ['node_operators', null, 'closed', false, []]);
   for (let i = 1; i < 10; i++) {
     clock += 30_000;
     assert.equal((await call(h, 'GET', '/nodes/admin/overview', { headers: ADMIN })).status, 200);
   }
-  assert.ok(kvReads <= KV_FLAGS.length * 5, `${kvReads} KV reads`);
+  assert.ok(kvReads <= (KV_FLAGS.length + 1) * 5, `${kvReads} KV reads`);
   await h.ctx.settle();
   const reads = () => posted().filter((p) => p.includes(': read '));
   assert.deepEqual(reads(), [`**ALERT** \`${ACTOR}: read the overview (2 nodes, with their addresses, and 2 tokens) (a maintainer's reads come here once per 30 min, every one is in the logs)\``]);
@@ -2023,13 +2040,19 @@ test('a purged operator account (AccountsDO, sign-in PR 12: POST /internal/opera
   assert.deepEqual((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: 'nope' } })).status, 400);
   const from = alerts().length;
   const r = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: OP } });
-  assert.deepEqual([r.status, r.json], [200, { ok: true, banned: 1 }]);
+  assert.deepEqual([r.status, r.json], [200, { ok: true, banned: 1, forgotten: 1 }]);
   assert.equal(h.obj.cp.registry.node(mine.node.nodeId).status, 'banned');
+  // Its record stays, banned, under an opaque key with no name (Privacy 12.3): nothing of it names the account.
+  const kept = h.obj.cp.registry.node(mine.node.nodeId);
+  assert.match(kept.operatorId, /^deleted:[0-9a-f]{12}$/);
+  assert.equal(kept.operatorName, '');
+  assert.ok(!JSON.stringify(h.ctx.db.prepare('SELECT * FROM nodes').all()).includes(OP), 'nor its row');
   assert.equal(mine.ws.of('status').at(-1)?.status, 'banned', 'told first');
   assert.deepEqual(mine.ws.closed, { code: 4403, reason: 'banned' });
   assert.equal(alerts().slice(from).filter((l) => l.includes(`operator ${OP} deleted their account: 1 node banned`)).length, 1);
   const again = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: OP } });
-  assert.deepEqual(again.json, { ok: true, banned: 0 });
+  assert.deepEqual(again.json, { ok: true, banned: 0, forgotten: 0 });
+  assert.equal(h.obj.cp.registry.node(mine.node.nodeId).operatorId, kept.operatorId, 'its key kept');
   // The project's account is never deleted: nothing is banned for it.
   const t = await call(h, 'POST', '/internal/operator-deleted', { body: { userId: PROJECT } });
   assert.deepEqual([t.status, t.json.error], [409, 'trusted']);

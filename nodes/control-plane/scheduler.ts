@@ -5,9 +5,11 @@
  *   1. the node is online (heartbeat within HEARTBEAT_TIMEOUT_MS) and hosts
  *   2. players can reach it with a transport their client supports: 'wss' (proven publicUrl) or
  *      'rtc' (passed its WebRTC self-test; needs a client with the WebRTC socket adapter)
- *   3. status: ranked -> 'active' only; casual -> 'probation' or 'active'
+ *   3. status: ranked -> 'active' only; casual -> 'probation' or 'active'. Ranked only on a project
+ *      node while communityRanked is false (the control plane's policy: COMMUNITY_RANKED "no")
  *   4. same build as the clients (wasm hash + protocol): a different wasm would desync
- *   5. not draining, a free slot (active < capacity), under its monthly egress cap
+ *   5. not draining, a free slot (active < capacity), under its monthly egress cap. The capacity is
+ *      what the caller hands in: the control plane caps a community node's (CommunityPolicy)
  *   6. same region as the queue
  *   7. ranked: none of the players is the node's operator (an operator never hosts their own ranked
  *      match: lag games on your own server are the cheapest cheat there is)
@@ -32,6 +34,8 @@ export interface PlacementRequest {
   /** Transports every player's client supports (old clients: ['wss'] only). */
   transports: NodeTransport[];
   now: number;
+  /** false: a ranked match goes to a project node only (CommunityPolicy.ranked). Absent: any active node, as before. */
+  communityRanked?: boolean;
 }
 
 /** The transport players will use on `n` (WebSocket preferred: no ICE, no relay), or null. */
@@ -50,6 +54,7 @@ export function ineligibility(n: NodeRecord, req: PlacementRequest): string | nu
   if (usableTransports(n).length === 0) return 'unreachable';
   if (transportFor(n, req.transports) === null) return 'transport';
   if (req.ranked ? n.status !== 'active' : n.status !== 'probation' && n.status !== 'active') return 'status:' + n.status;
+  if (req.ranked && req.communityRanked === false && !n.trusted) return 'community_ranked';
   if (!sameBuild(n.build, req.build)) return 'build';
   if (n.draining) return 'draining';
   if (n.active >= n.capacity.matches) return 'full';
