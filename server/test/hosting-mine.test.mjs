@@ -18,6 +18,7 @@ const realSetTimeout = globalThis.setTimeout;
 const D = await import('../src/NodeRegistryDO.ts');
 const { CLIENT_BUILD, rejoinTicketOf, serverMarkOf } = await import('../src/nodeApi.ts');
 const { REPORT_DAYS } = await import('../src/nodeStore.ts');
+const { hostRulesVersion } = await import('../src/hostPolicy.ts');
 const { backoffKey, projectOnlyOf } = await import('../src/MatchmakerDO.ts');
 const { INTERNAL_HEADER, internalSecret, signJwt } = await import('../src/auth.ts');
 const { generateEd25519, importPrivateKey, sign } = await import('../../nodes/shared/edcrypto.ts');
@@ -204,6 +205,10 @@ function accountsNs(people = new Map()) {
   const ns = {
     people,
     calls: [],
+    /** When set, /host-consent answers this (status, body). */
+    consent: null,
+    /** When set, the next GET /me answers the account as it is now, but only once this settles (a late answer). */
+    holdNext: null,
     idFromName: (n) => ({ n }),
     get: () => ({
       fetch: async (url, init) => {
@@ -213,7 +218,17 @@ function accountsNs(people = new Map()) {
         const out = (b, status = 200) => new RealResponse(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } });
         if (u.pathname === '/me') {
           const p = people.get(u.searchParams.get('userId'));
-          return p ? out(p) : out({ error: 'no_user' }, 404);
+          const answer = p ? out(p) : out({ error: 'no_user' }, 404);
+          const hold = ns.holdNext;
+          ns.holdNext = null;
+          if (hold) await hold;
+          return answer;
+        }
+        // The 'host' row as AccountsDO writes it (hosting.test.mjs checks the real one): GET /me says it from then on.
+        if (u.pathname === '/host-consent') {
+          if (ns.consent) return out(ns.consent.body, ns.consent.status);
+          people.get(body.userId).hostTerms = body.version;
+          return out({ hostTerms: body.version });
         }
         return out({ ok: true, applied: true });
       },
@@ -273,10 +288,15 @@ const closedEnv = (over = {}) => makeEnv({ TERMS_VERSION: '2026-11-05', FLAGS: k
 /** Open: (b) in force and hosting open to every account. */
 const openEnv = (over = {}) => makeEnv({ ...IN_FORCE, FLAGS: kvOf({ node_operators: '1' }), ...over });
 
+/** The DNS a community registration reads (NodeRegistryDO dnsFn): no records for any name, so never Cloudflare's proxy (hosting.test.mjs tests the lookup). */
+const fakeDns = async () => [];
+
 async function boot(env, ctx = new FakeCtx()) {
   objectWorld();
   const obj = new D.NodeRegistryDO(ctx, env);
   obj.alertSleep = () => Promise.resolve();
+  // A community registration reads its name's DNS records (proxyCheck.ts): never the network here.
+  obj.dnsFn = fakeDns;
   await obj.ready;
   return { obj, ctx, env };
 }
@@ -330,11 +350,25 @@ async function logIn(h, node) {
 const beat = (over = {}) => ({ t: 'heartbeat', data: { active: 0, capacity: 4, draining: false, egressGB: 0, egressCapGB: null, tickLagP99Ms: 1, cpuLoad: 0.1, rssMB: 80, matches: [], ...over } });
 
 /**
+ * `op` holds the rules for hosts in force, as its first code leaves it (hostGate's writeHostRules):
+ * AccountsDO's 'host' row (GET /me's hostTerms) and the object's copy (host_rules), which placement
+ * reads. None while the terms in force do not describe hosting (hostRulesVersion null).
+ */
+function holdRules(h, op = JUAN) {
+  const v = hostRulesVersion(h.env);
+  const p = h.env.ACCOUNTS.people.get(op);
+  if (p) p.hostTerms = v;
+  h.obj.noteHostRules(op, v);
+}
+
+/**
  * A community node of `op` (a token the registry mints: the gate is hosting.test.mjs's), live on
  * probation, or active with `active`: no verifier runs here, and a node on probation takes only
- * matches some verifier can re-simulate.
+ * matches some verifier can re-simulate. Its operator holds the rules for hosts as its first code
+ * left them (`rules` false: it never accepted any).
  */
-async function community(h, { op = JUAN, host = 'juan.example.org', name = 'juan-1', active = false } = {}) {
+async function community(h, { op = JUAN, host = 'juan.example.org', name = 'juan-1', active = false, rules = true } = {}) {
+  if (rules) holdRules(h, op);
   const { token } = await h.obj.cp.registry.createToken({ id: op, name: 'Juan' }, 'SA', clock, name, { publicHost: host });
   const node = await register(h, token, { publicUrl: `wss://${host}` });
   const ws = await logIn(h, node);
@@ -374,13 +408,15 @@ test('closed: /nodes/mine asks AccountsDO nothing and says hosting is closed; a 
   const r = await own(h, 'rename', { nodeId: node.nodeId, name: 'casa-juan' });
   assert.deepEqual([r.status, r.json.error], [403, 'hosting_closed']);
   assert.deepEqual([h.obj.cp.registry.node(node.nodeId).name, rows(h, 'nodes').find((x) => x.node_id === node.nodeId).data], ['juan-1', before]);
-  // A report: refused before anything is read, nothing in the table.
+  // No match for a community server while the terms do not describe hosting: nobody outside the
+  // project holds the rules for hosts (hostRulesVersion null), and the region backs off as one with no host.
   const p = await place(h);
-  assert.equal(p.status, 200);
-  const rep = await report(h, { matchId: p.json.placement.matchId });
+  assert.deepEqual([p.status, p.json], [200, { placement: null, hosts: 0 }]);
+  assert.deepEqual(h.ctx.sockets.flatMap((s) => s.of('assign')), [], 'nothing sent to it');
+  // A report: refused before anything is read, nothing in the table.
+  const rep = await report(h, { matchId: hex64('e') });
   assert.deepEqual([rep.status, rep.json.error, rows(h, 'node_reports')], [403, 'hosting_closed', []]);
-  // A project server while closed: no mark at all (a community one is always marked: honest).
-  assert.deepEqual(p.json.server, { name: 'juan-1', community: true });
+  // A project server while closed: no mark at all (a community one is always marked: honest, "the mark" below).
   const hp = await boot(closedEnv());
   await project(hp);
   const pp = await place(hp);
@@ -395,11 +431,10 @@ test('closed: /nodes/mine asks AccountsDO nothing and says hosting is closed; a 
   assert.equal((await own(h, 'drain', { nodeId: node.nodeId })).status, 200);
   const [ws] = h.ctx.sockets.filter((x) => x.readyState === 1);
   await h.obj.webSocketMessage(ws, JSON.stringify(beat({ draining: true })));
-  assert.equal((await own(h, 'retire', { nodeId: node.nodeId })).json.error, 'not_retirable', 'its match is still open');
-  const second = await community(h, { host: 'j5.example.org', name: 'juan-5' });
-  assert.equal((await own(h, 'drain', { nodeId: second.node.nodeId })).status, 200);
-  await h.obj.webSocketMessage(second.ws, JSON.stringify(beat({ draining: true })));
-  assert.equal((await own(h, 'retire', { nodeId: second.node.nodeId })).status, 200);
+  assert.equal((await own(h, 'retire', { nodeId: node.nodeId })).status, 200, 'drained, and no match ever went to it');
+  // The rules for hosts: no acceptance again before the terms describe hosting, nothing asked or stored.
+  const again = await call(h, 'POST', '/nodes/mine/accept', { body: { acceptHost: true, adult: true }, headers: as(JUAN) });
+  assert.deepEqual([again.status, again.json.error, rows(h, 'host_rules')], [403, 'hosting_closed', []]);
   assert.deepEqual(h.env.ACCOUNTS.calls, [], 'still never asked');
 });
 
@@ -414,17 +449,18 @@ test("open: /nodes/mine in full for a community operator: each node's service st
   clock += 1000;
   await h.obj.cp.registry.createToken({ id: ANA, name: 'Ana' }, 'SA', clock, undefined, { publicHost: 'ana2.example.org' });
   await h.obj.cp.registry.createToken({ id: JUAN, name: 'Juan' }, 'SA', clock, 'juan-2', { publicHost: 'j2.example.org' });
-  p.set(JUAN, person({ emailVerified: false, createdAt: clock - 2 * DAY }));
+  // The rules for hosts of an earlier version: to accept again (Terms 12.2), after what else it lacks.
+  p.set(JUAN, person({ emailVerified: false, createdAt: clock - 2 * DAY, hostTerms: '2026-11-05' }));
   const m = await mine(h);
   assert.equal(m.status, 200, JSON.stringify(m.json));
   const n = m.json.nodes[0];
   assert.deepEqual(
-    [n.nodeId, n.name, n.status, n.createdAt, n.draining, n.reachableAt !== null, n.lastProbe.ok, n.needed, n.strikes, n.refused, n.capacityEffective, n.publicUrl],
-    [node.nodeId, 'juan-1', 'probation', createdAt, false, true, true, 20, { count: 0, max: 3, windowDays: 7 }, { count: 0, rate: 0, recent: 0, of: 0, outUntil: null }, 4, 'wss://juan.example.org'],
+    [n.nodeId, n.name, n.status, n.createdAt, n.draining, n.reachableAt !== null, n.lastProbe.ok, n.needed, n.strikes, n.pauses, n.afterPause, n.refused, n.capacityEffective, n.publicUrl],
+    [node.nodeId, 'juan-1', 'probation', createdAt, false, true, true, 20, { count: 0, max: 3, windowDays: 7, nextExpiry: null }, { count: 0, windowDays: 30 }, null, { count: 0, rate: 0, recent: 0, of: 0, outUntil: null }, 4, 'wss://juan.example.org'],
   );
   assert.deepEqual(m.json.hosting, { open: true });
-  assert.deepEqual(m.json.requirements, { missing: ['email_required', 'account_too_new'], daysLeft: 5 });
-  assert.deepEqual(m.json.terms, { version: IN_FORCE.TERMS_VERSION, accepted: false }, 'the rules for hosts not accepted yet');
+  assert.deepEqual(m.json.requirements, { missing: ['email_required', 'account_too_new', 'reaccept_required'], daysLeft: 5 });
+  assert.deepEqual(m.json.terms, { version: IN_FORCE.TERMS_VERSION, accepted: false, acceptedVersion: '2026-11-05', again: true }, 'the rules for hosts of before: accepted again first');
   assert.deepEqual(m.json.limits, { nodes: 1, maxNodes: 3, tokensToday: 0, tokensLeftToday: 3, outstanding: 1, maxOutstanding: 2 });
   assert.deepEqual(
     m.json.tokens.map((t) => [t.region, t.name, t.publicHost, t.state, t.nodeId]),
@@ -465,6 +501,53 @@ test("open: /nodes/mine in full for a community operator: each node's service st
   await community(c);
   const cm = await mine(c);
   assert.deepEqual([cm.json.hosting, cm.json.requirements, c.env.ACCOUNTS.calls], [{ open: false, reason: 'hosting_closed' }, null, []]);
+});
+
+test('/nodes/mine shows the automatic measures (Terms 9.2 and 12.6.1, "MIS SERVIDORES te muestra tus faltas"): the lost matches in their window and when the oldest goes, a strike pause and where it leaves the server, a second one back to probation, a failed verification', async () => {
+  const h = await boot(openEnv());
+  const { node } = await community(h, { active: true });
+  const reg = h.obj.cp.registry;
+  const view = async () => (await mine(h)).json.nodes.find((n) => n.nodeId === node.nodeId);
+  const t0 = clock;
+  reg.onLost(node.nodeId, 'node_offline', t0);
+  let n = await view();
+  assert.deepEqual([n.status, n.strikes, n.pauses, n.afterPause], ['active', { count: 1, max: 3, windowDays: 7, nextExpiry: t0 + 7 * DAY }, { count: 0, windowDays: 30 }, null]);
+  // The third in the window: a pause of a day, back where it was (active) when it lifts.
+  reg.onLost(node.nodeId, 'node_offline', t0 + 1000);
+  reg.onLost(node.nodeId, 'node_offline', t0 + 2000);
+  n = await view();
+  assert.deepEqual([n.status, n.statusReason, n.suspendedUntil, n.afterPause, n.pauses.count, n.strikes.count], ['suspended', 'strikes:node_offline', t0 + 2000 + DAY, 'active', 1, 3]);
+  // It lifts; another lost match within the week pauses it again, the second time in 30 days: back to probation after it.
+  clock = t0 + 2000 + DAY;
+  reg.sweep(clock);
+  assert.equal(reg.node(node.nodeId).status, 'active');
+  reg.onLost(node.nodeId, 'node_offline', clock);
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count, n.strikes.count, n.strikes.nextExpiry], ['suspended', 'probation', 2, 4, t0 + 7 * DAY]);
+  // A week after the last, the lost matches are out of their window: none counted, whatever the counter last said.
+  clock = t0 + 2000 + 8 * DAY;
+  n = await view();
+  assert.deepEqual([n.strikes.count, n.strikes.nextExpiry, n.pauses.count], [0, null, 2]);
+  // Lifted, on probation now. Three lost matches 29.5 days after the second pause began: a third
+  // pause, a repeated one, so Registry.onLost demotes it again. Its window ends where it began: still
+  // said once the second pause has left the 30 days, while this one runs.
+  reg.sweep(clock);
+  assert.equal(reg.node(node.nodeId).status, 'probation');
+  const third = t0 + 2000 + DAY + 29.5 * DAY;
+  for (const at of [third - 2000, third - 1000, third]) reg.onLost(node.nodeId, 'node_offline', at);
+  clock = third + 0.75 * DAY;
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count, n.suspendedUntil], ['suspended', 'probation', 2, third + DAY]);
+  assert.equal(reg.node(node.nodeId).counters.probationVerified, 0);
+  clock = third + DAY;
+  reg.sweep(clock);
+  n = await view();
+  assert.deepEqual([n.status, n.afterPause, n.pauses.count], ['probation', null, 1], 'lifted: the 30 days from now again');
+  // A failed verification: suspended until a person looks, no end, nowhere it goes by itself.
+  reg.onVerified(node.nodeId, false, false);
+  n = await view();
+  assert.deepEqual([n.status, n.statusReason, n.suspendedUntil, n.afterPause], ['suspended', 'verification_failed', null, null]);
+  clock = t0;
 });
 
 // ---- A12: the owner's actions -------------------------------------------------------------------------
@@ -551,6 +634,151 @@ test("the owner's actions on its own servers: drain, rename and retire, and its 
   assert.ok(lines.some((l) => l.includes(`community operator ${JUAN}: node ${node.nodeId} renamed juan-1 -> casa-juan`)));
   assert.ok(lines.some((l) => l.includes(`community operator ${JUAN}: token ${unused.id.slice(0, 12)} revoked`)));
   assert.ok(!rows(h, 'node_alerts').some((r) => r.line.includes('casa-juan') || r.line.includes('retired by')), "nothing in the panel's ring");
+});
+
+// ---- Terms 12.2: the rules for hosts of a new version, accepted again ---------------------------------
+
+/** POST /nodes/mine/accept as the Worker forwards it. */
+const acceptAgain = (h, body = { acceptHost: true, adult: true }, id = JUAN) => call(h, 'POST', '/nodes/mine/accept', { body, headers: as(id) });
+const consents = (h) => h.env.ACCOUNTS.calls.filter((c) => c.path === '/host-consent').map((c) => c.body);
+const NEXT = '2026-12-01';
+
+test('a new terms version: its servers get no new match (running ones finish), no code (reaccept_required), until it accepts the rules again in Mis servidores with the first code\'s gate and row (source host_reaccept); never a first acceptance there; the project never held to it; kept through a deploy, gone with the account', async () => {
+  const db = new DatabaseSync(':memory:');
+  const env = openEnv();
+  const h = await boot(env, new FakeCtx(db));
+  const p = h.env.ACCOUNTS.people;
+  const { node } = await community(h, { active: true });
+  const first = await place(h);
+  assert.equal(first.json.placement.nodeId, node.nodeId, 'it holds the rules in force: placed');
+  // The deploy of a new version: the version the rules need moves with TERMS_VERSION (NODE_HOSTING_TERMS is its minimum).
+  env.TERMS_VERSION = NEXT;
+  assert.equal(hostRulesVersion(env), NEXT);
+  p.get(JUAN).terms = NEXT; // the general terms accepted again (their own sheet)
+  const sent = h.ctx.sockets.flatMap((x) => x.of('assign')).length;
+  const none = await place(h, { humans: playersOf(EVA) });
+  assert.deepEqual([none.json.placement, none.json.hosts], [null, 0], 'no new match, and the region backs off');
+  assert.equal(h.ctx.sockets.flatMap((x) => x.of('assign')).length, sent, 'nothing sent to it');
+  const rj = await call(h, 'POST', '/internal/rejoin', { body: { matchId: first.json.placement.matchId, playerId: ANA } });
+  assert.equal(rj.status, 200, 'its running match goes on');
+  // Mis servidores says so, after what else it lacks; a code waits for it.
+  h.obj.hostAccounts.clear();
+  const m = await mine(h);
+  assert.deepEqual([m.json.terms, m.json.requirements], [{ version: NEXT, accepted: false, acceptedVersion: IN_FORCE.TERMS_VERSION, again: true }, { missing: ['reaccept_required'], daysLeft: 0 }]);
+  const code = await call(h, 'POST', '/nodes/tokens', { body: { region: 'SA', publicHost: 'j2.example.org', acceptHost: true, adult: true }, headers: as(JUAN) });
+  assert.deepEqual([code.status, code.json.error, code.json.version, consents(h)], [403, 'reaccept_required', NEXT, []], 'never with a code');
+  // The acceptance: both, as for the first code; nothing written without them.
+  for (const [body, error] of [[{}, 'terms_required'], [{ acceptHost: true }, 'adult_required'], [{ acceptHost: true, adult: 'yes' }, 'adult_required'], [{ adult: true }, 'terms_required']]) {
+    const r = await acceptAgain(h, body);
+    assert.deepEqual([r.status, r.json.error], [403, error], JSON.stringify(body));
+  }
+  assert.equal((await call(h, 'POST', '/nodes/mine/accept', { body: 'nope', headers: as(JUAN) })).status, 400);
+  assert.deepEqual([consents(h), rows(h, 'host_rules').map((r) => r.version)], [[], [IN_FORCE.TERMS_VERSION]]);
+  lines.length = 0;
+  const ok = await acceptAgain(h);
+  assert.deepEqual([ok.status, ok.json], [200, { hostTerms: NEXT, already: false }]);
+  assert.deepEqual(consents(h), [{ userId: JUAN, version: NEXT, adult: true, again: true }]);
+  assert.deepEqual(rows(h, 'host_rules'), [{ operator_id: JUAN, version: NEXT, at: clock }]);
+  assert.ok(lines.some((l) => l.includes(`community operator ${JUAN} accepted again the rules for hosts of ${NEXT} and declared 18 or older`)));
+  assert.deepEqual((await acceptAgain(h)).json, { hostTerms: NEXT, already: true }, 'a second press writes nothing');
+  assert.equal(consents(h).length, 1);
+  // From then on: new matches, a code without accepting anything again, nothing left to do.
+  assert.equal((await place(h, { humans: playersOf(EVA) })).json.placement.nodeId, node.nodeId);
+  const m2 = await mine(h);
+  assert.deepEqual([m2.json.terms, m2.json.requirements.missing], [{ version: NEXT, accepted: true, acceptedVersion: NEXT, again: false }, []]);
+  assert.equal((await call(h, 'POST', '/nodes/tokens', { body: { region: 'SA', publicHost: 'j2.example.org' }, headers: as(JUAN) })).status, 200);
+  // The Operadores tab says which rules each host holds.
+  const ops = (await call(h, 'GET', '/nodes/admin/operators', { headers: ADMIN })).json.operators;
+  assert.deepEqual(ops.find((o) => o.operatorId === JUAN).rules, { accepted: NEXT, held: true });
+  // A first acceptance is never here: an account that never accepted any and has no server accepts with its first code.
+  p.get(ANA).terms = NEXT;
+  const fresh = await acceptAgain(h, undefined, ANA);
+  assert.deepEqual([fresh.status, fresh.json.error, consents(h).length], [409, 'first_code', 1]);
+  // A server on its books without any (an account that left the project's): no match until it accepts, here.
+  const ana = await community(h, { op: ANA, host: 'ana.example.org', name: 'ana-1', active: true, rules: false });
+  assert.equal((await mine(h, ANA)).json.terms.again, true);
+  for (let i = 0; i < 3; i++) assert.notEqual((await place(h, { humans: playersOf(hex64(String(i)).slice(0, 16)) })).json.placement?.nodeId, ana.node.nodeId);
+  assert.deepEqual(ana.ws.of('assign'), [], 'never asked');
+  assert.equal((await acceptAgain(h, undefined, ANA)).status, 200);
+  assert.equal(h.obj.rulesHeld(ANA), true);
+  // Blocked: refused before anything is read.
+  await call(h, 'POST', '/nodes/admin/operator', { body: { operatorId: EVA, action: 'block', reason: 'review' }, headers: ADMIN });
+  const calls = h.env.ACCOUNTS.calls.length;
+  assert.deepEqual([(await acceptAgain(h, undefined, EVA)).json.error, h.env.ACCOUNTS.calls.length], ['operator_blocked', calls]);
+  // AccountsDO's refusal is its: nothing kept.
+  env.TERMS_VERSION = '2026-12-15';
+  p.get(JUAN).terms = '2026-12-15';
+  h.env.ACCOUNTS.consent = { status: 409, body: { error: 'terms_changed', version: '2027-01-01' } };
+  assert.deepEqual([(await acceptAgain(h)).json.error, h.obj.rulesHeld(JUAN), rows(h, 'host_rules').find((r) => r.operator_id === JUAN).version], ['terms_required', false, NEXT]);
+  h.env.ACCOUNTS.consent = null;
+  env.TERMS_VERSION = NEXT;
+  // Through a deploy: the copy holds, and so does placement.
+  const back = await boot(env, new FakeCtx(db));
+  assert.deepEqual([back.obj.rulesHeld(JUAN), back.obj.rulesHeld(ANA)], [true, true]);
+  // The project: never held to the rules (A2, A3), its servers placed whatever its account holds.
+  const pj = await boot(openEnv());
+  await project(pj);
+  pj.env.TERMS_VERSION = NEXT;
+  assert.equal((await place(pj)).json.placement.trusted, true);
+  assert.equal((await acceptAgain(pj, undefined, PROJECT)).json.error, 'trusted');
+  assert.deepEqual((await mine(pj, PROJECT)).json.terms, { version: NEXT, accepted: true, acceptedVersion: null, again: false });
+  // Hosting not open for the account (a canary it is not in): refused, AccountsDO never asked.
+  const c = await boot(openEnv({ FLAGS: kvOf({ node_operators: ANA }) }));
+  assert.deepEqual([(await acceptAgain(c)).json.error, c.env.ACCOUNTS.calls], ['hosting_closed', []]);
+  // The account purged: its copy goes with it.
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: JUAN } })).status, 200);
+  assert.deepEqual([rows(h, 'host_rules').map((r) => r.operator_id), h.obj.rulesHeld(JUAN)], [[ANA], false]);
+});
+
+test("the copy of the rules for hosts: a GET /me answer older than an acceptance again, or than the purge, keeps nothing; a purged account never gets one back; a row the store fails to keep leaves the copy as it was, and the next read writes it", async () => {
+  const env = openEnv();
+  const h = await boot(env);
+  const p = h.env.ACCOUNTS.people;
+  const { node } = await community(h, { active: true });
+  env.TERMS_VERSION = NEXT;
+  p.get(JUAN).terms = NEXT;
+  h.obj.hostAccounts.clear();
+  const reads = () => h.env.ACCOUNTS.calls.filter((c) => c.path === '/me').length;
+  /** `go` with the next GET /me's answer held until the returned function is called. */
+  const late = async (go) => {
+    let release;
+    h.env.ACCOUNTS.holdNext = new Promise((r) => (release = r));
+    const n = reads();
+    const out = go();
+    while (reads() === n) await sleep(1);
+    return { out, release: () => release() };
+  };
+  // Mis servidores' poll reads the account (the rules of before) and its answer lands after VOLVER A ACEPTAR.
+  const poll = await late(() => mine(h));
+  assert.deepEqual((await acceptAgain(h)).json, { hostTerms: NEXT, already: false });
+  poll.release();
+  assert.equal((await poll.out).status, 200);
+  assert.deepEqual([h.obj.rulesHeld(JUAN), rows(h, 'host_rules').map((r) => r.version), h.obj.hostAccounts.has(JUAN)], [true, [NEXT], false], 'the late answer neither copied nor kept');
+  assert.equal((await place(h)).json.placement.nodeId, node.nodeId);
+  assert.deepEqual((await mine(h)).json.terms, { version: NEXT, accepted: true, acceptedVersion: NEXT, again: false }, 'the next read is fresh');
+  // A read under way when the account is purged: its answer brings nothing back.
+  h.obj.hostAccounts.clear();
+  const gone = await late(() => mine(h));
+  assert.equal((await call(h, 'POST', '/internal/operator-deleted', { body: { userId: JUAN } })).status, 200);
+  gone.release();
+  await gone.out;
+  assert.deepEqual([rows(h, 'host_rules'), h.obj.rulesHeld(JUAN), h.obj.hostAccounts.has(JUAN)], [[], false, false]);
+  // Nor a write that lands after the purge: node_forgotten has the id.
+  h.obj.noteHostRules(JUAN, NEXT);
+  assert.deepEqual([rows(h, 'host_rules'), h.obj.rulesHeld(JUAN)], [[], false]);
+  // The store fails to keep a row: the copy stays as it was, and the account's next read writes it.
+  Object.assign(p.get(ANA), { terms: NEXT, hostTerms: NEXT });
+  h.obj.store.setHostRules = () => {
+    throw new Error('disk full');
+  };
+  lines.length = 0;
+  assert.equal((await mine(h, ANA)).status, 200);
+  assert.deepEqual([h.obj.rulesHeld(ANA), rows(h, 'host_rules')], [false, []]);
+  assert.ok(lines.some((l) => l.includes(`the rules for hosts of ${ANA} not kept: Error: disk full`)));
+  delete h.obj.store.setHostRules;
+  h.obj.hostAccounts.clear();
+  await mine(h, ANA);
+  assert.deepEqual([h.obj.rulesHeld(ANA), rows(h, 'host_rules').map((r) => [r.operator_id, r.version])], [true, [[ANA, NEXT]]]);
 });
 
 // ---- A15: the community server's mark and the preference, at the object ---------------------------------
@@ -770,6 +998,26 @@ test("the Worker: the owner's actions never from a TV, 10 a minute; a report fro
   assert.deepEqual([rj.status, rj.json.node, rj.json.server], [200, true, { name: 'casa-juan', community: true }]);
   const plain = workerEnv({ NODES: nodesNs((path) => (path === '/internal/rejoin' ? { ticket: 't', wsUrl: 'wss://n.example.org/m/x' } : { ok: true })) });
   assert.equal('server' in (await wreq(plain, 'POST', '/api/rejoin', { body: { matchId: hex64('f') }, token: juan })).json, false);
+});
+
+test("the Worker: POST /nodes/mine/accept takes the first code's steps: closed while the terms do not describe hosting (the object never asked, no KV read), never a TV's session, a canary it is not in, fresh as a maintainer's; the session's since goes on; 10 a minute", async () => {
+  realWorld();
+  const body = { acceptHost: true, adult: true };
+  const closed = workerEnv({ TERMS_VERSION: '2026-11-05', FLAGS: kvOf({ node_operators: '1' }) });
+  const r = await wreq(closed, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN) });
+  assert.deepEqual([r.status, r.json.error, closed.NODES.seen, closed.FLAGS.reads], [403, 'hosting_closed', [], []], 'the object never asked, KV not even read');
+  const env = workerEnv({ ...IN_FORCE, FLAGS: kvOf({ node_operators: JUAN }) });
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body })).status, 401);
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN, { tv: 1 }) })).json.error, 'tv_session');
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(ANA) })).json.error, 'hosting_closed', 'not in the canary');
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN, { aat: s() - 16 * 60 }) })).json.error, 'reauth_required', 'its password or a mailed code in the last 15 minutes, as for a code');
+  assert.deepEqual(env.NODES.seen, []);
+  const since = s() - 30 * 86_400;
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN, { since }) })).status, 200);
+  const [seen] = env.NODES.seen;
+  assert.deepEqual([seen.path, seen.headers['x-operator-id'], seen.headers['x-operator-since'], JSON.parse(seen.body)], ['/nodes/mine/accept', JUAN, String(since), body]);
+  for (let i = 1; i < 10; i++) await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN) });
+  assert.equal((await wreq(env, 'POST', '/nodes/mine/accept', { body, token: await session(JUAN) })).status, 429);
 });
 
 test('the preference through the Worker and the hub: closed, POST /api/queue with projectOnly is as without it (nothing kept, no KV read); from the terms on never dropped by the flag (absent, 0, a failed read); one human with it takes the whole group to the project’s nodes; none free: a MatchDO, with a back-off of its own; do_disabled: it waits, its region’s and then SA’s project nodes only; never kept in a dropped search', async () => {

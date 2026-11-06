@@ -13,10 +13,18 @@
  *                     version (a 'host' consents row) neither held nor accepted with the request
  *   adult_required    the rules accepted without declaring 18 or older: never a 'host' row then
  *
+ *   reaccept_required the rules for hosts of an earlier version held (or a server on its books
+ *                     without any): accepted again in MIS SERVIDORES first (hostRulesStep 'again')
+ *
  * Then the caps (COMMUNITY_TOKENS_PER_DAY, COMMUNITY_OUTSTANDING, the registry's community node
  * cap), and the token's host: a DNS name, never one under RESERVED_HOST_DOMAIN.
+ *
+ * The rules for hosts in force (hostRulesVersion) also decide placement: a community node whose
+ * operator does not hold them gets no new match (NodeRegistryDO rulesHeld, the control plane's
+ * CommunityPolicy.rulesHeld); its matches running finish.
  */
-import { hostingModeOf } from './env';
+import { hostingModeOf, hostingTermsInForce, termsVersion } from './env';
+import type { Env } from './env';
 
 /** The youngest account that may host, in days (the ledger's NEW_ACCOUNT_DAYS: its minutes weigh 1 from then). */
 export const MIN_ACCOUNT_AGE_DAYS = 7;
@@ -70,6 +78,45 @@ export function hostRequirements(a: HostAccount, o: { now: number; since: number
   if (daysLeft > 0) missing.push('account_too_new');
   if (a.terms !== o.terms) missing.push('terms_required');
   return { missing, daysLeft };
+}
+
+/**
+ * The version of the rules for hosts an operator outside the project must hold (its newest 'host'
+ * consents row: Terms section 12 and Annex B accepted, 18 or older declared) to ask for a code and
+ * for its servers to get new matches (Terms 12.2, last paragraph). The rules are a part of the Terms,
+ * with no version of their own: it is the TERMS_VERSION in force, once the terms in force describe
+ * hosting (NODE_HOSTING_TERMS is the first version that does: env.ts hostingTermsInForce). When the
+ * Terms change version the version required moves with them, and every host accepts again, even
+ * where section 12 did not change. null while the terms in force do not describe hosting: nobody
+ * outside the project holds the rules then, so none of its servers is placed (before the opening
+ * there is none). Never the KV flag node_operators: closing it again after the opening stops the
+ * new codes, not the servers that hold the rules. The project's accounts (NODE_TRUSTED_OPERATORS)
+ * are never held to it (A2, A3): neither their codes nor their nodes.
+ */
+export function hostRulesVersion(env: Pick<Env, 'TERMS_VERSION' | 'NODE_HOSTING_TERMS'>): string | null {
+  return hostingTermsInForce(env) ? termsVersion(env) : null;
+}
+
+/** An operator who accepted the rules for hosts of `accepted` (null: none) holds those in force (`required`, hostRulesVersion's). */
+export function hostRulesHeld(accepted: string | null, required: string | null): boolean {
+  return required !== null && accepted === required;
+}
+
+/**
+ * Where an operator outside the project accepts the rules for hosts in force (`required`), by what it
+ * accepted last (`accepted`) and the servers on its books (`servers`, a retired one left out):
+ *   held   it holds them: nothing to accept
+ *   first  it never accepted any and has no server: with the button that asks for its first code
+ *          (POST /nodes/tokens with acceptHost and adult: Terms 12.2.4, 2.7, the Annex B intro)
+ *   again  it accepted those of an earlier version (or has a server without any: an account that
+ *          left the project's): accepted again in MIS SERVIDORES (POST /nodes/mine/accept) before
+ *          another code, and meanwhile its servers get no new match (Terms 12.2, last paragraph)
+ */
+export type HostRulesStep = 'held' | 'first' | 'again';
+
+export function hostRulesStep(accepted: string | null, required: string, servers: number): HostRulesStep {
+  if (accepted === required) return 'held';
+  return accepted === null && servers === 0 ? 'first' : 'again';
 }
 
 /** `host` is RESERVED_HOST_DOMAIN or a name under it. */

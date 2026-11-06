@@ -10,7 +10,7 @@
  */
 import { OPERATOR_MATCHES_MAX } from '../../nodes/control-plane/controlPlane';
 import type { ControlPlane, ProbeResult, RegionView } from '../../nodes/control-plane/controlPlane';
-import { MAX_STRIKES, PROBATION_MATCHES, STRIKE_WINDOW_MS, isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
+import { MAX_STRIKES, PROBATION_MATCHES, REPEAT_PAUSE_WINDOW_MS, STRIKE_COOLDOWN_MS, STRIKE_WINDOW_MS, isRetired, tokenIdOf, tokenState } from '../../nodes/control-plane/registry';
 import type { NodeRecord, TokenState } from '../../nodes/control-plane/registry';
 import type { BuildId, NodeRole } from '../../nodes/shared/controlProtocol';
 import { REGIONS } from '../../src/net/account';
@@ -53,10 +53,21 @@ export function mineView(cp: ControlPlane, n: NodeRecord) {
  * matches placement lets it run (capacityEffective). Never the players' reports: those are the
  * team's (the privacy policy: "lo ve el equipo, no el anfitrión").
  */
-export function mineNodeView(cp: ControlPlane, n: NodeRecord) {
+export function mineNodeView(cp: ControlPlane, n: NodeRecord, now: number = Date.now()) {
   const probe: ProbeResult | null = cp.probeOf(n.nodeId);
   const refused = n.counters.refused ?? 0;
   const tries = n.counters.assigned + refused;
+  // The automatic measures as the host sees them (Terms 9.2 and 12.6.1: "MIS SERVIDORES te muestra
+  // tus faltas"): its lost matches still in their window and when the oldest leaves it, its strike
+  // pauses in theirs, and where a pause leaves it once it lifts (probation after a repeated one: its
+  // verified matches start over). During a pause, its window ends where that pause began, as
+  // Registry.onLost counted it then: an older pause leaving the window meanwhile does not undo the
+  // demotion. A failed verification is the status and its reason; the hour out after refusals,
+  // `refused.outUntil`.
+  const strikes = n.strikeTimes.filter((t) => now - t < STRIKE_WINDOW_MS);
+  const paused = n.status === 'suspended' && n.suspendedUntil !== null;
+  const pausedAt = paused ? (n.suspendedUntil as number) - STRIKE_COOLDOWN_MS : now;
+  const pauses = (n.pauseTimes ?? []).filter((t) => t <= pausedAt && pausedAt - t < REPEAT_PAUSE_WINDOW_MS);
   return {
     ...mineView(cp, n),
     createdAt: n.createdAt,
@@ -66,7 +77,9 @@ export function mineNodeView(cp: ControlPlane, n: NodeRecord) {
     reachableAt: n.reachableAt,
     lastProbe: probe ? { at: probe.at, ok: probe.ok, error: probe.error } : null,
     needed: PROBATION_MATCHES,
-    strikes: { count: n.counters.strikes, max: MAX_STRIKES, windowDays: STRIKE_WINDOW_MS / DAY_MS },
+    strikes: { count: strikes.length, max: MAX_STRIKES, windowDays: STRIKE_WINDOW_MS / DAY_MS, nextExpiry: strikes.length > 0 ? Math.min(...strikes) + STRIKE_WINDOW_MS : null },
+    pauses: { count: pauses.length, windowDays: REPEAT_PAUSE_WINDOW_MS / DAY_MS },
+    afterPause: paused ? n.statusBeforeSuspension : null,
     refused: { count: refused, rate: tries > 0 ? Math.round((refused / tries) * 1000) / 1000 : 0, ...cp.refusalsOf(n.nodeId) },
     capacityEffective: cp.effectiveCapacity(n),
   };
@@ -329,6 +342,8 @@ export interface OperatorInput {
   tokensToday: number;
   /** The players' reports about its servers of the last REPORTS_SHOWN_DAYS, newest first (NodeStore.reportsAbout); none: an object of before them. */
   reports?: ReportRow[];
+  /** The rules for hosts it accepted last (the object's copy, host_rules) and whether it holds those in force: without them its servers get no new match. */
+  rules?: { accepted: string | null; held: boolean };
 }
 
 /** The days of reports the Operadores tab shows (A16: a week), and how many of them at most. */
@@ -360,8 +375,10 @@ export function reportsView(rows: readonly ReportRow[]) {
 
 /**
  * GET /nodes/admin/operators: one community operator for the maintainers (A4, A8 bis, A16, A17):
- * its status and opt-in, its nodes with their refusals and effective capacity, its tokens, the
- * matches it runs against OPERATOR_MATCHES_MAX, its points (today against the daily cap, 30 days,
+ * its status and opt-in, the rules for hosts it accepted last and whether they are the ones in
+ * force (Terms 12.2: else its servers get no new match), its nodes with their refusals and
+ * effective capacity, its tokens, the matches it runs against OPERATOR_MATCHES_MAX, its points
+ * (today against the daily cap, 30 days,
  * all time, and how much of them the 3 accounts that played most on its nodes brought) and the
  * players' reports of the last week (reportsView). Its wallet is GET /nodes/admin/wallet's.
  */
@@ -377,12 +394,14 @@ export function operatorView(cp: ControlPlane, operatorId: string, i: OperatorIn
   }
   return {
     operatorId,
-    name: newest?.operatorName ?? null,
+    // A purged account's records have no name (Registry.forgetOperator): null, as for an operator with no node.
+    name: newest?.operatorName || null,
     status: i.row?.status ?? 'ok',
     reason: i.row?.reason ?? null,
     actor: i.row?.actor ?? null,
     at: i.row?.at ?? null,
     showPublic: i.row?.showPublic === true,
+    rules: i.rules ?? { accepted: null, held: false },
     nodes: nodes.map((n) => ({
       nodeId: n.nodeId,
       name: n.name,

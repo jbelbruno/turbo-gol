@@ -105,10 +105,13 @@ export function closedKeyOf(stage: unknown): 'servers.closed' | 'servers.closedN
   return stage === 'canary' ? 'servers.closed' : 'servers.closedNow';
 }
 
-/** What a host may still lack (GET /nodes/mine `requirements.missing`, the token's refusals in their order). */
-export type Requirement = 'operator_blocked' | 'email_required' | 'deletion_pending' | 'account_too_new' | 'terms_required';
+/**
+ * What a host may still lack (GET /nodes/mine `requirements.missing`, the token's refusals in their
+ * order): last, the rules for hosts of a new terms version to accept again (Terms 12.2).
+ */
+export type Requirement = 'operator_blocked' | 'email_required' | 'deletion_pending' | 'account_too_new' | 'terms_required' | 'reaccept_required';
 
-const REQUIREMENTS: readonly Requirement[] = ['operator_blocked', 'email_required', 'deletion_pending', 'account_too_new', 'terms_required'];
+const REQUIREMENTS: readonly Requirement[] = ['operator_blocked', 'email_required', 'deletion_pending', 'account_too_new', 'terms_required', 'reaccept_required'];
 
 /** The requirements the account lacks, the ones this client knows, in the server's order. */
 export function requirementsOf(mine: MineAnswer | null): Requirement[] {
@@ -119,10 +122,38 @@ export function requirementsOf(mine: MineAnswer | null): Requirement[] {
 /**
  * The acceptance step shows (the rules for hosts of the terms in force and the 18-or-older
  * declaration, above PEDIR CÓDIGO): the account holds no acceptance for that version, or the server
- * could not say (null: the request then carries it, and the server writes it once).
+ * could not say (null: the request then carries it, and the server writes it once). Never for a host
+ * that accepts them again (`again`): that one is VOLVER A ACEPTAR's, before any code (acceptAgainPending).
  */
 export function acceptanceNeeded(mine: MineAnswer | null): boolean {
-  return mine?.terms?.accepted !== true;
+  return mine?.terms?.accepted !== true && mine?.terms?.again !== true;
+}
+
+/**
+ * The banner of a new terms version (Terms 12.2, last paragraph): the host accepted the rules of an
+ * earlier one (or has a server without any) and accepts them again in this screen, with the first
+ * code's acceptance and VOLVER A ACEPTAR (POST /nodes/mine/accept); until then its servers may get no
+ * new match and it asks for no code. Not for a blocked host: its servers are out of the network anyway.
+ */
+export function acceptAgainPending(mine: MineAnswer | null): boolean {
+  return mine?.terms?.again === true && !requirementsOf(mine).includes('operator_blocked');
+}
+
+/**
+ * The words of that banner, its sheet and its requirement line. A host that accepted the rules of an
+ * earlier version: the Terms have a new one, VOLVER A ACEPTAR. One with servers that never accepted
+ * any (`acceptedVersion` null: an account that left the project's): nothing changed version for it,
+ * so it is only told to accept them, ACEPTAR.
+ */
+export function acceptAgainWords(mine: MineAnswer | null): {
+  title: 'servers.againTitle' | 'servers.rulesTitle';
+  note: 'servers.againNote' | 'servers.rulesNote';
+  req: 'servers.req.reaccept_required' | 'servers.rulesReq';
+  button: 'servers.againBtn' | 'servers.rulesBtn';
+} {
+  return mine?.terms?.acceptedVersion === null
+    ? { title: 'servers.rulesTitle', note: 'servers.rulesNote', req: 'servers.rulesReq', button: 'servers.rulesBtn' }
+    : { title: 'servers.againTitle', note: 'servers.againNote', req: 'servers.req.reaccept_required', button: 'servers.againBtn' };
 }
 
 /**
@@ -190,7 +221,8 @@ export interface NodeFacts {
   /** "compatible", or "actualización pendiente" (below the channel's minimum, or another build than the network's). */
   version: 'compatible' | 'update';
   seen: 'now' | number | null;
-  strikes: { count: number; max: number; windowDays: number };
+  /** Its lost matches in their window, and when the oldest leaves it (null: none, or an older server that does not say). */
+  strikes: { count: number; max: number; windowDays: number; nextExpiry: number | null };
   /** The share of its assignments it refused, 0 to 1. */
   refusalRate: number;
   /** Out of placement for its refusals until then (A8 bis's hour), null when it is not. */
@@ -208,11 +240,41 @@ export function nodeFacts(n: MineNode, channel: { minimum: string } | null | und
     egress: { used: n.egressGB, cap: n.egressCapGB ?? null },
     version: n.compatible && !(minimum !== null && older(n.version, minimum)) ? 'compatible' : 'update',
     seen: n.online ? 'now' : (n.lastSeen ?? null),
-    strikes: n.strikes ?? { count: n.counters.strikes, max: 3, windowDays: 7 },
+    strikes: { count: n.strikes?.count ?? n.counters.strikes, max: n.strikes?.max ?? 3, windowDays: n.strikes?.windowDays ?? 7, nextExpiry: n.strikes?.nextExpiry ?? null },
     refusalRate: n.refused?.rate ?? 0,
     outUntil: n.refused?.outUntil ?? null,
     probation: { verified: n.counters.probationVerified, needed: n.needed ?? 20 },
   };
+}
+
+/**
+ * The automatic measures on a server, as MIS SERVIDORES says them (Terms 9.2: "Las medidas
+ * automáticas sobre un servidor de la comunidad ... las ves en MIS SERVIDORES"; 12.6.1):
+ *   verification  suspended by a failed verification, until a person reviews it (its wallet paused)
+ *   strikes       suspended for lost matches until `until`; `probation`: not its first pause in the
+ *                 window, so it goes back to probation and its verified matches start over
+ *   refusals      out of placement until `until`, for refusing too many of its latest matches
+ * A suspension or a ban the team decided is not one of them: its reason is shown as written.
+ */
+export type Measure = { kind: 'verification' } | { kind: 'strikes'; until: number; probation: boolean; days: number } | { kind: 'refusals'; until: number };
+
+/** The registry's reasons for its own suspensions (nodes/control-plane/registry.ts onVerified, onLost). */
+const AUTOMATIC_REASON = /^(?:verification_failed$|strikes:)/;
+
+/** A status reason the system wrote (a measure's code), not one the team wrote: the screen says it in words instead. */
+export function automaticReason(reason: string | null): boolean {
+  return reason !== null && AUTOMATIC_REASON.test(reason);
+}
+
+export function measuresOf(n: MineNode, now: number): Measure[] {
+  const out: Measure[] = [];
+  if (n.status === 'suspended' && n.statusReason === 'verification_failed') out.push({ kind: 'verification' });
+  if (n.status === 'suspended' && n.statusReason !== null && n.statusReason.startsWith('strikes:') && n.suspendedUntil !== null && n.suspendedUntil > now) {
+    out.push({ kind: 'strikes', until: n.suspendedUntil, probation: n.afterPause === 'probation' && (n.pauses?.count ?? 0) >= 2, days: n.pauses?.windowDays ?? 30 });
+  }
+  const outUntil = n.refused?.outUntil ?? null;
+  if (outUntil !== null && outUntil > now) out.push({ kind: 'refusals', until: outUntil });
+  return out;
 }
 
 /**
@@ -247,7 +309,7 @@ export const UNINSTALL_LINES: readonly string[] = [
 export const RESTART_LINE = 'sudo systemctl restart turbogol-node';
 
 /** The installer's refusals the help after an expired code explains (each with its text under nodesShared.err.*). */
-export const INSTALL_ERRORS = ['region_mismatch', 'rtc_not_available', 'ip_not_supported', 'public_host_mismatch'] as const;
+export const INSTALL_ERRORS = ['region_mismatch', 'rtc_not_available', 'ip_not_supported', 'public_host_mismatch', 'behind_proxy'] as const;
 
 // ---- PARTIDO ENCONTRADO, the FINAL, REPORTAR SERVIDOR, the preference -------------------------------
 

@@ -13,8 +13,9 @@
  *   placement     scheduler.pickNode -> 'assign' -> EdDSA tickets + the URL for the transport. With
  *                 the community policy (CommunityPolicy, the NodeRegistryDO's): a community node's
  *                 capacity capped, no ranked match on one, its operator's matches capped, an hour
- *                 out of placement after its unexcused refusals, and none on probation while its
- *                 build's verification queue is braked; a project node is placed as before
+ *                 out of placement after its unexcused refusals, none on probation while its
+ *                 build's verification queue is braked, and none for an operator blocked or without
+ *                 the rules for hosts in force; a project node is placed as before
  *   signaling     a player's WebRTC offer relayed to an rtc node (ticket checked on both ends)
  *   leaves        a player's explicit quit relayed to the node (MatchDO /internal/leave semantics);
  *                 the verifier only accepts takeovers of players whose leave went through here
@@ -209,12 +210,19 @@ export interface CommunityPolicy {
   soloBotsZero: boolean;
   /** The operator may not host (a maintainer blocked it): none of its nodes is placed. */
   blocked?: (operatorId: string) => boolean;
+  /**
+   * The operator holds the rules for hosts in force (the NodeRegistryDO's copy of its 'host'
+   * acceptance, server/src/hostPolicy.ts hostRulesVersion: a new Terms version is accepted again,
+   * Terms 12.2). false: none of its nodes gets a new match, its matches running finish. Absent:
+   * every operator does (the reference server).
+   */
+  rulesHeld?: (operatorId: string) => boolean;
   /** Where the ALERT lines about community nodes go (the community nodes' staff-only channel), never the team's `log`; absent: `log`. */
   log?: (msg: string) => void;
 }
 
 /** The owner's values (2026-11-04 and 2026-11-05); `ranked` comes from NODE_COMMUNITY_RANKED. */
-export const COMMUNITY_POLICY: Omit<CommunityPolicy, 'ranked' | 'blocked' | 'log'> = {
+export const COMMUNITY_POLICY: Omit<CommunityPolicy, 'ranked' | 'blocked' | 'rulesHeld' | 'log'> = {
   probationCapacity: PROBATION_CAPACITY_MAX,
   activeCapacity: COMMUNITY_CAPACITY_MAX,
   operatorMatches: OPERATOR_MATCHES_MAX,
@@ -1308,13 +1316,18 @@ export class ControlPlane {
     this.logAbout(n, `ALERT node ${n.name} (${n.nodeId}) refused ${refusals} of its last ${last.length} assignments with no reason: out of placement for ${Math.round(p.refusals.outMs / 60_000)} min`);
   }
 
+  /** A community node's operator may get new matches under the policy: not blocked, and holding the rules for hosts in force. */
+  private operatorPlaceable(n: NodeRecord, p: CommunityPolicy): boolean {
+    return !p.blocked?.(n.operatorId) && (p.rulesHeld === undefined || p.rulesHeld(n.operatorId));
+  }
+
   /**
    * A community node the policy lets take a match now (beside the scheduler's rules): its operator
-   * not blocked nor at OPERATOR_MATCHES_MAX, the node not out for its refusals, and on probation
-   * only while its build's verification queue is not braked.
+   * not blocked, holding the rules for hosts in force and not at OPERATOR_MATCHES_MAX, the node not
+   * out for its refusals, and on probation only while its build's verification queue is not braked.
    */
   private communityPlaceable(n: NodeRecord, p: CommunityPolicy, now: number, running: ReadonlyMap<string, number>, braked: (b: BuildId) => boolean): boolean {
-    if (p.blocked?.(n.operatorId)) return false;
+    if (!this.operatorPlaceable(n, p)) return false;
     if ((this.refusedOut.get(n.nodeId) ?? 0) > now) return false;
     if ((running.get(n.operatorId) ?? 0) >= p.operatorMatches) return false;
     return !(n.status === 'probation' && braked(n.build));
@@ -1567,11 +1580,14 @@ export class ControlPlane {
   /**
    * Host nodes online in `region` that may take matches (probation or active, reachable): the
    * `hosts` of POST /internal/place. While it is 0 the matchmaker stops asking for a while.
-   * `projectOnly`: the project's only (a project-only placement's own back-off, A15).
+   * `projectOnly`: the project's only (a project-only placement's own back-off, A15). Under the
+   * community policy, never a node whose operator gets no new match (blocked, or without the rules
+   * for hosts in force): a region with only those backs off as one with none.
    */
   hostsOnline(region: string, projectOnly = false): number {
+    const p = this.o.community;
     let n = 0;
-    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x) && (!projectOnly || x.trusted)) n++;
+    for (const x of this.registry.list()) if (x.region === region && this.mayHost(x) && (!projectOnly || x.trusted) && (!p || x.trusted || this.operatorPlaceable(x, p))) n++;
     return n;
   }
 

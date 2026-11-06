@@ -20,6 +20,7 @@
  * not there but in the queue hub, whatever that region: the /release goes to HUB_TARGET.
  */
 import type { MatchEntry, MatchOutcome } from '../../nodes/control-plane/controlPlane';
+import { isDeletedOperator } from '../../nodes/control-plane/registry';
 import type { MatchAssignment } from '../../nodes/shared/controlProtocol';
 import type { HostCredit } from './accountStore';
 import { INTERNAL_HEADER, internalSecret } from './auth';
@@ -68,13 +69,14 @@ export function outcomeCalls(o: MatchOutcome, assign: MatchAssignment, playerIds
     const body = { matchId, playlist: assign.mode, region: assign.region, players: o.players, noShows: o.noShows, reason: o.reason.slice(0, REASON_MAX) };
     calls.push({ matchId, target: ACCOUNTS_TARGET, path: '/ranked-cancel', body: JSON.stringify(body) });
   }
+  // A purged host's points and freeze reach no account (its records are under the purge's opaque key).
   const e = rewards.ledger;
-  if (e) {
+  if (e && !isDeletedOperator(e.operatorId)) {
     const body: HostCredit = { matchId, userId: e.operatorId, nodeId: e.nodeId, points: e.points, verified: e.verified, at: e.at };
     calls.push({ matchId, target: ACCOUNTS_TARGET, path: '/host-credit', body: JSON.stringify(body) });
   }
   const f = rewards.freeze;
-  if (f) {
+  if (f && !isDeletedOperator(f.operatorId)) {
     // `at`: when the match settled, so an unfreeze given after it is never undone by a late redelivery.
     const body = { userId: f.operatorId, reason: f.reason, at: rewards.doneAt ?? 0 };
     calls.push({ matchId, target: ACCOUNTS_TARGET, path: '/host-freeze', body: JSON.stringify(body) });

@@ -33,7 +33,8 @@
  *
  * A community operator (one outside the project) has at most MAX_NODES_PER_OPERATOR nodes and, when
  * the registry is given CommunityRules (the NodeRegistryDO), registers only a wss host on port 443
- * behind a DNS name, seen from its token's continent, under a name of its own (communityRefusal).
+ * behind a DNS name, seen from its token's continent, under a name of its own (communityRefusal),
+ * that does not resolve to Cloudflare's proxy (behindProxy).
  */
 import { HEARTBEAT_TIMEOUT_MS } from '../shared/controlProtocol';
 import type { BuildId, HeartbeatData, HelloData, NodeCapacity, NodeRole, NodeSpecs, NodeStatus, NodeTransport, RegisterRequest } from '../shared/controlProtocol';
@@ -105,6 +106,14 @@ export function hostOf(u: string): string | null {
  */
 export function isIpHost(host: string): boolean {
   return host.startsWith('[') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** What a purged operator's records are keyed by (Registry.forgetOperator): this and random hex, which nothing links to the account. */
+export const DELETED_OPERATOR_PREFIX = 'deleted:';
+
+/** `operatorId` is a purged account's opaque key (forgetOperator), not an account: nothing reaches it any more. */
+export function isDeletedOperator(operatorId: string): boolean {
+  return operatorId.startsWith(DELETED_OPERATOR_PREFIX);
 }
 
 /** A node a maintainer retired: out of the cap, placement and counts, refused at every login. */
@@ -310,6 +319,13 @@ export interface CommunityRules {
   reservedDomains: readonly string[];
   /** The continent Cloudflare saw (register's `seen`) must be the token's region; none or another one is refused. */
   regionCheck: boolean;
+  /**
+   * Whether the node's wss host resolves to Cloudflare's proxy, which would open every player's
+   * connection (Terms, Annex B, point 6: a host gives no one but the provider of its machine the
+   * players' data): true refuses the registration (behind_proxy), and so does null, a lookup that
+   * failed (dns_unavailable). Asked last, before the token is spent. Absent: not asked.
+   */
+  behindProxy?: (host: string) => Promise<boolean | null>;
 }
 
 /** `host` is one of the rules' reserved domains, or under one. */
@@ -645,6 +661,10 @@ export class Registry {
     if (this.opts.community && !this.trusted.has(tok.operatorId) && roles.includes('host')) {
       const refused = this.communityRefusal(this.opts.community, tok, req, host, seen);
       if (refused) return refused;
+      // host is a wss name here (communityRefusal refused any other).
+      const proxied = host !== null && this.opts.community.behindProxy ? await this.opts.community.behindProxy(host).catch(() => null) : false;
+      if (proxied === null) return { ok: false, code: 'dns_unavailable', message: `the DNS records of ${host} could not be read: the token was not used, run the installer again in a minute` };
+      if (proxied) return { ok: false, code: 'behind_proxy', message: `${host} resolves to Cloudflare's proxy: a community server is reached by its players directly. Set its DNS record to 'DNS only' and run the installer again` };
     }
     const b = req.build;
     if (!b || typeof b.version !== 'string' || typeof b.protocol !== 'number' || !/^[0-9a-f]{64}$/.test(String(b.wasmSha256))) return { ok: false, code: 'bad_build' };
@@ -729,6 +749,51 @@ export class Registry {
 
   byOperator(operatorId: string): NodeRecord[] {
     return this.list().filter((n) => n.operatorId === operatorId);
+  }
+
+  /**
+   * Its operator's account was purged (the NodeRegistryDO's /internal/operator-deleted, once its
+   * nodes are banned): every record of it, its nodes (banned, retired and pending ones too) and its
+   * tokens, goes under `alias` (DELETED_OPERATOR_PREFIX and random hex: no row links it back to the
+   * account) with no name. A node keeps its status, its counters and its slot; each is written.
+   * Returns how many nodes went.
+   */
+  forgetOperator(operatorId: string, alias: string): number {
+    let nodes = 0;
+    for (const n of this.nodes.values()) {
+      if (n.operatorId !== operatorId) continue;
+      n.operatorId = alias;
+      n.operatorName = '';
+      this.save(n);
+      nodes++;
+    }
+    const tokens = [...this.tokens.values()].filter((t) => t.operatorId === operatorId);
+    for (const t of tokens) {
+      t.operatorId = alias;
+      t.operatorName = '';
+    }
+    if (tokens.length > 0) this.opts.store?.tokens(tokens);
+    return nodes;
+  }
+
+  /**
+   * A project account's name as its account has it now (the NodeRegistryDO's public list, from
+   * AccountsDO): its records take it, nodes and tokens, so that the list's fallback when AccountsDO
+   * does not answer (publicOperatorNames) is never a name it left, which another account may hold
+   * by then. Only what differs is written. Returns how many records changed.
+   */
+  renameOperator(operatorId: string, name: string): number {
+    let changed = 0;
+    for (const n of this.nodes.values()) {
+      if (n.operatorId !== operatorId || n.operatorName === name) continue;
+      n.operatorName = name;
+      this.save(n);
+      changed++;
+    }
+    const tokens = [...this.tokens.values()].filter((t) => t.operatorId === operatorId && t.operatorName !== name);
+    for (const t of tokens) t.operatorName = name;
+    if (tokens.length > 0) this.opts.store?.tokens(tokens);
+    return changed + tokens.length;
   }
 
   // ---- live state ---------------------------------------------------------------------------

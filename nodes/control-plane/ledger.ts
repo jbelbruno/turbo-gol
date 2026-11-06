@@ -308,6 +308,34 @@ export class Ledger {
     this.onNote?.({ operatorId, playerIds: [...playerIds], at });
   }
 
+  /**
+   * Its operator's account was purged (Registry.forgetOperator): what the ledger holds of it goes
+   * under `alias`, as its nodes do, so its points stay with them (its totals, its entries for the
+   * ranking's 30 days, its repeat decay) and nothing links them back to the account: its own seat in
+   * an entry of its nodes, too. The store re-keys its rows the same way (NodeStore.forgetOperator).
+   * Its seats on other operators' nodes are a player's and stay as they are.
+   */
+  forgetOperator(operatorId: string, alias: string): void {
+    for (const e of this.entries) {
+      if (e.operatorId !== operatorId) continue;
+      e.operatorId = alias;
+      e.players = e.players.map((p) => (p.playerId === operatorId ? { ...p, playerId: alias } : p));
+    }
+    for (const map of [this.groups, this.players]) {
+      for (const [key, times] of [...map]) {
+        if (!key.startsWith(operatorId + '|')) continue;
+        map.delete(key);
+        map.set(alias + key.slice(operatorId.length), times);
+      }
+    }
+    for (const map of [this.totals, this.verified]) {
+      const v = map.get(operatorId);
+      if (v === undefined) continue;
+      map.delete(operatorId);
+      map.set(alias, v);
+    }
+  }
+
   /** Drop entries older than the window and stale repeat groups (the totals stay). */
   private prune(now: number): void {
     const since = now - WINDOW_DAYS * DAY_MS;

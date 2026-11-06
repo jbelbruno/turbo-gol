@@ -53,7 +53,12 @@ export interface MineNode extends MyNode {
   reachableAt?: number | null;
   lastProbe?: { at: number; ok: boolean; error: string | null } | null;
   needed?: number;
-  strikes?: { count: number; max: number; windowDays: number };
+  /** Its lost matches in their window, and when the oldest of them leaves it (null: none), from the pre-opening change on. */
+  strikes?: { count: number; max: number; windowDays: number; nextExpiry?: number | null };
+  /** Its strike pauses in their window, which during a pause ends where it began (a repeated one sends it back to probation), from the pre-opening change on. */
+  pauses?: { count: number; windowDays: number };
+  /** Where a strike pause leaves it when it lifts (null: it is in none), from the pre-opening change on. */
+  afterPause?: NodeStatus | null;
   refused?: { count: number; rate: number; recent: number; of: number; outUntil: number | null };
   capacityEffective?: number;
 }
@@ -94,12 +99,14 @@ export interface MineAnswer {
    * The rest of "Mis servidores" (A11), from the server of that change on, each only when it came:
    * whether hosting is open for the caller (`reason` why not), what it still lacks (the token's
    * refusal codes, null while hosting is closed or the account cannot be read), the rules for hosts
-   * of the terms in force (null likewise), its slots and code limits (null: no community cap, a
-   * project account), its own codes, its name in the public list, and the release channel.
+   * of the terms in force (null likewise: `accepted` it holds them; from the re-accept's server on,
+   * `acceptedVersion` the ones it accepted last and `again` it accepts them again here, Terms 12.2,
+   * its servers meanwhile without new matches), its slots and code limits (null: no community cap,
+   * a project account), its own codes, its name in the public list, and the release channel.
    */
   hosting?: { open: boolean; reason?: string };
   requirements?: { missing: string[]; daysLeft: number } | null;
-  terms?: { version: string | null; accepted: boolean } | null;
+  terms?: { version: string | null; accepted: boolean; acceptedVersion?: string | null; again?: boolean } | null;
   limits?: { nodes: number; maxNodes: number; tokensToday: number | null; tokensLeftToday: number | null; outstanding: number; maxOutstanding: number | null };
   tokens?: MineToken[];
   showPublic?: boolean;
@@ -135,6 +142,8 @@ export interface OperatorView {
   actor: string | null;
   at: number | null;
   showPublic: boolean;
+  /** The rules for hosts it accepted last (null: none) and whether they are the ones in force: else its servers get no new match (Terms 12.2). */
+  rules: { accepted: string | null; held: boolean };
   nodes: Array<{ nodeId: string; name: string; region: string; status: NodeStatus; online: boolean; retired: boolean; capacity: number; capacityEffective: number; assigned: number; refused: number; seenContinent: string | null }>;
   refusalRate: number;
   tokens: { today: number; unused: number };
@@ -169,6 +178,8 @@ export function operatorsOf(b: unknown): { at: number; operators: OperatorView[]
         actor: typeof x.actor === 'string' ? x.actor : null,
         at: typeof x.at === 'number' ? x.at : null,
         showPublic: x.showPublic === true,
+        // A server of before the re-accept: none said, read as none held.
+        rules: { accepted: typeof x.rules?.accepted === 'string' ? x.rules.accepted : null, held: x.rules?.held === true },
         nodes: arr(x.nodes),
         refusalRate: num(x.refusalRate),
         tokens: { today: num(x.tokens?.today), unused: num(x.tokens?.unused) },
@@ -472,9 +483,10 @@ export interface FrozenList {
 
 /**
  * POST /nodes/tokens's body. `name` left out: the server's default (`<region>-node-<k>`). A
- * community account's code also carries the acceptance of the rules for hosts of the terms in force
- * (Prompt 2, A3: `acceptHost`, its button) and the 18-or-older declaration (`adult`, its switch) until
- * it holds them for that version (GET /nodes/mine `terms.accepted`).
+ * community account's first code also carries the acceptance of the rules for hosts of the terms in
+ * force (Prompt 2, A3: `acceptHost`, its button) and the 18-or-older declaration (`adult`, its switch)
+ * until it holds them for that version (GET /nodes/mine `terms.accepted`); those of a new version are
+ * accepted again first, without a code (POST /nodes/mine/accept: AccountClient.nodesAcceptAgain).
  */
 export interface TokenAsk {
   region: RegionId;
@@ -604,11 +616,15 @@ export const NODE_ERROR_CODES = [
   'account_too_new',
   'terms_required',
   'adult_required',
+  'reaccept_required',
+  'first_code',
   'too_many_tokens',
   'name_taken',
   'rtc_not_available',
   'region_mismatch',
   'bad_public_url',
+  'behind_proxy',
+  'dns_unavailable',
   // the owner's actions (A12) and the reports (A16)
   'trusted',
   'banned',

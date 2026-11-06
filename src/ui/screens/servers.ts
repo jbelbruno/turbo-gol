@@ -15,16 +15,21 @@
  *   closed   open, but not for this account (a canary it is not in; with every account let in, a
  *            neutral line and a retry): what a community server is, no date, the guide
  *   project  a project account: its servers are CONTROL DE NODOS' (listed, nothing to do here)
- *   host     the wallet's pause when there is one (its reason, the review); AGREGAR UN SERVIDOR: what
- *            the account still lacks with its fix (the email: PERFIL's own dialog, profile.ts
- *            emailDialog, or its "mail is off" line; the terms in force: their re-accept sheet), else the form (region, never
+ *   host     once the terms changed version, the banner of the rules for hosts to accept again (Terms
+ *            12.2: until then its servers may get no new match and no code is asked for) with LEER Y
+ *            ACEPTAR, whose sheet is the first code's acceptance with VOLVER A ACEPTAR (POST
+ *            /nodes/mine/accept), on a TV where to do it; the wallet's pause when there is one (its
+ *            reason, the review); AGREGAR UN SERVIDOR: what the account still lacks with its fix
+ *            (the email: PERFIL's own dialog, profile.ts emailDialog, or its "mail is off" line; the
+ *            terms in force: their re-accept sheet; the rules for hosts again: the banner's sheet), else the form (region, never
  *            changed after; name; DNS name; matches; egress cap), the checklist, the acceptance
  *            (Terms §12 and Annex B with the 18-or-older switch, the strings of PR 2A verbatim,
  *            right above PEDIR CÓDIGO: the switch sends `adult`, the button `acceptHost`), then
  *            the code's install line with COPIAR, its hour and its follow-up to active; on a TV
  *            "Hazlo en tu teléfono o en tu PC" and a QR to /#servers instead (decision 7); TUS
- *            SERVIDORES (state, load against the effective capacity, egress, version against the
- *            channel, last seen, strikes, refusals; DRENAR, RENOMBRAR, RETIRAR held to confirm, never
+ *            SERVIDORES (state, the system's measures in words (serversModel.ts measuresOf: Terms 9.2),
+ *            load against the effective capacity, egress, version against the channel, last seen,
+ *            strikes and when the oldest goes, refusals; DRENAR, RENOMBRAR, RETIRAR held to confirm, never
  *            on a TV); TUS CÓDIGOS (REVOCAR an unused one); PUNTOS DE SERVIDOR (today against the
  *            cap, 30 days, all time, the balance and CANJEAR EN GARAJE); the public list's switch; a
  *            short help (on a TV, where the rules are and the guide's QR: no link leaves the game's tab)
@@ -68,14 +73,18 @@ import {
   PROBATION_CAPACITY_MAX,
   RESTART_LINE,
   UNINSTALL_LINES,
+  acceptAgainPending,
+  acceptAgainWords,
   acceptanceNeeded,
   annexHref,
+  automaticReason,
   closedKeyOf,
   communityAsk,
   followMine,
   hasServersLink,
   hostRulesHref,
   hostingOpen,
+  measuresOf,
   nodeFacts,
   ownRevocable,
   ownerActions,
@@ -84,7 +93,7 @@ import {
   serversViewOf,
   withoutServersLink,
 } from './serversModel';
-import type { CommunityCheck, FollowStep, Requirement, ServersView } from './serversModel';
+import type { CommunityCheck, FollowStep, Measure, Requirement, ServersView } from './serversModel';
 import { duration, language, t } from '../../i18n';
 import type { Key } from '../../i18n';
 import { formatPoints, regionName } from '../names';
@@ -110,6 +119,14 @@ const fact = (label: string, ...value: Child[]): Child[] => [h('dt', null, label
 const regionLabel = (id: string): string => (isRegion(id) ? regionName(id) : id);
 const when = (ms: number): string => new Date(ms).toLocaleString(language(), { dateStyle: 'short', timeStyle: 'short' });
 const ago = (ms: number, now: number): string => t('nodesAdmin.ago', { time: duration(Math.max(0, now - ms)) });
+
+/** An automatic measure on a server in words (serversModel.ts measuresOf), its time in this browser's clock. */
+const measureText = (x: Measure): string =>
+  x.kind === 'verification'
+    ? t('servers.measure.verification')
+    : x.kind === 'strikes'
+      ? t('servers.measure.strikes', { time: when(x.until) }) + (x.probation ? ' ' + t('servers.measure.strikesAgain', { days: x.days }) : '')
+      : t('servers.measure.refusals', { time: when(x.until) });
 
 /** The community guide (the nodes' README, in Spanish for Spanish). */
 const guideUrl = (): string => `${SOURCE_URL}/blob/main/nodes/${language() === 'es' ? 'README.es.md' : 'README.md'}`;
@@ -143,7 +160,7 @@ interface Wizard {
 }
 
 /** Sample kinds (window.__servers, scripts/ui-fit.mjs): the views and the add flow's steps. */
-type SampleKind = 'closed' | 'requirements' | 'terms' | 'operator' | 'token' | 'tv' | 'project' | 'guest';
+type SampleKind = 'closed' | 'requirements' | 'terms' | 'again' | 'operator' | 'token' | 'tv' | 'project' | 'guest';
 
 /** `window.__servers` exists in development and in a VITE_UI_FIT=1 build only (scripts/ui-fit.mjs). */
 const UI_FIT = import.meta.env.DEV || import.meta.env.VITE_UI_FIT === '1';
@@ -189,6 +206,7 @@ export function serversScreen(menu: Menu): Screen {
   let drawn: ServersView | null = null;
   /** The host view's parts, repainted on their own so a refresh never touches the form under the player's fingers. */
   const parts = {
+    again: h('div.mn-srv-again'),
     frozen: h('div.mn-srv-frozen'),
     add: h('div.mn-srv-add'),
     nodes: h('div.mn-na-rows'),
@@ -305,6 +323,26 @@ export function serversScreen(menu: Menu): Screen {
     h('div.mn-na-rows', null, ...m.nodes.map((n) => nodeCard(m, n, false))),
   ];
 
+  // ---- a host's: the rules for hosts of a new version -----------------------------------------------------
+
+  /**
+   * The terms changed version and the host holds the rules of an earlier one (acceptAgainPending,
+   * Terms 12.2): what it means and LEER Y ACEPTAR (acceptAgainSheet), on a TV where to do it instead.
+   * A host with servers that never accepted any is only told to accept them (acceptAgainWords).
+   */
+  const paintAgain = (m: MineAnswer): void => {
+    const pending = acceptAgainPending(m);
+    const words = acceptAgainWords(m);
+    draw(parts.again, `${pending}|${tv()}|${words.title}`, () =>
+      pending
+        ? [
+            h('div.mn-na-alert', readOnly('srv-again-note'), icon('warning'), h('div', null, h('p', null, h('b', null, t(words.title))), h('p', null, t(words.note)))),
+            tv() ? h('p.mn-note', readOnly('srv-again-tv'), t('nodesShared.tvNote')) : h('div.mn-na-tools', null, primary(t('servers.termsBtn'), acceptAgainSheet, { 'data-key': 'srv-again-open' })),
+          ]
+        : [],
+    );
+  };
+
   // ---- a host's: the wallet's pause ---------------------------------------------------------------------
 
   const paintFrozen = (): void => {
@@ -320,20 +358,22 @@ export function serversScreen(menu: Menu): Screen {
 
   /** What a requirement needs done, and its button when the game can do it from here. */
   const requirementLine = (r: Requirement, m: MineAnswer): HTMLElement => {
-    const text = r === 'account_too_new' ? t('servers.req.account_too_new', { count: m.requirements?.daysLeft ?? 7 }) : t(`servers.req.${r}` as Key);
+    const text = r === 'account_too_new' ? t('servers.req.account_too_new', { count: m.requirements?.daysLeft ?? 7 }) : r === 'reaccept_required' ? t(acceptAgainWords(m).req) : t(`servers.req.${r}` as Key);
     const me = acc.me;
     const mode = emailModeOf(me);
     const inSample = (go: () => void) => (): void => (sample !== null ? menu.toast(t('nodesAdmin.done'), 'ok') : go());
     // The email: PERFIL's own dialog (profile.ts emailDialog, never a copy), while mail goes; with the
     // mail off (GET /api/config auth.email false), PERFIL's line instead: its code could never arrive.
-    // The terms in force: their re-accept sheet.
+    // The terms in force: their re-accept sheet. The rules for hosts of a new version: the banner's sheet.
     const mailOff = r === 'email_required' && sample === null && !mailOn();
     const button =
       r === 'email_required' && !mailOff
         ? secondary(t(mode === 'confirm' ? 'profile.emailConfirmBtn' : 'profile.emailAddBtn'), inSample(() => emailDialog(menu, mode === 'change' ? 'add' : mode)), { 'data-key': 'srv-req-email' })
         : r === 'terms_required'
           ? secondary(t('servers.termsBtn'), inSample(() => void reacceptTerms(menu).then(() => ((clock = refreshResume(clock, Date.now())), void acc.fetchMe().catch(() => undefined)), () => undefined)), { 'data-key': 'srv-req-terms' })
-          : null;
+          : r === 'reaccept_required'
+            ? secondary(t('servers.termsBtn'), acceptAgainSheet, { 'data-key': 'srv-req-again' })
+            : null;
     return h('div.mn-prof-device', null, h('p', button === null ? readOnly('srv-req-' + r) : null, icon(r === 'operator_blocked' ? 'lock' : 'warning'), ' ', text), button, mailOff ? h('p.mn-note', null, mailOffText(menu)) : null);
   };
 
@@ -423,6 +463,81 @@ export function serversScreen(menu: Menu): Screen {
     return h('p.mn-note.mn-legal-notice', null, ...out);
   };
 
+  /**
+   * VOLVER A ACEPTAR (Terms 12.2, last paragraph): the rules for hosts of a new terms version, from the
+   * banner or the add flow's line, both drawn off a TV only. The first code's acceptance as it is (the
+   * summary, the 18-or-older switch and the line right above the button, PR 2A's strings), with a
+   * button of its own that the line names: POST /nodes/mine/accept (ACEPTAR for a host with servers
+   * that never accepted any: acceptAgainWords). The switch off is said here and nothing is sent; a
+   * refusal keeps the sheet.
+   */
+  const acceptAgainSheet = (): void => {
+    let adult = false;
+    const adultErr = h('p.mn-field-error', { hidden: true, 'aria-live': 'polite' });
+    const sw = toggleSwitch('srv-again-adult', t('servers.adult'), () => adult, (v) => {
+      adult = v;
+      adultErr.hidden = true;
+    });
+    const words = acceptAgainWords(answer());
+    const button = t(words.button);
+    menu.modal({
+      title: t(words.title),
+      body: [h('p', readOnly('srv-again-summary'), t('servers.acceptSummary')), setRow(t('servers.adult'), sw.el, t('servers.adultHint')), adultErr, acceptLine(button)],
+      actions: [
+        {
+          label: button,
+          primary: true,
+          onClick: async () => {
+            if (!adult) {
+              adultErr.textContent = t('nodesShared.err.adult_required');
+              adultErr.hidden = false;
+              return false;
+            }
+            return acceptAgain();
+          },
+        },
+        { label: t('profile.cancel'), autofocus: true, onClick: () => true },
+      ],
+    });
+  };
+
+  /**
+   * The acceptance sent (its switch was on): true once taken (the banner and the line go at once,
+   * /nodes/mine asked now confirms it); a 403 reauth_required opens "confirm it's you" and sends it
+   * again, the general terms of that version their own sheet first; any other refusal said, false.
+   */
+  const acceptAgain = async (): Promise<boolean> => {
+    if (sample !== null) {
+      menu.toast(t('nodesAdmin.done'), 'ok');
+      return true;
+    }
+    try {
+      await acc.nodesAcceptAgain(true);
+      if (mine !== null && mine.answer.terms) {
+        const req = mine.answer.requirements;
+        mine = { ...mine, answer: { ...mine.answer, terms: { ...mine.answer.terms, accepted: true, again: false }, requirements: req ? { ...req, missing: req.missing.filter((r) => r !== 'reaccept_required') } : req } };
+      }
+      clock = refreshResume(clock, Date.now());
+      menu.toast(t('servers.againDone'), 'ok');
+      if (el.isConnected) paint();
+      return true;
+    } catch (e) {
+      const code = codeOf(e);
+      // "Confirm it's you" (decision 7), as for a code: the password or a mailed code, then the same request again.
+      if (code === 'reauth_required' || code === 'password_required') {
+        queueMicrotask(() => confirmItsYou(menu, () => void acceptAgain(), 2, true));
+        return true;
+      }
+      if (code === 'terms_required' && e instanceof AccountError && e.detail.version !== undefined && acc.me?.terms !== e.detail.version) {
+        queueMicrotask(() => void reacceptTerms(menu).then(() => void acceptAgain(), () => undefined));
+        return true;
+      }
+      menu.toast(errText(e), 'error');
+      clock = refreshResume(clock, Date.now());
+      return false;
+    }
+  };
+
   const checklistStep = (w: Wizard): HTMLElement[] => {
     const m = answer();
     const needed = acceptanceNeeded(m);
@@ -489,6 +604,14 @@ export function serversScreen(menu: Menu): Screen {
           return;
         }
         if (mine !== null && mine.answer.terms) mine = { ...mine, answer: { ...mine.answer, terms: { ...mine.answer.terms, accepted: false } } };
+      }
+      // The rules for hosts of a new version (Terms 12.2): accepted again first, in their sheet; then PEDIR CÓDIGO again.
+      if (code === 'reaccept_required') {
+        if (mine !== null && mine.answer.terms) mine = { ...mine, answer: { ...mine.answer, terms: { ...mine.answer.terms, accepted: false, again: true } } };
+        clock = refreshResume(clock, Date.now());
+        acceptAgainSheet();
+        if (el.isConnected) paint();
+        return;
       }
       menu.toast(errText(e), 'error');
       if (code.startsWith('bad_') || code === 'name_taken' || code === 'verify_reserved' || code === 'too_many_nodes') w.step = 'form';
@@ -594,7 +717,9 @@ export function serversScreen(menu: Menu): Screen {
       readOnly('srv-node-' + n.nodeId),
       h('div.mn-prof-node-head', null, icon('server', 'mn-mtile-icon'), h('b.mn-prof-node-name', null, n.name), h('span.mn-prof-node-region', null, regionLabel(n.region)), tag(statusTone(n.status), t(STATE_KEY[n.status]))),
       state,
-      n.statusReason !== null && (n.status === 'suspended' || n.status === 'banned') ? h('p.mn-prof-node-reason', null, n.statusReason) : null,
+      // The system's measures in words (Terms 9.2: seen here), the team's own reason as it wrote it.
+      ...measuresOf(n, now).map((x) => h('p.mn-prof-node-reason', null, measureText(x))),
+      n.statusReason !== null && !automaticReason(n.statusReason) && (n.status === 'suspended' || n.status === 'banned') ? h('p.mn-prof-node-reason', null, n.statusReason) : null,
       n.status === 'pending' && probe !== null && !probe.ok ? h('p', null, h('code.mn-na-raw', null, probe.error ?? ''), ' ', t(hint !== null ? (`nodesShared.hint.${hint}` as Key) : 'nodesShared.hint.unknown')) : null,
       h(
         'dl.mn-prof-node-facts',
@@ -604,7 +729,7 @@ export function serversScreen(menu: Menu): Screen {
         ...fact(t('servers.fact.egress'), f.egress.cap !== null ? `${f.egress.used}/${f.egress.cap} GB` : `${f.egress.used} GB`),
         ...fact(t('servers.fact.version'), n.version, ' · ', t(f.version === 'compatible' ? 'servers.compatible' : 'servers.update')),
         ...fact(t('servers.fact.seen'), f.seen === 'now' ? t('nodesAdmin.seenNow') : f.seen !== null ? ago(f.seen, now) : '—'),
-        ...fact(t('servers.fact.strikes'), t('servers.strikes', { count: f.strikes.count, max: f.strikes.max, days: f.strikes.windowDays })),
+        ...fact(t('servers.fact.strikes'), t('servers.strikes', { count: f.strikes.count, max: f.strikes.max, days: f.strikes.windowDays }), f.strikes.count > 0 && f.strikes.nextExpiry !== null ? ` · ${t('servers.strikesNext', { time: when(f.strikes.nextExpiry) })}` : ''),
         ...fact(t('servers.fact.refused'), `${Math.round(f.refusalRate * 100)} %`, f.outUntil !== null && f.outUntil > now ? ` · ${t('servers.outUntil', { time: when(f.outUntil) })}` : ''),
         ...(n.suspendedUntil !== null ? fact(t('nodesAdmin.detail.until'), when(n.suspendedUntil)) : []),
         ...(points !== undefined ? fact(t('servers.fact.points'), t('servers.pointsOf', { points: formatPoints(points.points), matches: points.matches })) : []),
@@ -792,7 +917,7 @@ export function serversScreen(menu: Menu): Screen {
   const helpView = (): HTMLElement =>
     section(
       t('servers.helpTitle'),
-      ...(['states', 'what', 'few', 'points', 'data'] as const).map((k) => h('p', readOnly('srv-help-' + k), t(`servers.help.${k}` as Key))),
+      ...(['states', 'what', 'few', 'points', 'measures', 'data'] as const).map((k) => h('p', readOnly('srv-help-' + k), t(`servers.help.${k}` as Key))),
       tv()
         ? h('p.mn-note', readOnly('srv-help-rules'), t('servers.helpRulesTv'))
         : h('div.mn-na-tools', null, outLink(hostRulesHref(language()), t('servers.helpRules'), 'srv-help-rules'), outLink(guideUrl(), t('profile.hostServer'), 'srv-help-guide')),
@@ -800,6 +925,7 @@ export function serversScreen(menu: Menu): Screen {
     );
 
   const hostView = (): Child[] => [
+    parts.again,
     parts.frozen,
     section(t('servers.addTitle'), parts.add),
     section(t('servers.mineTitle'), parts.nodes),
@@ -839,6 +965,7 @@ export function serversScreen(menu: Menu): Screen {
     }
     const m = answer();
     if (v === 'host' && m !== null) {
+      paintAgain(m);
       paintFrozen();
       paintAdd();
       paintFollow();
@@ -1022,7 +1149,7 @@ function sampleMine(kind: SampleKind): MineAnswer | null {
     ...o,
   });
   const nodes =
-    kind === 'operator' || kind === 'token' || kind === 'tv' || kind === 'project'
+    kind === 'operator' || kind === 'token' || kind === 'tv' || kind === 'project' || kind === 'again'
       ? [node(1, 'juan-vps-buenos-aires-largo', 'active'), node(2, 'juan-2', 'probation'), node(3, 'juan-3', 'pending', { online: false, lastSeen: now - 3_600_000 })]
       : [];
   const open = kind !== 'closed';
@@ -1031,8 +1158,15 @@ function sampleMine(kind: SampleKind): MineAnswer | null {
     nodes,
     rewards: { operatorId: '0a1b2c3d4e5f6071', points30d: 3120, earned: 4100, matches30d: 64, playerMinutes30d: 5200, byNode: Object.fromEntries(nodes.map((n) => [n.nodeId, { points: 1040, matches: 21 }])), pointsToday: 212, capToday: 300 },
     hosting: open ? { open: true } : { open: false, reason: 'hosting_closed' },
-    requirements: kind === 'requirements' ? { missing: ['email_required', 'account_too_new'], daysLeft: 3 } : open ? { missing: [], daysLeft: 0 } : null,
-    terms: kind === 'terms' ? { version: '2026-11-13', accepted: false } : open ? { version: '2026-11-13', accepted: true } : null,
+    requirements: kind === 'requirements' ? { missing: ['email_required', 'account_too_new'], daysLeft: 3 } : kind === 'again' ? { missing: ['reaccept_required'], daysLeft: 0 } : open ? { missing: [], daysLeft: 0 } : null,
+    terms:
+      kind === 'terms'
+        ? { version: '2026-11-13', accepted: false, acceptedVersion: null, again: false }
+        : kind === 'again'
+          ? { version: '2026-12-01', accepted: false, acceptedVersion: '2026-11-13', again: true }
+          : open
+            ? { version: '2026-11-13', accepted: true, acceptedVersion: '2026-11-13', again: false }
+            : null,
     limits: { nodes: nodes.length, maxNodes: 3, tokensToday: 1, tokensLeftToday: 2, outstanding: kind === 'token' ? 1 : 0, maxOutstanding: 2 },
     tokens: kind === 'token' ? [{ id: 'abcdef123456', region: 'SA', name: 'juan-vps-buenos-aires', publicHost: 'srv1.example.com', createdAt: now - 8 * 60_000, expiresAt: now + 52 * 60_000, state: 'unused', nodeId: null }] : [],
     showPublic: false,

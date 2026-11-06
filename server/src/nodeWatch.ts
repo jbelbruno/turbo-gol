@@ -53,7 +53,7 @@ export const HEALTHZ_MAX_BYTES = 16 * 1024;
 // ---- what a node may have the object fetch ---------------------------------------------------------
 
 /** The four bytes of a dotted IPv4 address (the URL parser already turned every other IPv4 form into one), or null. */
-function ipv4Bytes(host: string): number[] | null {
+export function ipv4Bytes(host: string): number[] | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (!m) return null;
   const b = m.slice(1).map(Number);
@@ -73,7 +73,7 @@ function publicV4([a, b, c]: number[]): boolean {
 }
 
 /** The eight 16-bit groups of an IPv6 address (an embedded IPv4 tail included), or null. */
-function ipv6Words(h: string): number[] | null {
+export function ipv6Words(h: string): number[] | null {
   let s = h.toLowerCase();
   const tail = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(s);
   if (tail) {
